@@ -355,7 +355,7 @@ contract DirectDemocracyVoting is Initializable {
         electionSet = true;
         emit ElectionContractSet(_electionsContract);
     }
-    
+
     /**
      * @dev Version identifier to help with testing upgrades
      */

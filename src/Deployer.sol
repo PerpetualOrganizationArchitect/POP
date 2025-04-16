@@ -19,7 +19,7 @@ interface IDirectDemocracyVoting {
 
 // Interface for ElectionContract
 interface IElectionContract {
-    // No methods needed yet
+// No methods needed yet
 }
 
 // Interface for NFTMembership contract
@@ -234,10 +234,10 @@ contract Deployer is Ownable {
         allowedRoles[0] = "Default";
         allowedRoles[1] = "Executive";
         allowedRoles[2] = "Member";
-        
+
         // Default quorum percentage
         uint256 quorumPercentage = 50;
-        
+
         // Create initialization data for DirectDemocracyVoting contract
         bytes memory initData = abi.encodeWithSignature(
             "initialize(address,address,address,string[],address,uint256)",
@@ -248,16 +248,9 @@ contract Deployer is Ownable {
             treasuryAddress,
             quorumPercentage
         );
-        
+
         // Deploy the DirectDemocracyVoting contract
-        return deployContract(
-            orgId,
-            "DirectDemocracyVoting",
-            orgOwner,
-            autoUpgrade,
-            customImplementation,
-            initData
-        );
+        return deployContract(orgId, "DirectDemocracyVoting", orgOwner, autoUpgrade, customImplementation, initData);
     }
 
     /**
@@ -279,21 +272,11 @@ contract Deployer is Ownable {
     ) public returns (address electionProxy) {
         // Create initialization data for ElectionContract
         bytes memory initData = abi.encodeWithSignature(
-            "initialize(address,address,address)",
-            orgOwner,
-            nftMembershipAddress,
-            votingAddress
+            "initialize(address,address,address)", orgOwner, nftMembershipAddress, votingAddress
         );
-        
+
         // Deploy the ElectionContract
-        return deployContract(
-            orgId,
-            "ElectionContract",
-            orgOwner,
-            autoUpgrade,
-            customImplementation,
-            initData
-        );
+        return deployContract(orgId, "ElectionContract", orgOwner, autoUpgrade, customImplementation, initData);
     }
 
     /**
@@ -314,18 +297,21 @@ contract Deployer is Ownable {
         address accountRegistryAddress,
         address treasuryAddress,
         bool autoUpgrade
-    ) external returns (
-        address votingProxy, 
-        address electionProxy, 
-        address membershipProxy, 
-        address quickJoinProxy, 
-        address ddt
-    ) {
+    )
+        external
+        returns (
+            address votingProxy,
+            address electionProxy,
+            address membershipProxy,
+            address quickJoinProxy,
+            address ddt
+        )
+    {
         // Register the organization first if it doesn't exist
         if (!_orgExists(orgId)) {
             orgRegistry.registerOrg(orgId, orgOwner, orgName);
         }
-        
+
         // Deploy Membership contract
         membershipProxy = deployMembership(
             orgId,
@@ -333,59 +319,40 @@ contract Deployer is Ownable {
             orgName,
             autoUpgrade,
             address(0),
-            true  // Always use NFTMembership
+            true // Always use NFTMembership
         );
-        
+
         // Track if we deployed a new token
         bool deployedNewToken = false;
-        
+
         // If no token address provided, deploy a new DirectDemocracyToken for this organization
         if (tokenAddress == address(0)) {
             string[] memory allowedRoles = new string[](3);
             allowedRoles[0] = "Default";
             allowedRoles[1] = "Executive";
             allowedRoles[2] = "Member";
-            
+
             tokenAddress = deployDirectDemocracyToken(
-                orgOwner,
-                orgId,
-                "DDT",
-                membershipProxy,
-                allowedRoles,
-                autoUpgrade,
-                address(0)
+                orgOwner, orgId, "DDT", membershipProxy, allowedRoles, autoUpgrade, address(0)
             );
-            
+
             deployedNewToken = true;
         }
-        
+
         // Deploy DirectDemocracyVoting contract
         votingProxy = deployDirectDemocracyVoting(
-            orgId,
-            orgOwner,
-            tokenAddress,
-            membershipProxy,
-            treasuryAddress,
-            autoUpgrade,
-            address(0)
+            orgId, orgOwner, tokenAddress, membershipProxy, treasuryAddress, autoUpgrade, address(0)
         );
-        
+
         // Deploy ElectionContract
-        electionProxy = deployElectionContract(
-            orgId,
-            orgOwner,
-            membershipProxy,
-            votingProxy,
-            autoUpgrade,
-            address(0)
-        );
-        
+        electionProxy = deployElectionContract(orgId, orgOwner, membershipProxy, votingProxy, autoUpgrade, address(0));
+
         // Set ElectionContract in the DirectDemocracyVoting contract
         IDirectDemocracyVoting(votingProxy).setElectionsContract(electionProxy);
-        
+
         // Set ElectionContract in the NFTMembership contract
         INFTMembership(membershipProxy).setElectionContract(electionProxy);
-        
+
         // Deploy QuickJoin and link to Membership
         quickJoinProxy = deployQuickJoin(
             orgId,
@@ -397,17 +364,15 @@ contract Deployer is Ownable {
             autoUpgrade,
             address(0)
         );
-        
+
         // Set the QuickJoin address in the token if this is a newly deployed token
         if (deployedNewToken) {
             // We need to use a low-level call here since we're the deployer, not the token owner
             // This assumes the token owner is the same as the org owner
-            (bool success, ) = tokenAddress.call(
-                abi.encodeWithSignature("setQuickJoin(address)", quickJoinProxy)
-            );
+            (bool success,) = tokenAddress.call(abi.encodeWithSignature("setQuickJoin(address)", quickJoinProxy));
             // We don't require success here as it might need to be done manually if permissions differ
         }
-        
+
         return (votingProxy, electionProxy, membershipProxy, quickJoinProxy, tokenAddress);
     }
 
@@ -415,9 +380,7 @@ contract Deployer is Ownable {
      * @notice Helper: Return the current implementation for a beacon
      */
     function getBeaconImplementation(address beaconAddr) public view returns (address impl) {
-        (bool success, bytes memory result) = beaconAddr.staticcall(
-            abi.encodeWithSignature("implementation()")
-        );
+        (bool success, bytes memory result) = beaconAddr.staticcall(abi.encodeWithSignature("implementation()"));
         require(success, "Beacon implementation() call failed");
         impl = abi.decode(result, (address));
     }
