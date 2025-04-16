@@ -4,7 +4,9 @@ pragma solidity ^0.8.17;
 import "forge-std/Test.sol";
 import "../src/Voting.sol";
 import "../src/VotingV2.sol";
+import "../src/ImplementationRegistry.sol";
 import "../src/PoaManager.sol";
+import "../src/OrgRegistry.sol";
 import "../src/Deployer.sol";
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
@@ -12,7 +14,9 @@ contract DeployerTest is Test {
     // Contracts
     Voting votingImplementation;
     VotingV2 votingV2Implementation;
+    ImplementationRegistry implementationRegistry;
     PoaManager poaManager;
+    OrgRegistry orgRegistry;
     Deployer deployer;
     
     // Test addresses
@@ -36,12 +40,30 @@ contract DeployerTest is Test {
         // Deploy the updated voting implementation (for later testing)
         votingV2Implementation = new VotingV2();
         
-        // Deploy the PoaManager with the initial voting implementation
         vm.startPrank(poaAdmin);
-        poaManager = new PoaManager(address(votingImplementation));
         
-        // Deploy the Deployer contract
-        deployer = new Deployer(address(poaManager));
+        // Deploy the ImplementationRegistry
+        implementationRegistry = new ImplementationRegistry();
+        
+        // Deploy the PoaManager with the initial voting implementation and registry
+        poaManager = new PoaManager(
+            address(votingImplementation),
+            address(implementationRegistry)
+        );
+        
+        // Deploy the OrgRegistry
+        orgRegistry = new OrgRegistry();
+        
+        // Deploy the Deployer contract with references to PoaManager and OrgRegistry
+        deployer = new Deployer(address(poaManager), address(orgRegistry));
+        
+        // Transfer ownership of the registries
+        orgRegistry.transferOwnership(address(deployer));
+        implementationRegistry.transferOwnership(address(poaManager));
+        
+        // Now that PoaManager owns the ImplementationRegistry, register the initial implementation
+        poaManager.registerInitialImplementation();
+        
         vm.stopPrank();
     }
     
@@ -56,13 +78,13 @@ contract DeployerTest is Test {
         );
         vm.stopPrank();
         
-        // 2. Verify the OrgInfo has been properly stored
+        // 2. Verify the OrgInfo has been properly stored in the registry
         (
             address beaconProxy,
             address beacon,
             bool autoUpgrade,
             address owner
-        ) = deployer.orgs(autoUpgradeOrgId);
+        ) = orgRegistry.orgs(autoUpgradeOrgId);
         
         assertEq(beaconProxy, autoUpgradeOrgProxy, "BeaconProxy address mismatch");
         assertEq(beacon, address(poaManager.poaBeacon()), "Beacon address mismatch");
@@ -72,8 +94,15 @@ contract DeployerTest is Test {
         // 3. Test voting functionality through the proxy
         Voting votingProxy = Voting(autoUpgradeOrgProxy);
         
-        // Check the current version
+        // Verify implementation version
         assertEq(votingProxy.version(), "v1", "Should be using V1 implementation");
+        
+        // Verify implementation is registered correctly
+        assertEq(
+            implementationRegistry.implementations("v1"), 
+            address(votingImplementation), 
+            "Implementation not registered correctly"
+        );
         
         // Cast some votes
         vm.startPrank(voter1);
@@ -91,8 +120,21 @@ contract DeployerTest is Test {
         
         // 4. Upgrade the implementation through PoaManager
         vm.startPrank(poaAdmin);
-        poaManager.upgradeBeacon(address(votingV2Implementation));
+        poaManager.upgradeBeacon(address(votingV2Implementation), "v2");
         vm.stopPrank();
+        
+        // Verify the implementation is registered correctly in the registry
+        assertEq(
+            implementationRegistry.implementations("v2"), 
+            address(votingV2Implementation), 
+            "V2 not registered correctly"
+        );
+        
+        assertEq(
+            implementationRegistry.latestVersion(),
+            "v2",
+            "Latest version not updated correctly"
+        );
         
         // 5. Verify the proxy's implementation has been upgraded
         assertEq(votingProxy.version(), "v2", "Should be using V2 implementation after upgrade");
@@ -126,13 +168,13 @@ contract DeployerTest is Test {
         );
         vm.stopPrank();
         
-        // 2. Verify the OrgInfo has been properly stored
+        // 2. Verify the OrgInfo has been properly stored in the registry
         (
             address beaconProxy,
             address beacon,
             bool autoUpgrade,
             address owner
-        ) = deployer.orgs(manualUpgradeOrgId);
+        ) = orgRegistry.orgs(manualUpgradeOrgId);
         
         assertEq(beaconProxy, manualUpgradeOrgProxy, "BeaconProxy address mismatch");
         assertNotEq(beacon, address(poaManager.poaBeacon()), "Beacon should NOT be Poa's beacon");
@@ -149,7 +191,7 @@ contract DeployerTest is Test {
         
         // 4. Upgrade the Poa beacon
         vm.startPrank(poaAdmin);
-        poaManager.upgradeBeacon(address(votingV2Implementation));
+        poaManager.upgradeBeacon(address(votingV2Implementation), "v2");
         vm.stopPrank();
         
         // 5. Verify that the manual upgrade org is still using V1
@@ -173,5 +215,48 @@ contract DeployerTest is Test {
         (uint256 yesVotes, uint256 noVotes) = votingV2Proxy.getVotes(1);
         assertEq(yesVotes, 1, "YES votes should be preserved after manual upgrade");
         assertEq(noVotes, 0, "Should have 0 NO votes");
+    }
+    
+    function testRegistryOperations() public {
+        // Check the initial version
+        assertEq(implementationRegistry.latestVersion(), "v1", "Initial version should be v1");
+        assertEq(
+            implementationRegistry.getLatestImplementation(),
+            address(votingImplementation),
+            "Latest implementation should be V1"
+        );
+        
+        // Register a new implementation
+        vm.startPrank(poaAdmin);
+        poaManager.upgradeBeacon(address(votingV2Implementation), "v2");
+        vm.stopPrank();
+        
+        // Check the updated version
+        assertEq(implementationRegistry.latestVersion(), "v2", "Latest version should be v2");
+        assertEq(
+            implementationRegistry.getLatestImplementation(),
+            address(votingV2Implementation),
+            "Latest implementation should be V2"
+        );
+        
+        // Verify we can get specific versions
+        assertEq(
+            implementationRegistry.getImplementation("v1"),
+            address(votingImplementation),
+            "Should get V1 implementation"
+        );
+        
+        assertEq(
+            implementationRegistry.getImplementation("v2"),
+            address(votingV2Implementation),
+            "Should get V2 implementation"
+        );
+        
+        // Verify we have 2 versions registered
+        assertEq(
+            implementationRegistry.getVersionCount(),
+            2,
+            "Should have 2 versions registered"
+        );
     }
 } 
