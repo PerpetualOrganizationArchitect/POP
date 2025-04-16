@@ -41,7 +41,7 @@ contract ElectionContract is Initializable {
         require(msg.sender == votingContract, "Only voting contract can call this function");
         _;
     }
-    
+
     modifier onlyOwner() {
         require(msg.sender == owner, "Not authorized");
         _;
@@ -55,7 +55,7 @@ contract ElectionContract is Initializable {
         nftMembership = INFTMembership6(_nftMembership);
         votingContract = _votingContractAddress;
     }
-    
+
     /**
      * @dev Transfer ownership of the contract to a new account
      */
@@ -124,7 +124,7 @@ contract ElectionContract is Initializable {
         require(electionId < elections.length, "Invalid election ID");
         return (elections[electionId].winningCandidateIndex, elections[electionId].hasValidWinner);
     }
-    
+
     /**
      * @dev Version identifier to help with testing upgrades
      */
