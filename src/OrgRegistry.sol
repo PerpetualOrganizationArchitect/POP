@@ -10,33 +10,33 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 contract OrgRegistry is Ownable {
     // A struct to track deployed contract info
     struct ContractInfo {
-        address beaconProxy;       // The contract's BeaconProxy address
-        address beacon;            // The beacon that the proxy uses
-        bool autoUpgrade;          // Whether the contract auto-upgrades
-        address owner;             // The contract's owner (for reference)
+        address beaconProxy; // The contract's BeaconProxy address
+        address beacon; // The beacon that the proxy uses
+        bool autoUpgrade; // Whether the contract auto-upgrades
+        address owner; // The contract's owner (for reference)
     }
-    
+
     // Organization info
     struct OrgInfo {
-        bytes32 orgId;             // Organization ID
-        address owner;             // Organization owner
-        string name;               // Organization name
-        uint256 contractCount;     // Number of contracts for this org
-        bool exists;               // Whether the org exists
+        bytes32 orgId; // Organization ID
+        address owner; // Organization owner
+        string name; // Organization name
+        uint256 contractCount; // Number of contracts for this org
+        bool exists; // Whether the org exists
     }
 
     // orgId -> OrgInfo
     mapping(bytes32 => OrgInfo) public orgs;
-    
+
     // contractId -> ContractInfo (contractId is typically orgId-contractType)
     mapping(bytes32 => ContractInfo) public contracts;
-    
+
     // orgId -> contract type -> contract address
     mapping(bytes32 => mapping(string => address)) public orgContracts;
-    
+
     // List of all organization IDs
     bytes32[] public orgIds;
-    
+
     // List of all contract IDs
     bytes32[] public contractIds;
 
@@ -44,7 +44,7 @@ contract OrgRegistry is Ownable {
     event OrgRegistered(bytes32 indexed orgId, address owner, string name);
     event ContractRegistered(
         bytes32 indexed contractId,
-        bytes32 indexed orgId, 
+        bytes32 indexed orgId,
         address beaconProxy,
         address beacon,
         bool autoUpgrade,
@@ -52,33 +52,23 @@ contract OrgRegistry is Ownable {
     );
 
     constructor() Ownable(msg.sender) {}
-    
+
     /**
      * @notice Register a new organization
      * @param orgId Unique identifier for the organization
      * @param owner The owner of the organization
      * @param name The name of the organization
      */
-    function registerOrg(
-        bytes32 orgId,
-        address owner,
-        string memory name
-    ) external onlyOwner {
+    function registerOrg(bytes32 orgId, address owner, string memory name) external onlyOwner {
         require(orgId != bytes32(0), "Invalid org ID");
         require(owner != address(0), "Invalid owner");
         require(!orgs[orgId].exists, "Org already registered");
-        
-        OrgInfo memory info = OrgInfo({
-            orgId: orgId,
-            owner: owner,
-            name: name,
-            contractCount: 0,
-            exists: true
-        });
-        
+
+        OrgInfo memory info = OrgInfo({orgId: orgId, owner: owner, name: name, contractCount: 0, exists: true});
+
         orgs[orgId] = info;
         orgIds.push(orgId);
-        
+
         emit OrgRegistered(orgId, owner, name);
     }
 
@@ -90,29 +80,22 @@ contract OrgRegistry is Ownable {
      * @param autoUpgrade Whether the contract auto-upgrades
      * @param owner The contract's owner
      */
-    function registerContract(
-        bytes32 contractId,
-        address beaconProxy,
-        address beacon,
-        bool autoUpgrade,
-        address owner
-    ) public onlyOwner {
+    function registerContract(bytes32 contractId, address beaconProxy, address beacon, bool autoUpgrade, address owner)
+        public
+        onlyOwner
+    {
         require(contractId != bytes32(0), "Invalid contract ID");
         require(beaconProxy != address(0), "Invalid proxy address");
         require(beacon != address(0), "Invalid beacon address");
         require(owner != address(0), "Invalid owner");
         require(contracts[contractId].beaconProxy == address(0), "Contract already registered");
 
-        ContractInfo memory info = ContractInfo({
-            beaconProxy: beaconProxy,
-            beacon: beacon,
-            autoUpgrade: autoUpgrade,
-            owner: owner
-        });
-        
+        ContractInfo memory info =
+            ContractInfo({beaconProxy: beaconProxy, beacon: beacon, autoUpgrade: autoUpgrade, owner: owner});
+
         contracts[contractId] = info;
         contractIds.push(contractId);
-        
+
         emit ContractRegistered(
             contractId,
             bytes32(0), // No specific orgId, as contractId is the primary key
@@ -122,7 +105,7 @@ contract OrgRegistry is Ownable {
             owner
         );
     }
-    
+
     /**
      * @notice Register a contract with a specific organization and contract type
      * @param orgId The organization ID
@@ -143,28 +126,21 @@ contract OrgRegistry is Ownable {
         require(orgs[orgId].exists, "Org not registered");
         require(bytes(contractType).length > 0, "Invalid contract type");
         require(orgContracts[orgId][contractType] == address(0), "Contract type already registered for org");
-        
+
         // Generate a unique contract ID
         bytes32 contractId = keccak256(abi.encodePacked(orgId, "-", contractType));
-        
+
         // Register the contract
         registerContract(contractId, beaconProxy, beacon, autoUpgrade, owner);
-        
+
         // Link the contract to the organization
         orgContracts[orgId][contractType] = beaconProxy;
-        
+
         // Increment the org's contract count
         orgs[orgId].contractCount++;
-        
+
         // Emit with the orgId included
-        emit ContractRegistered(
-            contractId,
-            orgId,
-            beaconProxy,
-            beacon,
-            autoUpgrade,
-            owner
-        );
+        emit ContractRegistered(contractId, orgId, beaconProxy, beacon, autoUpgrade, owner);
     }
 
     /**
@@ -179,7 +155,7 @@ contract OrgRegistry is Ownable {
         require(contractAddress != address(0), "Contract not found for org");
         return contractAddress;
     }
-    
+
     /**
      * @notice Get the beacon for a specific contract
      * @param contractId The contract ID
@@ -190,7 +166,7 @@ contract OrgRegistry is Ownable {
         require(info.beaconProxy != address(0), "Contract not found");
         return info.beacon;
     }
-    
+
     /**
      * @notice Check if a contract auto-upgrades
      * @param contractId The contract ID
@@ -201,7 +177,7 @@ contract OrgRegistry is Ownable {
         require(info.beaconProxy != address(0), "Contract not found");
         return info.autoUpgrade;
     }
-    
+
     /**
      * @notice Get the number of registered organizations
      * @return The count of organizations
@@ -209,7 +185,7 @@ contract OrgRegistry is Ownable {
     function getOrgCount() external view returns (uint256) {
         return orgIds.length;
     }
-    
+
     /**
      * @notice Get the number of registered contracts
      * @return The count of contracts
@@ -217,4 +193,4 @@ contract OrgRegistry is Ownable {
     function getContractCount() external view returns (uint256) {
         return contractIds.length;
     }
-} 
+}

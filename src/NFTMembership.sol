@@ -9,13 +9,12 @@ import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
  * @title NFTMembership
  * @dev A proxy-compatible NFT membership contract with advanced features
  */
-
 contract NFTMembership is ERC721URIStorage, Initializable {
     uint256 private _nextTokenId;
 
     // Organization owner
     address public owner;
-    
+
     // Token metadata that overrides the constructor values
     string private _tokenName;
     string private _tokenSymbol;
@@ -54,24 +53,24 @@ contract NFTMembership is ERC721URIStorage, Initializable {
      * @dev Initialize the contract with org details and membership types
      */
     function initialize(
-        address _owner, 
+        address _owner,
         string memory name_,
-        string[] memory _memberTypeNames, 
-        string[] memory _executiveRoleNames, 
+        string[] memory _memberTypeNames,
+        string[] memory _executiveRoleNames,
         string memory _defaultImageURL
     ) external initializer {
         require(_owner != address(0), "Invalid owner");
-        
+
         // Store token name and symbol for overriding the getter functions
         _tokenName = name_;
         _tokenSymbol = "MBR";
-        
+
         owner = _owner;
         defaultImageURL = _defaultImageURL;
-        
+
         // Initialize firstMint as true
         firstMint = true;
-        
+
         for (uint256 i = 0; i < _memberTypeNames.length; i++) {
             memberTypeNames[i] = _memberTypeNames[i];
             memberTypeImages[_memberTypeNames[i]] = _defaultImageURL;
@@ -88,7 +87,7 @@ contract NFTMembership is ERC721URIStorage, Initializable {
     function name() public view virtual override returns (string memory) {
         return _tokenName;
     }
-    
+
     /**
      * @dev Override symbol function to use custom symbol
      */
@@ -177,8 +176,7 @@ contract NFTMembership is ERC721URIStorage, Initializable {
     function downgradeExecutive(address executive) public onlyExecutiveRole {
         require(isExecutiveRole[memberTypeOf[executive]], "User is not an executive.");
         require(
-            block.timestamp >= lastDowngradeTime[msg.sender] + ONE_WEEK, 
-            "Downgrade limit reached. Try again in a week."
+            block.timestamp >= lastDowngradeTime[msg.sender] + ONE_WEEK, "Downgrade limit reached. Try again in a week."
         );
 
         memberTypeOf[executive] = DEFAULT_MEMBER_TYPE;
@@ -205,7 +203,7 @@ contract NFTMembership is ERC721URIStorage, Initializable {
     function getQuickJoin() public view returns (address) {
         return quickJoin;
     }
-    
+
     /**
      * @dev Transfer ownership of the contract to a new account
      */
@@ -215,14 +213,14 @@ contract NFTMembership is ERC721URIStorage, Initializable {
         owner = newOwner;
         emit OwnershipTransferred(oldOwner, newOwner);
     }
-    
+
     /**
      * @dev Implementation of the IERC721 isMember function required by Voting contract
      */
     function isMember(address account) external view returns (bool) {
         return bytes(memberTypeOf[account]).length > 0;
     }
-    
+
     /**
      * @dev Version identifier to help with testing upgrades
      */

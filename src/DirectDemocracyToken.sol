@@ -43,7 +43,7 @@ contract DirectDemocracyToken is Initializable, ERC20 {
     function name() public view virtual override returns (string memory) {
         return _tokenName;
     }
-    
+
     /**
      * @dev Override symbol function to use custom symbol
      */
@@ -63,11 +63,11 @@ contract DirectDemocracyToken is Initializable, ERC20 {
     ) external initializer {
         require(_owner != address(0), "Invalid owner");
         require(_nftMembership != address(0), "Invalid NFT membership address");
-        
+
         // Store token name and symbol for overriding getters
         _tokenName = name_;
         _tokenSymbol = symbol_;
-        
+
         owner = _owner;
         nftMembership = INFTMembership(_nftMembership);
 
@@ -94,7 +94,7 @@ contract DirectDemocracyToken is Initializable, ERC20 {
         emit OwnershipTransferred(oldOwner, newOwner);
     }
 
-    function setQuickJoin(address _quickJoin) public{
+    function setQuickJoin(address _quickJoin) public {
         require(!quickJoinSet, "QuickJoin already set");
         quickJoin = _quickJoin;
         quickJoinSet = true;
@@ -141,7 +141,7 @@ contract DirectDemocracyToken is Initializable, ERC20 {
     {
         revert("Transfer of Tokens is not allowed");
     }
-    
+
     /**
      * @dev Version identifier to help with testing upgrades
      */

@@ -22,7 +22,7 @@ contract UniversalAccountRegistry is Initializable {
 
     // Event for username change
     event UsernameChanged(address indexed accountAddress, string newUsername);
-    
+
     // Event for ownership transfer
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
@@ -100,7 +100,7 @@ contract UniversalAccountRegistry is Initializable {
     function getUsername(address accountAddress) public view returns (string memory) {
         return addressToUsername[accountAddress];
     }
-    
+
     /**
      * @dev Version identifier to help with testing upgrades
      */
