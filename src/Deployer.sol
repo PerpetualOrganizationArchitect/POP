@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./OrgRegistry.sol";
 
 interface IPoaManager {
     function poaBeacon() external view returns (address); // The official Poa beacon
@@ -21,19 +22,11 @@ interface IPoaManager {
 contract Deployer is Ownable {
     using Address for address;
 
-    // A simple struct to track each org's info (optional for convenience)
-    struct OrgInfo {
-        address beaconProxy;       // The org's BeaconProxy address
-        address beacon;            // The beacon that the proxy uses (either Poa's or a custom org-owned)
-        bool autoUpgrade;          // Whether the org is auto-upgrading
-        address owner;             // The org's owner (for reference)
-    }
-
-    // orgId (or any unique key) -> OrgInfo
-    mapping(bytes32 => OrgInfo) public orgs;
-
-    // Reference to the PoaManager (which manages Poa's official Voting beacon).
+    // Reference to the PoaManager (which manages Poa's official Voting beacon)
     IPoaManager public poaManager;
+    
+    // Reference to the OrgRegistry for tracking organizations
+    OrgRegistry public orgRegistry;
 
     event OrgDeployed(
         bytes32 indexed orgId,
@@ -43,9 +36,11 @@ contract Deployer is Ownable {
         address orgOwner
     );
 
-    constructor(address _poaManager) Ownable(msg.sender) {
+    constructor(address _poaManager, address _orgRegistry) Ownable(msg.sender) {
         require(_poaManager != address(0), "Invalid PoaManager");
+        require(_orgRegistry != address(0), "Invalid OrgRegistry");
         poaManager = IPoaManager(_poaManager);
+        orgRegistry = OrgRegistry(_orgRegistry);
     }
 
     /**
@@ -62,7 +57,6 @@ contract Deployer is Ownable {
         bool autoUpgrade,
         address customImplementation
     ) external returns (address beaconProxy) {
-        require(orgs[orgId].beaconProxy == address(0), "Org already deployed");
         require(orgOwner != address(0), "Invalid org owner");
 
         // 1. Determine beacon address
@@ -89,14 +83,14 @@ contract Deployer is Ownable {
         bytes memory initData = abi.encodeWithSignature("initialize(address)", orgOwner);
         BeaconProxy proxy = new BeaconProxy(beacon, initData);
 
-        // 3. Store org info
-        OrgInfo memory info = OrgInfo({
-            beaconProxy: address(proxy),
-            beacon: beacon,
-            autoUpgrade: autoUpgrade,
-            owner: orgOwner
-        });
-        orgs[orgId] = info;
+        // 3. Register the org in the OrgRegistry
+        orgRegistry.registerOrg(
+            orgId,
+            address(proxy),
+            beacon,
+            autoUpgrade,
+            orgOwner
+        );
 
         emit OrgDeployed(orgId, address(proxy), beacon, autoUpgrade, orgOwner);
 
@@ -104,20 +98,10 @@ contract Deployer is Ownable {
     }
 
     /**
-     * @notice Helper: Return the current Voting implementation for an org.
-     *         If autoUpgrade=true, returns Poa's official logic. Otherwise returns the org's local logic.
-     * @dev This requires us to do a staticcall to the org's beacon's .implementation().
+     * @notice Helper: Return the current Voting implementation for an org's beacon.
+     * @dev This requires us to do a staticcall to the beacon's .implementation().
      */
-    function getOrgImplementation(bytes32 orgId) external view returns (address) {
-        OrgInfo memory info = orgs[orgId];
-        require(info.beacon != address(0), "Org not found");
-
-        // If the beacon is an UpgradeableBeacon, we can call .implementation() directly.
-        // If it's Poa's official beacon, same approach applies (since it is also an UpgradeableBeacon).
-        return _getBeaconImplementation(info.beacon);
-    }
-
-    function _getBeaconImplementation(address beaconAddr) internal view returns (address impl) {
+    function getBeaconImplementation(address beaconAddr) public view returns (address impl) {
         // The standard OZ UpgradeableBeacon doesn't expose implementation() externally,
         // but we can get it via a staticcall to the beacon's public function:
         //   function implementation() external view returns (address)
