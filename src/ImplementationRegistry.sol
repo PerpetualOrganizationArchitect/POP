@@ -10,16 +10,16 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 contract ImplementationRegistry is Ownable {
     // Contract Type -> (Version string -> Implementation address)
     mapping(string => mapping(string => address)) public implementations;
-    
+
     // Contract type -> all versions array
     mapping(string => string[]) public contractVersions;
-    
+
     // Contract type -> latest version
     mapping(string => string) public latestVersions;
-    
+
     // List of all registered contract types
     string[] public contractTypes;
-    
+
     // Events
     event ImplementationRegistered(string contractType, string version, address implementation);
     event LatestVersionUpdated(string contractType, string version);
@@ -43,28 +43,27 @@ contract ImplementationRegistry is Ownable {
         require(bytes(contractType).length > 0, "Contract type cannot be empty");
         require(bytes(version).length > 0, "Version cannot be empty");
         require(implementation != address(0), "Invalid implementation address");
-        
+
         // If this is a new contract type, add it to the list
-        if (implementations[contractType][version] == address(0) && 
-            !_contractTypeExists(contractType)) {
+        if (implementations[contractType][version] == address(0) && !_contractTypeExists(contractType)) {
             contractTypes.push(contractType);
             emit ContractTypeAdded(contractType);
         }
-        
+
         // Only add to versions array if it's a new version
         if (implementations[contractType][version] == address(0)) {
             contractVersions[contractType].push(version);
         }
-        
+
         implementations[contractType][version] = implementation;
         emit ImplementationRegistered(contractType, version, implementation);
-        
+
         if (setAsLatest) {
             latestVersions[contractType] = version;
             emit LatestVersionUpdated(contractType, version);
         }
     }
-    
+
     /**
      * @notice Set a specific version as the latest for a contract type
      * @param contractType The type of contract
@@ -75,7 +74,7 @@ contract ImplementationRegistry is Ownable {
         latestVersions[contractType] = version;
         emit LatestVersionUpdated(contractType, version);
     }
-    
+
     /**
      * @notice Get the latest implementation address for a contract type
      * @param contractType The type of contract
@@ -85,7 +84,7 @@ contract ImplementationRegistry is Ownable {
         string memory latestVersion = latestVersions[contractType];
         return implementations[contractType][latestVersion];
     }
-    
+
     /**
      * @notice Get a specific implementation by contract type and version
      * @param contractType The type of contract
@@ -96,7 +95,7 @@ contract ImplementationRegistry is Ownable {
         require(implementations[contractType][version] != address(0), "Version not registered");
         return implementations[contractType][version];
     }
-    
+
     /**
      * @notice Get the number of registered versions for a contract type
      * @param contractType The type of contract
@@ -105,7 +104,7 @@ contract ImplementationRegistry is Ownable {
     function getVersionCount(string memory contractType) external view returns (uint256) {
         return contractVersions[contractType].length;
     }
-    
+
     /**
      * @notice Get the number of registered contract types
      * @return The count of contract types
@@ -113,7 +112,7 @@ contract ImplementationRegistry is Ownable {
     function getContractTypeCount() external view returns (uint256) {
         return contractTypes.length;
     }
-    
+
     /**
      * @notice Get a specific version for a contract type by index
      * @param contractType The type of contract
@@ -124,7 +123,7 @@ contract ImplementationRegistry is Ownable {
         require(index < contractVersions[contractType].length, "Index out of bounds");
         return contractVersions[contractType][index];
     }
-    
+
     /**
      * @notice Get a contract type by index
      * @param index The index in the contract types array
@@ -134,7 +133,7 @@ contract ImplementationRegistry is Ownable {
         require(index < contractTypes.length, "Index out of bounds");
         return contractTypes[index];
     }
-    
+
     /**
      * @notice Check if a contract type exists
      * @param contractType The type to check
@@ -148,4 +147,4 @@ contract ImplementationRegistry is Ownable {
         }
         return false;
     }
-} 
+}

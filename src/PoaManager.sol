@@ -12,13 +12,13 @@ import "./ImplementationRegistry.sol";
 contract PoaManager is Ownable {
     // Contract type -> Beacon
     mapping(string => UpgradeableBeacon) public beacons;
-    
+
     // Reference to the implementation registry
     ImplementationRegistry public implementationRegistry;
-    
+
     // List of contract types
     string[] public contractTypes;
-    
+
     // Initial implementations - contract type -> implementation address
     mapping(string => address) public initialImplementations;
 
@@ -30,7 +30,7 @@ contract PoaManager is Ownable {
         require(_implementationRegistry != address(0), "Invalid registry");
         implementationRegistry = ImplementationRegistry(_implementationRegistry);
     }
-    
+
     /**
      * @notice Add a new contract type with initial implementation
      * @param contractType The type of contract (e.g., "Voting", "Membership")
@@ -40,18 +40,18 @@ contract PoaManager is Ownable {
         require(bytes(contractType).length > 0, "Contract type cannot be empty");
         require(initialImplementation != address(0), "Invalid implementation");
         require(address(beacons[contractType]) == address(0), "Contract type already exists");
-        
+
         // Deploy a new beacon for this contract type
         UpgradeableBeacon beacon = new UpgradeableBeacon(initialImplementation, address(this));
-        
+
         // Register the contract type
         beacons[contractType] = beacon;
         contractTypes.push(contractType);
         initialImplementations[contractType] = initialImplementation;
-        
+
         emit BeaconCreated(contractType, address(beacon), initialImplementation);
     }
-    
+
     /**
      * @notice Register the initial implementation for a contract type
      * @param contractType The type of contract to register
@@ -59,14 +59,9 @@ contract PoaManager is Ownable {
     function registerInitialImplementation(string memory contractType) external {
         require(address(beacons[contractType]) != address(0), "Contract type not found");
         address implementation = initialImplementations[contractType];
-        
+
         // Register the initial implementation as "v1"
-        implementationRegistry.registerImplementation(
-            contractType,
-            "v1",
-            implementation,
-            true
-        );
+        implementationRegistry.registerImplementation(contractType, "v1", implementation, true);
     }
 
     /**
@@ -75,22 +70,16 @@ contract PoaManager is Ownable {
      * @param newImplementation The address of the new implementation
      * @param version The version string for this implementation
      */
-    function upgradeBeacon(
-        string memory contractType,
-        address newImplementation,
-        string memory version
-    ) external onlyOwner {
+    function upgradeBeacon(string memory contractType, address newImplementation, string memory version)
+        external
+        onlyOwner
+    {
         require(address(beacons[contractType]) != address(0), "Contract type not found");
         require(newImplementation != address(0), "Invalid implementation");
-        
+
         // Register the new implementation in the registry
-        implementationRegistry.registerImplementation(
-            contractType,
-            version,
-            newImplementation,
-            true
-        );
-        
+        implementationRegistry.registerImplementation(contractType, version, newImplementation, true);
+
         // Upgrade the beacon
         beacons[contractType].upgradeTo(newImplementation);
         emit BeaconUpgraded(contractType, newImplementation);
@@ -105,7 +94,7 @@ contract PoaManager is Ownable {
         require(address(beacons[contractType]) != address(0), "Contract type not found");
         return address(beacons[contractType]);
     }
-    
+
     /**
      * @notice Get the current implementation for a contract type
      * @param contractType The type of contract
@@ -115,17 +104,21 @@ contract PoaManager is Ownable {
         require(address(beacons[contractType]) != address(0), "Contract type not found");
         return beacons[contractType].implementation();
     }
-    
+
     /**
      * @notice Get the implementation for a specific version of a contract type
      * @param contractType The type of contract
      * @param version The version string
      * @return The implementation address
      */
-    function getImplementationByVersion(string memory contractType, string memory version) external view returns (address) {
+    function getImplementationByVersion(string memory contractType, string memory version)
+        external
+        view
+        returns (address)
+    {
         return implementationRegistry.getImplementation(contractType, version);
     }
-    
+
     /**
      * @notice Get the latest registered implementation for a contract type
      * @param contractType The type of contract
@@ -133,7 +126,7 @@ contract PoaManager is Ownable {
     function getLatestImplementation(string memory contractType) external view returns (address) {
         return implementationRegistry.getLatestImplementation(contractType);
     }
-    
+
     /**
      * @notice Get the number of contract types
      * @return The count of contract types

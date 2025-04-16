@@ -52,7 +52,7 @@ contract QuickJoin is Initializable {
         require(_directDemocracyTokenAddress != address(0), "Invalid token address");
         require(_accountRegistryAddress != address(0), "Invalid account registry address");
         require(_masterDeployAddress != address(0), "Invalid master deploy address");
-        
+
         owner = _owner;
         membershipNFT = IMembershipNFT(_membershipNFTAddress);
         directDemocracyToken = IDirectDemocracyToken(_directDemocracyTokenAddress);
@@ -96,7 +96,7 @@ contract QuickJoin is Initializable {
         require(_directDemocracyTokenAddress != address(0), "Invalid token address");
         require(_accountRegistryAddress != address(0), "Invalid account registry address");
         require(_masterDeployAddress != address(0), "Invalid master deploy address");
-        
+
         membershipNFT = IMembershipNFT(_membershipNFTAddress);
         directDemocracyToken = IDirectDemocracyToken(_directDemocracyTokenAddress);
         accountRegistry = IUniversalAccountRegistry(_accountRegistryAddress);
@@ -134,7 +134,7 @@ contract QuickJoin is Initializable {
         membershipNFT.mintDefaultNFT(newUser);
         directDemocracyToken.mint(newUser);
     }
-    
+
     /**
      * @dev Version identifier to help with testing upgrades
      */
