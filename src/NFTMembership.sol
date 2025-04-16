@@ -117,7 +117,7 @@ contract NFTMembership is ERC721URIStorage, Initializable {
         _;
     }
 
-    function setElectionContract(address _electionContract) public onlyOwner {
+    function setElectionContract(address _electionContract) public {
         require(electionContract == address(0), "Election contract already set");
         electionContract = _electionContract;
     }

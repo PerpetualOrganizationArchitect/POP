@@ -12,14 +12,20 @@ interface IPoaManager {
     function getCurrentImplementation(string memory contractType) external view returns (address);
 }
 
-// Interface for Voting contract
-interface IVoting {
-    function setMembershipContract(address membershipContract) external;
+// Interface for DirectDemocracyVoting contract
+interface IDirectDemocracyVoting {
+    function setElectionsContract(address electionsContract) external;
+}
+
+// Interface for ElectionContract
+interface IElectionContract {
+    // No methods needed yet
 }
 
 // Interface for NFTMembership contract
 interface INFTMembership {
     function setQuickJoin(address quickJoinAddress) external;
+    function setElectionContract(address electionContract) external;
 }
 
 // Interface for Direct Democracy Token
@@ -119,49 +125,6 @@ contract Deployer is Ownable {
     }
 
     /**
-     * @notice Deploy an organization (creates a Voting contract)
-     * @param orgId Unique identifier for the Org
-     * @param orgOwner The address that will own the Voting contract
-     * @param autoUpgrade If true, uses Poa's official beacon for auto-upgrades
-     * @param customImplementation Custom implementation (only used if autoUpgrade=false)
-     */
-    function deployOrg(bytes32 orgId, address orgOwner, bool autoUpgrade, address customImplementation)
-        public
-        returns (address votingProxy)
-    {
-        // Register the organization first if it doesn't exist
-        if (!_orgExists(orgId)) {
-            // Use org ID as the name if no specific name is provided
-            string memory orgName = bytes32ToString(orgId);
-            orgRegistry.registerOrg(orgId, orgOwner, orgName);
-        }
-
-        // Create initialization data for Voting contract
-        bytes memory initData = abi.encodeWithSignature("initialize(address)", orgOwner);
-
-        // Deploy the Voting contract
-        return deployContract(orgId, "Voting", orgOwner, autoUpgrade, customImplementation, initData);
-    }
-
-    /**
-     * @notice Deploy a Voting contract
-     * @param orgId Unique identifier for the Org
-     * @param orgOwner The address that will own the Voting contract
-     * @param autoUpgrade If true, uses Poa's official beacon for auto-upgrades
-     * @param customImplementation Custom implementation (only used if autoUpgrade=false)
-     */
-    function deployVoting(bytes32 orgId, address orgOwner, bool autoUpgrade, address customImplementation)
-        public
-        returns (address votingProxy)
-    {
-        // Create initialization data for Voting contract
-        bytes memory initData = abi.encodeWithSignature("initialize(address)", orgOwner);
-
-        // Deploy the Voting contract
-        return deployContract(orgId, "Voting", orgOwner, autoUpgrade, customImplementation, initData);
-    }
-
-    /**
      * @notice Deploy a Membership contract
      * @param orgId Unique identifier for the Org
      * @param orgOwner The address that will own the Membership contract
@@ -248,44 +211,99 @@ contract Deployer is Ownable {
     }
 
     /**
-     * @notice Deploy both Voting and Membership contracts for an org and link them
+     * @notice Deploy a DirectDemocracyVoting contract
      * @param orgId Unique identifier for the Org
-     * @param orgOwner The address that will own the contracts
-     * @param orgName The name of the organization for the membership NFT
+     * @param orgOwner The address that will own the voting contract
+     * @param ddTokenAddress Address of the DirectDemocracyToken contract
+     * @param nftMembershipAddress Address of the NFTMembership contract
+     * @param treasuryAddress Address of the Treasury contract
      * @param autoUpgrade If true, uses Poa's official beacon for auto-upgrades
-     * @param isNFTMembership Whether to use the NFTMembership contract
+     * @param customImplementation Custom implementation (only used if autoUpgrade=false)
      */
-    function deployOrgContracts(
+    function deployDirectDemocracyVoting(
         bytes32 orgId,
         address orgOwner,
-        string memory orgName,
+        address ddTokenAddress,
+        address nftMembershipAddress,
+        address treasuryAddress,
         bool autoUpgrade,
-        bool isNFTMembership
-    ) public returns (address votingProxy, address membershipProxy) {
-        // Register the organization first if it doesn't exist
-        if (!_orgExists(orgId)) {
-            orgRegistry.registerOrg(orgId, orgOwner, orgName);
-        }
-
-        // Deploy Membership contract
-        membershipProxy = deployMembership(orgId, orgOwner, orgName, autoUpgrade, address(0), isNFTMembership);
-
-        // Deploy Voting contract
-        votingProxy = deployOrg(orgId, orgOwner, autoUpgrade, address(0));
-
-        // Set up the link between Voting and Membership
-        IVoting(votingProxy).setMembershipContract(membershipProxy);
-
-        return (votingProxy, membershipProxy);
+        address customImplementation
+    ) public returns (address votingProxy) {
+        // Set up allowed roles for token usage
+        string[] memory allowedRoles = new string[](3);
+        allowedRoles[0] = "Default";
+        allowedRoles[1] = "Executive";
+        allowedRoles[2] = "Member";
+        
+        // Default quorum percentage
+        uint256 quorumPercentage = 50;
+        
+        // Create initialization data for DirectDemocracyVoting contract
+        bytes memory initData = abi.encodeWithSignature(
+            "initialize(address,address,address,string[],address,uint256)",
+            orgOwner,
+            ddTokenAddress,
+            nftMembershipAddress,
+            allowedRoles,
+            treasuryAddress,
+            quorumPercentage
+        );
+        
+        // Deploy the DirectDemocracyVoting contract
+        return deployContract(
+            orgId,
+            "DirectDemocracyVoting",
+            orgOwner,
+            autoUpgrade,
+            customImplementation,
+            initData
+        );
     }
 
     /**
-     * @notice Deploy full organization suite with Voting, Membership, QuickJoin
+     * @notice Deploy an ElectionContract
+     * @param orgId Unique identifier for the Org
+     * @param orgOwner The address that will own the election contract
+     * @param nftMembershipAddress Address of the NFTMembership contract
+     * @param votingAddress Address of the DirectDemocracyVoting contract
+     * @param autoUpgrade If true, uses Poa's official beacon for auto-upgrades
+     * @param customImplementation Custom implementation (only used if autoUpgrade=false)
+     */
+    function deployElectionContract(
+        bytes32 orgId,
+        address orgOwner,
+        address nftMembershipAddress,
+        address votingAddress,
+        bool autoUpgrade,
+        address customImplementation
+    ) public returns (address electionProxy) {
+        // Create initialization data for ElectionContract
+        bytes memory initData = abi.encodeWithSignature(
+            "initialize(address,address,address)",
+            orgOwner,
+            nftMembershipAddress,
+            votingAddress
+        );
+        
+        // Deploy the ElectionContract
+        return deployContract(
+            orgId,
+            "ElectionContract",
+            orgOwner,
+            autoUpgrade,
+            customImplementation,
+            initData
+        );
+    }
+
+    /**
+     * @notice Deploy full organization suite with DirectDemocracyVoting, ElectionContract, NFTMembership, QuickJoin
      * @param orgId Unique identifier for the Org
      * @param orgOwner The address that will own the contracts
      * @param orgName The name of the organization
      * @param tokenAddress Address of an existing DirectDemocracyToken contract (if 0, will deploy a new one)
      * @param accountRegistryAddress Address of the UniversalAccountRegistry contract
+     * @param treasuryAddress Address of the Treasury contract (if 0, won't enable treasury features)
      * @param autoUpgrade If true, uses Poa's official beacon for auto-upgrades
      */
     function deployFullOrg(
@@ -294,34 +312,80 @@ contract Deployer is Ownable {
         string memory orgName,
         address tokenAddress,
         address accountRegistryAddress,
+        address treasuryAddress,
         bool autoUpgrade
-    ) external returns (address votingProxy, address membershipProxy, address quickJoinProxy, address ddt) {
-        // Deploy basic org contracts first
-        (votingProxy, membershipProxy) = deployOrgContracts(
+    ) external returns (
+        address votingProxy, 
+        address electionProxy, 
+        address membershipProxy, 
+        address quickJoinProxy, 
+        address ddt
+    ) {
+        // Register the organization first if it doesn't exist
+        if (!_orgExists(orgId)) {
+            orgRegistry.registerOrg(orgId, orgOwner, orgName);
+        }
+        
+        // Deploy Membership contract
+        membershipProxy = deployMembership(
             orgId,
             orgOwner,
             orgName,
             autoUpgrade,
-            true // Always use NFTMembership
+            address(0),
+            true  // Always use NFTMembership
         );
-
+        
         // Track if we deployed a new token
         bool deployedNewToken = false;
-
+        
         // If no token address provided, deploy a new DirectDemocracyToken for this organization
         if (tokenAddress == address(0)) {
             string[] memory allowedRoles = new string[](3);
             allowedRoles[0] = "Default";
             allowedRoles[1] = "Executive";
             allowedRoles[2] = "Member";
-
+            
             tokenAddress = deployDirectDemocracyToken(
-                orgOwner, orgId, "DDT", membershipProxy, allowedRoles, autoUpgrade, address(0)
+                orgOwner,
+                orgId,
+                "DDT",
+                membershipProxy,
+                allowedRoles,
+                autoUpgrade,
+                address(0)
             );
-
+            
             deployedNewToken = true;
         }
-
+        
+        // Deploy DirectDemocracyVoting contract
+        votingProxy = deployDirectDemocracyVoting(
+            orgId,
+            orgOwner,
+            tokenAddress,
+            membershipProxy,
+            treasuryAddress,
+            autoUpgrade,
+            address(0)
+        );
+        
+        // Deploy ElectionContract
+        electionProxy = deployElectionContract(
+            orgId,
+            orgOwner,
+            membershipProxy,
+            votingProxy,
+            autoUpgrade,
+            address(0)
+        );
+        
+        // Set ElectionContract in the DirectDemocracyVoting contract
+        IDirectDemocracyVoting(votingProxy).setElectionsContract(electionProxy);
+        
+        // Set ElectionContract in the NFTMembership contract
+        INFTMembership(membershipProxy).setElectionContract(electionProxy);
+        
         // Deploy QuickJoin and link to Membership
         quickJoinProxy = deployQuickJoin(
             orgId,
@@ -333,34 +397,27 @@ contract Deployer is Ownable {
             autoUpgrade,
             address(0)
         );
-
+        
         // Set the QuickJoin address in the token if this is a newly deployed token
         if (deployedNewToken) {
             // We need to use a low-level call here since we're the deployer, not the token owner
             // This assumes the token owner is the same as the org owner
-            (bool success,) = tokenAddress.call(abi.encodeWithSignature("setQuickJoin(address)", quickJoinProxy));
+            (bool success, ) = tokenAddress.call(
+                abi.encodeWithSignature("setQuickJoin(address)", quickJoinProxy)
+            );
             // We don't require success here as it might need to be done manually if permissions differ
         }
-
-        return (votingProxy, membershipProxy, quickJoinProxy, tokenAddress);
-    }
-
-    /**
-     * @notice Deploy both Voting and Membership contracts for an org and link them (backward compatibility)
-     * Uses the original Membership contract
-     */
-    function deployOrgContracts(bytes32 orgId, address orgOwner, string memory orgName, bool autoUpgrade)
-        external
-        returns (address votingProxy, address membershipProxy)
-    {
-        return this.deployOrgContracts(orgId, orgOwner, orgName, autoUpgrade, false);
+        
+        return (votingProxy, electionProxy, membershipProxy, quickJoinProxy, tokenAddress);
     }
 
     /**
      * @notice Helper: Return the current implementation for a beacon
      */
     function getBeaconImplementation(address beaconAddr) public view returns (address impl) {
-        (bool success, bytes memory result) = beaconAddr.staticcall(abi.encodeWithSignature("implementation()"));
+        (bool success, bytes memory result) = beaconAddr.staticcall(
+            abi.encodeWithSignature("implementation()")
+        );
         require(success, "Beacon implementation() call failed");
         impl = abi.decode(result, (address));
     }
