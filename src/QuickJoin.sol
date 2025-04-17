@@ -3,8 +3,9 @@ pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 
+// Updated interface for Membership.sol
 interface IMembershipNFT {
-    function mintDefaultNFT(address newUser) external;
+    function quickJoinMint(address newUser) external;
 }
 
 // interface for UniversalAccountRegistry.sol
@@ -99,11 +100,11 @@ contract QuickJoin is Initializable {
         if (bytes(existingUsername).length == 0) {
             accountRegistry.registerAccountQuickJoin(userName, msg.sender);
         }
-        membershipNFT.mintDefaultNFT(msg.sender);
+        membershipNFT.quickJoinMint(msg.sender);
     }
 
     function quickJoinWithUser() public {
-        membershipNFT.mintDefaultNFT(msg.sender);
+        membershipNFT.quickJoinMint(msg.sender);
     }
 
     function quickJoinNoUserMasterDeploy(string memory userName, address newUser) public onlyMasterDeploy {
@@ -113,11 +114,11 @@ contract QuickJoin is Initializable {
         if (bytes(existingUsername).length == 0) {
             accountRegistry.registerAccountQuickJoin(userName, newUser);
         }
-        membershipNFT.mintDefaultNFT(newUser);
+        membershipNFT.quickJoinMint(newUser);
     }
 
     function quickJoinWithUserMasterDeploy(address newUser) public onlyMasterDeploy {
-        membershipNFT.mintDefaultNFT(newUser);
+        membershipNFT.quickJoinMint(newUser);
     }
 
     /**
