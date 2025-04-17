@@ -41,7 +41,12 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
     bytes4 public constant MODULE_ID = 0x6464766f; /* "ddvo" */
 
     /* ────────────────────────────── Enumerations ───────────────────────────── */
-    enum TokenType { ETHER, ERC20, WRAPPED, CUSTOM }
+    enum TokenType {
+        ETHER,
+        ERC20,
+        WRAPPED,
+        CUSTOM
+    }
 
     /* ────────────────────────────── State Storage ──────────────────────────── */
     INFTMembership2 public nftMembership;
@@ -55,14 +60,16 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
     bytes32 private _domainSeparator;
     mapping(address => uint256) private _sigNonces;
 
-    struct PollOption { uint256 votes; }
+    struct PollOption {
+        uint256 votes;
+    }
 
     struct Proposal {
         uint256 totalVotes;
-        uint48  endTimestamp;
-        uint16  transferTriggerIndex;
-        bool    transferEnabled;
-        bool    electionEnabled;
+        uint48 endTimestamp;
+        uint16 transferTriggerIndex;
+        bool transferEnabled;
+        bool electionEnabled;
         TokenType tokenType;
         address payable transferRecipient;
         address transferToken;
@@ -114,13 +121,15 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         __Ownable_init(_owner);
         __ReentrancyGuard_init();
 
-        nftMembership        = INFTMembership2(_nftMembership);
-        treasury             = ITreasury(_treasuryAddress);
-        quorumPercentage     = _quorumPercentage;
+        nftMembership = INFTMembership2(_nftMembership);
+        treasury = ITreasury(_treasuryAddress);
+        quorumPercentage = _quorumPercentage;
 
-        for (uint256 i; i < _allowedRoleNames.length; ) {
+        for (uint256 i; i < _allowedRoleNames.length;) {
             _allowedRoles[keccak256(bytes(_allowedRoleNames[i]))] = true;
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -169,29 +178,33 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         if (closing > type(uint48).max) revert DurationOverflow();
 
         Proposal storage p = _proposals.push();
-        p.endTimestamp           = uint48(closing);
-        p.transferTriggerIndex   = uint16(_transferTriggerOptionIndex);
-        p.transferRecipient      = _transferRecipient;
-        p.transferAmount         = _transferAmount;
-        p.transferEnabled        = _transferEnabled;
-        p.transferToken          = _transferToken;
-        p.tokenType              = _tokenType;
-        p.electionEnabled        = _electionEnabled;
+        p.endTimestamp = uint48(closing);
+        p.transferTriggerIndex = uint16(_transferTriggerOptionIndex);
+        p.transferRecipient = _transferRecipient;
+        p.transferAmount = _transferAmount;
+        p.transferEnabled = _transferEnabled;
+        p.transferToken = _transferToken;
+        p.tokenType = _tokenType;
+        p.electionEnabled = _electionEnabled;
 
         uint256 proposalId = _proposals.length - 1;
 
-        for (uint256 i; i < _optionNames.length; ) {
+        for (uint256 i; i < _optionNames.length;) {
             p.options.push(PollOption(0));
             emit PollOptionNames(proposalId, i, _optionNames[i]);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         uint256 electionId;
         if (_electionEnabled) {
             (electionId,) = elections.createElection(proposalId);
-            for (uint256 i; i < _candidateAddresses.length; ) {
+            for (uint256 i; i < _candidateAddresses.length;) {
                 elections.addCandidate(proposalId, _candidateAddresses[i], _candidateNames[i]);
-                unchecked { ++i; }
+                unchecked {
+                    ++i;
+                }
             }
         }
 
@@ -212,13 +225,13 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
     }
 
     /* ──────────────────────────────── Voting ───────────────────────────────── */
-    function vote(
-        uint256 _proposalId,
-        uint256[] memory _optionIndices,
-        uint256[] memory _weights
-    ) external proposalExists(_proposalId) whenNotExpired(_proposalId) {
+    function vote(uint256 _proposalId, uint256[] memory _optionIndices, uint256[] memory _weights)
+        external
+        proposalExists(_proposalId)
+        whenNotExpired(_proposalId)
+    {
         if (_optionIndices.length != _weights.length) revert LengthMismatch();
-        
+
         if (!nftMembership.canVote(msg.sender)) revert Unauthorized();
 
         Proposal storage p = _proposals[_proposalId];
@@ -232,21 +245,28 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         }
 
         uint256 weightSum;
-        for (uint256 i; i < _weights.length; ) {
+        for (uint256 i; i < _weights.length;) {
             uint256 w = _weights[i];
             if (w > 100) revert InvalidWeight();
-            unchecked { weightSum += w; ++i; }
+            unchecked {
+                weightSum += w;
+                ++i;
+            }
         }
         if (weightSum != 100) revert WeightsMustSum100();
 
         p.hasVoted[msg.sender] = true;
-        unchecked { ++p.totalVotes; }
+        unchecked {
+            ++p.totalVotes;
+        }
 
-        for (uint256 i; i < _optionIndices.length; ) {
+        for (uint256 i; i < _optionIndices.length;) {
             uint256 option = _optionIndices[i];
             if (option >= p.options.length) revert InvalidOption();
             p.options[option].votes += _weights[i];
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         emit Voted(_proposalId, msg.sender, _optionIndices, _weights);
@@ -285,14 +305,16 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
 
         uint256 highestVotes;
         uint256 len = p.options.length;
-        for (uint256 i; i < len; ) {
+        for (uint256 i; i < len;) {
             uint256 v = p.options[i].votes;
             if (v > highestVotes) {
-                highestVotes   = v;
-                winningOption  = i;
+                highestVotes = v;
+                winningOption = i;
                 hasValidWinner = highestVotes > p.totalVotes * quorumPercentage;
             }
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -328,18 +350,15 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         );
     }
 
-    function getOptionVotes(uint256 id, uint256 option)
-        external
-        view
-        proposalExists(id)
-        returns (uint256)
-    {
+    function getOptionVotes(uint256 id, uint256 option) external view proposalExists(id) returns (uint256) {
         Proposal storage p = _proposals[id];
         if (option >= p.options.length) revert InvalidOption();
         return p.options[option].votes;
     }
 
-    function proposalsCount() external view returns (uint256) { return _proposals.length; }
+    function proposalsCount() external view returns (uint256) {
+        return _proposals.length;
+    }
 
     /* ───────────────────────────── Cleanup Helper ───────────────────────────── */
     /**
@@ -347,18 +366,17 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
      *         Gas refunds are capped to 20 percent of tx.gasUsed. Keep batches ≤4 000.
      * @param voters list of addresses to delete
      */
-    function cleanupVotes(uint256 id, address[] calldata voters)
-        external
-        proposalExists(id)
-        whenExpired(id)
-    {
+    function cleanupVotes(uint256 id, address[] calldata voters) external proposalExists(id) whenExpired(id) {
         if (voters.length > 4_000) revert TooManyVoters();
         Proposal storage p = _proposals[id];
 
         uint256 cleaned;
-        for (uint256 i; i < voters.length; ) {
+        for (uint256 i; i < voters.length;) {
             delete p.hasVoted[voters[i]];
-            unchecked { ++i; ++cleaned; }
+            unchecked {
+                ++i;
+                ++cleaned;
+            }
         }
         emit VotesCleaned(id, cleaned);
     }
@@ -373,7 +391,9 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
     }
 
     /* ───────────────────────────── Upgrade Helpers ─────────────────────────── */
-    function version() external pure returns (string memory) { return "v1"; }
+    function version() external pure returns (string memory) {
+        return "v1";
+    }
 
     uint256[49] private __gap;
 }
