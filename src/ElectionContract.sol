@@ -105,8 +105,7 @@ contract ElectionContract is Initializable {
 
         // Mint NFT to the winning candidate with the EXECUTIVE role
         nftMembership.mintOrChange(
-            elections[electionId].candidates[winningOption].candidateAddress, 
-            keccak256("EXECUTIVE")
+            elections[electionId].candidates[winningOption].candidateAddress, keccak256("EXECUTIVE")
         );
 
         emit ElectionConcluded(electionId, winningOption, true);

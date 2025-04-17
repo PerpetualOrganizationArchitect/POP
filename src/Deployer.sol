@@ -142,15 +142,15 @@ contract Deployer is Ownable {
             string[] memory roleNames = new string[](2);
             roleNames[0] = "DEFAULT";
             roleNames[1] = "EXECUTIVE";
-            
+
             string[] memory roleImages = new string[](2);
             roleImages[0] = "https://example.com/default.png";
             roleImages[1] = "https://example.com/executive.png";
-            
+
             bool[] memory roleCanVote = new bool[](2);
             roleCanVote[0] = true;
             roleCanVote[1] = true;
-            
+
             bytes32[] memory executiveRoles = new bytes32[](1);
             executiveRoles[0] = keccak256("EXECUTIVE");
 
@@ -291,15 +291,7 @@ contract Deployer is Ownable {
         address accountRegistryAddress,
         address treasuryAddress,
         bool autoUpgrade
-    )
-        external
-        returns (
-            address votingProxy,
-            address electionProxy,
-            address membershipProxy,
-            address quickJoinProxy
-        )
-    {
+    ) external returns (address votingProxy, address electionProxy, address membershipProxy, address quickJoinProxy) {
         // Register the organization first if it doesn't exist
         if (!_orgExists(orgId)) {
             orgRegistry.registerOrg(orgId, orgOwner, orgName);
@@ -316,9 +308,8 @@ contract Deployer is Ownable {
         );
 
         // Deploy DirectDemocracyVoting contract
-        votingProxy = deployDirectDemocracyVoting(
-            orgId, orgOwner, membershipProxy, treasuryAddress, autoUpgrade, address(0)
-        );
+        votingProxy =
+            deployDirectDemocracyVoting(orgId, orgOwner, membershipProxy, treasuryAddress, autoUpgrade, address(0));
 
         // Deploy ElectionContract
         electionProxy = deployElectionContract(orgId, orgOwner, membershipProxy, votingProxy, autoUpgrade, address(0));
@@ -331,13 +322,7 @@ contract Deployer is Ownable {
 
         // Deploy QuickJoin and link to Membership
         quickJoinProxy = deployQuickJoin(
-            orgId,
-            orgOwner,
-            membershipProxy,
-            accountRegistryAddress,
-            address(this),
-            autoUpgrade,
-            address(0)
+            orgId, orgOwner, membershipProxy, accountRegistryAddress, address(this), autoUpgrade, address(0)
         );
 
         return (votingProxy, electionProxy, membershipProxy, quickJoinProxy);
