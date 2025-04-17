@@ -8,7 +8,8 @@ import "forge-std/Test.sol";
 // Add new voting imports
 import {DirectDemocracyVoting} from "../src/DirectDemocracyVoting.sol";
 import {ElectionContract} from "../src/ElectionContract.sol";
-import "../src/NFTMembership.sol";
+// Replace NFTMembership import
+import {Membership} from "../src/Membership.sol";
 // Import specific contracts to avoid interface collisions
 import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
 import {QuickJoin} from "../src/QuickJoin.sol";
@@ -24,8 +25,8 @@ contract DeployerTest is Test {
     // Contracts
     DirectDemocracyVoting votingImplementation;
     ElectionContract electionImplementation;
-    NFTMembership nftMembershipImplementation;
-    NFTMembership nftMembershipV2Implementation;
+    Membership membershipImplementation;
+    Membership membershipV2Implementation;
     UniversalAccountRegistry accountRegistryImplementation;
     QuickJoin quickJoinImplementation;
     ImplementationRegistry implementationRegistry;
@@ -55,8 +56,8 @@ contract DeployerTest is Test {
         // Deploy implementations
         votingImplementation = new DirectDemocracyVoting();
         electionImplementation = new ElectionContract();
-        nftMembershipImplementation = new NFTMembership();
-        nftMembershipV2Implementation = new NFTMembership();
+        membershipImplementation = new Membership();
+        membershipV2Implementation = new Membership();
         accountRegistryImplementation = new UniversalAccountRegistry();
         quickJoinImplementation = new QuickJoin();
         
@@ -87,7 +88,7 @@ contract DeployerTest is Test {
         poaManager.addContractType("ElectionContract", address(electionImplementation));
         poaManager.registerInitialImplementation("ElectionContract");
 
-        poaManager.addContractType("Membership", address(nftMembershipImplementation));
+        poaManager.addContractType("Membership", address(membershipImplementation));
         poaManager.registerInitialImplementation("Membership");
         
         poaManager.addContractType("QuickJoin", address(quickJoinImplementation));
@@ -153,12 +154,12 @@ contract DeployerTest is Test {
         assertEq(votingContract.version(), "v1", "Should be using V1 implementation");
         
         // Check NFTMembership proxy
-        NFTMembership membershipContract = NFTMembership(membershipProxy);
+        Membership membershipContract = Membership(membershipProxy);
         
-        // Set up image URLs for NFTMembership
+        // Set up image URLs for Membership
         vm.startPrank(orgOwner);
-        membershipContract.setMemberTypeImage("Executive", "https://example.com/executive.png");
-        membershipContract.setMemberTypeImage("Default", "https://example.com/default.png");
+        membershipContract.setRoleImage(keccak256("EXECUTIVE"), "https://example.com/executive.png");
+        membershipContract.setRoleImage(keccak256("DEFAULT"), "https://example.com/default.png");
         vm.stopPrank();
         
         // Use QuickJoin to onboard users
@@ -169,8 +170,9 @@ contract DeployerTest is Test {
         QuickJoin(quickJoinProxy).quickJoinNoUser("Voter2Username");
         
         // Verify the roles are set correctly
-        assertTrue(membershipContract.checkIsExecutive(voter1), "Voter1 should be an executive");
-        assertEq(membershipContract.checkMemberTypeByAddress(voter2), "Default", "Voter2 should be a default member");
+        assertTrue(membershipContract.isExecutiveRole(membershipContract.roleOf(voter1)), "Voter1 should be an executive");
+        bytes32 voter2Role = membershipContract.roleOf(voter2);
+        assertTrue(keccak256("DEFAULT") == voter2Role || keccak256("Member") == voter2Role, "Voter2 should be a default member");
         
         // 4. Test DirectDemocracyVoting functionality
         

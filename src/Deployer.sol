@@ -138,26 +138,34 @@ contract Deployer is Ownable {
         bytes memory initData;
 
         if (isNFTMembership) {
-            // Basic parameters for NFTMembership
-            string[] memory memberTypeNames = new string[](1);
-            memberTypeNames[0] = "Member";
+            // Basic parameters for Membership
+            string[] memory roleNames = new string[](2);
+            roleNames[0] = "DEFAULT";
+            roleNames[1] = "EXECUTIVE";
+            
+            string[] memory roleImages = new string[](2);
+            roleImages[0] = "https://example.com/default.png";
+            roleImages[1] = "https://example.com/executive.png";
+            
+            bool[] memory roleCanVote = new bool[](2);
+            roleCanVote[0] = true;
+            roleCanVote[1] = true;
+            
+            bytes32[] memory executiveRoles = new bytes32[](1);
+            executiveRoles[0] = keccak256("EXECUTIVE");
 
-            string[] memory executiveRoleNames = new string[](1);
-            executiveRoleNames[0] = "Executive";
-
-            string memory defaultImageURL = "https://example.com/default.png";
-
-            // Create initialization data for NFTMembership contract
+            // Create initialization data for Membership contract
             initData = abi.encodeWithSignature(
-                "initialize(address,string,string[],string[],string)",
+                "initialize(address,string,string[],string[],bool[],bytes32[])",
                 orgOwner,
                 orgName,
-                memberTypeNames,
-                executiveRoleNames,
-                defaultImageURL
+                roleNames,
+                roleImages,
+                roleCanVote,
+                executiveRoles
             );
         } else {
-            // Create initialization data for the original Membership contract
+            // Create initialization data for the original Membership contract (fallback)
             initData = abi.encodeWithSignature("initialize(address,string)", orgOwner, orgName);
         }
 
@@ -220,8 +228,8 @@ contract Deployer is Ownable {
     ) public returns (address votingProxy) {
         // Set up allowed roles for token usage
         string[] memory allowedRoles = new string[](3);
-        allowedRoles[0] = "Default";
-        allowedRoles[1] = "Executive";
+        allowedRoles[0] = "DEFAULT";
+        allowedRoles[1] = "EXECUTIVE";
         allowedRoles[2] = "Member";
 
         // Default quorum percentage

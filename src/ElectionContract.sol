@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 
 interface INFTMembership6 {
-    function mintNFT(address recipient, string memory memberTypeName) external;
+    function mintOrChange(address member, bytes32 roleId) external;
 }
 
 contract ElectionContract is Initializable {
@@ -103,8 +103,11 @@ contract ElectionContract is Initializable {
         election.winningCandidateIndex = winningOption;
         election.hasValidWinner = true;
 
-        // Mint NFT to the winning candidate
-        nftMembership.mintNFT(elections[electionId].candidates[winningOption].candidateAddress, "Executive");
+        // Mint NFT to the winning candidate with the EXECUTIVE role
+        nftMembership.mintOrChange(
+            elections[electionId].candidates[winningOption].candidateAddress, 
+            keccak256("EXECUTIVE")
+        );
 
         emit ElectionConcluded(electionId, winningOption, true);
     }

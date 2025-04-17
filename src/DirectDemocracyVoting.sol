@@ -6,7 +6,7 @@ import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 interface INFTMembership2 {
-    function checkMemberTypeByAddress(address user) external view returns (string memory);
+    function roleOf(address user) external view returns (bytes32);
     function canVote(address user) external view returns (bool);
 }
 
@@ -126,7 +126,7 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
 
     /* ─────────────────────────────── Modifiers ─────────────────────────────── */
     modifier onlyAllowedRole() {
-        bytes32 roleHash = keccak256(bytes(nftMembership.checkMemberTypeByAddress(msg.sender)));
+        bytes32 roleHash = nftMembership.roleOf(msg.sender);
         if (!_allowedRoles[roleHash]) revert Unauthorized();
         _;
     }
