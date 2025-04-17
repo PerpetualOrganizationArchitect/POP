@@ -197,7 +197,7 @@ contract Deployer is Ownable(msg.sender) {
         bool autoUpgrade
     ) external returns (address voting, address election, address membership, address quickjoin) {
         if (_orgExists(orgId)) {
-            (, address recordedOwner,,,) = orgRegistry.orgs(orgId);
+            (address recordedOwner,,,) = orgRegistry.orgOf(orgId);
             if (recordedOwner != orgOwner) revert OrgExistsMismatch();
         } else {
             orgRegistry.registerOrg(orgId, orgOwner, orgName);
@@ -221,7 +221,7 @@ contract Deployer is Ownable(msg.sender) {
     }
 
     function _orgExists(bytes32 id) internal view returns (bool) {
-        (,,,, bool exists) = orgRegistry.orgs(id);
+        (,,, bool exists) = orgRegistry.orgOf(id);
         return exists;
     }
 }

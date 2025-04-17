@@ -81,19 +81,14 @@ contract DeployerTest is Test {
 
         // Add contract types and register initial implementations
         poaManager.addContractType("DirectDemocracyVoting", address(votingImplementation));
-        poaManager.registerInitialImplementation("DirectDemocracyVoting");
 
         poaManager.addContractType("ElectionContract", address(electionImplementation));
-        poaManager.registerInitialImplementation("ElectionContract");
 
         poaManager.addContractType("Membership", address(membershipImplementation));
-        poaManager.registerInitialImplementation("Membership");
 
         poaManager.addContractType("QuickJoin", address(quickJoinImplementation));
-        poaManager.registerInitialImplementation("QuickJoin");
 
         poaManager.addContractType("UniversalAccountRegistry", address(accountRegistryImplementation));
-        poaManager.registerInitialImplementation("UniversalAccountRegistry");
 
         // Deploy global UniversalAccountRegistry
         address accountRegistryBeacon = poaManager.getBeacon("UniversalAccountRegistry");
@@ -127,8 +122,9 @@ contract DeployerTest is Test {
         assertEq(contractAddress, autoUpgradeOrgProxy, "BeaconProxy address mismatch");
 
         // Get contract details
-        bytes32 contractId = keccak256(abi.encodePacked(autoUpgradeOrgId, "-", "DirectDemocracyVoting"));
-        (address beaconProxy, address beacon, bool autoUpgrade, address owner) = orgRegistry.contracts(contractId);
+        bytes32 typeId = keccak256(bytes("DirectDemocracyVoting"));
+        bytes32 contractId = keccak256(abi.encodePacked(autoUpgradeOrgId, typeId));
+        (address beaconProxy, address beacon, bool autoUpgrade, address owner) = orgRegistry.contractOf(contractId);
 
         assertEq(beaconProxy, autoUpgradeOrgProxy, "BeaconProxy address mismatch");
         assertEq(beacon, poaManager.getBeacon("DirectDemocracyVoting"), "Beacon address mismatch");
@@ -313,16 +309,15 @@ contract DeployerTest is Test {
     }
 
     function testRegistryOperations() public {
-        // Check the initial version
-        string memory latestVersion = implementationRegistry.getVersionAtIndex(
-            "DirectDemocracyVoting", implementationRegistry.getVersionCount("DirectDemocracyVoting") - 1
-        );
-        assertEq(latestVersion, "v1", "Initial version should be v1");
-        assertEq(
-            implementationRegistry.getLatestImplementation("DirectDemocracyVoting"),
-            address(votingImplementation),
-            "Latest implementation should be V1"
-        );
+        // Check the initial version of an implementation
+        address impl = implementationRegistry.getLatestImplementation("DirectDemocracyVoting");
+        assertEq(impl, address(votingImplementation), "Latest implementation should be correct");
+
+        // Check version info using existing methods
+        address storedImpl = implementationRegistry.getImplementation("DirectDemocracyVoting", "v1");
+        address latestImpl = implementationRegistry.getLatestImplementation("DirectDemocracyVoting");
+        assertEq(storedImpl, address(votingImplementation), "Implementation address should match");
+        assertTrue(storedImpl == latestImpl, "Should be marked as latest version");
     }
 
     /**
