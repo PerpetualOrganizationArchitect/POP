@@ -10,16 +10,13 @@ import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgra
 interface IMembershipNFT {
     function quickJoinMint(address newUser) external;
 }
+
 interface IUniversalAccountRegistry {
     function getUsername(address account) external view returns (string memory);
     function registerAccountQuickJoin(string memory username, address newUser) external;
 }
 
-contract QuickJoin is
-    Initializable,
-    OwnableUpgradeable,
-    ReentrancyGuardUpgradeable
-{
+contract QuickJoin is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /*────────────────────────────── Errors  ───────────────────────────────*/
     error InvalidAddress();
     error OnlyMasterDeploy();
@@ -43,24 +40,20 @@ contract QuickJoin is
     event UsernameExists(address indexed user);
 
     /*──────────────────────────── Initialiser ─────────────────────────────*/
-    function initialize(
-        address _owner,
-        address _membershipNFT,
-        address _accountRegistry,
-        address _masterDeploy
-    ) external initializer {
+    function initialize(address _owner, address _membershipNFT, address _accountRegistry, address _masterDeploy)
+        external
+        initializer
+    {
         if (
-            _owner          == address(0) ||
-            _membershipNFT  == address(0) ||
-            _accountRegistry== address(0) ||
-            _masterDeploy   == address(0)
+            _owner == address(0) || _membershipNFT == address(0) || _accountRegistry == address(0)
+                || _masterDeploy == address(0)
         ) revert InvalidAddress();
 
         __Ownable_init(_owner);
         __ReentrancyGuard_init();
 
-        membershipNFT       = IMembershipNFT(_membershipNFT);
-        accountRegistry     = IUniversalAccountRegistry(_accountRegistry);
+        membershipNFT = IMembershipNFT(_membershipNFT);
+        accountRegistry = IUniversalAccountRegistry(_accountRegistry);
         masterDeployAddress = _masterDeploy;
     }
 
@@ -71,19 +64,16 @@ contract QuickJoin is
     }
 
     /*──────────────────────── Address Management  ─────────────────────────*/
-    function updateAddresses(
-        address _membershipNFT,
-        address _accountRegistry,
-        address _masterDeploy
-    ) external onlyOwner {
-        if (
-            _membershipNFT  == address(0) ||
-            _accountRegistry== address(0) ||
-            _masterDeploy   == address(0)
-        ) revert InvalidAddress();
+    function updateAddresses(address _membershipNFT, address _accountRegistry, address _masterDeploy)
+        external
+        onlyOwner
+    {
+        if (_membershipNFT == address(0) || _accountRegistry == address(0) || _masterDeploy == address(0)) {
+            revert InvalidAddress();
+        }
 
-        membershipNFT       = IMembershipNFT(_membershipNFT);
-        accountRegistry     = IUniversalAccountRegistry(_accountRegistry);
+        membershipNFT = IMembershipNFT(_membershipNFT);
+        accountRegistry = IUniversalAccountRegistry(_accountRegistry);
         masterDeployAddress = _masterDeploy;
 
         emit AddressesUpdated(_membershipNFT, _accountRegistry, _masterDeploy);
@@ -135,11 +125,7 @@ contract QuickJoin is
         emit QuickJoinedByMaster(msg.sender, newUser, created);
     }
 
-    function quickJoinWithUserMasterDeploy(address newUser)
-        external
-        onlyMasterDeploy
-        nonReentrant
-    {
+    function quickJoinWithUserMasterDeploy(address newUser) external onlyMasterDeploy nonReentrant {
         if (newUser == address(0)) revert ZeroUser();
         string memory existing = accountRegistry.getUsername(newUser);
         if (bytes(existing).length == 0) revert NoUsername();
@@ -148,7 +134,9 @@ contract QuickJoin is
     }
 
     /*──────────────────────── Version Hook & Gap ──────────────────────────*/
-    function version() external pure returns (string memory) { return "v1"; }
+    function version() external pure returns (string memory) {
+        return "v1";
+    }
 
     uint256[46] private __gap;
 }

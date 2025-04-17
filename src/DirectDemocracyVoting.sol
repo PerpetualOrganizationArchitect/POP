@@ -201,12 +201,13 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         if (_electionEnabled) {
             electionId = elections.createElection(proposalId);
 
-            for (uint256 i = 0; i < _candidateAddresses.length; ) {
+            for (uint256 i = 0; i < _candidateAddresses.length;) {
                 elections.addCandidate(proposalId, _candidateAddresses[i], _candidateNames[i]);
-                unchecked { ++i; }
+                unchecked {
+                    ++i;
+                }
             }
         }
-
 
         emit NewProposal(
             proposalId,

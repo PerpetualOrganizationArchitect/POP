@@ -11,11 +11,7 @@ interface INFTMembership {
     function mintOrChange(address member, bytes32 roleId) external;
 }
 
-contract ElectionContract is
-    Initializable,
-    OwnableUpgradeable,
-    ReentrancyGuardUpgradeable
-{
+contract ElectionContract is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /*──────────────────────────── Errors ─────────────────────────────*/
     error AlreadyLinked();
     error ElectionInactive();
@@ -40,42 +36,35 @@ contract ElectionContract is
     }
 
     struct Election {
-        bool     isActive;
-        bool     cleaned;
-        uint256  winningCandidateIndex;
-        bool     hasValidWinner;
+        bool isActive;
+        bool cleaned;
+        uint256 winningCandidateIndex;
+        bool hasValidWinner;
         Candidate[] candidates;
         mapping(address => bool) addrTaken;
-        mapping(bytes32  => bool) nameTaken;
+        mapping(bytes32 => bool) nameTaken;
     }
 
     mapping(uint256 => uint256) public proposalToElection;
-    mapping(uint256 => bool)    private _proposalLinked;
+    mapping(uint256 => bool) private _proposalLinked;
 
     Election[] private _elections;
 
     /*──────────────────────────── Events ─────────────────────────────*/
     event ElectionCreated(uint256 indexed electionId, uint256 indexed proposalId);
     event CandidateAdded(
-        uint256 indexed electionId,
-        uint256 indexed candidateIndex,
-        address candidateAddress,
-        string  candidateName
+        uint256 indexed electionId, uint256 indexed candidateIndex, address candidateAddress, string candidateName
     );
     event ElectionConcluded(uint256 indexed electionId, uint256 winningCandidateIndex);
     event CandidatesCleared(uint256 indexed electionId);
 
     /*────────────────────────── Initializer ─────────────────────────*/
-    function initialize(
-        address _owner,
-        address _membership,
-        address _voting
-    ) external initializer {
+    function initialize(address _owner, address _membership, address _voting) external initializer {
         require(_owner != address(0) && _membership != address(0) && _voting != address(0), "addr=0");
         __Ownable_init(_owner);
         __ReentrancyGuard_init();
 
-        nftMembership  = INFTMembership(_membership);
+        nftMembership = INFTMembership(_membership);
         votingContract = _voting;
     }
 
@@ -86,11 +75,7 @@ contract ElectionContract is
     }
 
     /*────────────────────── Election Lifecycle ──────────────────────*/
-    function createElection(uint256 proposalId)
-        external
-        onlyVoting
-        returns (uint256 electionId)
-    {
+    function createElection(uint256 proposalId) external onlyVoting returns (uint256 electionId) {
         if (_proposalLinked[proposalId]) revert AlreadyLinked();
 
         electionId = _elections.length;
@@ -98,16 +83,15 @@ contract ElectionContract is
         _elections[electionId].isActive = true;
 
         proposalToElection[proposalId] = electionId;
-        _proposalLinked[proposalId]    = true;
+        _proposalLinked[proposalId] = true;
 
         emit ElectionCreated(electionId, proposalId);
     }
 
-    function addCandidate(
-        uint256 proposalId,
-        address candidateAddr,
-        string  calldata candidateName
-    ) external onlyVoting {
+    function addCandidate(uint256 proposalId, address candidateAddr, string calldata candidateName)
+        external
+        onlyVoting
+    {
         uint256 id = _mapped(proposalId);
         Election storage e = _elections[id];
         if (!e.isActive) revert ElectionInactive();
@@ -118,17 +102,13 @@ contract ElectionContract is
         if (e.nameTaken[nameHash]) revert CandidateDup();
 
         e.addrTaken[candidateAddr] = true;
-        e.nameTaken[nameHash]      = true;
+        e.nameTaken[nameHash] = true;
         e.candidates.push(Candidate(candidateAddr, nameHash));
 
         emit CandidateAdded(id, e.candidates.length - 1, candidateAddr, candidateName);
     }
 
-    function concludeElection(uint256 proposalId, uint256 winningIdx)
-        external
-        onlyVoting
-        nonReentrant
-    {
+    function concludeElection(uint256 proposalId, uint256 winningIdx) external onlyVoting nonReentrant {
         uint256 id = _mapped(proposalId);
         Election storage e = _elections[id];
         if (!e.isActive) revert ElectionInactive();
@@ -137,8 +117,8 @@ contract ElectionContract is
         if (len == 0) revert NoCandidates();
         if (winningIdx >= len) revert InvalidWinner();
 
-        e.isActive             = false;
-        e.hasValidWinner       = true;
+        e.isActive = false;
+        e.hasValidWinner = true;
         e.winningCandidateIndex = winningIdx;
 
         nftMembership.mintOrChange(e.candidates[winningIdx].candidateAddress, EXEC_ROLE);
@@ -151,7 +131,7 @@ contract ElectionContract is
         if (electionId >= _elections.length) revert InvalidElection();
         Election storage e = _elections[electionId];
         if (e.isActive) revert ElectionInactive();
-        if (e.cleaned)  revert AlreadyCleaned();
+        if (e.cleaned) revert AlreadyCleaned();
 
         delete e.candidates;
         e.cleaned = true;
@@ -170,11 +150,7 @@ contract ElectionContract is
         return (e.isActive, e.winningCandidateIndex, e.hasValidWinner, e.candidates.length);
     }
 
-    function getCandidate(uint256 electionId, uint256 index)
-        external
-        view
-        returns (address addr, bytes32 nameHash)
-    {
+    function getCandidate(uint256 electionId, uint256 index) external view returns (address addr, bytes32 nameHash) {
         if (electionId >= _elections.length) revert InvalidElection();
         Election storage e = _elections[electionId];
         if (index >= e.candidates.length) revert InvalidWinner();
@@ -198,7 +174,9 @@ contract ElectionContract is
         for (uint256 i; i < lower.length;) {
             uint8 c = uint8(lower[i]);
             if (c >= 65 && c <= 90) lower[i] = bytes1(c + 32);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
         return keccak256(lower);
     }
