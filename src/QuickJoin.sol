@@ -7,10 +7,6 @@ interface IMembershipNFT {
     function mintDefaultNFT(address newUser) external;
 }
 
-interface IDirectDemocracyToken {
-    function mint(address newUser) external;
-}
-
 // interface for UniversalAccountRegistry.sol
 interface IUniversalAccountRegistry {
     function getUsername(address accountAddress) external view returns (string memory);
@@ -24,7 +20,6 @@ interface IUniversalAccountRegistry {
  */
 contract QuickJoin is Initializable {
     IMembershipNFT private membershipNFT;
-    IDirectDemocracyToken private directDemocracyToken;
     IUniversalAccountRegistry private accountRegistry;
 
     address public owner;
@@ -43,19 +38,16 @@ contract QuickJoin is Initializable {
     function initialize(
         address _owner,
         address _membershipNFTAddress,
-        address _directDemocracyTokenAddress,
         address _accountRegistryAddress,
         address _masterDeployAddress
     ) external initializer {
         require(_owner != address(0), "Invalid owner");
         require(_membershipNFTAddress != address(0), "Invalid membership NFT address");
-        require(_directDemocracyTokenAddress != address(0), "Invalid token address");
         require(_accountRegistryAddress != address(0), "Invalid account registry address");
         require(_masterDeployAddress != address(0), "Invalid master deploy address");
 
         owner = _owner;
         membershipNFT = IMembershipNFT(_membershipNFTAddress);
-        directDemocracyToken = IDirectDemocracyToken(_directDemocracyTokenAddress);
         accountRegistry = IUniversalAccountRegistry(_accountRegistryAddress);
         masterDeployAddress = _masterDeployAddress;
     }
@@ -88,17 +80,14 @@ contract QuickJoin is Initializable {
      */
     function updateAddresses(
         address _membershipNFTAddress,
-        address _directDemocracyTokenAddress,
         address _accountRegistryAddress,
         address _masterDeployAddress
     ) external onlyOwner {
         require(_membershipNFTAddress != address(0), "Invalid membership NFT address");
-        require(_directDemocracyTokenAddress != address(0), "Invalid token address");
         require(_accountRegistryAddress != address(0), "Invalid account registry address");
         require(_masterDeployAddress != address(0), "Invalid master deploy address");
 
         membershipNFT = IMembershipNFT(_membershipNFTAddress);
-        directDemocracyToken = IDirectDemocracyToken(_directDemocracyTokenAddress);
         accountRegistry = IUniversalAccountRegistry(_accountRegistryAddress);
         masterDeployAddress = _masterDeployAddress;
     }
@@ -111,12 +100,10 @@ contract QuickJoin is Initializable {
             accountRegistry.registerAccountQuickJoin(userName, msg.sender);
         }
         membershipNFT.mintDefaultNFT(msg.sender);
-        directDemocracyToken.mint(msg.sender);
     }
 
     function quickJoinWithUser() public {
         membershipNFT.mintDefaultNFT(msg.sender);
-        directDemocracyToken.mint(msg.sender);
     }
 
     function quickJoinNoUserMasterDeploy(string memory userName, address newUser) public onlyMasterDeploy {
@@ -127,12 +114,10 @@ contract QuickJoin is Initializable {
             accountRegistry.registerAccountQuickJoin(userName, newUser);
         }
         membershipNFT.mintDefaultNFT(newUser);
-        directDemocracyToken.mint(newUser);
     }
 
     function quickJoinWithUserMasterDeploy(address newUser) public onlyMasterDeploy {
         membershipNFT.mintDefaultNFT(newUser);
-        directDemocracyToken.mint(newUser);
     }
 
     /**

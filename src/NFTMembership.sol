@@ -227,4 +227,13 @@ contract NFTMembership is ERC721URIStorage, Initializable {
     function version() external pure returns (string memory) {
         return "v1";
     }
+
+    /**
+     * @dev Check if an address is eligible to vote
+     * @param user The address to check
+     * @return True if the address has any membership type
+     */
+    function canVote(address user) external view returns (bool) {
+        return bytes(memberTypeOf[user]).length > 0;
+    }
 }

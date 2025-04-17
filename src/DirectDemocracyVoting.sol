@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 interface INFTMembership2 {
     function checkMemberTypeByAddress(address user) external view returns (string memory);
@@ -24,7 +23,7 @@ interface IElections {
 }
 
 contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
-    /* ───────────────────────────── Custom Errors ───────────────────────────── */
+    /* ───────────────────────────── Custom Errors ───────────────────────────── */
     error Unauthorized();
     error AlreadyVoted();
     error InvalidProposal();
@@ -44,7 +43,7 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
     /* ────────────────────────────── Enumerations ───────────────────────────── */
     enum TokenType { ETHER, ERC20, WRAPPED, CUSTOM }
 
-    /* ────────────────────────────── State Storage ──────────────────────────── */
+    /* ────────────────────────────── State Storage ──────────────────────────── */
     INFTMembership2 public nftMembership;
     ITreasury public treasury;
     IElections public elections;
@@ -98,6 +97,9 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
     event VotesCleaned(uint256 indexed proposalId, uint256 count);
 
     /* ───────────────────────────── Initialiser ─────────────────────────────── */
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() initializer {}
+
     /**
      * @param _quorumPercentage whole numbers 1‑100
      */
@@ -109,8 +111,7 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         uint256 _quorumPercentage
     ) external initializer {
         require(_owner != address(0), "owner=0");
-        __Ownable_init();
-        _transferOwnership(_owner);
+        __Ownable_init(_owner);
         __ReentrancyGuard_init();
 
         nftMembership        = INFTMembership2(_nftMembership);
@@ -145,7 +146,7 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         _;
     }
 
-    /* ─────────────────────────── Proposal Creation ─────────────────────────── */
+    /* ─────────────────────────── Proposal Creation ─────────────────────────── */
     function createProposal(
         string memory _name,
         string memory _description,
@@ -343,7 +344,7 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
     /* ───────────────────────────── Cleanup Helper ───────────────────────────── */
     /**
      * @notice Deletes `hasVoted` flags after a proposal ends to reclaim gas (EIP‑3529).
-     *         Gas refunds are capped to 20 percent of tx.gasUsed. Keep batches ≤4 000.
+     *         Gas refunds are capped to 20 percent of tx.gasUsed. Keep batches ≤4 000.
      * @param voters list of addresses to delete
      */
     function cleanupVotes(uint256 id, address[] calldata voters)
@@ -363,12 +364,15 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
     }
 
     /* ─────────────────────────── External Management ───────────────────────── */
-    function setElectionsContract(address _elections) external onlyOwner {
+    function setElectionsContract(address _elections) external {
+        if (address(elections) != address(0)) {
+            _checkOwner();
+        }
         elections = IElections(_elections);
         emit ElectionContractSet(_elections);
     }
 
-    /* ───────────────────────────── Upgrade Helpers ─────────────────────────── */
+    /* ───────────────────────────── Upgrade Helpers ─────────────────────────── */
     function version() external pure returns (string memory) { return "v1"; }
 
     uint256[49] private __gap;
