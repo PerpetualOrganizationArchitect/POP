@@ -16,11 +16,11 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     error ArrayLenMismatch();
 
     /*─────────────────────────── Constants ─────────────────────────────*/
-    uint256 private constant MAX_LEN      = 64;
+    uint256 private constant MAX_LEN = 64;
     address private constant BURN_ADDRESS = address(0xdead);
 
     /*──────────────────────────── Storage ──────────────────────────────*/
-    mapping(address => string) public addressToUsername;          
+    mapping(address => string) public addressToUsername;
     mapping(bytes32 => address) public ownerOfUsernameHash;
 
     /*──────────────────────────── Events ───────────────────────────────*/
@@ -58,9 +58,11 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         if (len != names.length) revert ArrayLenMismatch();
         require(len <= 100, "batch>100");
 
-        for (uint256 i; i < len; ) {
+        for (uint256 i; i < len;) {
             _register(users[i], names[i]);
-            unchecked { ++i; }                    
+            unchecked {
+                ++i;
+            }
         }
         emit BatchRegistered(len);
     }
@@ -109,7 +111,9 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     }
 
     /*────────────────────────── Version Hook ──────────────────────────*/
-    function version() external pure returns (string memory) { return "v1"; }
+    function version() external pure returns (string memory) {
+        return "v1";
+    }
 
     /*──────────────────── Internal Registration ───────────────────────*/
     function _register(address user, string calldata username) internal {
@@ -119,32 +123,30 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         if (ownerOfUsernameHash[hash] != address(0)) revert UsernameTaken();
 
         ownerOfUsernameHash[hash] = user;
-        addressToUsername[user]   = norm;
+        addressToUsername[user] = norm;
 
         emit UserRegistered(user, norm);
     }
 
     /*──────────────────── Username Validation ─────────────────────────*/
-    function _validate(string calldata raw)
-        internal
-        pure
-        returns (bytes32 hash, string memory normalized)
-    {
+    function _validate(string calldata raw) internal pure returns (bytes32 hash, string memory normalized) {
         uint256 len = bytes(raw).length;
         if (len == 0) revert UsernameEmpty();
         if (len > MAX_LEN) revert UsernameTooLong();
 
         bytes memory lower = bytes(raw);
-        for (uint256 i; i < len; ) {
+        for (uint256 i; i < len;) {
             uint8 c = uint8(lower[i]);
             if (c >= 65 && c <= 90) c += 32;
             if (
-                !( (c >= 97 && c <= 122) ||                       // a‑z
-                   (c >= 48 && c <= 57 ) ||                       // 0‑9
-                   (c == 95) || (c == 45) )                       // _ or -
+                // a‑z
+                // 0‑9
+                !((c >= 97 && c <= 122) || (c >= 48 && c <= 57) || (c == 95) || (c == 45)) // _ or -
             ) revert InvalidChars();
             lower[i] = bytes1(c);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
         normalized = string(lower);
         hash = keccak256(lower);
