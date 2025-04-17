@@ -306,7 +306,7 @@ contract DeployerTest is Test {
         assertEq(winningOptionIndex, 0, "Option A should be the winner");
 
         // Verify the election contract has recorded the winner
-        (bool isActive, uint256 winningCandidateIndex, bool validWinner) = electionContract.getElectionDetails(1); // Second election
+        (bool isActive, uint256 winningCandidateIndex, bool validWinner, ) = electionContract.getElection(1); // Second election
         assertFalse(isActive, "Election should be concluded");
         assertEq(winningCandidateIndex, 0, "Candidate 1 should be elected");
         assertTrue(validWinner, "Should have a valid winner in the election");

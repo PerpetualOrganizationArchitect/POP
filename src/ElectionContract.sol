@@ -1,136 +1,208 @@
-// SPDX-License-Identifier: MIT
+// SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
-import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+/*──────────────────── OpenZeppelin Upgradeables ────────────────────*/
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
-interface INFTMembership6 {
+/*────────── Interface to membership module that mints EXEC_ROLE ──────────*/
+interface INFTMembership {
     function mintOrChange(address member, bytes32 roleId) external;
 }
 
-contract ElectionContract is Initializable {
-    INFTMembership6 public nftMembership;
+contract ElectionContract is
+    Initializable,
+    OwnableUpgradeable,
+    ReentrancyGuardUpgradeable
+{
+    /*──────────────────────────── Errors ─────────────────────────────*/
+    error AlreadyLinked();
+    error ElectionInactive();
+    error InvalidElection();
+    error CandidateDup();
+    error NoCandidates();
+    error InvalidWinner();
+    error TooManyCandidates();
+    error AlreadyCleaned();
+
+    /*────────────────────────── Constants ───────────────────────────*/
+    bytes32 public constant EXEC_ROLE = keccak256("EXECUTIVE");
+    uint256 private constant MAX_CANDIDATES = 100;
+
+    /*─────────────────────────── Storage ────────────────────────────*/
+    INFTMembership public nftMembership;
     address public votingContract;
-    address public owner;
-    bool public electionEnabled;
 
     struct Candidate {
         address candidateAddress;
-        string candidateName;
+        bytes32 nameHash;
     }
 
     struct Election {
-        bool isActive;
-        uint256 winningCandidateIndex;
-        bool hasValidWinner;
+        bool     isActive;
+        bool     cleaned;
+        uint256  winningCandidateIndex;
+        bool     hasValidWinner;
         Candidate[] candidates;
+        mapping(address => bool) addrTaken;
+        mapping(bytes32  => bool) nameTaken;
     }
 
-    mapping(uint256 => uint256) public proposalIdToElectionId;
+    mapping(uint256 => uint256) public proposalToElection;
+    mapping(uint256 => bool)    private _proposalLinked;
 
-    Election[] public elections;
+    Election[] private _elections;
 
-    event ElectionCreated(uint256 proposalId, uint256 indexed electionId);
+    /*──────────────────────────── Events ─────────────────────────────*/
+    event ElectionCreated(uint256 indexed electionId, uint256 indexed proposalId);
     event CandidateAdded(
-        uint256 indexed electionId, uint256 candidateIndex, address candidateAddress, string candidateName
+        uint256 indexed electionId,
+        uint256 indexed candidateIndex,
+        address candidateAddress,
+        string  candidateName
     );
-    event ElectionConcluded(uint256 indexed electionId, uint256 winningCandidateIndex, bool hasValidWinner);
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event ElectionConcluded(uint256 indexed electionId, uint256 winningCandidateIndex);
+    event CandidatesCleared(uint256 indexed electionId);
 
-    modifier onlyVotingContract() {
-        require(msg.sender == votingContract, "Only voting contract can call this function");
+    /*────────────────────────── Initializer ─────────────────────────*/
+    function initialize(
+        address _owner,
+        address _membership,
+        address _voting
+    ) external initializer {
+        require(_owner != address(0) && _membership != address(0) && _voting != address(0), "addr=0");
+        __Ownable_init(_owner);
+        __ReentrancyGuard_init();
+
+        nftMembership  = INFTMembership(_membership);
+        votingContract = _voting;
+    }
+
+    /*────────────────────── Modifiers / Access ──────────────────────*/
+    modifier onlyVoting() {
+        require(msg.sender == votingContract, "voting-only");
         _;
     }
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Not authorized");
-        _;
-    }
-
-    constructor() {}
-
-    function initialize(address _owner, address _nftMembership, address _votingContractAddress) external initializer {
-        require(_owner != address(0), "Invalid owner");
-        owner = _owner;
-        nftMembership = INFTMembership6(_nftMembership);
-        votingContract = _votingContractAddress;
-    }
-
-    /**
-     * @dev Transfer ownership of the contract to a new account
-     */
-    function transferOwnership(address newOwner) public onlyOwner {
-        require(newOwner != address(0), "New owner is the zero address");
-        address oldOwner = owner;
-        owner = newOwner;
-        emit OwnershipTransferred(oldOwner, newOwner);
-    }
-
-    function createElection(uint256 _proposalId) external onlyVotingContract returns (uint256, uint256) {
-        Election memory newElection;
-        newElection.isActive = true;
-        elections.push(newElection);
-        proposalIdToElectionId[_proposalId] = elections.length - 1;
-
-        uint256 electionId = elections.length - 1;
-        emit ElectionCreated(electionId, _proposalId);
-        return (electionId, _proposalId);
-    }
-
-    function addCandidate(uint256 proposalId, address _candidateAddress, string memory _candidateName)
+    /*────────────────────── Election Lifecycle ──────────────────────*/
+    function createElection(uint256 proposalId)
         external
-        onlyVotingContract
+        onlyVoting
+        returns (uint256 electionId)
     {
-        uint256 electionId = proposalIdToElectionId[proposalId];
+        if (_proposalLinked[proposalId]) revert AlreadyLinked();
 
-        require(electionId < elections.length, "Invalid election ID");
-        require(elections[electionId].isActive, "Election is not active");
+        electionId = _elections.length;
+        _elections.push();
+        _elections[electionId].isActive = true;
 
-        elections[electionId].candidates.push(Candidate(_candidateAddress, _candidateName));
-        emit CandidateAdded(electionId, elections[electionId].candidates.length - 1, _candidateAddress, _candidateName);
+        proposalToElection[proposalId] = electionId;
+        _proposalLinked[proposalId]    = true;
+
+        emit ElectionCreated(electionId, proposalId);
     }
 
-    function concludeElection(uint256 proposalId, uint256 winningOption) external onlyVotingContract {
-        uint256 electionId = proposalIdToElectionId[proposalId];
-        require(electionId < elections.length, "Invalid election ID");
-        require(elections[electionId].isActive, "Election is already concluded");
-        uint256 length = elections[electionId].candidates.length;
+    function addCandidate(
+        uint256 proposalId,
+        address candidateAddr,
+        string  calldata candidateName
+    ) external onlyVoting {
+        uint256 id = _mapped(proposalId);
+        Election storage e = _elections[id];
+        if (!e.isActive) revert ElectionInactive();
+        if (candidateAddr == address(0) || e.addrTaken[candidateAddr]) revert CandidateDup();
+        if (e.candidates.length >= MAX_CANDIDATES) revert TooManyCandidates();
 
-        require(length > winningOption, "Invalid winning option");
+        bytes32 nameHash = _nameHash(candidateName);
+        if (e.nameTaken[nameHash]) revert CandidateDup();
 
-        Election storage election = elections[electionId];
-        election.isActive = false;
-        election.winningCandidateIndex = winningOption;
-        election.hasValidWinner = true;
+        e.addrTaken[candidateAddr] = true;
+        e.nameTaken[nameHash]      = true;
+        e.candidates.push(Candidate(candidateAddr, nameHash));
 
-        // Mint NFT to the winning candidate with the EXECUTIVE role
-        nftMembership.mintOrChange(
-            elections[electionId].candidates[winningOption].candidateAddress, keccak256("EXECUTIVE")
-        );
-
-        emit ElectionConcluded(electionId, winningOption, true);
+        emit CandidateAdded(id, e.candidates.length - 1, candidateAddr, candidateName);
     }
 
-    function getElectionDetails(uint256 electionId) external view returns (bool, uint256, bool) {
-        require(electionId < elections.length, "Invalid election ID");
-        Election storage election = elections[electionId];
-        return (election.isActive, election.winningCandidateIndex, election.hasValidWinner);
+    function concludeElection(uint256 proposalId, uint256 winningIdx)
+        external
+        onlyVoting
+        nonReentrant
+    {
+        uint256 id = _mapped(proposalId);
+        Election storage e = _elections[id];
+        if (!e.isActive) revert ElectionInactive();
+
+        uint256 len = e.candidates.length;
+        if (len == 0) revert NoCandidates();
+        if (winningIdx >= len) revert InvalidWinner();
+
+        e.isActive             = false;
+        e.hasValidWinner       = true;
+        e.winningCandidateIndex = winningIdx;
+
+        nftMembership.mintOrChange(e.candidates[winningIdx].candidateAddress, EXEC_ROLE);
+
+        emit ElectionConcluded(id, winningIdx);
     }
 
-    function getCandidates(uint256 electionId) external view returns (Candidate[] memory) {
-        require(electionId < elections.length, "Invalid election ID");
-        return elections[electionId].candidates;
+    /*──────────────── Candidate Cleanup ────────────────*/
+    function clearCandidates(uint256 electionId) external nonReentrant {
+        if (electionId >= _elections.length) revert InvalidElection();
+        Election storage e = _elections[electionId];
+        if (e.isActive) revert ElectionInactive();
+        if (e.cleaned)  revert AlreadyCleaned();
+
+        delete e.candidates;
+        e.cleaned = true;
+
+        emit CandidatesCleared(electionId);
     }
 
-    function getElectionResults(uint256 electionId) external view returns (uint256, bool) {
-        require(electionId < elections.length, "Invalid election ID");
-        return (elections[electionId].winningCandidateIndex, elections[electionId].hasValidWinner);
+    /*─────────────────────────── Views ──────────────────────────────*/
+    function getElection(uint256 id)
+        external
+        view
+        returns (bool active, uint256 winner, bool hasWinner, uint256 candidateCount)
+    {
+        if (id >= _elections.length) revert InvalidElection();
+        Election storage e = _elections[id];
+        return (e.isActive, e.winningCandidateIndex, e.hasValidWinner, e.candidates.length);
     }
 
-    /**
-     * @dev Version identifier to help with testing upgrades
-     */
-    function version() external pure returns (string memory) {
-        return "v1";
+    function getCandidate(uint256 electionId, uint256 index)
+        external
+        view
+        returns (address addr, bytes32 nameHash)
+    {
+        if (electionId >= _elections.length) revert InvalidElection();
+        Election storage e = _elections[electionId];
+        if (index >= e.candidates.length) revert InvalidWinner();
+        Candidate storage c = e.candidates[index];
+        return (c.candidateAddress, c.nameHash);
     }
+
+    function candidatesCount(uint256 electionId) external view returns (uint256) {
+        if (electionId >= _elections.length) revert InvalidElection();
+        return _elections[electionId].candidates.length;
+    }
+
+    /*────────────────────── Internal Helpers ───────────────────────*/
+    function _mapped(uint256 proposalId) private view returns (uint256 id) {
+        id = proposalToElection[proposalId];
+        if (!_proposalLinked[proposalId] || id >= _elections.length) revert InvalidElection();
+    }
+
+    function _nameHash(string calldata s) private pure returns (bytes32) {
+        bytes memory lower = bytes(s);
+        for (uint256 i; i < lower.length;) {
+            uint8 c = uint8(lower[i]);
+            if (c >= 65 && c <= 90) lower[i] = bytes1(c + 32);
+            unchecked { ++i; }
+        }
+        return keccak256(lower);
+    }
+
+    /*─────────────── Upgrade storage gap ───────────────*/
+    uint256[44] private __gap;
 }

@@ -17,7 +17,7 @@ interface ITreasury {
 }
 
 interface IElections {
-    function createElection(uint256 _proposalId) external returns (uint256 electionId, uint256 _unused);
+    function createElection(uint256 _proposalId) external returns (uint256 electionId);
     function addCandidate(uint256 _proposalId, address _candidateAddress, string memory _candidateName) external;
     function concludeElection(uint256 _electionId, uint256 winningOption) external;
 }
@@ -199,14 +199,14 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
 
         uint256 electionId;
         if (_electionEnabled) {
-            (electionId,) = elections.createElection(proposalId);
-            for (uint256 i; i < _candidateAddresses.length;) {
+            electionId = elections.createElection(proposalId);
+
+            for (uint256 i = 0; i < _candidateAddresses.length; ) {
                 elections.addCandidate(proposalId, _candidateAddresses[i], _candidateNames[i]);
-                unchecked {
-                    ++i;
-                }
+                unchecked { ++i; }
             }
         }
+
 
         emit NewProposal(
             proposalId,
