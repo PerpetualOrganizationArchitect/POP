@@ -1,137 +1,82 @@
-// SPDX-License-Identifier: MIT
+// SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.17;
 
+/*───────────────────────  PoaManager  ─────────────────────────*/
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./ImplementationRegistry.sol";
 
-/**
- * @title PoaManager
- * @dev Manages the official beacons for different contract types
- */
-contract PoaManager is Ownable {
-    // Contract type -> Beacon
-    mapping(string => UpgradeableBeacon) public beacons;
+contract PoaManager is Ownable(msg.sender) {
+    /*──────────── Errors ───────────*/
+    error TypeExists();
+    error TypeUnknown();
+    error ImplZero();
+    error SameImplementation();
 
-    // Reference to the implementation registry
-    ImplementationRegistry public implementationRegistry;
+    /*──────────── Storage ──────────*/
+    mapping(bytes32 => UpgradeableBeacon) public beacons; // typeId ⇒ beacon
+    bytes32[] public typeIds;
+    ImplementationRegistry public immutable registry;
 
-    // List of contract types
-    string[] public contractTypes;
+    /*──────────── Events ───────────*/
+    event BeaconCreated(bytes32 indexed typeId, string typeName, address beacon, address implementation);
+    event BeaconUpgraded(bytes32 indexed typeId, address newImplementation, string version);
 
-    // Initial implementations - contract type -> implementation address
-    mapping(string => address) public initialImplementations;
-
-    // Events
-    event BeaconUpgraded(string indexed contractType, address indexed newImplementation);
-    event BeaconCreated(string indexed contractType, address indexed beaconAddress, address indexed implementation);
-
-    constructor(address _implementationRegistry) Ownable(msg.sender) {
-        require(_implementationRegistry != address(0), "Invalid registry");
-        implementationRegistry = ImplementationRegistry(_implementationRegistry);
+    constructor(address registryAddr) {
+        if (registryAddr == address(0)) revert ImplZero();
+        registry = ImplementationRegistry(registryAddr);
     }
 
-    /**
-     * @notice Add a new contract type with initial implementation
-     * @param contractType The type of contract (e.g., "Voting", "Membership")
-     * @param initialImplementation The initial implementation address
-     */
-    function addContractType(string memory contractType, address initialImplementation) external onlyOwner {
-        require(bytes(contractType).length > 0, "Contract type cannot be empty");
-        require(initialImplementation != address(0), "Invalid implementation");
-        require(address(beacons[contractType]) == address(0), "Contract type already exists");
-
-        // Deploy a new beacon for this contract type
-        UpgradeableBeacon beacon = new UpgradeableBeacon(initialImplementation, address(this));
-
-        // Register the contract type
-        beacons[contractType] = beacon;
-        contractTypes.push(contractType);
-        initialImplementations[contractType] = initialImplementation;
-
-        emit BeaconCreated(contractType, address(beacon), initialImplementation);
+    /*──────────── Internal utils ───────────*/
+    function _id(string calldata s) internal pure returns (bytes32) {
+        return keccak256(bytes(s));
     }
 
-    /**
-     * @notice Register the initial implementation for a contract type
-     * @param contractType The type of contract to register
-     */
-    function registerInitialImplementation(string memory contractType) external {
-        require(address(beacons[contractType]) != address(0), "Contract type not found");
-        address implementation = initialImplementations[contractType];
+    /*──────────── Admin: add & bootstrap ───────────*/
+    function addContractType(string calldata typeName, address impl) external onlyOwner {
+        if (impl == address(0)) revert ImplZero();
+        bytes32 tId = _id(typeName);
+        if (address(beacons[tId]) != address(0)) revert TypeExists();
 
-        // Register the initial implementation as "v1"
-        implementationRegistry.registerImplementation(contractType, "v1", implementation, true);
+        UpgradeableBeacon beacon = new UpgradeableBeacon(impl, address(this));
+        beacons[tId] = beacon;
+        typeIds.push(tId);
+
+        // auto‑register as v1 & mark latest
+        registry.registerImplementation(typeName, "v1", impl, true);
+
+        emit BeaconCreated(tId, typeName, address(beacon), impl);
     }
 
-    /**
-     * @notice Upgrade the beacon for a contract type to a new implementation
-     * @param contractType The type of contract to upgrade
-     * @param newImplementation The address of the new implementation
-     * @param version The version string for this implementation
-     */
-    function upgradeBeacon(string memory contractType, address newImplementation, string memory version)
-        external
-        onlyOwner
-    {
-        require(address(beacons[contractType]) != address(0), "Contract type not found");
-        require(newImplementation != address(0), "Invalid implementation");
+    /*──────────── Admin: upgrade ───────────*/
+    function upgradeBeacon(string calldata typeName, address newImpl, string calldata version) external onlyOwner {
+        if (newImpl == address(0)) revert ImplZero();
+        bytes32 tId = _id(typeName);
+        UpgradeableBeacon beacon = beacons[tId];
+        if (address(beacon) == address(0)) revert TypeUnknown();
+        if (beacon.implementation() == newImpl) revert SameImplementation();
 
-        // Register the new implementation in the registry
-        implementationRegistry.registerImplementation(contractType, version, newImplementation, true);
+        // register & upgrade
+        registry.registerImplementation(typeName, version, newImpl, true);
+        beacon.upgradeTo(newImpl);
 
-        // Upgrade the beacon
-        beacons[contractType].upgradeTo(newImplementation);
-        emit BeaconUpgraded(contractType, newImplementation);
+        emit BeaconUpgraded(tId, newImpl, version);
     }
 
-    /**
-     * @notice Get the beacon address for a contract type
-     * @param contractType The type of contract
-     * @return The beacon address
-     */
-    function getBeacon(string memory contractType) external view returns (address) {
-        require(address(beacons[contractType]) != address(0), "Contract type not found");
-        return address(beacons[contractType]);
+    /*──────────── Views ───────────*/
+    function getBeacon(string calldata typeName) external view returns (address) {
+        address b = address(beacons[_id(typeName)]);
+        if (b == address(0)) revert TypeUnknown();
+        return b;
     }
 
-    /**
-     * @notice Get the current implementation for a contract type
-     * @param contractType The type of contract
-     * @return The current implementation address
-     */
-    function getCurrentImplementation(string memory contractType) external view returns (address) {
-        require(address(beacons[contractType]) != address(0), "Contract type not found");
-        return beacons[contractType].implementation();
+    function getCurrentImplementation(string calldata typeName) external view returns (address) {
+        UpgradeableBeacon b = beacons[_id(typeName)];
+        if (address(b) == address(0)) revert TypeUnknown();
+        return b.implementation();
     }
 
-    /**
-     * @notice Get the implementation for a specific version of a contract type
-     * @param contractType The type of contract
-     * @param version The version string
-     * @return The implementation address
-     */
-    function getImplementationByVersion(string memory contractType, string memory version)
-        external
-        view
-        returns (address)
-    {
-        return implementationRegistry.getImplementation(contractType, version);
-    }
-
-    /**
-     * @notice Get the latest registered implementation for a contract type
-     * @param contractType The type of contract
-     */
-    function getLatestImplementation(string memory contractType) external view returns (address) {
-        return implementationRegistry.getLatestImplementation(contractType);
-    }
-
-    /**
-     * @notice Get the number of contract types
-     * @return The count of contract types
-     */
-    function getContractTypeCount() external view returns (uint256) {
-        return contractTypes.length;
+    function contractTypeCount() external view returns (uint256) {
+        return typeIds.length;
     }
 }
