@@ -1,90 +1,191 @@
-// SPDX-License-Identifier: MIT
+// SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*──────── OpenZeppelin v5.3 Upgradeables ────────*/
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+/*──────── External interfaces ────────*/
 interface IParticipationToken2 is IERC20 {
     function mint(address to, uint256 amount) external;
 }
 
-interface INFTMembership11 {
-    function checkMemberTypeByAddress(address user) external view returns (string memory);
-    function checkIsExecutive(address user) external view returns (bool);
+interface IMembership {
+    function isMember(address user) external view returns (bool);
+    function roleOf(address user) external view returns (bytes32);
 }
 
-contract EducationHub {
+/*────────────────── EducationHub ─────────────────*/
+contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
+    /*────────── Errors ─────────*/
+    error ZeroAddress();
+    error InvalidString();
+    error InvalidPayout();
+    error InvalidAnswer();
+    error NotMember();
+    error NotExecutive();
+    error ModuleExists();
+    error ModuleUnknown();
+    error AlreadyCompleted();
+
+    /*────────── Types / Storage ─────────*/
     struct Module {
-        uint256 id;
-        string name;
+        bytes32 answerHash;
+        uint256 payout;
         string ipfsHash;
         bool exists;
-        uint256 payout;
-        uint8 correctAnswer;
     }
 
-    mapping(uint256 => Module) public modules;
-    mapping(address => mapping(uint256 => bool)) public completedModules; // Tracks completion per user per module
-
+    mapping(uint256 => Module) private _modules;
+    mapping(address => mapping(uint256 => uint256)) private _progress;
     uint256 public nextModuleId;
 
+    // roleId to allowed   (creator privilege)
+    mapping(bytes32 => bool) public isCreatorRole;
+
     IParticipationToken2 public token;
-    INFTMembership11 public nftMembership;
+    IMembership public membership;
 
-    event ModuleCreated(uint256 indexed id, string name, string ipfsHash, uint256 payout, uint8 correctAnswer);
-    event ModuleCompleted(uint256 indexed id, address indexed completer);
+    /*────────── Events ─────────*/
+    event ModuleCreated(uint256 indexed id, string ipfsHash, uint256 payout);
+    event ModuleUpdated(uint256 indexed id, string ipfsHash, uint256 payout);
+    event ModuleRemoved(uint256 indexed id);
+    event ModuleCompleted(uint256 indexed id, address indexed learner);
+    event CreatorRoleUpdated(bytes32 indexed role, bool enabled);
+    /*────────── Initialiser ────────*/
 
-    constructor(address _token, address _nftMembership) {
-        token = IParticipationToken2(_token);
-        nftMembership = INFTMembership11(_nftMembership);
-    }
-
-    modifier isMember() {
-        string memory memberType = nftMembership.checkMemberTypeByAddress(msg.sender);
-        require(bytes(memberType).length != 0, "Not a member");
-        _;
-    }
-
-    modifier isExecutive() {
-        require(nftMembership.checkIsExecutive(msg.sender), "Not an executive");
-        _;
-    }
-
-    function createModule(string memory _name, string memory _ipfsHash, uint256 _payout, uint8 _correctAnswer)
-        public
-        isExecutive
+    function initialize(address tokenAddr, address membershipAddr, bytes32[] calldata creatorRoleIds)
+        external
+        initializer
     {
-        require(_payout > 0, "Payout must be greater than zero");
+        if (tokenAddr == address(0) || membershipAddr == address(0)) revert ZeroAddress();
+        __Ownable_init(_msgSender());
+        __ReentrancyGuard_init();
+        __Pausable_init();
 
-        uint256 moduleId = nextModuleId++;
-        require(!modules[moduleId].exists, "Module already exists");
+        token = IParticipationToken2(tokenAddr);
+        membership = IMembership(membershipAddr);
 
-        modules[moduleId] = Module({
-            id: moduleId,
-            name: _name,
-            ipfsHash: _ipfsHash,
-            exists: true,
-            payout: _payout,
-            correctAnswer: _correctAnswer
+        for (uint256 i; i < creatorRoleIds.length; ++i) {
+            isCreatorRole[creatorRoleIds[i]] = true;
+            emit CreatorRoleUpdated(creatorRoleIds[i], true);
+        }
+    }
+
+    /*────────── Modifiers ─────────*/
+    modifier onlyMember() {
+        if (!membership.isMember(_msgSender())) revert NotMember();
+        _;
+    }
+
+    modifier onlyCreator() {
+        if (!isCreatorRole[membership.roleOf(_msgSender())]) revert NotExecutive();
+        _;
+    }
+
+    /*────────── Module CRUD ────────*/
+    function createModule(string calldata ipfsHash, uint256 payout, uint8 correctAnswer)
+        external
+        onlyCreator
+        whenNotPaused
+    {
+        if (bytes(ipfsHash).length == 0) revert InvalidString();
+        if (payout == 0) revert InvalidPayout();
+
+        uint256 id;
+        unchecked {
+            id = nextModuleId++;
+        }
+
+        _modules[id] = Module({
+            answerHash: keccak256(abi.encodePacked(correctAnswer)),
+            payout: payout,
+            ipfsHash: ipfsHash,
+            exists: true
         });
 
-        emit ModuleCreated(moduleId, _name, _ipfsHash, _payout, _correctAnswer);
+        emit ModuleCreated(id, ipfsHash, payout);
     }
 
-    function completeModule(uint256 _moduleId, uint8 _answer) public isMember {
-        Module memory module = modules[_moduleId];
-        require(module.exists, "Module does not exist");
-        require(_answer == module.correctAnswer, "Incorrect answer");
-        require(!completedModules[msg.sender][_moduleId], "Module already completed");
+    function updateModule(uint256 id, string calldata newIpfsHash, uint256 newPayout)
+        external
+        onlyCreator
+        whenNotPaused
+    {
+        Module storage m = _module(id);
+        if (bytes(newIpfsHash).length == 0) revert InvalidString();
+        if (newPayout == 0) revert InvalidPayout();
 
-        token.mint(msg.sender, module.payout);
-        completedModules[msg.sender][_moduleId] = true;
+        m.ipfsHash = newIpfsHash;
+        m.payout = newPayout;
 
-        emit ModuleCompleted(_moduleId, msg.sender);
+        emit ModuleUpdated(id, newIpfsHash, newPayout);
     }
 
-    function removeModule(uint256 _moduleId) public isExecutive {
-        require(modules[_moduleId].exists, "Module does not exist");
-
-        delete modules[_moduleId];
+    function removeModule(uint256 id) external onlyCreator whenNotPaused {
+        _module(id);
+        delete _modules[id];
+        emit ModuleRemoved(id);
     }
+
+    /*────────── Learner path ───────*/
+    function completeModule(uint256 id, uint8 answer) external nonReentrant onlyMember whenNotPaused {
+        Module storage m = _module(id);
+        if (_isCompleted(_msgSender(), id)) revert AlreadyCompleted();
+        if (keccak256(abi.encodePacked(answer)) != m.answerHash) revert InvalidAnswer();
+
+        token.mint(_msgSender(), m.payout);
+
+        _setCompleted(_msgSender(), id);
+        emit ModuleCompleted(id, _msgSender());
+    }
+
+    /*────────── View helpers ───────*/
+    function getModule(uint256 id) external view returns (uint256 payout, string memory ipfsHash, bool exists) {
+        Module storage m = _module(id);
+        return (m.payout, m.ipfsHash, m.exists);
+    }
+
+    function hasCompleted(address learner, uint256 id) external view returns (bool) {
+        return _isCompleted(learner, id);
+    }
+
+    /*────────── Admin Guard rails ─────*/
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    /*────────── Internal utils ───────*/
+    function _module(uint256 id) internal view returns (Module storage m) {
+        m = _modules[id];
+        if (!m.exists) revert ModuleUnknown();
+    }
+
+    function _isCompleted(address user, uint256 id) internal view returns (bool) {
+        uint256 word = id >> 8;
+        uint256 bit = 1 << (id & 0xff);
+        return _progress[user][word] & bit != 0;
+    }
+
+    function _setCompleted(address user, uint256 id) internal {
+        uint256 word = id >> 8;
+        uint256 bit = 1 << (id & 0xff);
+        unchecked {
+            _progress[user][word] |= bit;
+        }
+    }
+
+    /*────────── Version / Gap ───────*/
+    function version() external pure returns (string memory) {
+        return "v1";
+    }
+
+    uint256[42] private __gap;
 }

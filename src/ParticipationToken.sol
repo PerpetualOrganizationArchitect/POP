@@ -13,12 +13,7 @@ interface IMembership {
 }
 
 /*──────────────────  Participation Token  ──────────────────*/
-contract ParticipationToken is
-    Initializable,
-    ERC20Upgradeable,
-    OwnableUpgradeable,
-    ReentrancyGuardUpgradeable
-{
+contract ParticipationToken is Initializable, ERC20Upgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /*──────────── Errors ───────────*/
     error NotTaskOrEdu();
     error NotExecutive();
@@ -40,10 +35,11 @@ contract ParticipationToken is
 
     struct Request {
         address requester;
-        uint96  amount;
-        bool    approved;
-        string  ipfsHash;
+        uint96 amount;
+        bool approved;
+        string ipfsHash;
     }
+
     mapping(uint256 => Request) public requests;
 
     /*──────────── Events ──────────*/
@@ -54,11 +50,7 @@ contract ParticipationToken is
     event RequestCancelled(uint256 indexed id, address indexed caller);
 
     /*─────────── Initialiser ──────*/
-    function initialize(
-        string calldata name_,
-        string calldata symbol_,
-        address membershipAddr
-    ) external initializer {
+    function initialize(string calldata name_, string calldata symbol_, address membershipAddr) external initializer {
         if (membershipAddr == address(0)) revert InvalidAddress();
         __ERC20_init(name_, symbol_);
         __Ownable_init(msg.sender);
@@ -72,11 +64,13 @@ contract ParticipationToken is
         if (msg.sender != taskManager && msg.sender != educationHub) revert NotTaskOrEdu();
         _;
     }
+
     modifier onlyExec() {
         bytes32 role = membership.roleOf(msg.sender);
         if (role == bytes32(0) || !membership.isExecutiveRole(role)) revert NotExecutive();
         _;
     }
+
     modifier isMember() {
         if (membership.roleOf(msg.sender) == bytes32(0)) revert NotMember();
         _;
@@ -100,33 +94,30 @@ contract ParticipationToken is
     /*────── Mint by authorised modules ─────*/
     function mint(address to, uint256 amount) external nonReentrant onlyTaskOrEdu {
         if (to == address(0)) revert InvalidAddress();
-        if (amount == 0)       revert ZeroAmount();
+        if (amount == 0) revert ZeroAmount();
         _mint(to, amount);
     }
 
     /*────────── Request flow ─────────*/
     function requestTokens(uint96 amount, string calldata ipfsHash) external isMember {
-        if (amount == 0)                  revert ZeroAmount();
-        if (bytes(ipfsHash).length == 0)  revert InvalidAddress();
+        if (amount == 0) revert ZeroAmount();
+        if (bytes(ipfsHash).length == 0) revert InvalidAddress();
 
-        unchecked { ++requestCounter; }
-        requests[requestCounter] = Request({
-            requester: msg.sender,
-            amount:    amount,
-            approved:  false,
-            ipfsHash:  ipfsHash
-        });
+        unchecked {
+            ++requestCounter;
+        }
+        requests[requestCounter] = Request({requester: msg.sender, amount: amount, approved: false, ipfsHash: ipfsHash});
         emit Requested(requestCounter, msg.sender, amount, ipfsHash);
     }
 
     /// Execs approve – _state change after_ successful mint
     function approveRequest(uint256 id) external nonReentrant onlyExec {
         Request storage r = requests[id];
-        if (r.requester == address(0))      revert RequestUnknown();
-        if (r.approved)                     revert AlreadyApproved();
-        if (r.requester == msg.sender)      revert NotRequester();
+        if (r.requester == address(0)) revert RequestUnknown();
+        if (r.approved) revert AlreadyApproved();
+        if (r.requester == msg.sender) revert NotRequester();
 
-        _mint(r.requester, r.amount);       // ← external effect first
+        _mint(r.requester, r.amount); // ← external effect first
         r.approved = true;
         emit RequestApproved(id, msg.sender);
     }
@@ -135,7 +126,7 @@ contract ParticipationToken is
     function cancelRequest(uint256 id) external nonReentrant {
         Request storage r = requests[id];
         if (r.requester == address(0)) revert RequestUnknown();
-        if (r.approved)                revert AlreadyApproved();
+        if (r.approved) revert AlreadyApproved();
         if (msg.sender != r.requester && !membership.isExecutiveRole(membership.roleOf(msg.sender))) {
             revert NotExecutive();
         }
@@ -148,20 +139,25 @@ contract ParticipationToken is
     function transfer(address, uint256) public pure override returns (bool) {
         revert TransfersDisabled();
     }
+
     function approve(address, uint256) public pure override returns (bool) {
         revert TransfersDisabled();
     }
+
     function transferFrom(address, address, uint256) public pure override returns (bool) {
         revert TransfersDisabled();
     }
     // still allow mint/burn via `_update`
+
     function _update(address from, address to, uint256 value) internal virtual override {
         if (from != address(0) && to != address(0)) revert TransfersDisabled();
         super._update(from, to, value);
     }
 
     /*───────── Version helper ─────────*/
-    function version() external pure returns (string memory) { return "v1"; }
+    function version() external pure returns (string memory) {
+        return "v1";
+    }
 
     /*──────── Storage gap (50 left) ───*/
     uint256[50] private __gap;
