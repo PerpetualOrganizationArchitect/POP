@@ -18,11 +18,7 @@ interface IParticipationToken is IERC20 {
 }
 
 /*───────────────────────  Contract  ───────────────────────*/
-contract TaskManager is
-    Initializable,
-    OwnableUpgradeable,
-    ReentrancyGuardUpgradeable
-{
+contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /*─────────────── Custom Errors ───────────────*/
     error ZeroAddress();
     error InvalidString();
@@ -37,22 +33,29 @@ contract TaskManager is
     error MintFailed();
 
     /*─────────────── Constants ──────────────────*/
-    uint256 public constant MAX_PAYOUT = 1e24;           // 1 million tokens with 18 dec
-    bytes4  public constant MODULE_ID  = 0x54534b30;     // "TSK0"
+    uint256 public constant MAX_PAYOUT = 1e24; // 1 million tokens with 18 dec
+    bytes4 public constant MODULE_ID = 0x54534b30; // "TSK0"
 
     /*─────────────── Data Types ─────────────────*/
-    enum Status { UNCLAIMED, CLAIMED, SUBMITTED, COMPLETED, CANCELLED }
+    enum Status {
+        UNCLAIMED,
+        CLAIMED,
+        SUBMITTED,
+        COMPLETED,
+        CANCELLED
+    }
 
     struct Task {
         uint248 payout;
-        Status  status;
+        Status status;
         address claimer;
-        string  ipfsHash;
+        string ipfsHash;
     }
-    // roleId ⇒ allowed   (creator privilege)
+    // roleId to allowed   (creator privilege)
+
     mapping(bytes32 => bool) public isCreatorRole;
 
-    IMembership         public membership;
+    IMembership public membership;
     IParticipationToken public token;
 
     mapping(uint256 => Task) private _tasks;
@@ -60,9 +63,7 @@ contract TaskManager is
 
     /*─────────────── Events ─────────────────────*/
     event CreatorRoleUpdated(bytes32 indexed role, bool enabled);
-    event TaskCreated(
-        uint256 indexed id, uint256 payout, string ipfsHash, string projectName
-    );
+    event TaskCreated(uint256 indexed id, uint256 payout, string ipfsHash, string projectName);
     event TaskUpdated(uint256 indexed id, uint256 payout, string ipfsHash);
     event TaskClaimed(uint256 indexed id, address indexed claimer);
     event TaskSubmitted(uint256 indexed id, string ipfsHash);
@@ -72,17 +73,16 @@ contract TaskManager is
     event ProjectDeleted(string name);
 
     /*──────────────── Initialiser ───────────────*/
-    function initialize(
-        address tokenAddress,
-        address membershipAddress,
-        bytes32[] calldata creatorRoleIds
-    ) external initializer {
+    function initialize(address tokenAddress, address membershipAddress, bytes32[] calldata creatorRoleIds)
+        external
+        initializer
+    {
         if (tokenAddress == address(0) || membershipAddress == address(0)) revert ZeroAddress();
         __Ownable_init(_msgSender());
         __ReentrancyGuard_init();
 
-        token       = IParticipationToken(tokenAddress);
-        membership  = IMembership(membershipAddress);
+        token = IParticipationToken(tokenAddress);
+        membership = IMembership(membershipAddress);
 
         for (uint256 i; i < creatorRoleIds.length; ++i) {
             isCreatorRole[creatorRoleIds[i]] = true;
@@ -95,38 +95,28 @@ contract TaskManager is
         if (!isCreatorRole[membership.roleOf(_msgSender())]) revert NotCreator();
         _;
     }
+
     modifier onlyMember() {
         if (membership.roleOf(_msgSender()) == bytes32(0)) revert NotMember();
         _;
     }
 
     /*─────────────────── Core Logic ──────────────────*/
-    function createTask(
-        uint256 payout,
-        string calldata ipfsHash,
-        string calldata projectName
-    ) external onlyCreator {
-        if (payout == 0 || payout > MAX_PAYOUT)            revert InvalidPayout();
-        if (bytes(ipfsHash).length == 0)                   revert InvalidString();
-        if (bytes(projectName).length == 0)                revert InvalidString();
+    function createTask(uint256 payout, string calldata ipfsHash, string calldata projectName) external onlyCreator {
+        if (payout == 0 || payout > MAX_PAYOUT) revert InvalidPayout();
+        if (bytes(ipfsHash).length == 0) revert InvalidString();
+        if (bytes(projectName).length == 0) revert InvalidString();
 
         uint256 id;
-        unchecked { id = nextTaskId++; }
-        _tasks[id] = Task({
-            payout:   uint248(payout),
-            status:   Status.UNCLAIMED,
-            claimer:  address(0),
-            ipfsHash: ipfsHash
-        });
+        unchecked {
+            id = nextTaskId++;
+        }
+        _tasks[id] = Task({payout: uint248(payout), status: Status.UNCLAIMED, claimer: address(0), ipfsHash: ipfsHash});
         emit TaskCreated(id, payout, ipfsHash, projectName);
     }
 
     /// @dev Update task before it is CLAIMED; once claimed only `ipfsHash` may change.
-    function updateTask(
-        uint256 id,
-        uint256 newPayout,
-        string calldata newIpfsHash
-    ) external onlyCreator {
+    function updateTask(uint256 id, uint256 newPayout, string calldata newIpfsHash) external onlyCreator {
         Task storage t = _task(id);
 
         if (t.status == Status.CLAIMED || t.status == Status.SUBMITTED) {
@@ -136,8 +126,8 @@ contract TaskManager is
         } else if (t.status == Status.UNCLAIMED) {
             // before claim: allow both
             if (newPayout == 0 || newPayout > MAX_PAYOUT) revert InvalidPayout();
-            if (bytes(newIpfsHash).length == 0)           revert InvalidString();
-            t.payout   = uint248(newPayout);
+            if (bytes(newIpfsHash).length == 0) revert InvalidString();
+            t.payout = uint248(newPayout);
             t.ipfsHash = newIpfsHash;
         } else {
             revert AlreadyCompleted();
@@ -149,18 +139,18 @@ contract TaskManager is
         Task storage t = _task(id);
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
 
-        t.status  = Status.CLAIMED;
+        t.status = Status.CLAIMED;
         t.claimer = _msgSender();
         emit TaskClaimed(id, _msgSender());
     }
 
     function submitTask(uint256 id, string calldata ipfsHash) external onlyMember {
         Task storage t = _task(id);
-        if (t.status != Status.CLAIMED)   revert AlreadySubmitted();
-        if (t.claimer != _msgSender())    revert NotClaimer();
-        if (bytes(ipfsHash).length == 0)  revert InvalidString();
+        if (t.status != Status.CLAIMED) revert AlreadySubmitted();
+        if (t.claimer != _msgSender()) revert NotClaimer();
+        if (bytes(ipfsHash).length == 0) revert InvalidString();
 
-        t.status   = Status.SUBMITTED;
+        t.status = Status.SUBMITTED;
         t.ipfsHash = ipfsHash;
         emit TaskSubmitted(id, ipfsHash);
     }
@@ -188,6 +178,7 @@ contract TaskManager is
         if (bytes(name).length == 0) revert InvalidString();
         emit ProjectCreated(name);
     }
+
     function deleteProject(string calldata name) external onlyCreator {
         if (bytes(name).length == 0) revert InvalidString();
         emit ProjectDeleted(name);
@@ -216,7 +207,9 @@ contract TaskManager is
     }
 
     /*──────────── Version & Gap ───────────*/
-    function version() external pure returns (string memory) { return "v1"; }
+    function version() external pure returns (string memory) {
+        return "v1";
+    }
 
     uint256[50] private __gap;
 }

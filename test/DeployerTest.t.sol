@@ -2,10 +2,6 @@
 pragma solidity ^0.8.17;
 
 import "forge-std/Test.sol";
-// Remove old voting imports
-// import "../src/Voting.sol";
-// import "../src/VotingV2.sol";
-// Add new voting imports
 import {DirectDemocracyVoting} from "../src/DirectDemocracyVoting.sol";
 import {ElectionContract} from "../src/ElectionContract.sol";
 // Replace NFTMembership import
@@ -19,6 +15,7 @@ import "../src/OrgRegistry.sol";
 // Import the new contracts
 import {ParticipationToken} from "../src/ParticipationToken.sol";
 import {TaskManager} from "../src/TaskManager.sol";
+import {EducationHub} from "../src/EducationHub.sol";
 // Import only the Deployer contract to avoid interface collisions
 import {Deployer} from "../src/Deployer.sol";
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
@@ -34,6 +31,7 @@ contract DeployerTest is Test {
     QuickJoin quickJoinImplementation;
     ParticipationToken participationTokenImplementation;
     TaskManager taskManagerImplementation;
+    EducationHub educationHubImplementation;
     ImplementationRegistry implementationRegistry;
     PoaManager poaManager;
     OrgRegistry orgRegistry;
@@ -68,6 +66,7 @@ contract DeployerTest is Test {
         quickJoinImplementation = new QuickJoin();
         participationTokenImplementation = new ParticipationToken();
         taskManagerImplementation = new TaskManager();
+        educationHubImplementation = new EducationHub();
 
         vm.startPrank(poaAdmin);
 
@@ -95,6 +94,7 @@ contract DeployerTest is Test {
         poaManager.addContractType("UniversalAccountRegistry", address(accountRegistryImplementation));
         poaManager.addContractType("ParticipationToken", address(participationTokenImplementation));
         poaManager.addContractType("TaskManager", address(taskManagerImplementation));
+        poaManager.addContractType("EducationHub", address(educationHubImplementation));
 
         // Deploy global UniversalAccountRegistry
         address accountRegistryBeacon = poaManager.getBeacon("UniversalAccountRegistry");
@@ -117,7 +117,8 @@ contract DeployerTest is Test {
             address membershipProxy,
             address quickJoinProxy,
             address participationTokenProxy,
-            address taskManagerProxy
+            address taskManagerProxy,
+            address educationHubProxy
         ) = deployer.deployFullOrg(
             autoUpgradeOrgId, // Org ID
             orgOwner, // Org Owner
@@ -142,7 +143,8 @@ contract DeployerTest is Test {
         // Get contract details for voting
         bytes32 votingTypeId = keccak256(bytes("DirectDemocracyVoting"));
         bytes32 votingContractId = keccak256(abi.encodePacked(autoUpgradeOrgId, votingTypeId));
-        (address votingBeaconProxy, address votingBeacon, bool votingAutoUpgrade, address votingOwner) = orgRegistry.contractOf(votingContractId);
+        (address votingBeaconProxy, address votingBeacon, bool votingAutoUpgrade, address votingOwner) =
+            orgRegistry.contractOf(votingContractId);
 
         assertEq(votingBeaconProxy, autoUpgradeOrgProxy, "Voting BeaconProxy address mismatch");
         assertEq(votingBeacon, poaManager.getBeacon("DirectDemocracyVoting"), "Voting Beacon address mismatch");
@@ -152,7 +154,8 @@ contract DeployerTest is Test {
         // Get contract details for ParticipationToken
         bytes32 tokenTypeId = keccak256(bytes("ParticipationToken"));
         bytes32 tokenContractId = keccak256(abi.encodePacked(autoUpgradeOrgId, tokenTypeId));
-        (address tokenBeaconProxy, address tokenBeacon, bool tokenAutoUpgrade, address tokenOwner) = orgRegistry.contractOf(tokenContractId);
+        (address tokenBeaconProxy, address tokenBeacon, bool tokenAutoUpgrade, address tokenOwner) =
+            orgRegistry.contractOf(tokenContractId);
 
         assertEq(tokenBeaconProxy, participationTokenProxy, "Token BeaconProxy address mismatch");
         assertEq(tokenBeacon, poaManager.getBeacon("ParticipationToken"), "Token Beacon address mismatch");
@@ -162,12 +165,24 @@ contract DeployerTest is Test {
         // Get contract details for TaskManager
         bytes32 taskTypeId = keccak256(bytes("TaskManager"));
         bytes32 taskContractId = keccak256(abi.encodePacked(autoUpgradeOrgId, taskTypeId));
-        (address taskBeaconProxy, address taskBeacon, bool taskAutoUpgrade, address taskOwner) = orgRegistry.contractOf(taskContractId);
+        (address taskBeaconProxy, address taskBeacon, bool taskAutoUpgrade, address taskOwner) =
+            orgRegistry.contractOf(taskContractId);
 
         assertEq(taskBeaconProxy, taskManagerProxy, "Task BeaconProxy address mismatch");
         assertEq(taskBeacon, poaManager.getBeacon("TaskManager"), "Task Beacon address mismatch");
         assertTrue(taskAutoUpgrade, "Task Auto-upgrade should be enabled");
         assertEq(taskOwner, orgOwner, "Task Owner address mismatch");
+
+        // Get contract details for EducationHub
+        bytes32 educationTypeId = keccak256(bytes("EducationHub"));
+        bytes32 educationContractId = keccak256(abi.encodePacked(autoUpgradeOrgId, educationTypeId));
+        (address educationBeaconProxy, address educationBeacon, bool educationAutoUpgrade, address educationOwner) =
+            orgRegistry.contractOf(educationContractId);
+
+        assertEq(educationBeaconProxy, educationHubProxy, "EducationHub BeaconProxy address mismatch");
+        assertEq(educationBeacon, poaManager.getBeacon("EducationHub"), "EducationHub Beacon address mismatch");
+        assertTrue(educationAutoUpgrade, "EducationHub Auto-upgrade should be enabled");
+        assertEq(educationOwner, orgOwner, "EducationHub Owner address mismatch");
 
         // 3. Initialize the contract instances
         DirectDemocracyVoting votingContract = DirectDemocracyVoting(autoUpgradeOrgProxy);
@@ -175,12 +190,12 @@ contract DeployerTest is Test {
         Membership membershipContract = Membership(membershipProxy);
         ParticipationToken tokenContract = ParticipationToken(participationTokenProxy);
         TaskManager taskManagerContract = TaskManager(taskManagerProxy);
-
+        EducationHub educationHubContract = EducationHub(educationHubProxy);
         // Verify implementation versions
         assertEq(votingContract.version(), "v1", "Should be using Voting V1 implementation");
         assertEq(tokenContract.version(), "v1", "Should be using Token V1 implementation");
         assertEq(taskManagerContract.version(), "v1", "Should be using TaskManager V1 implementation");
-
+        assertEq(educationHubContract.version(), "v1", "Should be using EducationHub V1 implementation");
         // 4. Set up memberships
         vm.startPrank(orgOwner);
         membershipContract.setRoleImage(keccak256("EXECUTIVE"), "https://example.com/executive.png");
@@ -199,55 +214,59 @@ contract DeployerTest is Test {
 
         // Verify the roles
         assertTrue(
-            membershipContract.isExecutiveRole(membershipContract.roleOf(voter1)), 
-            "Voter1 should be an executive"
+            membershipContract.isExecutiveRole(membershipContract.roleOf(voter1)), "Voter1 should be an executive"
         );
         bytes32 voter2Role = membershipContract.roleOf(voter2);
         assertTrue(
-            keccak256("DEFAULT") == voter2Role || keccak256("Member") == voter2Role, 
-            "Voter2 should be a default member"
+            keccak256("DEFAULT") == voter2Role || keccak256("Member") == voter2Role, "Voter2 should be a default member"
         );
 
         // 5. Test ParticipationToken functionality
         // Check token info
         assertEq(tokenContract.name(), "Auto Upgrade Organization Token", "Token name should match");
         assertEq(tokenContract.symbol(), "TKN", "Token symbol should match");
-        
+
         // Check initial balance
         assertEq(tokenContract.balanceOf(voter1), 0, "Initial token balance should be zero");
-        
+
         // 6. Test TaskManager functionality
         // Create a task
         vm.startPrank(voter1); // Use executive role to create task
-        
+
         string memory ipfsHash = "QmTaskHashExample";
         string memory projectName = "Test Project";
         uint256 payoutAmount = 100;
-        
+
         taskManagerContract.createTask(payoutAmount, ipfsHash, projectName);
-        
+
         uint256 taskId = 0; // First task
-        
+
         // Claim the task as taskWorker
         vm.stopPrank();
         vm.prank(taskWorker);
         taskManagerContract.claimTask(taskId);
-        
+
         // Submit task completion
         vm.prank(taskWorker);
         taskManagerContract.submitTask(taskId, "QmCompletionProofHash");
-        
+
         // Verify task completion as executive
         vm.prank(voter1);
         taskManagerContract.completeTask(taskId);
-        
+
         // Check that tokens were minted to taskWorker
         assertEq(tokenContract.balanceOf(taskWorker), payoutAmount, "Task worker should receive tokens");
-        
+
+        // Test EducationHub functionality
+        vm.startPrank(voter1);
+        educationHubContract.createModule("QmModuleHashExample", 100, 1);
+        educationHubContract.completeModule(0, 1);
+        assertEq(tokenContract.balanceOf(voter1), 100, "Voter1 should receive tokens from module completion");
+        vm.stopPrank();
+
         // Continue with voting tests...
         vm.startPrank(voter1);
-        // ... [existing voting test code] ...
-        
+
         // Create a proposal with election enabled
         string memory proposalName = "Test Proposal";
         string memory proposalDesc = "Testing the voting system";
@@ -330,7 +349,7 @@ contract DeployerTest is Test {
         // Check the initial version of an implementation
         address impl = implementationRegistry.getLatestImplementation("DirectDemocracyVoting");
         assertEq(impl, address(votingImplementation), "Latest implementation should be correct");
-        
+
         // Check version info using existing methods
         address storedImpl = implementationRegistry.getImplementation("DirectDemocracyVoting", "v1");
         address latestImpl = implementationRegistry.getLatestImplementation("DirectDemocracyVoting");

@@ -202,9 +202,8 @@ contract Deployer is Ownable(msg.sender) {
         bool autoUpgrade,
         address customImpl
     ) public returns (address proxy) {
-        bytes memory init = abi.encodeWithSignature(
-            "initialize(string,string,address)", tokenName, tokenSymbol, membership
-        );
+        bytes memory init =
+            abi.encodeWithSignature("initialize(string,string,address)", tokenName, tokenSymbol, membership);
         proxy = _deployContract(orgId, "ParticipationToken", orgOwner, autoUpgrade, customImpl, init);
         return proxy;
     }
@@ -219,10 +218,25 @@ contract Deployer is Ownable(msg.sender) {
         bool autoUpgrade,
         address customImpl
     ) public returns (address proxy) {
-        bytes memory init = abi.encodeWithSignature(
-            "initialize(address,address,bytes32[])", token, membership, creatorRoleIds
-        );
+        bytes memory init =
+            abi.encodeWithSignature("initialize(address,address,bytes32[])", token, membership, creatorRoleIds);
         proxy = _deployContract(orgId, "TaskManager", orgOwner, autoUpgrade, customImpl, init);
+        return proxy;
+    }
+
+    /*──────────── EducationHub ─────────────*/
+    function deployEducationHub(
+        bytes32 orgId,
+        address orgOwner,
+        address membership,
+        address token,
+        bytes32[] memory creatorRoleIds,
+        bool autoUpgrade,
+        address customImpl
+    ) public returns (address proxy) {
+        bytes memory init =
+            abi.encodeWithSignature("initialize(address,address,bytes32[])", token, membership, creatorRoleIds);
+        proxy = _deployContract(orgId, "EducationHub", orgOwner, autoUpgrade, customImpl, init);
         return proxy;
     }
 
@@ -234,14 +248,18 @@ contract Deployer is Ownable(msg.sender) {
         address registry,
         address treasury,
         bool autoUpgrade
-    ) external returns (
-        address voting,
-        address election,
-        address membership,
-        address quickjoin,
-        address participationToken,
-        address taskManager
-    ) {
+    )
+        external
+        returns (
+            address voting,
+            address election,
+            address membership,
+            address quickjoin,
+            address participationToken,
+            address taskManager,
+            address educationHub
+        )
+    {
         if (_orgExists(orgId)) {
             (address recordedOwner,,,) = orgRegistry.orgOf(orgId);
             if (recordedOwner != orgOwner) revert OrgExistsMismatch();
@@ -257,23 +275,30 @@ contract Deployer is Ownable(msg.sender) {
         INFTMembership(membership).setElectionContract(election);
 
         quickjoin = deployQuickJoin(orgId, orgOwner, membership, registry, address(this), autoUpgrade, address(0));
-        
+
         // Deploy participation token
         string memory tokenName = string(abi.encodePacked(orgName, " Token"));
         string memory tokenSymbol = "TKN";
-        participationToken = deployParticipationToken(
-            orgId, orgOwner, tokenName, tokenSymbol, membership, autoUpgrade, address(0)
-        );
-        
+        participationToken =
+            deployParticipationToken(orgId, orgOwner, tokenName, tokenSymbol, membership, autoUpgrade, address(0));
+
         // Deploy task manager
         bytes32[] memory execRoles = new bytes32[](1);
         execRoles[0] = keccak256("EXECUTIVE");
-        taskManager = deployTaskManager(
-            orgId, orgOwner, participationToken, membership, execRoles, autoUpgrade, address(0)
-        );
-        
+        taskManager =
+            deployTaskManager(orgId, orgOwner, participationToken, membership, execRoles, autoUpgrade, address(0));
+
         // Link token with task manager
         IParticipationToken(participationToken).setTaskManager(taskManager);
+
+        // Deploy education hub
+        bytes32[] memory creatorRoleIds = new bytes32[](1);
+        creatorRoleIds[0] = keccak256("EXECUTIVE");
+        educationHub =
+            deployEducationHub(orgId, orgOwner, membership, participationToken, creatorRoleIds, autoUpgrade, address(0));
+
+        // Link token with education hub
+        IParticipationToken(participationToken).setEducationHub(educationHub);
     }
 
     /*──────────── Utilities ────────────*/
@@ -284,7 +309,7 @@ contract Deployer is Ownable(msg.sender) {
     }
 
     function _orgExists(bytes32 id) internal view returns (bool) {
-        (,,,bool exists) = orgRegistry.orgOf(id);
+        (,,, bool exists) = orgRegistry.orgOf(id);
         return exists;
     }
 }
