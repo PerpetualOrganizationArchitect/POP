@@ -273,7 +273,7 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, PausableUpg
     }
 
     /**
-     * @notice Delete heavy storage of an expired proposal to save refund gas. 
+     * @notice Delete heavy storage of an expired proposal to save refund gas.
      *  Anyone can call, but cap batch size to avoid OOG.
      */
     function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
