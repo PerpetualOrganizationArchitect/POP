@@ -3,6 +3,7 @@ pragma solidity ^0.8.17;
 
 import "forge-std/Test.sol";
 import {DirectDemocracyVoting} from "../src/DirectDemocracyVoting.sol";
+import {ParticipationVoting} from "../src/ParticipationVoting.sol";
 import {ElectionContract} from "../src/ElectionContract.sol";
 // Replace NFTMembership import
 import {Membership} from "../src/Membership.sol";
@@ -36,7 +37,7 @@ contract DeployerTest is Test {
     PoaManager poaManager;
     OrgRegistry orgRegistry;
     Deployer deployer;
-
+    ParticipationVoting participationVotingImplementation;
     // Test addresses
     address public poaAdmin = address(1);
     address public orgOwner = address(2);
@@ -67,6 +68,7 @@ contract DeployerTest is Test {
         participationTokenImplementation = new ParticipationToken();
         taskManagerImplementation = new TaskManager();
         educationHubImplementation = new EducationHub();
+        participationVotingImplementation = new ParticipationVoting();
 
         vm.startPrank(poaAdmin);
 
@@ -95,6 +97,7 @@ contract DeployerTest is Test {
         poaManager.addContractType("ParticipationToken", address(participationTokenImplementation));
         poaManager.addContractType("TaskManager", address(taskManagerImplementation));
         poaManager.addContractType("EducationHub", address(educationHubImplementation));
+        poaManager.addContractType("ParticipationVoting", address(participationVotingImplementation));
 
         // Deploy global UniversalAccountRegistry
         address accountRegistryBeacon = poaManager.getBeacon("UniversalAccountRegistry");
@@ -118,7 +121,8 @@ contract DeployerTest is Test {
             address quickJoinProxy,
             address participationTokenProxy,
             address taskManagerProxy,
-            address educationHubProxy
+            address educationHubProxy,
+            address participationVotingProxy
         ) = deployer.deployFullOrg(
             autoUpgradeOrgId, // Org ID
             orgOwner, // Org Owner
@@ -184,6 +188,21 @@ contract DeployerTest is Test {
         assertTrue(educationAutoUpgrade, "EducationHub Auto-upgrade should be enabled");
         assertEq(educationOwner, orgOwner, "EducationHub Owner address mismatch");
 
+        // Get contract details for ParticipationVoting
+        bytes32 participationVotingTypeId = keccak256(bytes("ParticipationVoting"));
+        bytes32 participationVotingContractId = keccak256(abi.encodePacked(autoUpgradeOrgId, participationVotingTypeId));
+        (
+            address participationVotingBeaconProxy,
+            address participationVotingBeacon,
+            bool participationVotingAutoUpgrade,
+            address participationVotingOwner
+        ) = orgRegistry.contractOf(participationVotingContractId);
+
+        assertEq(participationVotingBeaconProxy, participationVotingProxy, "ParticipationVoting BeaconProxy address mismatch");
+        assertEq(participationVotingBeacon, poaManager.getBeacon("ParticipationVoting"), "ParticipationVoting Beacon address mismatch");
+        assertTrue(participationVotingAutoUpgrade, "ParticipationVoting Auto-upgrade should be enabled");
+        assertEq(participationVotingOwner, orgOwner, "ParticipationVoting Owner address mismatch");
+
         // 3. Initialize the contract instances
         DirectDemocracyVoting votingContract = DirectDemocracyVoting(autoUpgradeOrgProxy);
         ElectionContract electionContract = ElectionContract(electionProxy);
@@ -191,6 +210,7 @@ contract DeployerTest is Test {
         ParticipationToken tokenContract = ParticipationToken(participationTokenProxy);
         TaskManager taskManagerContract = TaskManager(taskManagerProxy);
         EducationHub educationHubContract = EducationHub(educationHubProxy);
+        ParticipationVoting participationVotingContract = ParticipationVoting(participationVotingProxy);
         // Verify implementation versions
         assertEq(votingContract.version(), "v1", "Should be using Voting V1 implementation");
         assertEq(tokenContract.version(), "v1", "Should be using Token V1 implementation");
@@ -278,7 +298,7 @@ contract DeployerTest is Test {
         optionNames[1] = "Option B";
 
         // Transfer settings (not used in this test)
-        uint256 transferTriggerOptionIndex = 0;
+        uint16 transferTriggerOptionIndex = 0;
         address payable transferRecipient = payable(address(0));
         uint256 transferAmount = 0;
         bool transferEnabled = false;
@@ -297,18 +317,17 @@ contract DeployerTest is Test {
         candidateNames[0] = "Candidate 1";
         candidateNames[1] = "Candidate 2";
 
-        // Create the proposal
+        // Create the proposal - looking at DirectDemocracyVoting contract's method signature
         votingContract.createProposal(
             proposalName,
-            proposalDesc,
             timeInMinutes,
             optionNames,
             transferTriggerOptionIndex,
             transferRecipient,
             transferAmount,
             transferEnabled,
-            transferToken,
             tokenType,
+            transferToken,
             electionEnabled,
             candidateAddresses,
             candidateNames
@@ -322,10 +341,10 @@ contract DeployerTest is Test {
         uint256 proposalId = 0; // First proposal
 
         // Cast votes from two different voters with different weights for each option
-        uint256[] memory optionIndices = new uint256[](1);
+        uint16[] memory optionIndices = new uint16[](1);
         optionIndices[0] = 0; // Voting for Option A
 
-        uint256[] memory weights = new uint256[](1);
+        uint8[] memory weights = new uint8[](1);
         weights[0] = 100; // 100% of weight on Option A
 
         // Vote as voter1
@@ -343,6 +362,40 @@ contract DeployerTest is Test {
         uint256 optionBVotes = votingContract.getOptionVotes(proposalId, 1);
         assertEq(optionAVotes, 100, "Option A should have 100 votes");
         assertEq(optionBVotes, 100, "Option B should have 100 votes");
+
+        // Test ParticipationVoting functionality
+        vm.startPrank(voter1);
+        // Update parameters to match the signature in the ParticipationVoting contract
+        participationVotingContract.createProposal(
+            "Test ParticipationVoting Proposal", // ipfsHash
+            uint32(60), // minutesDuration as uint32
+            optionNames,
+            transferTriggerOptionIndex,
+            transferRecipient,
+            transferAmount,
+            transferEnabled,
+            ParticipationVoting.TokenType.ETHER, // Use the correct enum type
+            transferToken,
+            false,
+            candidateAddresses,
+            candidateNames
+        );
+        vm.stopPrank();
+
+        // Vote on the participation voting proposal
+        uint256 pvProposalId = 0; // First proposal
+
+        // Use same arrays for ParticipationVoting (they're already correctly typed)
+        vm.startPrank(taskWorker);
+        optionIndices[0] = 1; // Voting for Option B
+        participationVotingContract.vote(pvProposalId, optionIndices, weights);
+        vm.stopPrank();
+
+        // Verify vote counts for participation voting
+        uint256 pvOptionAVotes = participationVotingContract.getOptionVotes(pvProposalId, 0);
+        uint256 pvOptionBVotes = participationVotingContract.getOptionVotes(pvProposalId, 1);
+        assertEq(pvOptionAVotes, 0, "ParticipationVoting Option A should have 0 votes");
+        assertEq(pvOptionBVotes, 100, "ParticipationVoting Option B should have 100 votes");
     }
 
     function testRegistryOperations() public {
