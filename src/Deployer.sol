@@ -166,13 +166,13 @@ contract Deployer is Ownable(msg.sender) {
         bool autoUpgrade,
         address customImpl
     ) public returns (address proxy) {
-        string[] memory roles = new string[](3);
-        roles[0] = "DEFAULT";
-        roles[1] = "EXECUTIVE";
-        roles[2] = "Member";
+        bytes32[] memory roleHashes = new bytes32[](3);
+        roleHashes[0] = keccak256("DEFAULT");
+        roleHashes[1] = keccak256("EXECUTIVE");
+        roleHashes[2] = keccak256("Member");
 
         bytes memory init = abi.encodeWithSignature(
-            "initialize(address,address,string[],address,uint256)", orgOwner, membership, roles, treasury, 50
+            "initialize(address,address,bytes32[],address,uint256)", orgOwner, membership, roleHashes, treasury, 50
         );
         proxy = _deployContract(orgId, "DirectDemocracyVoting", orgOwner, autoUpgrade, customImpl, init);
         return proxy;
@@ -205,6 +205,38 @@ contract Deployer is Ownable(msg.sender) {
         bytes memory init =
             abi.encodeWithSignature("initialize(string,string,address)", tokenName, tokenSymbol, membership);
         proxy = _deployContract(orgId, "ParticipationToken", orgOwner, autoUpgrade, customImpl, init);
+        return proxy;
+    }
+
+    /*──────────── ParticipationVoting ─────────────*/
+    function deployParticipationVoting(
+        bytes32 orgId,
+        address orgOwner,
+        address membership,
+        address treasury,
+        address token,
+        address elections,
+        bool autoUpgrade,
+        bool quadratic,
+        address customImpl
+    ) public returns (address proxy) {
+        bytes32[] memory roleHashes = new bytes32[](3);
+        roleHashes[0] = keccak256("DEFAULT");
+        roleHashes[1] = keccak256("EXECUTIVE");
+        roleHashes[2] = keccak256("Member");
+
+        bytes memory init = abi.encodeWithSignature(
+            "initialize(address,address,address,address,address,uint8,bytes32[],bool)",
+            orgOwner,
+            token,
+            membership,
+            treasury,
+            elections,
+            50,
+            roleHashes,
+            quadratic
+        );
+        proxy = _deployContract(orgId, "ParticipationVoting", orgOwner, autoUpgrade, customImpl, init);
         return proxy;
     }
 
@@ -257,7 +289,8 @@ contract Deployer is Ownable(msg.sender) {
             address quickjoin,
             address participationToken,
             address taskManager,
-            address educationHub
+            address educationHub,
+            address participationVoting
         )
     {
         if (_orgExists(orgId)) {
@@ -299,6 +332,11 @@ contract Deployer is Ownable(msg.sender) {
 
         // Link token with education hub
         IParticipationToken(participationToken).setEducationHub(educationHub);
+
+        // Deploy participation voting
+        participationVoting = deployParticipationVoting(
+            orgId, orgOwner, membership, treasury, participationToken, election, autoUpgrade, false, address(0)
+        );
     }
 
     /*──────────── Utilities ────────────*/

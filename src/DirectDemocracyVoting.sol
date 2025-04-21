@@ -1,29 +1,30 @@
-// SPDX-License-Identifier: MIT
+// SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.20;
 
+/* ─────────── OpenZeppelin v5.3 Upgradeables ─────────── */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
-interface INFTMembership2 {
+/* ─────────── External Interfaces ─────────── */
+interface IMembership {
     function roleOf(address user) external view returns (bytes32);
     function canVote(address user) external view returns (bool);
 }
 
 interface ITreasury {
-    function sendTokens(address _token, address _to, uint256 _amount) external;
-    function setVotingContract(address _votingContract) external;
-    function withdrawEther(address payable _to, uint256 _amount) external;
+    function sendTokens(address token, address to, uint256 amount) external;
+    function withdrawEther(address payable to, uint256 amount) external;
 }
 
 interface IElections {
-    function createElection(uint256 _proposalId) external returns (uint256 electionId);
-    function addCandidate(uint256 _proposalId, address _candidateAddress, string memory _candidateName) external;
-    function concludeElection(uint256 _electionId, uint256 winningOption) external;
+    function createElection(uint256 proposalId) external returns (uint256 electionId);
+    function addCandidate(uint256 proposalId, address candidate, string memory name) external;
+    function concludeElection(uint256 electionId, uint256 winningOption) external;
 }
 
 contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
-    /* ───────────────────────────── Custom Errors ───────────────────────────── */
+    /* ─────────────── Errors ─────────────── */
     error Unauthorized();
     error AlreadyVoted();
     error InvalidProposal();
@@ -37,10 +38,10 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
     error DuplicateOption();
     error TooManyVoters();
 
-    /* ─────────────────────────────── Constants ─────────────────────────────── */
+    /* ───────────── Constants ───────────── */
     bytes4 public constant MODULE_ID = 0x6464766f; /* "ddvo" */
 
-    /* ────────────────────────────── Enumerations ───────────────────────────── */
+    /* ───────────── Enums ───────────── */
     enum TokenType {
         ETHER,
         ERC20,
@@ -48,17 +49,12 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         CUSTOM
     }
 
-    /* ────────────────────────────── State Storage ──────────────────────────── */
-    INFTMembership2 public nftMembership;
+    /* ───────────── Storage ───────────── */
+    IMembership public membership;
     ITreasury public treasury;
     IElections public elections;
 
-    /// @notice quorum percentage 1‑100
-    uint256 public quorumPercentage;
-
-    // reserved for future EIP‑712 (unused until AA or 4337)
-    bytes32 private _domainSeparator;
-    mapping(address => uint256) private _sigNonces;
+    uint256 public quorumPercentage; // 1‑100
 
     struct PollOption {
         uint256 votes;
@@ -67,13 +63,13 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
     struct Proposal {
         uint256 totalVotes;
         uint48 endTimestamp;
-        uint16 transferTriggerIndex;
+        uint16 payoutTriggerIdx;
         bool transferEnabled;
         bool electionEnabled;
         TokenType tokenType;
-        address payable transferRecipient;
+        address payable recipient;
         address transferToken;
-        uint256 transferAmount;
+        uint256 amount;
         PollOption[] options;
         mapping(address => bool) hasVoted;
     }
@@ -81,39 +77,36 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
     Proposal[] private _proposals;
     mapping(bytes32 => bool) private _allowedRoles;
 
-    /* ──────────────────────────────── Events ───────────────────────────────── */
+    /* ───────────── Events ───────────── */
+    event RoleAllowed(bytes32 role);
     event NewProposal(
         uint256 indexed proposalId,
-        string name,
-        string description,
-        uint256 timeInMinutes,
-        uint256 creationTimestamp,
-        uint256 transferTriggerOptionIndex,
-        address transferRecipient,
-        uint256 transferAmount,
+        string ipfsHash,
+        uint48 endTimestamp,
+        uint48 creationTimestamp,
+        uint16 payoutTriggerIdx,
+        address recipient,
+        uint256 amount,
         bool transferEnabled,
+        TokenType tokenType,
         address transferToken,
         bool electionEnabled,
         uint256 electionId
     );
-
-    event Voted(uint256 indexed proposalId, address indexed voter, uint256[] optionIndices, uint256[] weights);
+    event Voted(uint256 indexed proposalId, address indexed voter, uint16[] optionIndices, uint8[] weights);
     event PollOptionNames(uint256 indexed proposalId, uint256 indexed optionIndex, string name);
     event WinnerAnnounced(uint256 indexed proposalId, uint256 winningOptionIndex, bool hasValidWinner);
     event ElectionContractSet(address indexed electionContract);
     event VotesCleaned(uint256 indexed proposalId, uint256 count);
 
-    /* ───────────────────────────── Initialiser ─────────────────────────────── */
-    /// @custom:oz-upgrades-unsafe-allow constructor
+    /* ─────────── Initialiser ─────────── */
     constructor() initializer {}
 
-    /**
-     * @param _quorumPercentage whole numbers 1‑100
-     */
+
     function initialize(
         address _owner,
-        address _nftMembership,
-        string[] memory _allowedRoleNames,
+        address _membership,
+        bytes32[] calldata roleHashes, // hashed roleIds
         address _treasuryAddress,
         uint256 _quorumPercentage
     ) external initializer {
@@ -121,21 +114,19 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         __Ownable_init(_owner);
         __ReentrancyGuard_init();
 
-        nftMembership = INFTMembership2(_nftMembership);
+        membership = IMembership(_membership);
         treasury = ITreasury(_treasuryAddress);
         quorumPercentage = _quorumPercentage;
 
-        for (uint256 i; i < _allowedRoleNames.length;) {
-            _allowedRoles[keccak256(bytes(_allowedRoleNames[i]))] = true;
-            unchecked {
-                ++i;
-            }
+        for (uint256 i; i < roleHashes.length; ++i) {
+            _allowedRoles[roleHashes[i]] = true;
+            emit RoleAllowed(roleHashes[i]);
         }
     }
 
     /* ─────────────────────────────── Modifiers ─────────────────────────────── */
     modifier onlyAllowedRole() {
-        bytes32 roleHash = nftMembership.roleOf(msg.sender);
+        bytes32 roleHash = membership.roleOf(msg.sender);
         if (!_allowedRoles[roleHash]) revert Unauthorized();
         _;
     }
@@ -157,52 +148,51 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
 
     /* ─────────────────────────── Proposal Creation ─────────────────────────── */
     function createProposal(
-        string memory _name,
-        string memory _description,
-        uint256 _timeInMinutes,
-        string[] memory _optionNames,
-        uint256 _transferTriggerOptionIndex,
-        address payable _transferRecipient,
-        uint256 _transferAmount,
-        bool _transferEnabled,
-        address _transferToken,
-        TokenType _tokenType,
-        bool _electionEnabled,
-        address[] memory _candidateAddresses,
-        string[] memory _candidateNames
+        string memory ipfsHash,
+        uint256 minutesDuration,
+        string[] memory optionNames,
+        uint16 payoutTriggerIdx,
+        address payable recipient,
+        uint256 amount,
+        bool transferEnabled,
+        TokenType tokenType,
+        address transferToken,
+        bool electionEnabled,
+        address[] memory candidateAddresses,
+        string[] memory candidateNames
     ) external onlyAllowedRole {
-        if (_candidateAddresses.length != _candidateNames.length) revert LengthMismatch();
-        if (_optionNames.length > type(uint16).max) revert LengthMismatch();
+        if (candidateAddresses.length != candidateNames.length) revert LengthMismatch();
+        if (optionNames.length > type(uint16).max) revert LengthMismatch();
 
-        uint256 closing = block.timestamp + _timeInMinutes * 1 minutes;
-        if (closing > type(uint48).max) revert DurationOverflow();
+        uint48 endTs = uint48(block.timestamp + minutesDuration * 1 minutes);
+        if (endTs > type(uint48).max) revert DurationOverflow();
 
         Proposal storage p = _proposals.push();
-        p.endTimestamp = uint48(closing);
-        p.transferTriggerIndex = uint16(_transferTriggerOptionIndex);
-        p.transferRecipient = _transferRecipient;
-        p.transferAmount = _transferAmount;
-        p.transferEnabled = _transferEnabled;
-        p.transferToken = _transferToken;
-        p.tokenType = _tokenType;
-        p.electionEnabled = _electionEnabled;
+        p.endTimestamp = endTs;
+        p.payoutTriggerIdx = payoutTriggerIdx;
+        p.recipient = recipient;
+        p.amount = amount;
+        p.transferEnabled = transferEnabled;
+        p.transferToken = transferToken;
+        p.tokenType = tokenType;
+        p.electionEnabled = electionEnabled;
 
         uint256 proposalId = _proposals.length - 1;
 
-        for (uint256 i; i < _optionNames.length;) {
+        for (uint256 i; i < optionNames.length;) {
             p.options.push(PollOption(0));
-            emit PollOptionNames(proposalId, i, _optionNames[i]);
+            emit PollOptionNames(proposalId, i, optionNames[i]);
             unchecked {
                 ++i;
             }
         }
 
         uint256 electionId;
-        if (_electionEnabled) {
+        if (electionEnabled) {
             electionId = elections.createElection(proposalId);
 
-            for (uint256 i = 0; i < _candidateAddresses.length;) {
-                elections.addCandidate(proposalId, _candidateAddresses[i], _candidateNames[i]);
+            for (uint256 i = 0; i < candidateAddresses.length;) {
+                elections.addCandidate(proposalId, candidateAddresses[i], candidateNames[i]);
                 unchecked {
                     ++i;
                 }
@@ -211,29 +201,29 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
 
         emit NewProposal(
             proposalId,
-            _name,
-            _description,
-            _timeInMinutes,
-            block.timestamp,
-            _transferTriggerOptionIndex,
-            _transferRecipient,
-            _transferAmount,
-            _transferEnabled,
-            _transferToken,
-            _electionEnabled,
+            ipfsHash,
+            endTs,
+            uint48(block.timestamp),
+            payoutTriggerIdx,
+            recipient,
+            amount,
+            transferEnabled,
+            tokenType,
+            transferToken,
+            electionEnabled,
             electionId
         );
     }
 
     /* ──────────────────────────────── Voting ───────────────────────────────── */
-    function vote(uint256 _proposalId, uint256[] memory _optionIndices, uint256[] memory _weights)
+    function vote(uint256 _proposalId, uint16[] memory _optionIndices, uint8[] memory _weights)
         external
         proposalExists(_proposalId)
         whenNotExpired(_proposalId)
     {
         if (_optionIndices.length != _weights.length) revert LengthMismatch();
 
-        if (!nftMembership.canVote(msg.sender)) revert Unauthorized();
+        if (!membership.canVote(msg.sender)) revert Unauthorized();
 
         Proposal storage p = _proposals[_proposalId];
         if (p.hasVoted[msg.sender]) revert AlreadyVoted();
@@ -284,11 +274,11 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         (winner, valid) = _getWinner(_proposalId);
         Proposal storage p = _proposals[_proposalId];
 
-        if (valid && p.transferEnabled && winner == p.transferTriggerIndex) {
+        if (valid && p.transferEnabled && winner == p.payoutTriggerIdx) {
             if (p.tokenType == TokenType.ETHER) {
-                treasury.withdrawEther(p.transferRecipient, p.transferAmount);
+                treasury.withdrawEther(p.recipient, p.amount);
             } else {
-                treasury.sendTokens(p.transferToken, p.transferRecipient, p.transferAmount);
+                treasury.sendTokens(p.transferToken, p.recipient, p.amount);
             }
         }
 
@@ -325,10 +315,10 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         proposalExists(id)
         returns (
             uint256 totalVotes,
-            uint256 endTimestamp,
-            uint256 transferTriggerOptionIndex,
-            address payable transferRecipient,
-            uint256 transferAmount,
+            uint48 endTimestamp,
+            uint16 payoutTriggerIdx,
+            address payable recipient,
+            uint256 amount,
             bool transferEnabled,
             address transferToken,
             TokenType tokenType,
@@ -340,9 +330,9 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyG
         return (
             p.totalVotes,
             p.endTimestamp,
-            p.transferTriggerIndex,
-            p.transferRecipient,
-            p.transferAmount,
+            p.payoutTriggerIdx,
+            p.recipient,
+            p.amount,
             p.transferEnabled,
             p.transferToken,
             p.tokenType,

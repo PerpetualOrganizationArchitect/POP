@@ -1,7 +1,7 @@
 // SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.20;
 
-/*──────── OpenZeppelin v5.3 Upgradeables ────────*/
+/*──────── OpenZeppelin v5.3 Upgradeables ────────*/
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
@@ -9,8 +9,9 @@ import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /*──────── External interfaces ────────*/
-interface IParticipationToken2 is IERC20 {
+interface IParticipationToken is IERC20 {
     function mint(address to, uint256 amount) external;
+    function setEducationHub(address eh) external;
 }
 
 interface IMembership {
@@ -20,6 +21,9 @@ interface IMembership {
 
 /*────────────────── EducationHub ─────────────────*/
 contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
+    /*────────── Constants ─────────*/
+    bytes4 public constant MODULE_ID = 0x45445548; /* "EDUH" */
+
     /*────────── Errors ─────────*/
     error ZeroAddress();
     error InvalidString();
@@ -43,10 +47,10 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
     mapping(address => mapping(uint256 => uint256)) private _progress;
     uint256 public nextModuleId;
 
-    // roleId to allowed   (creator privilege)
+    // roleId to allowed (creator privilege)
     mapping(bytes32 => bool) public isCreatorRole;
 
-    IParticipationToken2 public token;
+    IParticipationToken public token;
     IMembership public membership;
 
     /*────────── Events ─────────*/
@@ -55,8 +59,8 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
     event ModuleRemoved(uint256 indexed id);
     event ModuleCompleted(uint256 indexed id, address indexed learner);
     event CreatorRoleUpdated(bytes32 indexed role, bool enabled);
-    /*────────── Initialiser ────────*/
 
+    /*────────── Initialiser ────────*/
     function initialize(address tokenAddr, address membershipAddr, bytes32[] calldata creatorRoleIds)
         external
         initializer
@@ -66,7 +70,7 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
         __ReentrancyGuard_init();
         __Pausable_init();
 
-        token = IParticipationToken2(tokenAddr);
+        token = IParticipationToken(tokenAddr);
         membership = IMembership(membershipAddr);
 
         for (uint256 i; i < creatorRoleIds.length; ++i) {
@@ -86,7 +90,7 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
         _;
     }
 
-    /*────────── Module CRUD ────────*/
+    /*────────── Module CRUD ────────*/
     function createModule(string calldata ipfsHash, uint256 payout, uint8 correctAnswer)
         external
         onlyCreator
@@ -153,13 +157,19 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
         return _isCompleted(learner, id);
     }
 
-    /*────────── Admin Guard rails ─────*/
+    /*────────── Admin Guard rails ─────────*/
     function pause() external onlyOwner {
         _pause();
     }
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    /*────────── Creator Role Management ───────*/
+    function setCreatorRole(bytes32 role, bool enabled) external onlyOwner {
+        isCreatorRole[role] = enabled;
+        emit CreatorRoleUpdated(role, enabled);
     }
 
     /*────────── Internal utils ───────*/
