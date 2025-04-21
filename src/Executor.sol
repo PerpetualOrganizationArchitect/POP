@@ -8,22 +8,21 @@ import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 interface IExecutor {
-    struct Call { address target; uint256 value; bytes data; }
+    struct Call {
+        address target;
+        uint256 value;
+        bytes data;
+    }
+
     function execute(uint256 proposalId, Call[] calldata batch) external;
 }
 
 /**
  * @title Executor
- * @notice Batch‑executor behind an UpgradeableBeacon.  
+ * @notice Batch‑executor behind an UpgradeableBeacon.
  *         Exactly **one** governor address is authorised to trigger `execute`.
  */
-contract Executor is
-    Initializable,
-    OwnableUpgradeable,
-    PausableUpgradeable,
-    ReentrancyGuardUpgradeable,
-    IExecutor
-{
+contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable, IExecutor {
     /* ─────────── Errors ─────────── */
     error UnauthorizedCaller();
     error CallFailed(uint256 index, bytes lowLevelData);
@@ -36,7 +35,7 @@ contract Executor is
     uint8 public constant MAX_CALLS_PER_BATCH = 20;
 
     /* ─────────── Storage ─────────── */
-    address public allowedCaller;          // sole authorised governor
+    address public allowedCaller; // sole authorised governor
 
     /* ─────────── Events ─────────── */
     event CallerSet(address indexed caller);
@@ -63,33 +62,34 @@ contract Executor is
     }
 
     /* ─────────── Batch execution ─────────── */
-    function execute(uint256 proposalId, Call[] calldata batch)
-        external
-        override
-        whenNotPaused
-        nonReentrant
-    {
+    function execute(uint256 proposalId, Call[] calldata batch) external override whenNotPaused nonReentrant {
         if (msg.sender != allowedCaller) revert UnauthorizedCaller();
-        uint len = batch.length;
+        uint256 len = batch.length;
         if (len == 0) revert EmptyBatch();
         if (len > MAX_CALLS_PER_BATCH) revert TooManyCalls();
 
-        for (uint i; i < len; ) {
+        for (uint256 i; i < len;) {
             if (batch[i].target == address(this)) revert TargetSelf();
 
-            (bool ok, bytes memory ret) =
-                batch[i].target.call{value: batch[i].value}(batch[i].data);
+            (bool ok, bytes memory ret) = batch[i].target.call{value: batch[i].value}(batch[i].data);
             if (!ok) revert CallFailed(i, ret);
 
             emit CallExecuted(proposalId, i, batch[i].target, batch[i].value);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
         emit BatchExecuted(proposalId, len);
     }
 
     /* ─────────── Guardian helpers ─────────── */
-    function pause()  external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
 
     /* ─────────── ETH recovery ─────────── */
     function sweep(address payable to) external onlyOwner {
@@ -108,5 +108,5 @@ contract Executor is
     }
 
     /* ─────────── Storage gap ─────────── */
-    uint256[50] private __gap;   // initial deployment gap
+    uint256[50] private __gap; // initial deployment gap
 }
