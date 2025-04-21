@@ -198,8 +198,14 @@ contract DeployerTest is Test {
             address participationVotingOwner
         ) = orgRegistry.contractOf(participationVotingContractId);
 
-        assertEq(participationVotingBeaconProxy, participationVotingProxy, "ParticipationVoting BeaconProxy address mismatch");
-        assertEq(participationVotingBeacon, poaManager.getBeacon("ParticipationVoting"), "ParticipationVoting Beacon address mismatch");
+        assertEq(
+            participationVotingBeaconProxy, participationVotingProxy, "ParticipationVoting BeaconProxy address mismatch"
+        );
+        assertEq(
+            participationVotingBeacon,
+            poaManager.getBeacon("ParticipationVoting"),
+            "ParticipationVoting Beacon address mismatch"
+        );
         assertTrue(participationVotingAutoUpgrade, "ParticipationVoting Auto-upgrade should be enabled");
         assertEq(participationVotingOwner, orgOwner, "ParticipationVoting Owner address mismatch");
 
