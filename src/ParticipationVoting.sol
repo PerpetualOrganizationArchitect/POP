@@ -116,6 +116,7 @@ contract ParticipationVoting is Initializable, OwnableUpgradeable, ReentrancyGua
     event QuadraticVotingToggled(bool enabled);
     event ElectionContractSet(address indexed newAddress);
     /* ─────────────────────── Initializer  ────────────────────────────── */
+
     function initialize(
         address _owner,
         address _token,
@@ -344,10 +345,19 @@ contract ParticipationVoting is Initializable, OwnableUpgradeable, ReentrancyGua
         external
         view
         exists(id)
-        returns (uint48 endTs, uint256 totalWeight, bool executed, uint256 options, TokenType tokenType, bool electionEnabled, uint256 electionId)
+        returns (
+            uint48 endTs,
+            uint256 totalWeight,
+            bool executed,
+            uint256 options,
+            TokenType tokenType,
+            bool electionEnabled,
+            uint256 electionId
+        )
     {
         Proposal storage p = _proposals[id];
-        return (p.endTimestamp, p.totalWeight, p.executed, p.options.length, p.tokenType, p.electionEnabled, p.electionId);
+        return
+            (p.endTimestamp, p.totalWeight, p.executed, p.options.length, p.tokenType, p.electionEnabled, p.electionId);
     }
 
     function getOptionVotes(uint256 id, uint16 index) external view exists(id) returns (uint256) {

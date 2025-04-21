@@ -1,9 +1,10 @@
 // SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.20;
 
-/* ─────────── OpenZeppelin v5.3 Upgradeables ─────────── */
+/* OpenZeppelin v5.3 Upgradeables */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 /* ─────────── External Interfaces ─────────── */
@@ -12,379 +13,319 @@ interface IMembership {
     function canVote(address user) external view returns (bool);
 }
 
-interface ITreasury {
-    function sendTokens(address token, address to, uint256 amount) external;
-    function withdrawEther(address payable to, uint256 amount) external;
+interface IExecutor {
+    struct Call {
+        address target;
+        uint256 value;
+        bytes data;
+    }
+
+    function execute(uint256 proposalId, Call[] calldata batch) external;
 }
 
-interface IElections {
-    function createElection(uint256 proposalId) external returns (uint256 electionId);
-    function addCandidate(uint256 proposalId, address candidate, string memory name) external;
-    function concludeElection(uint256 electionId, uint256 winningOption) external;
-}
-
-contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
+/// @notice Direct‑democracy governor: every eligible voter gets **100 points** per proposal
+///         to distribute across options.  _Quorum is weight‑based_.
+contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
     /* ─────────────── Errors ─────────────── */
     error Unauthorized();
     error AlreadyVoted();
     error InvalidProposal();
     error VotingExpired();
     error VotingOpen();
-    error WeightsMustSum100();
-    error InvalidOption();
+    error WeightSumNot100(uint256);
+    error InvalidIndex();
     error LengthMismatch();
     error InvalidWeight();
-    error DurationOverflow();
-    error DuplicateOption();
-    error TooManyVoters();
+    error DurationOutOfRange();
+    error DuplicateIndex();
+    error TooManyOptions();
+    error TooManyCalls();
+    error TargetNotAllowed();
+    error TargetSelf();
+    error EmptyBatch();
+    error ZeroAddress();
 
     /* ───────────── Constants ───────────── */
     bytes4 public constant MODULE_ID = 0x6464766f; /* "ddvo" */
-
-    /* ───────────── Enums ───────────── */
-    enum TokenType {
-        ETHER,
-        ERC20,
-        WRAPPED,
-        CUSTOM
-    }
+    uint8 public constant MAX_OPTIONS = 50;
+    uint8 public constant MAX_CALLS = 20;
+    uint32 public constant MAX_DURATION_MIN = 43_200; /* 30 days */
+    uint32 public constant MIN_DURATION_MIN = 10; /* spam guard */
 
     /* ───────────── Storage ───────────── */
     IMembership public membership;
-    ITreasury public treasury;
-    IElections public elections;
+    IExecutor public executor;
 
-    uint256 public quorumPercentage; // 1‑100
+    mapping(address => bool) public allowedTarget; // executor allow‑list
+    mapping(bytes32 => bool) private _allowedRoles;
+
+    uint8 public quorumPercentage; // 1‑100
 
     struct PollOption {
-        uint256 votes;
+        uint96 votes;
     }
 
     struct Proposal {
-        uint256 totalVotes;
-        uint48 endTimestamp;
-        uint16 payoutTriggerIdx;
-        bool transferEnabled;
-        bool electionEnabled;
-        TokenType tokenType;
-        address payable recipient;
-        address transferToken;
-        uint256 amount;
+        uint128 totalWeight; // each voter adds exactly 100
+        uint64 endTimestamp;
         PollOption[] options;
         mapping(address => bool) hasVoted;
+        IExecutor.Call[][] batches; // winner batch forwarded to executor
     }
 
     Proposal[] private _proposals;
-    mapping(bytes32 => bool) private _allowedRoles;
 
     /* ───────────── Events ───────────── */
-    event RoleAllowed(bytes32 role);
-    event NewProposal(
-        uint256 indexed proposalId,
-        string ipfsHash,
-        uint48 endTimestamp,
-        uint48 creationTimestamp,
-        uint16 payoutTriggerIdx,
-        address recipient,
-        uint256 amount,
-        bool transferEnabled,
-        TokenType tokenType,
-        address transferToken,
-        bool electionEnabled,
-        uint256 electionId
-    );
-    event Voted(uint256 indexed proposalId, address indexed voter, uint16[] optionIndices, uint8[] weights);
-    event PollOptionNames(uint256 indexed proposalId, uint256 indexed optionIndex, string name);
-    event WinnerAnnounced(uint256 indexed proposalId, uint256 winningOptionIndex, bool hasValidWinner);
-    event ElectionContractSet(address indexed electionContract);
-    event VotesCleaned(uint256 indexed proposalId, uint256 count);
-
+    event RoleSet(bytes32 role, bool allowed);
+    event NewProposal(uint256 indexed id, string ipfsCID, uint64 endTs, uint64 createdAt);
+    event PollOptionNames(uint256 indexed id, uint256 indexed idx, string name);
+    event VoteCast(uint256 indexed id, address indexed voter, uint16[] idxs, uint8[] weights);
+    event Winner(uint256 indexed id, uint256 winningIdx, bool valid);
+    event ExecutorUpdated(address newExecutor);
+    event TargetAllowed(address target, bool allowed);
+    event ProposalCleaned(uint256 indexed id, uint256 cleaned);
+    event QuorumPercentageSet(uint8 newQuorumPct);
     /* ─────────── Initialiser ─────────── */
+
     constructor() initializer {}
 
-
     function initialize(
-        address _owner,
-        address _membership,
-        bytes32[] calldata roleHashes, // hashed roleIds
-        address _treasuryAddress,
-        uint256 _quorumPercentage
+        address owner_,
+        address membership_,
+        address executor_,
+        bytes32[] calldata initialRoles,
+        address[] calldata initialTargets,
+        uint8 quorumPct
     ) external initializer {
-        require(_owner != address(0), "owner=0");
-        __Ownable_init(_owner);
+        if (owner_ == address(0) || membership_ == address(0) || executor_ == address(0)) {
+            revert ZeroAddress();
+        }
+        require(quorumPct > 0 && quorumPct <= 100, "quorum");
+
+        __Ownable_init(owner_);
+        __Pausable_init();
         __ReentrancyGuard_init();
 
-        membership = IMembership(_membership);
-        treasury = ITreasury(_treasuryAddress);
-        quorumPercentage = _quorumPercentage;
+        membership = IMembership(membership_);
+        executor = IExecutor(executor_);
+        quorumPercentage = quorumPct;
 
-        for (uint256 i; i < roleHashes.length; ++i) {
-            _allowedRoles[roleHashes[i]] = true;
-            emit RoleAllowed(roleHashes[i]);
+        for (uint256 i; i < initialRoles.length; ++i) {
+            _allowedRoles[initialRoles[i]] = true;
+            emit RoleSet(initialRoles[i], true);
+        }
+        for (uint256 i; i < initialTargets.length; ++i) {
+            allowedTarget[initialTargets[i]] = true;
+            emit TargetAllowed(initialTargets[i], true);
         }
     }
 
-    /* ─────────────────────────────── Modifiers ─────────────────────────────── */
-    modifier onlyAllowedRole() {
-        bytes32 roleHash = membership.roleOf(msg.sender);
-        if (!_allowedRoles[roleHash]) revert Unauthorized();
+    /* ────────── Guardian helpers ────────── */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    /* ─────────── Governance setters ─────────── */
+    function setExecutor(address newExec) external onlyOwner {
+        if (newExec == address(0)) revert ZeroAddress();
+        executor = IExecutor(newExec);
+        emit ExecutorUpdated(newExec);
+    }
+
+    function setRoleAllowed(bytes32 role, bool allowed) external onlyOwner {
+        _allowedRoles[role] = allowed;
+        emit RoleSet(role, allowed);
+    }
+
+    function setTargetAllowed(address target, bool allowed) external onlyOwner {
+        allowedTarget[target] = allowed;
+        emit TargetAllowed(target, allowed);
+    }
+
+    function setQuorumPercentage(uint8 newQuorumPct) external onlyOwner {
+        require(newQuorumPct > 0 && newQuorumPct <= 100, "quorum");
+        quorumPercentage = newQuorumPct;
+        emit QuorumPercentageSet(newQuorumPct);
+    }
+
+    /* ───────────── Modifiers ───────────── */
+    modifier onlyCreator() {
+        if (!_allowedRoles[membership.roleOf(msg.sender)]) revert Unauthorized();
         _;
     }
 
-    modifier proposalExists(uint256 id) {
+    modifier exists(uint256 id) {
         if (id >= _proposals.length) revert InvalidProposal();
         _;
     }
 
-    modifier whenNotExpired(uint256 id) {
+    modifier notExpired(uint256 id) {
         if (block.timestamp > _proposals[id].endTimestamp) revert VotingExpired();
         _;
     }
 
-    modifier whenExpired(uint256 id) {
+    modifier isExpired(uint256 id) {
         if (block.timestamp <= _proposals[id].endTimestamp) revert VotingOpen();
         _;
     }
 
-    /* ─────────────────────────── Proposal Creation ─────────────────────────── */
+    /* ────────── Proposal Creation ────────── */
     function createProposal(
-        string memory ipfsHash,
-        uint256 minutesDuration,
-        string[] memory optionNames,
-        uint16 payoutTriggerIdx,
-        address payable recipient,
-        uint256 amount,
-        bool transferEnabled,
-        TokenType tokenType,
-        address transferToken,
-        bool electionEnabled,
-        address[] memory candidateAddresses,
-        string[] memory candidateNames
-    ) external onlyAllowedRole {
-        if (candidateAddresses.length != candidateNames.length) revert LengthMismatch();
-        if (optionNames.length > type(uint16).max) revert LengthMismatch();
+        string calldata ipfsCID,
+        uint32 minutesDuration,
+        string[] calldata optionNames,
+        IExecutor.Call[][] calldata optionBatches
+    ) external onlyCreator whenNotPaused {
+        if (optionNames.length == 0 || optionNames.length != optionBatches.length) {
+            revert LengthMismatch();
+        }
+        if (optionNames.length > MAX_OPTIONS) revert TooManyOptions();
+        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) {
+            revert DurationOutOfRange();
+        }
 
-        uint48 endTs = uint48(block.timestamp + minutesDuration * 1 minutes);
-        if (endTs > type(uint48).max) revert DurationOverflow();
-
+        uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
         Proposal storage p = _proposals.push();
         p.endTimestamp = endTs;
-        p.payoutTriggerIdx = payoutTriggerIdx;
-        p.recipient = recipient;
-        p.amount = amount;
-        p.transferEnabled = transferEnabled;
-        p.transferToken = transferToken;
-        p.tokenType = tokenType;
-        p.electionEnabled = electionEnabled;
 
-        uint256 proposalId = _proposals.length - 1;
+        uint256 id = _proposals.length - 1;
+        for (uint256 i; i < optionNames.length; ++i) {
+            if (optionBatches[i].length == 0) revert EmptyBatch();
+            if (optionBatches[i].length > MAX_CALLS) revert TooManyCalls();
 
-        for (uint256 i; i < optionNames.length;) {
+            for (uint256 j; j < optionBatches[i].length; ++j) {
+                if (!allowedTarget[optionBatches[i][j].target]) revert TargetNotAllowed();
+                if (optionBatches[i][j].target == address(this)) revert TargetSelf();
+            }
             p.options.push(PollOption(0));
-            emit PollOptionNames(proposalId, i, optionNames[i]);
-            unchecked {
-                ++i;
-            }
+            p.batches.push(optionBatches[i]);
+            emit PollOptionNames(id, i, optionNames[i]);
         }
-
-        uint256 electionId;
-        if (electionEnabled) {
-            electionId = elections.createElection(proposalId);
-
-            for (uint256 i = 0; i < candidateAddresses.length;) {
-                elections.addCandidate(proposalId, candidateAddresses[i], candidateNames[i]);
-                unchecked {
-                    ++i;
-                }
-            }
-        }
-
-        emit NewProposal(
-            proposalId,
-            ipfsHash,
-            endTs,
-            uint48(block.timestamp),
-            payoutTriggerIdx,
-            recipient,
-            amount,
-            transferEnabled,
-            tokenType,
-            transferToken,
-            electionEnabled,
-            electionId
-        );
+        emit NewProposal(id, ipfsCID, endTs, uint64(block.timestamp));
     }
 
-    /* ──────────────────────────────── Voting ───────────────────────────────── */
-    function vote(uint256 _proposalId, uint16[] memory _optionIndices, uint8[] memory _weights)
+    /* ─────────────── Voting ─────────────── */
+    function vote(uint256 id, uint16[] calldata idxs, uint8[] calldata weights)
         external
-        proposalExists(_proposalId)
-        whenNotExpired(_proposalId)
+        exists(id)
+        notExpired(id)
+        whenNotPaused
     {
-        if (_optionIndices.length != _weights.length) revert LengthMismatch();
-
+        if (idxs.length != weights.length) revert LengthMismatch();
         if (!membership.canVote(msg.sender)) revert Unauthorized();
 
-        Proposal storage p = _proposals[_proposalId];
+        Proposal storage p = _proposals[id];
         if (p.hasVoted[msg.sender]) revert AlreadyVoted();
 
-        // ensure indices are unique
-        for (uint256 i; i < _optionIndices.length; ++i) {
-            for (uint256 j = i + 1; j < _optionIndices.length; ++j) {
-                if (_optionIndices[i] == _optionIndices[j]) revert DuplicateOption();
-            }
-        }
+        uint256 seen;
+        uint256 sum;
+        uint256 len = idxs.length;
 
-        uint256 weightSum;
-        for (uint256 i; i < _weights.length;) {
-            uint256 w = _weights[i];
-            if (w > 100) revert InvalidWeight();
+        for (uint256 i; i < len; ++i) {
+            uint16 ix = idxs[i];
+            if (ix >= p.options.length) revert InvalidIndex();
+            if ((seen >> ix) & 1 == 1) revert DuplicateIndex();
+            seen |= 1 << ix;
+
+            uint8 wt = weights[i];
+            if (wt > 100) revert InvalidWeight();
             unchecked {
-                weightSum += w;
-                ++i;
+                sum += wt;
             }
         }
-        if (weightSum != 100) revert WeightsMustSum100();
+        if (sum != 100) revert WeightSumNot100(sum);
 
         p.hasVoted[msg.sender] = true;
         unchecked {
-            ++p.totalVotes;
-        }
+            p.totalWeight += 100;
+        } // each voter contributes 100
 
-        for (uint256 i; i < _optionIndices.length;) {
-            uint256 option = _optionIndices[i];
-            if (option >= p.options.length) revert InvalidOption();
-            p.options[option].votes += _weights[i];
+        for (uint256 i; i < len; ++i) {
             unchecked {
-                ++i;
+                p.options[idxs[i]].votes += uint96(weights[i]);
             }
         }
-
-        emit Voted(_proposalId, msg.sender, _optionIndices, _weights);
+        emit VoteCast(id, msg.sender, idxs, weights);
     }
 
-    /* ─────────────────────────── Finalize & Payout ─────────────────────────── */
-    function announceWinner(uint256 _proposalId)
+    /* ─────────── Finalise & Execute ─────────── */
+    function announceWinner(uint256 id)
         external
         nonReentrant
-        proposalExists(_proposalId)
-        whenExpired(_proposalId)
+        exists(id)
+        isExpired(id)
+        whenNotPaused
         returns (uint256 winner, bool valid)
     {
-        (winner, valid) = _getWinner(_proposalId);
-        Proposal storage p = _proposals[_proposalId];
-
-        if (valid && p.transferEnabled && winner == p.payoutTriggerIdx) {
-            if (p.tokenType == TokenType.ETHER) {
-                treasury.withdrawEther(p.recipient, p.amount);
-            } else {
-                treasury.sendTokens(p.transferToken, p.recipient, p.amount);
+        (winner, valid) = _calcWinner(id);
+        if (valid) {
+            IExecutor.Call[] storage batch = _proposals[id].batches[winner];
+            for (uint256 i; i < batch.length; ++i) {
+                if (!allowedTarget[batch[i].target]) revert TargetNotAllowed();
             }
+            executor.execute(id, batch);
         }
-
-        if (p.electionEnabled && valid) {
-            elections.concludeElection(_proposalId, winner);
-        }
-
-        emit WinnerAnnounced(_proposalId, winner, valid);
+        emit Winner(id, winner, valid);
     }
 
-    /* ────────────────────────────── View Helpers ───────────────────────────── */
-    function _getWinner(uint256 _proposalId) internal view returns (uint256 winningOption, bool hasValidWinner) {
-        Proposal storage p = _proposals[_proposalId];
-        if (p.totalVotes == 0) return (0, false);
-
-        uint256 highestVotes;
-        uint256 len = p.options.length;
-        for (uint256 i; i < len;) {
-            uint256 v = p.options[i].votes;
-            if (v > highestVotes) {
-                highestVotes = v;
-                winningOption = i;
-                hasValidWinner = highestVotes > p.totalVotes * quorumPercentage;
-            }
-            unchecked {
-                ++i;
-            }
-        }
-    }
-
-    function getProposal(uint256 id)
-        external
-        view
-        proposalExists(id)
-        returns (
-            uint256 totalVotes,
-            uint48 endTimestamp,
-            uint16 payoutTriggerIdx,
-            address payable recipient,
-            uint256 amount,
-            bool transferEnabled,
-            address transferToken,
-            TokenType tokenType,
-            bool electionEnabled,
-            uint256 optionsCount
-        )
-    {
+    /**
+     * @notice Delete heavy storage of an expired proposal to save refund gas. 
+     *  Anyone can call, but cap batch size to avoid OOG.
+     */
+    function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
         Proposal storage p = _proposals[id];
-        return (
-            p.totalVotes,
-            p.endTimestamp,
-            p.payoutTriggerIdx,
-            p.recipient,
-            p.amount,
-            p.transferEnabled,
-            p.transferToken,
-            p.tokenType,
-            p.electionEnabled,
-            p.options.length
-        );
+        require(p.batches.length > 0 || voters.length > 0, "nothing");
+        uint256 cleaned;
+        for (uint256 i; i < voters.length && i < 4_000; ++i) {
+            // 4k ≈ refund cap
+            if (p.hasVoted[voters[i]]) {
+                delete p.hasVoted[voters[i]];
+                unchecked {
+                    ++cleaned;
+                }
+            }
+        }
+        if (cleaned == 0 && p.batches.length > 0) {
+            delete p.batches; // one‑shot after first call
+        }
+        emit ProposalCleaned(id, cleaned);
     }
 
-    function getOptionVotes(uint256 id, uint256 option) external view proposalExists(id) returns (uint256) {
+    /* ───────────── View helpers ───────────── */
+    function _calcWinner(uint256 id) internal view returns (uint256 win, bool ok) {
         Proposal storage p = _proposals[id];
-        if (option >= p.options.length) revert InvalidOption();
-        return p.options[option].votes;
+        uint96 high;
+        uint96 second;
+        for (uint256 i; i < p.options.length; ++i) {
+            uint96 v = p.options[i].votes;
+            if (v > high) {
+                second = high;
+                high = v;
+                win = i;
+            } else if (v > second) {
+                second = v;
+            }
+        }
+        ok = (uint256(high) * 100 > uint256(p.totalWeight) * quorumPercentage) && (high > second);
     }
 
     function proposalsCount() external view returns (uint256) {
         return _proposals.length;
     }
 
-    /* ───────────────────────────── Cleanup Helper ───────────────────────────── */
-    /**
-     * @notice Deletes `hasVoted` flags after a proposal ends to reclaim gas (EIP‑3529).
-     *         Gas refunds are capped to 20 percent of tx.gasUsed. Keep batches ≤4 000.
-     * @param voters list of addresses to delete
-     */
-    function cleanupVotes(uint256 id, address[] calldata voters) external proposalExists(id) whenExpired(id) {
-        if (voters.length > 4_000) revert TooManyVoters();
-        Proposal storage p = _proposals[id];
-
-        uint256 cleaned;
-        for (uint256 i; i < voters.length;) {
-            delete p.hasVoted[voters[i]];
-            unchecked {
-                ++i;
-                ++cleaned;
-            }
-        }
-        emit VotesCleaned(id, cleaned);
-    }
-
-    /* ─────────────────────────── External Management ───────────────────────── */
-    function setElectionsContract(address _elections) external {
-        if (address(elections) != address(0)) {
-            _checkOwner();
-        }
-        elections = IElections(_elections);
-        emit ElectionContractSet(_elections);
-    }
-
-    /* ───────────────────────────── Upgrade Helpers ─────────────────────────── */
+    /* ───────────── Version ───────────── */
     function version() external pure returns (string memory) {
         return "v1";
     }
 
-    uint256[49] private __gap;
+    function moduleId() external pure returns (bytes4) {
+        return MODULE_ID;
+    }
+
+    /* ───────────── Storage gap ───────────── */
+    uint256[50] private __gap; // storage gap
 }
