@@ -94,18 +94,28 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
     }
 
     /*──────── Admin setters ───────*/
-    function setTaskManager(address tm) external onlyExecutor {
-        if (taskManager != address(0)) revert AlreadySet();
+    function setTaskManager(address tm) external {
         if (tm == address(0)) revert InvalidAddress();
-        taskManager = tm;
-        emit TaskManagerSet(tm);
+        if (taskManager == address(0)) {
+            taskManager = tm;
+            emit TaskManagerSet(tm);
+        } else {
+            if (_msgSender() != executor) revert Unauthorized();
+            taskManager = tm;
+            emit TaskManagerSet(tm);
+        }
     }
 
-    function setEducationHub(address eh) external onlyExecutor {
-        if (educationHub != address(0)) revert AlreadySet();
+    function setEducationHub(address eh) external {
         if (eh == address(0)) revert InvalidAddress();
-        educationHub = eh;
-        emit EducationHubSet(eh);
+        if (educationHub == address(0)) {
+            educationHub = eh;
+            emit EducationHubSet(eh);
+        } else {
+            if (_msgSender() != executor) revert Unauthorized();
+            educationHub = eh;
+            emit EducationHubSet(eh);
+        }
     }
 
     /*────── Mint by authorised modules ─────*/

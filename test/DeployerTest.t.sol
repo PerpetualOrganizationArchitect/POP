@@ -120,7 +120,6 @@ contract DeployerTest is Test {
             orgOwner,
             "Hybrid DAO",
             accountRegProxy,
-            address(0), // treasury unused in current flow
             true // auto‑upgrade
         );
 

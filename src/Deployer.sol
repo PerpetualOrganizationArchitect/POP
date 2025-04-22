@@ -1,22 +1,22 @@
 // SPDX‑License‑Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.20;
 
-/*────────────── OpenZeppelin ─────────────*/
+/*───────────────────────────  OpenZeppelin  ───────────────────────────*/
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-/*────────────── Local deps ───────────────*/
+/*────────────────────────────── Core deps ──────────────────────────────*/
 import "./OrgRegistry.sol";
 
-/*──────────── External manager ───────────*/
+/*──────────────────── External management contracts ────────────────────*/
 interface IPoaManager {
     function getBeacon(string calldata) external view returns (address);
     function getCurrentImplementation(string calldata) external view returns (address);
 }
 
-/*──────────── Module hooks ───────────────*/
-interface INFTMembership {
+/*────────────────────── Module‑specific hooks ──────────────────────────*/
+interface IMembership {
     function setQuickJoin(address) external;
 }
 
@@ -25,250 +25,267 @@ interface IParticipationToken {
     function setEducationHub(address) external;
 }
 
-/*── Executor admin interface (setCaller) ─*/
 interface IExecutorAdmin {
     function setCaller(address) external;
 }
 
-/*── HybridVoting initializer selector ────*/
+/*── init‑selector helpers (reduce bytecode & safety) ────────────────────*/
 interface IHybridVotingInit {
     function initialize(
-        address owner_, // multisig / DAO owner
-        address membership_, // NFT membership address
-        address token_, // participation token
-        address executor_, // batch‑executor
-        bytes32[] calldata roleHashes,
-        address[] calldata initialTargets,
+        address membership_,
+        address token_,
+        address executor_,
+        bytes32[] calldata roles,
+        address[] calldata targets,
         uint8 quorumPct,
-        uint8 ddSharePct,
+        uint8 ddSplit,
         bool quadratic,
-        uint256 minBalance
+        uint256 minBal
     ) external;
 }
 
-/*──────────────────── Deployer ───────────────────*/
-contract Deployer is Ownable(msg.sender) {
-    /*──────── Custom errors ────────*/
-    error InvalidAddress();
-    error EmptyInit();
-    error UnsupportedType();
-    error BeaconProbeFail();
-    error OrgExistsMismatch();
+interface IParticipationVotingInit {
+    function initialize(
+        address executor_,
+        address membership_,
+        address token_,
+        bytes32[] calldata roles,
+        address[] calldata targets,
+        uint8 quorumPct,
+        bool quadratic,
+        uint256 minBal
+    ) external;
+}
 
-    /*──────── Immutables ───────────*/
+/*────────────────────────────  Errors  ───────────────────────────────*/
+error InvalidAddress();
+error EmptyInit();
+error UnsupportedType();
+error BeaconProbeFail();
+error OrgExistsMismatch();
+
+/*───────────────────────────  Deployer  ───────────────────────────────*/
+contract Deployer is Ownable(msg.sender) {
+    /* immutables */
     IPoaManager public immutable poaManager;
     OrgRegistry public immutable orgRegistry;
 
+    /* Local definition of OrgInfo struct to match OrgRegistry */
+    struct OrgInfo {
+        address executor;
+        uint32 contractCount;
+        bool bootstrap;
+        bool exists;
+        string metaCID;
+    }
+
+    /* events */
     event ContractDeployed(
-        bytes32 indexed orgId, string contractType, address proxy, address beacon, bool autoUpgrade, address orgOwner
+        bytes32 indexed orgId, bytes32 indexed typeId, address proxy, address beacon, bool autoUpgrade, address owner
     );
 
+    /* constructor */
     constructor(address _poaManager, address _orgRegistry) {
         if (_poaManager == address(0) || _orgRegistry == address(0)) revert InvalidAddress();
         poaManager = IPoaManager(_poaManager);
         orgRegistry = OrgRegistry(_orgRegistry);
     }
 
-    /*──────────────── Core factory ───────────────*/
-    function _deployContract(
+    /*──────────────────────── INTERNAL CORE ───────────────────────*/
+    function _deploy(
         bytes32 orgId,
-        string memory contractType,
-        address orgOwner,
+        string memory typeName, // human string
+        address moduleOwner, // normally the org executor
         bool autoUpgrade,
-        address customImpl,
-        bytes memory initData
+        address customImpl, // optional bespoke logic
+        bytes memory initData,
+        bool lastRegister // only TRUE for *final* owner‑side registration
     ) internal returns (address proxy) {
-        if (bytes(contractType).length == 0) revert UnsupportedType();
-        if (orgOwner == address(0)) revert InvalidAddress();
         if (initData.length == 0) revert EmptyInit();
 
-        /*── 1. Beacon ──*/
+        /* 1. beacon handling */
         address beacon;
         if (autoUpgrade) {
             if (customImpl != address(0)) revert UnsupportedType();
-            beacon = poaManager.getBeacon(contractType);
+            beacon = poaManager.getBeacon(typeName);
             if (beacon == address(0)) revert UnsupportedType();
-
+            // paranoia‑check – the PoaManager must own the beacon
             (bool ok,) = beacon.staticcall(abi.encodeWithSignature("implementation()"));
             if (!ok || Ownable(beacon).owner() != address(poaManager)) revert BeaconProbeFail();
         } else {
-            address impl = customImpl == address(0) ? poaManager.getCurrentImplementation(contractType) : customImpl;
+            address impl = (customImpl == address(0)) ? poaManager.getCurrentImplementation(typeName) : customImpl;
             if (impl == address(0)) revert UnsupportedType();
-
-            beacon = address(new UpgradeableBeacon(impl, orgOwner));
+            beacon = address(new UpgradeableBeacon(impl, moduleOwner));
         }
 
-        /*── 2. Proxy ──*/
+        /* 2. create proxy */
         proxy = address(new BeaconProxy(beacon, initData));
 
-        /*── 3. Registry ──*/
-        orgRegistry.registerOrgContract(orgId, contractType, proxy, beacon, autoUpgrade, orgOwner);
-        emit ContractDeployed(orgId, contractType, proxy, beacon, autoUpgrade, orgOwner);
+        /* 3. book‑keeping in OrgRegistry */
+        bytes32 typeId = keccak256(bytes(typeName));
+        orgRegistry.registerOrgContract(orgId, typeId, proxy, beacon, autoUpgrade, moduleOwner, lastRegister);
+
+        emit ContractDeployed(orgId, typeId, proxy, beacon, autoUpgrade, moduleOwner);
     }
 
-    /*──────────── Membership ─────────────*/
-    function deployMembership(
+    /*══════════════  MODULE‑SPECIFIC DEPLOY HELPERS  ═════════════=*/
+    /*---------  Executor  (first, we need its address everywhere) ---------*/
+    function _deployExecutor(bytes32 orgId, address executorEOA, bool autoUp, address customImpl)
+        internal
+        returns (address execProxy)
+    {
+        bytes memory init = abi.encodeWithSignature("initialize(address)", executorEOA);
+        execProxy = _deploy(orgId, "Executor", executorEOA, autoUp, customImpl, init, false);
+    }
+
+    /*---------  Membership NFT  ---------*/
+    function _deployMembership(
         bytes32 orgId,
-        address orgOwner,
-        string calldata orgName,
-        bool autoUpgrade,
-        address customImpl,
-        bool isNFT
-    ) public returns (address proxy) {
-        if (bytes(orgName).length == 0) revert UnsupportedType();
+        address executorAddr,
+        string memory orgName,
+        bool autoUp,
+        address customImpl
+    ) internal returns (address membershipProxy) {
+        /* build minimal default role‑set */
+        string[] memory names = new string[](2);
+        string[] memory images = new string[](2);
+        bool[] memory canVote = new bool[](2);
 
-        bytes memory init = isNFT
-            ? _membershipInit(orgOwner, orgName)
-            : abi.encodeWithSignature("initialize(address,string)", orgOwner, orgName);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
 
-        proxy = _deployContract(orgId, "Membership", orgOwner, autoUpgrade, customImpl, init);
-        return proxy;
-    }
+        // Set meaningful image URIs for each role
+        images[0] = "ipfs://default-role-image"; // Placeholder URI for default role
+        images[1] = "ipfs://executive-role-image"; // Placeholder URI for executive role
 
-    function _membershipInit(address owner_, string calldata name_) private pure returns (bytes memory) {
-        /* default & executive roles with voting rights */
-        string[] memory roleNames = new string[](2);
-        string[] memory roleImages = new string[](2);
-        bool[] memory roleVote = new bool[](2);
-
-        roleNames[0] = "DEFAULT";
-        roleNames[1] = "EXECUTIVE";
-        roleImages[0] = "https://example.com/default.png";
-        roleImages[1] = "https://example.com/executive.png";
-        roleVote[0] = true;
-        roleVote[1] = true;
+        canVote[0] = true;
+        canVote[1] = true;
 
         bytes32[] memory execRoles = new bytes32[](1);
         execRoles[0] = keccak256("EXECUTIVE");
 
-        return abi.encodeWithSignature(
+        bytes memory init = abi.encodeWithSignature(
             "initialize(address,string,string[],string[],bool[],bytes32[])",
-            owner_,
-            name_,
-            roleNames,
-            roleImages,
-            roleVote,
+            executorAddr,
+            orgName,
+            names,
+            images,
+            canVote,
             execRoles
         );
+
+        membershipProxy = _deploy(orgId, "Membership", executorAddr, autoUp, customImpl, init, false);
     }
 
-    /*──────────── QuickJoin ─────────────*/
-    function deployQuickJoin(
+    /*---------  QuickJoin  ---------*/
+    function _deployQuickJoin(
         bytes32 orgId,
-        address orgOwner,
+        address executorAddr,
         address membership,
         address registry,
-        address master,
-        bool autoUpgrade,
+        address masterDeploy,
+        bool autoUp,
         address customImpl
-    ) public returns (address proxy) {
+    ) internal returns (address qjProxy) {
         bytes memory init = abi.encodeWithSignature(
-            "initialize(address,address,address,address)", orgOwner, membership, registry, master
+            "initialize(address,address,address,address)", executorAddr, membership, registry, masterDeploy
         );
-        proxy = _deployContract(orgId, "QuickJoin", orgOwner, autoUpgrade, customImpl, init);
-        INFTMembership(membership).setQuickJoin(proxy);
-        return proxy;
+        qjProxy = _deploy(orgId, "QuickJoin", executorAddr, autoUp, customImpl, init, false);
+        IMembership(membership).setQuickJoin(qjProxy);
     }
 
-    /*──────────── ParticipationToken ─────────────*/
-    function deployParticipationToken(
+    /*---------  ParticipationToken  ---------*/
+    function _deployPT(
         bytes32 orgId,
-        address orgOwner,
-        string memory tokenName,
-        string memory tokenSymbol,
-        address membership,
-        bool autoUpgrade,
-        address customImpl
-    ) public returns (address proxy) {
-        bytes memory init =
-            abi.encodeWithSignature("initialize(string,string,address)", tokenName, tokenSymbol, membership);
-        proxy = _deployContract(orgId, "ParticipationToken", orgOwner, autoUpgrade, customImpl, init);
-        return proxy;
-    }
-
-    /*──────────── TaskManager ─────────────*/
-    function deployTaskManager(
-        bytes32 orgId,
-        address orgOwner,
-        address token,
-        address membership,
-        bytes32[] memory creatorRoles,
-        bool autoUpgrade,
-        address customImpl
-    ) public returns (address proxy) {
-        bytes memory init =
-            abi.encodeWithSignature("initialize(address,address,bytes32[])", token, membership, creatorRoles);
-        proxy = _deployContract(orgId, "TaskManager", orgOwner, autoUpgrade, customImpl, init);
-        return proxy;
-    }
-
-    /*──────────── EducationHub ─────────────*/
-    function deployEducationHub(
-        bytes32 orgId,
-        address orgOwner,
-        address membership,
-        address token,
-        bytes32[] memory creatorRoles,
-        bool autoUpgrade,
-        address customImpl
-    ) public returns (address proxy) {
-        bytes memory init =
-            abi.encodeWithSignature("initialize(address,address,bytes32[])", token, membership, creatorRoles);
-        proxy = _deployContract(orgId, "EducationHub", orgOwner, autoUpgrade, customImpl, init);
-        return proxy;
-    }
-
-    /*──────────── Executor (batch caller) ─────────────*/
-    function deployExecutor(bytes32 orgId, address orgOwner, bool autoUpgrade, address customImpl)
-        public
-        returns (address proxy)
-    {
-        bytes memory init = abi.encodeWithSignature("initialize(address)", orgOwner);
-        proxy = _deployContract(orgId, "Executor", orgOwner, autoUpgrade, customImpl, init);
-        return proxy;
-    }
-
-    /*──────────── HybridVoting ─────────────*/
-    function deployHybridVoting(
-        bytes32 orgId,
-        address orgOwner,
-        address membership,
-        address token,
         address executorAddr,
-        bool autoUpgrade,
+        string memory name,
+        string memory symbol,
+        address membership,
+        bool autoUp,
         address customImpl
-    ) public returns (address proxy) {
-        bytes32[] memory roleHashes = new bytes32[](3);
-        roleHashes[0] = keccak256("DEFAULT");
-        roleHashes[1] = keccak256("EXECUTIVE");
-        roleHashes[2] = keccak256("Member");
+    ) internal returns (address ptProxy) {
+        bytes memory init =
+            abi.encodeWithSignature("initialize(address,string,string,address)", executorAddr, name, symbol, membership);
+        ptProxy = _deploy(orgId, "ParticipationToken", executorAddr, autoUp, customImpl, init, false);
+    }
 
-        address[] memory emptyTargets = new address[](0);
+    /*---------  TaskManager  ---------*/
+    function _deployTaskManager(
+        bytes32 orgId,
+        address executorAddr,
+        address token,
+        address membership,
+        bool autoUp,
+        address customImpl
+    ) internal returns (address tmProxy) {
+        bytes32[] memory execOnly = new bytes32[](1);
+        execOnly[0] = keccak256("EXECUTIVE");
+
+        bytes memory init = abi.encodeWithSignature(
+            "initialize(address,address,bytes32[],address)", token, membership, execOnly, executorAddr
+        );
+        tmProxy = _deploy(orgId, "TaskManager", executorAddr, autoUp, customImpl, init, false);
+    }
+
+    /*---------  EducationHub  ---------*/
+    function _deployEducationHub(
+        bytes32 orgId,
+        address executorAddr,
+        address membership,
+        address token,
+        bool autoUp,
+        address customImpl,
+        bool lastRegister // <<< flag propagated to registry
+    ) internal returns (address ehProxy) {
+        bytes32[] memory execOnly = new bytes32[](1);
+        execOnly[0] = keccak256("EXECUTIVE");
+
+        bytes memory init = abi.encodeWithSignature(
+            "initialize(address,address,address,bytes32[])", token, membership, executorAddr, execOnly
+        );
+        ehProxy = _deploy(orgId, "EducationHub", executorAddr, autoUp, customImpl, init, lastRegister);
+    }
+
+    /*---------  HybridVoting  ---------*/
+    function _deployHybridVoting(
+        bytes32 orgId,
+        address executorAddr,
+        address membership,
+        address token,
+        bool autoUp,
+        address customImpl,
+        bool lastRegister
+    ) internal returns (address hvProxy) {
+        bytes32[] memory roles = new bytes32[](3);
+        roles[0] = keccak256("DEFAULT");
+        roles[1] = keccak256("EXECUTIVE");
+        roles[2] = keccak256("Member");
+
+        address[] memory targets = new address[](2);
+        targets[0] = membership;
+        targets[1] = executorAddr;
 
         bytes memory init = abi.encodeWithSelector(
             IHybridVotingInit.initialize.selector,
-            orgOwner,
             membership,
             token,
             executorAddr,
-            roleHashes,
-            emptyTargets,
+            roles,
+            targets,
             50, // quorum %
-            50, // 50‑50 split DD vs participation
-            false, // quadratic disabled by default
-            4 ether // min balance
+            50, // DD/PT split %
+            false,
+            4 ether
         );
-        proxy = _deployContract(orgId, "HybridVoting", orgOwner, autoUpgrade, customImpl, init);
-        return proxy;
+        hvProxy = _deploy(orgId, "HybridVoting", executorAddr, autoUp, customImpl, init, lastRegister);
     }
 
-    /*──────────── Full‑org bundle (updated) ─────────────*/
+    /*════════════════  FULL ORG  DEPLOYMENT  ════════════════*/
     function deployFullOrg(
         bytes32 orgId,
-        address orgOwner,
+        address executorEOA, // multisig / DAO address
         string calldata orgName,
-        address registry,
-        address treasury, // retained for possible future modules
+        address registryAddr, // external username registry
         bool autoUpgrade
     )
         external
@@ -276,57 +293,68 @@ contract Deployer is Ownable(msg.sender) {
             address hybridVoting,
             address executorAddr,
             address membership,
-            address quickjoin,
+            address quickJoin,
             address participationToken,
             address taskManager,
             address educationHub
         )
     {
-        /* ─── 0. ensure org record ─── */
-        if (_orgExists(orgId)) {
-            (address recordedOwner,,,) = orgRegistry.orgOf(orgId);
-            if (recordedOwner != orgOwner) revert OrgExistsMismatch();
+        /* 0. ensure Org exists (or create) */
+        if (orgRegistry.orgCount() == 0 || !_orgExists(orgId)) {
+            orgRegistry.registerOrg(orgId, executorEOA, orgName);
         } else {
-            orgRegistry.registerOrg(orgId, orgOwner, orgName);
+            // Destructure the tuple returned by orgOf
+            (address currentExec,,,,) = orgRegistry.orgOf(orgId);
+            if (currentExec != executorEOA) revert OrgExistsMismatch();
         }
 
-        /* ─── 1. Membership NFT ─── */
-        membership = deployMembership(orgId, orgOwner, orgName, autoUpgrade, address(0), true);
+        /* 1. Executor  */
+        executorAddr = _deployExecutor(orgId, executorEOA, autoUpgrade, address(0));
 
-        /* ─── 2. QuickJoin helper ─── */
-        quickjoin = deployQuickJoin(orgId, orgOwner, membership, registry, address(this), autoUpgrade, address(0));
+        /* 2. Membership NFT */
+        membership = _deployMembership(orgId, executorAddr, orgName, autoUpgrade, address(0));
 
-        /* ─── 3. Participation token ─── */
-        string memory tokenName = string(abi.encodePacked(orgName, " Token"));
-        string memory tokenSymbol = "TKN";
-        participationToken =
-            deployParticipationToken(orgId, orgOwner, tokenName, tokenSymbol, membership, autoUpgrade, address(0));
+        /* 3. QuickJoin */
+        quickJoin =
+            _deployQuickJoin(orgId, executorAddr, membership, registryAddr, address(this), autoUpgrade, address(0));
 
-        /* ─── 4. Executor (temp caller = orgOwner) ─── */
-        executorAddr = deployExecutor(orgId, orgOwner, autoUpgrade, address(0));
+        /* 4. Participation token */
+        string memory tName = string(abi.encodePacked(orgName, " Token"));
+        string memory tSymbol = "PT";
+        participationToken = _deployPT(orgId, executorAddr, tName, tSymbol, membership, autoUpgrade, address(0));
 
-        /* ─── 5. Hybrid governor ─── */
-        hybridVoting =
-            deployHybridVoting(orgId, orgOwner, membership, participationToken, executorAddr, autoUpgrade, address(0));
-
-        /*   tie executor to governor   */
-        IExecutorAdmin(executorAddr).setCaller(hybridVoting);
-
-        /* ─── 6. Task manager & Education hub ─── */
-        bytes32[] memory execRoles = new bytes32[](1);
-        execRoles[0] = keccak256("EXECUTIVE");
-        taskManager =
-            deployTaskManager(orgId, orgOwner, participationToken, membership, execRoles, autoUpgrade, address(0));
+        /* 5. TaskManager */
+        taskManager = _deployTaskManager(orgId, executorAddr, participationToken, membership, autoUpgrade, address(0));
         IParticipationToken(participationToken).setTaskManager(taskManager);
 
-        bytes32[] memory creatorRoles = new bytes32[](1);
-        creatorRoles[0] = keccak256("EXECUTIVE");
-        educationHub =
-            deployEducationHub(orgId, orgOwner, membership, participationToken, creatorRoles, autoUpgrade, address(0));
+        /* 6. EducationHub (no longer the final registration) */
+        educationHub = _deployEducationHub(
+            orgId,
+            executorAddr,
+            membership,
+            participationToken,
+            autoUpgrade,
+            address(0),
+            false // <--- Changed from true to false
+        );
         IParticipationToken(participationToken).setEducationHub(educationHub);
+
+        /* 7. HybridVoting governor (LAST owner-side registration → flips bootstrap) */
+        hybridVoting = _deployHybridVoting(
+            orgId,
+            executorAddr,
+            membership,
+            participationToken,
+            autoUpgrade,
+            address(0),
+            true // <--- Added lastRegister = true here
+        );
+
+        /* link executor to governor */
+        IExecutorAdmin(executorAddr).setCaller(hybridVoting);
     }
 
-    /*──────────── Utilities ────────────*/
+    /*══════════════  UTILITIES  ═════════════=*/
     function getBeaconImplementation(address beacon) external view returns (address impl) {
         (bool ok, bytes memory ret) = beacon.staticcall(abi.encodeWithSignature("implementation()"));
         if (!ok) revert BeaconProbeFail();
@@ -334,7 +362,8 @@ contract Deployer is Ownable(msg.sender) {
     }
 
     function _orgExists(bytes32 id) internal view returns (bool) {
-        (,,, bool exists) = orgRegistry.orgOf(id);
+        // Destructure the tuple to get the exists field (4th element)
+        (,,, bool exists,) = orgRegistry.orgOf(id);
         return exists;
     }
 }
