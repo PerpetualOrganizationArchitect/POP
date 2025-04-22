@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 /* ──────────────────  OpenZeppelin v5.3 Upgradeables  ────────────────── */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
@@ -16,7 +16,7 @@ interface IMembership {
 }
 
 /* ──────────────────  Direct‑democracy governor  ─────────────────────── */
-contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
+contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
     /* ─────────── Errors (same id set) ─────────── */
     error Unauthorized();
     error AlreadyVoted();
@@ -81,19 +81,18 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, PausableUpg
     constructor() initializer {}
 
     function initialize(
-        address owner_,
         address membership_,
         address executor_,
         bytes32[] calldata initialRoles,
         address[] calldata initialTargets,
         uint8 quorumPct
     ) external initializer {
-        if (owner_ == address(0) || membership_ == address(0) || executor_ == address(0)) {
+        if (membership_ == address(0) || executor_ == address(0)) {
             revert ZeroAddress();
         }
         require(quorumPct > 0 && quorumPct <= 100, "quorum");
 
-        __Ownable_init(owner_);
+        __Context_init();
         __Pausable_init();
         __ReentrancyGuard_init();
 
@@ -114,7 +113,7 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, PausableUpg
 
     /* ─────────── Admin (executor‑gated) ─────────── */
     modifier onlyExecutor() {
-        if (msg.sender != address(executor)) revert Unauthorized();
+        if (_msgSender() != address(executor)) revert Unauthorized();
         _;
     }
 
@@ -150,7 +149,9 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, PausableUpg
 
     /* ─────────── Modifiers ─────────── */
     modifier onlyCreator() {
-        if (!_allowedRoles[membership.roleOf(msg.sender)]) revert Unauthorized();
+        if (_msgSender() != address(executor) && !_allowedRoles[membership.roleOf(_msgSender())]) {
+            revert Unauthorized();
+        }
         _;
     }
 
@@ -208,10 +209,10 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, PausableUpg
         whenNotPaused
     {
         if (idxs.length != weights.length) revert LengthMismatch();
-        if (!membership.canVote(msg.sender)) revert Unauthorized();
+        if (_msgSender() != address(executor) && !membership.canVote(_msgSender())) revert Unauthorized();
 
         Proposal storage p = _proposals[id];
-        if (p.hasVoted[msg.sender]) revert AlreadyVoted();
+        if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
         uint256 seen;
         uint256 sum;
@@ -229,7 +230,7 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, PausableUpg
         }
         if (sum != 100) revert WeightSumNot100(sum);
 
-        p.hasVoted[msg.sender] = true;
+        p.hasVoted[_msgSender()] = true;
         unchecked {
             p.totalWeight += 100;
         }
@@ -239,7 +240,7 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, PausableUpg
                 p.options[idxs[i]].votes += uint96(weights[i]);
             }
         }
-        emit VoteCast(id, msg.sender, idxs, weights);
+        emit VoteCast(id, _msgSender(), idxs, weights);
     }
 
     /* ─────────── Finalise & Execute ─────────── */
@@ -256,6 +257,7 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, PausableUpg
 
         if (valid && batch.length > 0) {
             for (uint256 i; i < batch.length; ++i) {
+                if (batch[i].target == address(this)) revert TargetSelf();
                 if (!allowedTarget[batch[i].target]) revert TargetNotAllowed();
             }
             executor.execute(id, batch);
@@ -309,5 +311,5 @@ contract DirectDemocracyVoting is Initializable, OwnableUpgradeable, PausableUpg
         return MODULE_ID;
     }
 
-    uint256[50] private __gap; // storage gap
+    uint256[60] private __gap; // storage gap
 }

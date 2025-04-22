@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 /*  OpenZeppelin v5.3 Upgradeables  */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -17,7 +17,7 @@ interface IMembership {
 import {IExecutor} from "./Executor.sol";
 
 /* ─────────────────── HybridVoting ─────────────────── */
-contract HybridVoting is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
+contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
     /* ─────── Errors ─────── */
     error Unauthorized();
     error AlreadyVoted();
@@ -35,7 +35,6 @@ contract HybridVoting is Initializable, OwnableUpgradeable, PausableUpgradeable,
     error TargetNotAllowed();
     error TargetSelf();
     error ZeroAddress();
-    error MinBalance();
 
     /* ─────── Constants ─────── */
     bytes4 public constant MODULE_ID = 0x68766f74; /* "hfot" */
@@ -98,7 +97,6 @@ contract HybridVoting is Initializable, OwnableUpgradeable, PausableUpgradeable,
     constructor() initializer {}
 
     function initialize(
-        address owner_,
         address membership_,
         address token_,
         address executor_,
@@ -109,7 +107,7 @@ contract HybridVoting is Initializable, OwnableUpgradeable, PausableUpgradeable,
         bool quadratic_,
         uint256 minBalance_
     ) external initializer {
-        if (owner_ == address(0) || membership_ == address(0) || token_ == address(0) || executor_ == address(0)) {
+        if (membership_ == address(0) || token_ == address(0) || executor_ == address(0)) {
             revert ZeroAddress();
         }
 
@@ -117,7 +115,7 @@ contract HybridVoting is Initializable, OwnableUpgradeable, PausableUpgradeable,
         require(ddShare_ <= 100, "split");
         require(minBalance_ > 0, "minBalance");
 
-        __Ownable_init(owner_);
+        __Context_init();
         __Pausable_init();
         __ReentrancyGuard_init();
 
@@ -146,7 +144,7 @@ contract HybridVoting is Initializable, OwnableUpgradeable, PausableUpgradeable,
 
     /* ─────── Governance setters (executor‑gated) ─────── */
     modifier onlyExecutor() {
-        if (msg.sender != address(executor)) revert Unauthorized();
+        if (_msgSender() != address(executor)) revert Unauthorized();
         _;
     }
 
@@ -198,7 +196,9 @@ contract HybridVoting is Initializable, OwnableUpgradeable, PausableUpgradeable,
 
     /* ─────── Helpers & modifiers ─────── */
     modifier onlyCreator() {
-        if (!_allowedRoles[membership.roleOf(msg.sender)]) revert Unauthorized();
+        if (_msgSender() != address(executor) && !_allowedRoles[membership.roleOf(_msgSender())]) {
+            revert Unauthorized();
+        }
         _;
     }
 
@@ -258,12 +258,12 @@ contract HybridVoting is Initializable, OwnableUpgradeable, PausableUpgradeable,
         if (idxs.length != weights.length) revert LengthMismatch();
 
         Proposal storage p = _proposals[id];
-        if (p.hasVoted[msg.sender]) revert AlreadyVoted();
+        if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
         /* collect raw powers */
-        bool hasRole = _allowedRoles[membership.roleOf(msg.sender)];
+        bool hasRole = _allowedRoles[membership.roleOf(_msgSender())];
         uint256 ddRawVoter = hasRole ? 100 : 0; // always 0 or 100
-        uint256 bal = participationToken.balanceOf(msg.sender);
+        uint256 bal = participationToken.balanceOf(_msgSender());
         if (bal < MIN_BAL) bal = 0;
         uint256 ptPower = (bal == 0) ? 0 : (quadraticVoting ? Math.sqrt(bal) : bal);
         uint256 ptRawVoter = ptPower * 100; // raw numerator
@@ -292,9 +292,9 @@ contract HybridVoting is Initializable, OwnableUpgradeable, PausableUpgradeable,
         }
         p.ddTotalRaw += ddRawVoter;
         p.ptTotalRaw += ptRawVoter;
-        p.hasVoted[msg.sender] = true;
+        p.hasVoted[_msgSender()] = true;
 
-        emit VoteCast(id, msg.sender, idxs, weights);
+        emit VoteCast(id, _msgSender(), idxs, weights);
     }
 
     /* ─────── Winner & execution ─────── */
@@ -386,5 +386,5 @@ contract HybridVoting is Initializable, OwnableUpgradeable, PausableUpgradeable,
         return MODULE_ID;
     }
 
-    uint256[50] private __gap;
+    uint256[60] private __gap;
 }

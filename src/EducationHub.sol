@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 /*──────── OpenZeppelin v5.3 Upgradeables ────────*/
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -20,7 +20,7 @@ interface IMembership {
 }
 
 /*────────────────── EducationHub ─────────────────*/
-contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
+contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
     /*────────── Constants ─────────*/
     bytes4 public constant MODULE_ID = 0x45445548; /* "EDUH" */
 
@@ -30,7 +30,8 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
     error InvalidPayout();
     error InvalidAnswer();
     error NotMember();
-    error NotExecutive();
+    error NotCreator();
+    error NotExecutor();
     error ModuleExists();
     error ModuleUnknown();
     error AlreadyCompleted();
@@ -52,6 +53,7 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
 
     IParticipationToken public token;
     IMembership public membership;
+    address public executor; // DAO / Timelock / Governor
 
     /*────────── Events ─────────*/
     event ModuleCreated(uint256 indexed id, string ipfsHash, uint256 payout);
@@ -60,18 +62,32 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
     event ModuleCompleted(uint256 indexed id, address indexed learner);
     event CreatorRoleUpdated(bytes32 indexed role, bool enabled);
 
+    event ExecutorSet(address indexed newExecutor);
+    event TokenSet(address indexed newToken);
+    event MembershipSet(address indexed newMembership);
+
     /*────────── Initialiser ────────*/
-    function initialize(address tokenAddr, address membershipAddr, bytes32[] calldata creatorRoleIds)
-        external
-        initializer
-    {
-        if (tokenAddr == address(0) || membershipAddr == address(0)) revert ZeroAddress();
-        __Ownable_init(_msgSender());
+    function initialize(
+        address tokenAddr,
+        address membershipAddr,
+        address executorAddr,
+        bytes32[] calldata creatorRoleIds
+    ) external initializer {
+        if (tokenAddr == address(0) || membershipAddr == address(0) || executorAddr == address(0)) {
+            revert ZeroAddress();
+        }
+
+        __Context_init();
         __ReentrancyGuard_init();
         __Pausable_init();
 
         token = IParticipationToken(tokenAddr);
         membership = IMembership(membershipAddr);
+        executor = executorAddr;
+
+        emit TokenSet(tokenAddr);
+        emit MembershipSet(membershipAddr);
+        emit ExecutorSet(executorAddr);
 
         for (uint256 i; i < creatorRoleIds.length; ++i) {
             isCreatorRole[creatorRoleIds[i]] = true;
@@ -81,13 +97,54 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
 
     /*────────── Modifiers ─────────*/
     modifier onlyMember() {
-        if (!membership.isMember(_msgSender())) revert NotMember();
+        if (_msgSender() != executor && !membership.isMember(_msgSender())) revert NotMember();
         _;
     }
 
     modifier onlyCreator() {
-        if (!isCreatorRole[membership.roleOf(_msgSender())]) revert NotExecutive();
+        if (_msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())]) revert NotCreator();
         _;
+    }
+
+    modifier onlyExecutor() {
+        if (_msgSender() != executor) revert NotExecutor();
+        _;
+    }
+
+    /*────────── DAO / Admin Setters ───────*/
+    function setExecutor(address newExec) external {
+        if (newExec == address(0)) revert ZeroAddress();
+        if (_msgSender() != executor) revert NotExecutor();
+        executor = newExec;
+        emit ExecutorSet(newExec);
+    }
+
+    function setToken(address newToken) external onlyExecutor {
+        if (newToken == address(0)) revert ZeroAddress();
+        token = IParticipationToken(newToken);
+        emit TokenSet(newToken);
+    }
+
+    function setMembership(address newMembership) external onlyExecutor {
+        if (newMembership == address(0)) revert ZeroAddress();
+        membership = IMembership(newMembership);
+        emit MembershipSet(newMembership);
+    }
+
+    function setCreatorRole(bytes32 role, bool enable) external onlyExecutor {
+        isCreatorRole[role] = enable;
+        emit CreatorRoleUpdated(role, enable);
+    }
+
+    /*────────── Pause Control (executor) ───────*/
+    function pause() external {
+        if (_msgSender() != executor) revert NotExecutor();
+        _pause();
+    }
+
+    function unpause() external {
+        if (_msgSender() != executor) revert NotExecutor();
+        _unpause();
     }
 
     /*────────── Module CRUD ────────*/
@@ -99,11 +156,7 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
         if (bytes(ipfsHash).length == 0) revert InvalidString();
         if (payout == 0) revert InvalidPayout();
 
-        uint256 id;
-        unchecked {
-            id = nextModuleId++;
-        }
-
+        uint256 id = nextModuleId++;
         _modules[id] = Module({
             answerHash: keccak256(abi.encodePacked(correctAnswer)),
             payout: payout,
@@ -130,7 +183,7 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
     }
 
     function removeModule(uint256 id) external onlyCreator whenNotPaused {
-        _module(id);
+        _module(id); // existence check
         delete _modules[id];
         emit ModuleRemoved(id);
     }
@@ -142,8 +195,8 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
         if (keccak256(abi.encodePacked(answer)) != m.answerHash) revert InvalidAnswer();
 
         token.mint(_msgSender(), m.payout);
-
         _setCompleted(_msgSender(), id);
+
         emit ModuleCompleted(id, _msgSender());
     }
 
@@ -155,21 +208,6 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
 
     function hasCompleted(address learner, uint256 id) external view returns (bool) {
         return _isCompleted(learner, id);
-    }
-
-    /*────────── Admin Guard rails ─────────*/
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
-    /*────────── Creator Role Management ───────*/
-    function setCreatorRole(bytes32 role, bool enabled) external onlyOwner {
-        isCreatorRole[role] = enabled;
-        emit CreatorRoleUpdated(role, enabled);
     }
 
     /*────────── Internal utils ───────*/
@@ -197,5 +235,5 @@ contract EducationHub is Initializable, OwnableUpgradeable, ReentrancyGuardUpgra
         return "v1";
     }
 
-    uint256[42] private __gap;
+    uint256[60] private __gap;
 }
