@@ -1,12 +1,12 @@
 // SPDX‑License‑Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.20;
 
-/*────────────────────────── OpenZeppelin Upgradeables ─────────────────────*/
+/*────────────────────────── OpenZeppelin Upgradeables ────────────────────*/
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
-/*──────────────────────────── Interface Stubs ─────────────────────────────*/
+/*───────────────────────── Interface minimal stubs ───────────────────────*/
 interface IMembershipNFT {
     function quickJoinMint(address newUser) external;
 }
@@ -16,77 +16,96 @@ interface IUniversalAccountRegistry {
     function registerAccountQuickJoin(string memory username, address newUser) external;
 }
 
-contract QuickJoin is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
-    /*────────────────────────────── Errors  ───────────────────────────────*/
+/*──────────────────────────────  Contract  ───────────────────────────────*/
+contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradeable {
+    /* ───────── Errors ───────── */
     error InvalidAddress();
     error OnlyMasterDeploy();
     error ZeroUser();
     error UsernameTooLong();
     error NoUsername();
+    error Unauthorized();
 
-    /*──────────────────────────── Constants  ──────────────────────────────*/
-    uint256 private constant MAX_USERNAME_LEN = 64;
+    /* ───────── Constants ────── */
+    uint256 internal constant MAX_USERNAME_LEN = 64;
     bytes4 public constant MODULE_ID = bytes4(keccak256("QuickJoin"));
 
-    /*─────────────────────────── State Storage ────────────────────────────*/
+    /* ───────── Storage ──────── */
     IMembershipNFT private membershipNFT;
     IUniversalAccountRegistry private accountRegistry;
-    address public masterDeployAddress;
 
-    /*────────────────────────────── Events  ───────────────────────────────*/
+    address public masterDeployAddress; // set once, but rotatable by executor
+    address public executor; // DAO / Timelock – hard‑authority
+
+    /* ───────── Events ───────── */
     event AddressesUpdated(address membership, address registry, address master);
+    event ExecutorUpdated(address newExecutor);
     event QuickJoined(address indexed user, bool usernameCreated);
     event QuickJoinedByMaster(address indexed master, address indexed user, bool usernameCreated);
-    event UsernameExists(address indexed user);
 
-    /*──────────────────────────── Initialiser ─────────────────────────────*/
-    function initialize(address _owner, address _membershipNFT, address _accountRegistry, address _masterDeploy)
+    /* ───────── Initialiser ───── */
+    function initialize(address executor_, address membershipNFT_, address accountRegistry_, address masterDeploy_)
         external
         initializer
     {
         if (
-            _owner == address(0) || _membershipNFT == address(0) || _accountRegistry == address(0)
-                || _masterDeploy == address(0)
+            executor_ == address(0) || membershipNFT_ == address(0) || accountRegistry_ == address(0)
+                || masterDeploy_ == address(0)
         ) revert InvalidAddress();
 
-        __Ownable_init(_owner);
+        __Context_init();
         __ReentrancyGuard_init();
 
-        membershipNFT = IMembershipNFT(_membershipNFT);
-        accountRegistry = IUniversalAccountRegistry(_accountRegistry);
-        masterDeployAddress = _masterDeploy;
+        executor = executor_;
+        membershipNFT = IMembershipNFT(membershipNFT_);
+        accountRegistry = IUniversalAccountRegistry(accountRegistry_);
+        masterDeployAddress = masterDeploy_;
+
+        emit AddressesUpdated(membershipNFT_, accountRegistry_, masterDeploy_);
+        emit ExecutorUpdated(executor_);
     }
 
-    /*─────────────────────────── Modifiers  ──────────────────────────────*/
+    /* ───────── Modifiers ─────── */
     modifier onlyMasterDeploy() {
-        if (msg.sender != masterDeployAddress) revert OnlyMasterDeploy();
+        if (_msgSender() != executor && _msgSender() != masterDeployAddress) revert OnlyMasterDeploy();
         _;
     }
 
-    /*──────────────────────── Address Management  ─────────────────────────*/
-    function updateAddresses(address _membershipNFT, address _accountRegistry, address _masterDeploy)
+    modifier onlyExecutor() {
+        if (_msgSender() != executor) revert Unauthorized();
+        _;
+    }
+
+    /* ─────── Admin / DAO setters (executor‑gated) ─────── */
+    function updateAddresses(address membershipNFT_, address accountRegistry_, address masterDeploy_)
         external
-        onlyOwner
+        onlyExecutor
     {
-        if (_membershipNFT == address(0) || _accountRegistry == address(0) || _masterDeploy == address(0)) {
+        if (membershipNFT_ == address(0) || accountRegistry_ == address(0) || masterDeploy_ == address(0)) {
             revert InvalidAddress();
         }
 
-        membershipNFT = IMembershipNFT(_membershipNFT);
-        accountRegistry = IUniversalAccountRegistry(_accountRegistry);
-        masterDeployAddress = _masterDeploy;
+        membershipNFT = IMembershipNFT(membershipNFT_);
+        accountRegistry = IUniversalAccountRegistry(accountRegistry_);
+        masterDeployAddress = masterDeploy_;
 
-        emit AddressesUpdated(_membershipNFT, _accountRegistry, _masterDeploy);
+        emit AddressesUpdated(membershipNFT_, accountRegistry_, masterDeploy_);
     }
 
-    /*──────────────────────── Internal Join Helper ────────────────────────*/
+    function setExecutor(address newExec) external onlyExecutor {
+        if (newExec == address(0)) revert InvalidAddress();
+        executor = newExec;
+        emit ExecutorUpdated(newExec);
+    }
+
+    /* ───────── Internal helper ─────── */
     function _quickJoin(address user, string memory username) private nonReentrant {
+        if (user == address(0)) revert ZeroUser();
         if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
         bool created;
         if (bytes(accountRegistry.getUsername(user)).length == 0) {
-            // require non‑empty username if user not yet registered
-            if (bytes(username).length == 0) revert NoUsername();
+            if (bytes(username).length == 0) revert NoUsername(); // require username on first registration
             accountRegistry.registerAccountQuickJoin(username, user);
             created = true;
         }
@@ -95,48 +114,41 @@ contract QuickJoin is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradea
         emit QuickJoined(user, created);
     }
 
-    /*────────────────────── Public Quick‑Join Paths ───────────────────────*/
-    function quickJoinNoUser(string calldata userName) external {
-        _quickJoin(msg.sender, userName);
+    /* ───────── Public user paths ─────── */
+
+    /// 1) caller supplies username if they don’t have one yet
+    function quickJoinNoUser(string calldata username) external {
+        _quickJoin(_msgSender(), username);
     }
 
+    /// 2) caller already registered a username elsewhere
     function quickJoinWithUser() external nonReentrant {
-        string memory existing = accountRegistry.getUsername(msg.sender);
+        string memory existing = accountRegistry.getUsername(_msgSender());
         if (bytes(existing).length == 0) revert NoUsername();
-        membershipNFT.quickJoinMint(msg.sender);
-        emit QuickJoined(msg.sender, false);
+        membershipNFT.quickJoinMint(_msgSender());
+        emit QuickJoined(_msgSender(), false);
     }
 
-    /*────────────────────── MasterDeploy Quick‑Join  ──────────────────────*/
-    function quickJoinNoUserMasterDeploy(string calldata userName, address newUser)
-        external
-        onlyMasterDeploy
-        nonReentrant
-    {
-        if (newUser == address(0)) revert ZeroUser();
-        if (bytes(userName).length > MAX_USERNAME_LEN) revert UsernameTooLong();
+    /* ───────── Master‑deploy helper paths ─────── */
 
-        bool created;
-        if (bytes(accountRegistry.getUsername(newUser)).length == 0) {
-            accountRegistry.registerAccountQuickJoin(userName, newUser);
-            created = true;
-        }
-        membershipNFT.quickJoinMint(newUser);
-        emit QuickJoinedByMaster(msg.sender, newUser, created);
+    function quickJoinNoUserMasterDeploy(string calldata username, address newUser) external onlyMasterDeploy {
+        _quickJoin(newUser, username);
+        emit QuickJoinedByMaster(_msgSender(), newUser, bytes(username).length > 0);
     }
 
     function quickJoinWithUserMasterDeploy(address newUser) external onlyMasterDeploy nonReentrant {
         if (newUser == address(0)) revert ZeroUser();
         string memory existing = accountRegistry.getUsername(newUser);
         if (bytes(existing).length == 0) revert NoUsername();
+
         membershipNFT.quickJoinMint(newUser);
-        emit QuickJoinedByMaster(msg.sender, newUser, false);
+        emit QuickJoinedByMaster(_msgSender(), newUser, false);
     }
 
-    /*──────────────────────── Version Hook & Gap ──────────────────────────*/
+    /* ───────── Misc view helpers ─────── */
     function version() external pure returns (string memory) {
         return "v1";
     }
 
-    uint256[46] private __gap;
+    uint256[46] private __gap; // storage gap
 }

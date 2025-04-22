@@ -4,8 +4,8 @@ pragma solidity ^0.8.20;
 /*───────────  OpenZeppelin v5.3 Upgradeables  ──────────*/
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 
 /*────────── External Interfaces ──────────*/
 interface IMembership {
@@ -17,7 +17,7 @@ interface IParticipationToken is IERC20 {
 }
 
 /*───────────────────────  Contract  ───────────────────────*/
-contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
+contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgradeable {
     /*─────────────── Custom Errors ───────────────*/
     error ZeroAddress();
     error InvalidString();
@@ -38,7 +38,7 @@ contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgrad
     error Unauthorized();
 
     /*─────────────── Constants ──────────────────*/
-    uint256 public constant MAX_PAYOUT = 1e24; // 1,000,000 tokens (18 dec)
+    uint256 public constant MAX_PAYOUT = 1e24; // 1,000,000 tokens (18 dec)
     bytes4 public constant MODULE_ID = 0x54534b32; // "TSK2"
 
     /*─────────────── Data Types ─────────────────*/
@@ -99,21 +99,28 @@ contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgrad
     event ExecutorSet(address indexed newExecutor);
     /*──────────────── Initialiser ───────────────*/
 
-    function initialize(address tokenAddress, address membershipAddress, bytes32[] calldata creatorRoleIds)
-        external
-        initializer
-    {
-        if (tokenAddress == address(0) || membershipAddress == address(0)) revert ZeroAddress();
-        __Ownable_init(_msgSender());
+    function initialize(
+        address tokenAddress,
+        address membershipAddress,
+        bytes32[] calldata creatorRoleIds,
+        address executorAddress
+    ) external initializer {
+        if (tokenAddress == address(0) || membershipAddress == address(0) || executorAddress == address(0)) {
+            revert ZeroAddress();
+        }
         __ReentrancyGuard_init();
+        __Context_init();
 
         token = IParticipationToken(tokenAddress);
         membership = IMembership(membershipAddress);
+        executor = executorAddress;
 
         for (uint256 i; i < creatorRoleIds.length; ++i) {
             isCreatorRole[creatorRoleIds[i]] = true;
             emit CreatorRoleUpdated(creatorRoleIds[i], true);
         }
+
+        emit ExecutorSet(executorAddress);
     }
 
     /*──────────────── Modifiers ─────────────────*/
@@ -362,12 +369,8 @@ contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgrad
         emit CreatorRoleUpdated(role, enable);
     }
 
-    function setExecutor(address newExecutor) external {
+    function setExecutor(address newExecutor) external onlyExecutor {
         if (newExecutor == address(0)) revert ZeroAddress();
-        if (executor != address(0)) {
-            // After first set, only executor can update
-            if (msg.sender != executor) revert Unauthorized();
-        }
         executor = newExecutor;
         emit ExecutorSet(newExecutor);
     }

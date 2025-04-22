@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 /*  OpenZeppelin v5.3 Upgradeables  */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -17,7 +17,7 @@ interface IMembership {
 }
 
 /// Participation‑weighted governor (power = balance or √balance)
-contract ParticipationVoting is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
+contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
     /* ─────────────── Errors ─────────────── */
     error Unauthorized();
     error AlreadyVoted();
@@ -84,27 +84,31 @@ contract ParticipationVoting is Initializable, OwnableUpgradeable, PausableUpgra
     event QuadraticToggled(bool enabled);
     event MinBalanceSet(uint256 newMinBalance);
 
+    modifier onlyExecutor() {
+        if (_msgSender() != address(executor)) revert Unauthorized();
+        _;
+    }
+
     /* ─────────── Initialiser ─────────── */
     constructor() initializer {}
 
     function initialize(
-        address owner_,
+        address executor_,
         address membership_,
         address token_,
-        address executor_,
         bytes32[] calldata initialRoles,
         address[] calldata initialTargets,
         uint8 quorumPct,
         bool quadratic_,
         uint256 minBalance_
     ) external initializer {
-        if (owner_ == address(0) || membership_ == address(0) || token_ == address(0) || executor_ == address(0)) {
+        if (membership_ == address(0) || token_ == address(0) || executor_ == address(0)) {
             revert ZeroAddress();
         }
         require(quorumPct > 0 && quorumPct <= 100, "quorum");
         require(minBalance_ > 0, "minBalance");
 
-        __Ownable_init(owner_);
+        __Context_init();
         __Pausable_init();
         __ReentrancyGuard_init();
 
@@ -130,50 +134,52 @@ contract ParticipationVoting is Initializable, OwnableUpgradeable, PausableUpgra
     }
 
     /* ───────────── Governance setters ───────────── */
-    function pause() external onlyOwner {
+    function pause() external onlyExecutor {
         _pause();
     }
 
-    function unpause() external onlyOwner {
+    function unpause() external onlyExecutor {
         _unpause();
     }
 
-    function setExecutor(address a) external onlyOwner {
+    function setExecutor(address a) external onlyExecutor {
         if (a == address(0)) revert ZeroAddress();
         executor = IExecutor(a);
         emit ExecutorUpdated(a);
     }
 
-    function setRoleAllowed(bytes32 r, bool ok) external onlyOwner {
+    function setRoleAllowed(bytes32 r, bool ok) external onlyExecutor {
         _allowedRoles[r] = ok;
         emit RoleSet(r, ok);
     }
 
-    function setTargetAllowed(address t, bool ok) external onlyOwner {
+    function setTargetAllowed(address t, bool ok) external onlyExecutor {
         if (t == address(0)) revert ZeroAddress();
         allowedTarget[t] = ok;
         emit TargetAllowed(t, ok);
     }
 
-    function setQuorumPercentage(uint8 q) external onlyOwner {
+    function setQuorumPercentage(uint8 q) external onlyExecutor {
         require(q > 0 && q <= 100, "quorum");
         quorumPercentage = q;
         emit QuorumPercentageSet(q);
     }
 
-    function toggleQuadratic() external onlyOwner {
+    function toggleQuadratic() external onlyExecutor {
         quadraticVoting = !quadraticVoting;
         emit QuadraticToggled(quadraticVoting);
     }
 
-    function setMinBalance(uint256 n) external onlyOwner {
+    function setMinBalance(uint256 n) external onlyExecutor {
         MIN_BAL = n;
         emit MinBalanceSet(n);
     }
 
     /* ───────────── Modifiers ───────────── */
     modifier onlyCreator() {
-        if (!_allowedRoles[membership.roleOf(msg.sender)]) revert Unauthorized();
+        if (_msgSender() != address(executor) && !_allowedRoles[membership.roleOf(_msgSender())]) {
+            revert Unauthorized();
+        }
         _;
     }
 
@@ -232,13 +238,13 @@ contract ParticipationVoting is Initializable, OwnableUpgradeable, PausableUpgra
     {
         if (idxs.length != weights.length) revert LengthMismatch();
 
-        uint256 bal = participationToken.balanceOf(msg.sender);
+        uint256 bal = participationToken.balanceOf(_msgSender());
         if (bal < MIN_BAL) revert MinBalance();
         uint256 power = quadraticVoting ? Math.sqrt(bal) : bal;
         require(power > 0, "power=0");
 
         Proposal storage p = _proposals[id];
-        if (p.hasVoted[msg.sender]) revert AlreadyVoted();
+        if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
         uint256 seen;
         uint256 sum;
@@ -259,7 +265,7 @@ contract ParticipationVoting is Initializable, OwnableUpgradeable, PausableUpgra
         uint256 newTW = uint256(p.totalWeight) + power;
         if (newTW > type(uint128).max) revert Overflow();
         p.totalWeight = uint128(newTW);
-        p.hasVoted[msg.sender] = true;
+        p.hasVoted[_msgSender()] = true;
 
         for (uint256 i; i < idxs.length; ++i) {
             uint256 add = power * weights[i];
@@ -267,7 +273,7 @@ contract ParticipationVoting is Initializable, OwnableUpgradeable, PausableUpgra
             if (newVotes > type(uint128).max) revert Overflow();
             p.options[idxs[i]].votes = uint128(newVotes);
         }
-        emit VoteCast(id, msg.sender, idxs, weights);
+        emit VoteCast(id, _msgSender(), idxs, weights);
     }
 
     /* ─────────── Finalise & Execute ─────────── */

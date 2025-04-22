@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 /*──────────────────── OpenZeppelin v5.3 Upgradeables ─────────────*/
 import "@openzeppelin-contracts-upgradeable/contracts/token/ERC20/ERC20Upgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 /*────────────── External membership interface ─────────────*/
@@ -13,7 +13,7 @@ interface IMembership {
 }
 
 /*──────────────────  Participation Token  ──────────────────*/
-contract ParticipationToken is Initializable, ERC20Upgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
+contract ParticipationToken is Initializable, ERC20Upgradeable, ContextUpgradeable, ReentrancyGuardUpgradeable {
     /*──────────── Errors ───────────*/
     error NotTaskOrEdu();
     error NotExecutive();
@@ -25,11 +25,13 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, OwnableUpgradeab
     error InvalidAddress();
     error ZeroAmount();
     error TransfersDisabled();
+    error Unauthorized();
 
     /*──────────── State ───────────*/
     address public taskManager;
     address public educationHub;
     IMembership public membership;
+    address public executor;
 
     uint256 public requestCounter;
 
@@ -50,41 +52,57 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, OwnableUpgradeab
     event RequestCancelled(uint256 indexed id, address indexed caller);
 
     /*─────────── Initialiser ──────*/
-    function initialize(string calldata name_, string calldata symbol_, address membershipAddr) external initializer {
-        if (membershipAddr == address(0)) revert InvalidAddress();
+    function initialize(address executor_, string calldata name_, string calldata symbol_, address membershipAddr)
+        external
+        initializer
+    {
+        if (membershipAddr == address(0) || executor_ == address(0)) revert InvalidAddress();
+
         __ERC20_init(name_, symbol_);
-        __Ownable_init(msg.sender);
+        __Context_init();
         __ReentrancyGuard_init();
 
         membership = IMembership(membershipAddr);
+        executor = executor_;
     }
 
     /*────────── Modifiers ─────────*/
     modifier onlyTaskOrEdu() {
-        if (msg.sender != taskManager && msg.sender != educationHub) revert NotTaskOrEdu();
+        if (_msgSender() != executor && _msgSender() != taskManager && _msgSender() != educationHub) {
+            revert NotTaskOrEdu();
+        }
         _;
     }
 
     modifier onlyExec() {
-        bytes32 role = membership.roleOf(msg.sender);
+        if (_msgSender() == executor) {
+            _;
+            return;
+        }
+        bytes32 role = membership.roleOf(_msgSender());
         if (role == bytes32(0) || !membership.isExecutiveRole(role)) revert NotExecutive();
         _;
     }
 
     modifier isMember() {
-        if (membership.roleOf(msg.sender) == bytes32(0)) revert NotMember();
+        if (_msgSender() != executor && membership.roleOf(_msgSender()) == bytes32(0)) revert NotMember();
+        _;
+    }
+
+    modifier onlyExecutor() {
+        if (_msgSender() != executor) revert Unauthorized();
         _;
     }
 
     /*──────── Admin setters ───────*/
-    function setTaskManager(address tm) external onlyOwner {
+    function setTaskManager(address tm) external onlyExecutor {
         if (taskManager != address(0)) revert AlreadySet();
         if (tm == address(0)) revert InvalidAddress();
         taskManager = tm;
         emit TaskManagerSet(tm);
     }
 
-    function setEducationHub(address eh) external onlyOwner {
+    function setEducationHub(address eh) external onlyExecutor {
         if (educationHub != address(0)) revert AlreadySet();
         if (eh == address(0)) revert InvalidAddress();
         educationHub = eh;
@@ -101,38 +119,38 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, OwnableUpgradeab
     /*────────── Request flow ─────────*/
     function requestTokens(uint96 amount, string calldata ipfsHash) external isMember {
         if (amount == 0) revert ZeroAmount();
-        if (bytes(ipfsHash).length == 0) revert InvalidAddress();
+        if (bytes(ipfsHash).length == 0) revert ZeroAmount();
 
-        unchecked {
-            ++requestCounter;
-        }
-        requests[requestCounter] = Request({requester: msg.sender, amount: amount, approved: false, ipfsHash: ipfsHash});
-        emit Requested(requestCounter, msg.sender, amount, ipfsHash);
+        requests[++requestCounter] =
+            Request({requester: _msgSender(), amount: amount, approved: false, ipfsHash: ipfsHash});
+
+        emit Requested(requestCounter, _msgSender(), amount, ipfsHash);
     }
 
-    /// Execs approve – _state change after_ successful mint
+    /// Execs approve – state change *after* successful mint
     function approveRequest(uint256 id) external nonReentrant onlyExec {
         Request storage r = requests[id];
         if (r.requester == address(0)) revert RequestUnknown();
         if (r.approved) revert AlreadyApproved();
-        if (r.requester == msg.sender) revert NotRequester();
+        if (r.requester == _msgSender()) revert NotRequester();
 
-        _mint(r.requester, r.amount); // ← external effect first
         r.approved = true;
-        emit RequestApproved(id, msg.sender);
+        _mint(r.requester, r.amount);
+
+        emit RequestApproved(id, _msgSender());
     }
 
-    /// Optional: allow requester or exec to cancel unapproved request & free storage
+    /// Cancel unapproved request – requester **or** exec
     function cancelRequest(uint256 id) external nonReentrant {
         Request storage r = requests[id];
         if (r.requester == address(0)) revert RequestUnknown();
         if (r.approved) revert AlreadyApproved();
-        if (msg.sender != r.requester && !membership.isExecutiveRole(membership.roleOf(msg.sender))) {
-            revert NotExecutive();
-        }
+
+        bool isExec = (_msgSender() == executor) || membership.isExecutiveRole(membership.roleOf(_msgSender()));
+        if (_msgSender() != r.requester && !isExec) revert NotExecutive();
 
         delete requests[id];
-        emit RequestCancelled(id, msg.sender);
+        emit RequestCancelled(id, _msgSender());
     }
 
     /*────── Complete transfer lockdown ─────*/
@@ -147,9 +165,9 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, OwnableUpgradeab
     function transferFrom(address, address, uint256) public pure override returns (bool) {
         revert TransfersDisabled();
     }
-    // still allow mint/burn via `_update`
 
-    function _update(address from, address to, uint256 value) internal virtual override {
+    /// still allow mint / burn internally
+    function _update(address from, address to, uint256 value) internal override {
         if (from != address(0) && to != address(0)) revert TransfersDisabled();
         super._update(from, to, value);
     }
@@ -159,6 +177,6 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, OwnableUpgradeab
         return "v1";
     }
 
-    /*──────── Storage gap (50 left) ───*/
+    /*──────── Storage gap ────────────*/
     uint256[50] private __gap;
 }

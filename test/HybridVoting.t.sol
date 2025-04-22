@@ -94,6 +94,7 @@ contract HybridVotingTest is Test {
     address alice = vm.addr(2); // has role, some tokens
     address bob = vm.addr(3); // no role, many tokens
     address carol = vm.addr(4); // role + tokens (quadratic test)
+    address nonExecutor = vm.addr(5); // someone without executor access
 
     /* contracts */
     MockERC20 token;
@@ -128,14 +129,13 @@ contract HybridVotingTest is Test {
         bytes memory initData = abi.encodeCall(
             HybridVoting.initialize,
             (
-                owner, // contract owner
                 address(membership), // membership
                 address(token), // participation token
                 address(exec), // executor
                 roles, // allowed role(s)
                 targets, // allowed target(s)
                 uint8(50), // quorum %
-                uint8(50), // 50‑50 split DD : PT
+                uint8(50), // 50‑50 split DD : PT
                 false, // quadratic off
                 1 ether // Lower MIN_BAL to ensure all users can participate
             )
@@ -260,7 +260,7 @@ contract HybridVotingTest is Test {
         assertEq(exec.lastId(), id, "executor should be called with correct id");
     }
 
-    /* ───────────────────────── PAUSE / CLEANUP ───────────────────────── */
+    /* ───────────────────────── PAUSE / CLEANUP ───────────────────────── */
     function testPauseUnpause() public {
         vm.prank(address(exec));
         hv.pause();
@@ -269,6 +269,89 @@ contract HybridVotingTest is Test {
         vm.prank(address(exec));
         hv.unpause();
         _create();
+    }
+
+    /* ───────────────────────── UNAUTHORIZED ACCESS TESTS ───────────────────────── */
+    function testOnlyExecutorRevertWhenNonExecutorCallsAdminFunctions() public {
+        // Test that non-executors cannot call admin functions
+        vm.startPrank(nonExecutor);
+
+        // Pause
+        vm.expectRevert();
+        hv.pause();
+
+        // Set executor
+        vm.expectRevert();
+        hv.setExecutor(nonExecutor);
+
+        // Set role allowed
+        vm.expectRevert();
+        hv.setRoleAllowed(ROLE_EXEC, false);
+
+        // Set target allowed
+        vm.expectRevert();
+        hv.setTargetAllowed(address(0xDEAD), true);
+
+        // Set quorum
+        vm.expectRevert();
+        hv.setQuorum(60);
+
+        // Set split
+        vm.expectRevert();
+        hv.setSplit(60);
+
+        // Toggle quadratic
+        vm.expectRevert();
+        hv.toggleQuadratic();
+
+        // Set min balance
+        vm.expectRevert();
+        hv.setMinBalance(2 ether);
+
+        vm.stopPrank();
+    }
+
+    function testExecutorCanCallAdminFunctions() public {
+        // Test that executor can call admin functions
+        vm.startPrank(address(exec));
+
+        // Set quorum
+        hv.setQuorum(60);
+        assertEq(hv.quorumPct(), 60);
+
+        // Set split
+        hv.setSplit(60);
+        assertEq(hv.ddSharePct(), 60);
+
+        // Toggle quadratic
+        bool initialQuadratic = hv.quadraticVoting();
+        hv.toggleQuadratic();
+        assertEq(hv.quadraticVoting(), !initialQuadratic);
+
+        // Set min balance
+        hv.setMinBalance(2 ether);
+        assertEq(hv.MIN_BAL(), 2 ether);
+
+        vm.stopPrank();
+    }
+
+    function testExecutorTransfer() public {
+        // Test transfer of executor role
+        address newExecutor = vm.addr(6);
+
+        // Set new executor
+        vm.prank(address(exec));
+        hv.setExecutor(newExecutor);
+
+        // Old executor should no longer have permissions
+        vm.prank(address(exec));
+        vm.expectRevert();
+        hv.setQuorum(70);
+
+        // New executor should have permissions
+        vm.prank(newExecutor);
+        hv.setQuorum(70);
+        assertEq(hv.quorumPct(), 70);
     }
 
     function testCleanup() public {

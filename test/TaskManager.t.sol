@@ -64,6 +64,7 @@ contract TaskManagerTest is Test {
     address pm1 = makeAddr("pm1");
     address member1 = makeAddr("member1");
     address outsider = makeAddr("outsider");
+    address executor = makeAddr("executor");
 
     bytes32 constant CREATOR_ROLE = keccak256("CREATOR");
 
@@ -93,7 +94,7 @@ contract TaskManagerTest is Test {
         creatorRoles[0] = CREATOR_ROLE;
 
         vm.prank(creator1);
-        tm.initialize(address(token), address(membership), creatorRoles);
+        tm.initialize(address(token), address(membership), creatorRoles, executor);
     }
 
     /*───────────────── PROJECT SCENARIOS ───────────────*/
@@ -312,13 +313,6 @@ contract TaskManagerTest is Test {
         // Initial setup
         vm.prank(creator1);
         tm.createProject("GOV_TEST", 5 ether, new address[](0));
-
-        // Set up an executor
-        address executor = makeAddr("executor");
-
-        // First setExecutor call can be made by anyone since executor is not set yet
-        vm.prank(creator1);
-        tm.setExecutor(executor);
 
         // Add new role to the creator roles using the executor
         bytes32 NEW_ROLE = keccak256("NEW_CREATOR");
@@ -617,32 +611,25 @@ contract TaskManagerTest is Test {
     }
 
     function test_ExecutorRoleManagement() public {
-        // Create initial executor
-        address executor1 = makeAddr("executor1");
+        // Create new executor
         address executor2 = makeAddr("executor2");
 
-        // Anyone can set the executor for the first time
+        // Non-executor can't set executor
         vm.prank(creator1);
-        tm.setExecutor(executor1);
-
-        // Try to set another executor from non-executor address (should fail)
-        vm.prank(creator1);
-        vm.expectRevert(TaskManager.Unauthorized.selector);
+        vm.expectRevert(TaskManager.NotExecutor.selector);
         tm.setExecutor(executor2);
 
-        // Only executor can update executor
-        vm.prank(executor1);
+        // Executor can update executor
+        vm.prank(executor);
         tm.setExecutor(executor2);
 
-        // Only executor can set creator roles
+        // Old executor can no longer set creator roles
         bytes32 TEST_ROLE = keccak256("TEST_ROLE");
-
-        // Non-executor can't set creator roles
-        vm.prank(creator1);
+        vm.prank(executor);
         vm.expectRevert(TaskManager.NotExecutor.selector);
         tm.setCreatorRole(TEST_ROLE, true);
 
-        // Executor can set creator roles
+        // New executor can set creator roles
         vm.prank(executor2);
         tm.setCreatorRole(TEST_ROLE, true);
 
@@ -654,7 +641,7 @@ contract TaskManagerTest is Test {
         vm.prank(testCreator);
         tm.createProject("EXECUTOR_TEST", 1 ether, new address[](0));
 
-        // Executor can revoke the role
+        // New executor can revoke the role
         vm.prank(executor2);
         tm.setCreatorRole(TEST_ROLE, false);
 
@@ -665,11 +652,6 @@ contract TaskManagerTest is Test {
     }
 
     function test_ExecutorBypassMemberCheck() public {
-        // Set up executor
-        address executor = makeAddr("bypass_executor");
-        vm.prank(creator1);
-        tm.setExecutor(executor);
-
         // Create project
         vm.prank(creator1);
         tm.createProject("EXECUTOR_BYPASS", 5 ether, new address[](0));
