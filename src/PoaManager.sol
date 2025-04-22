@@ -16,15 +16,25 @@ contract PoaManager is Ownable(msg.sender) {
     /*──────────── Storage ──────────*/
     mapping(bytes32 => UpgradeableBeacon) public beacons; // typeId to beacon
     bytes32[] public typeIds;
-    ImplementationRegistry public immutable registry;
+    ImplementationRegistry public registry; // Remove immutable since we need to update it
 
     /*──────────── Events ───────────*/
     event BeaconCreated(bytes32 indexed typeId, string typeName, address beacon, address implementation);
     event BeaconUpgraded(bytes32 indexed typeId, address newImplementation, string version);
+    event RegistryUpdated(address oldRegistry, address newRegistry);
 
     constructor(address registryAddr) {
-        if (registryAddr == address(0)) revert ImplZero();
+        // Allow a temporary zero address during initialization
+        // This will be updated with updateImplRegistry
         registry = ImplementationRegistry(registryAddr);
+    }
+
+    /*──────────── Admin: update registry ───────────*/
+    function updateImplRegistry(address registryAddr) external onlyOwner {
+        if (registryAddr == address(0)) revert ImplZero();
+        address oldRegistry = address(registry);
+        registry = ImplementationRegistry(registryAddr);
+        emit RegistryUpdated(oldRegistry, registryAddr);
     }
 
     /*──────────── Internal utils ───────────*/
@@ -42,8 +52,11 @@ contract PoaManager is Ownable(msg.sender) {
         beacons[tId] = beacon;
         typeIds.push(tId);
 
-        // auto‑register as v1 & mark latest
-        registry.registerImplementation(typeName, "v1", impl, true);
+        // Only try to register in the implementation registry if it exists
+        // This allows us to register the ImplementationRegistry itself first
+        if (address(registry) != address(0)) {
+            registry.registerImplementation(typeName, "v1", impl, true);
+        }
 
         emit BeaconCreated(tId, typeName, address(beacon), impl);
     }

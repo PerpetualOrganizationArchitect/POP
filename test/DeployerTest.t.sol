@@ -3,8 +3,10 @@ pragma solidity ^0.8.17;
 
 /*──────────── forge‑std helpers ───────────*/
 import "forge-std/Test.sol";
+import "forge-std/console.sol";
 
 /*──────────── OpenZeppelin ───────────*/
+import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 
 /*──────────── Local contracts ───────────*/
@@ -72,17 +74,68 @@ contract DeployerTest is Test {
         taskMgrImpl = new TaskManager();
         eduHubImpl = new EducationHub();
 
+        // Deploy the implementation contract for ImplementationRegistry
+        ImplementationRegistry implRegistryImpl = new ImplementationRegistry();
+
         vm.startPrank(poaAdmin);
+        console.log("Current msg.sender:", msg.sender);
 
         /*–– infra ––*/
-        implRegistry = new ImplementationRegistry();
-        poaManager = new PoaManager(address(implRegistry));
-        orgRegistry = new OrgRegistry();
-        deployer = new Deployer(address(poaManager), address(orgRegistry));
+        // Deploy PoaManager first without the actual registry address
+        // We'll update it later after we create the proxy
+        poaManager = new PoaManager(address(0)); // Temporary zero address
 
-        /* transfer ownerships for registering later */
+        // Deploy implementations for OrgRegistry and Deployer
+        OrgRegistry orgRegistryImpl = new OrgRegistry();
+        Deployer deployerImpl = new Deployer();
+
+        // Register ImplementationRegistry implementation with PoaManager first
+        poaManager.addContractType("ImplementationRegistry", address(implRegistryImpl));
+
+        // Get the beacon for ImplementationRegistry
+        address implRegBeacon = poaManager.getBeacon("ImplementationRegistry");
+
+        // Create ImplementationRegistry proxy and initialize it with poaAdmin as owner
+        bytes memory implRegistryInit = abi.encodeWithSignature("initialize(address)", poaAdmin);
+        implRegistry = ImplementationRegistry(address(new BeaconProxy(implRegBeacon, implRegistryInit)));
+
+        // Now update the PoaManager to use the correct ImplementationRegistry proxy
+        poaManager.updateImplRegistry(address(implRegistry));
+
+        // Register the implRegistryImpl in the registry now that it's connected
+        implRegistry.registerImplementation("ImplementationRegistry", "v1", address(implRegistryImpl), true);
+
+        // Transfer implRegistry ownership to poaManager
         implRegistry.transferOwnership(address(poaManager));
+
+        // Register implementations for OrgRegistry and Deployer
+        poaManager.addContractType("OrgRegistry", address(orgRegistryImpl));
+        poaManager.addContractType("Deployer", address(deployerImpl));
+
+        // Get beacons created by PoaManager
+        address orgRegBeacon = poaManager.getBeacon("OrgRegistry");
+        address deployerBeacon = poaManager.getBeacon("Deployer");
+
+        // Create OrgRegistry proxy - initialize with poaAdmin as owner
+        bytes memory orgRegistryInit = abi.encodeWithSignature("initialize(address)", poaAdmin);
+        orgRegistry = OrgRegistry(address(new BeaconProxy(orgRegBeacon, orgRegistryInit)));
+
+        // Debug to verify OrgRegistry owner
+        console.log("OrgRegistry owner after init:", orgRegistry.owner());
+
+        // Create Deployer proxy - initialize with msg.sender (poaAdmin) for proper ownership
+        bytes memory deployerInit =
+            abi.encodeWithSignature("initialize(address,address)", address(poaManager), address(orgRegistry));
+        deployer = Deployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
+
+        // Debug to verify Deployer owner
+        console.log("Deployer owner after init:", deployer.owner());
+        console.log("deployer address:", address(deployer));
+
+        // Now transfer orgRegistry ownership to deployer after both are initialized
+        // This is critical to get the ownership chain right
         orgRegistry.transferOwnership(address(deployer));
+        console.log("OrgRegistry owner after transfer:", orgRegistry.owner());
 
         /*–– register implementation types ––*/
         poaManager.addContractType("HybridVoting", address(hybridImpl));
@@ -95,7 +148,10 @@ contract DeployerTest is Test {
         poaManager.addContractType("UniversalAccountRegistry", address(accountRegImpl));
 
         /*–– global account registry instance ––*/
+        // Get the beacon created by PoaManager for account registry
         address accRegBeacon = poaManager.getBeacon("UniversalAccountRegistry");
+
+        // Create a proxy using the beacon with proper initialization data
         bytes memory accRegInit = abi.encodeWithSignature("initialize(address)", poaAdmin);
         accountRegProxy = address(new BeaconProxy(accRegBeacon, accRegInit));
 
