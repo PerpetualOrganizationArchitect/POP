@@ -94,6 +94,7 @@ contract HybridVoting is Initializable, OwnableUpgradeable, PausableUpgradeable,
     event MinBalanceSet(uint256 newMinBalance);
     event ProposalCleaned(uint256 id, uint256 cleaned);
     /* ─────── Initialiser ─────── */
+
     constructor() initializer {}
 
     function initialize(
