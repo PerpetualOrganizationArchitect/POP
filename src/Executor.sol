@@ -1,4 +1,4 @@
-// SPDX‑License‑Identifier: MIT
+    // SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.20;
 
 /* OpenZeppelin v5.3 Upgradeables */
@@ -44,19 +44,20 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     event Swept(address indexed to, uint256 amount);
 
     /* ─────────── Initialiser ─────────── */
-    function initialize(address owner_, address governor_) external initializer {
-        if (owner_ == address(0) || governor_ == address(0)) revert ZeroAddress();
+    function initialize(address owner_) external initializer {
+        if (owner_ == address(0)) revert ZeroAddress();
         __Ownable_init(owner_);
         __Pausable_init();
         __ReentrancyGuard_init();
-
-        allowedCaller = governor_;
-        emit CallerSet(governor_);
     }
 
     /* ─────────── Governor management ─────────── */
-    function setCaller(address newCaller) external onlyOwner {
+    function setCaller(address newCaller) external {
         if (newCaller == address(0)) revert ZeroAddress();
+        if (allowedCaller != address(0)) {
+            // After first set, only current caller can change
+            if (msg.sender != allowedCaller) revert UnauthorizedCaller();
+        }
         allowedCaller = newCaller;
         emit CallerSet(newCaller);
     }

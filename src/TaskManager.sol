@@ -71,6 +71,7 @@ contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgrad
     event TaskCancelled(uint256 indexed id, address indexed canceller);
     event ProjectCreated(string name);
     event ProjectDeleted(string name);
+    event TaskAssigned(uint256 indexed id, address indexed assignee, address indexed assigner);
 
     /*──────────────── Initialiser ───────────────*/
     function initialize(address tokenAddress, address membershipAddress, bytes32[] calldata creatorRoleIds)
@@ -144,6 +145,19 @@ contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgrad
         emit TaskClaimed(id, _msgSender());
     }
 
+    function assignTask(uint256 id, address assignee) external onlyCreator {
+        if (assignee == address(0)) revert ZeroAddress();
+        if (membership.roleOf(assignee) == bytes32(0)) revert NotMember();
+
+        Task storage t = _task(id);
+        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+
+        t.status  = Status.CLAIMED;
+        t.claimer = assignee;
+
+        emit TaskAssigned(id, assignee, _msgSender());
+    }
+
     function submitTask(uint256 id, string calldata ipfsHash) external onlyMember {
         Task storage t = _task(id);
         if (t.status != Status.CLAIMED) revert AlreadySubmitted();
@@ -211,5 +225,5 @@ contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgrad
         return "v1";
     }
 
-    uint256[50] private __gap;
+    uint256[100] private __gap;
 }
