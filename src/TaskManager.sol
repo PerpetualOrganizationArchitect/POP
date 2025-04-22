@@ -1,4 +1,4 @@
-// SPDX‑License‑Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 /*───────────  OpenZeppelin v5.3 Upgradeables  ──────────*/
@@ -14,7 +14,6 @@ interface IMembership {
 
 interface IParticipationToken is IERC20 {
     function mint(address to, uint256 amount) external;
-    function setTaskManager(address tm) external;
 }
 
 /*───────────────────────  Contract  ───────────────────────*/
@@ -24,17 +23,23 @@ contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgrad
     error InvalidString();
     error InvalidPayout();
     error UnknownTask();
+    error UnknownProject();
+    error ProjectExists();
     error NotCreator();
     error NotMember();
+    error NotPM();
     error AlreadyClaimed();
     error AlreadySubmitted();
     error AlreadyCompleted();
     error NotClaimer();
-    error MintFailed();
+    error BudgetExceeded();
+    error CapBelowCommitted();
+    error NotExecutor();
+    error Unauthorized();
 
     /*─────────────── Constants ──────────────────*/
-    uint256 public constant MAX_PAYOUT = 1e24; // 1 million tokens with 18 dec
-    bytes4 public constant MODULE_ID = 0x54534b30; // "TSK0"
+    uint256 public constant MAX_PAYOUT = 1e24; // 1,000,000 tokens (18 dec)
+    bytes4 public constant MODULE_ID = 0x54534b32; // "TSK2"
 
     /*─────────────── Data Types ─────────────────*/
     enum Status {
@@ -49,31 +54,51 @@ contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgrad
         uint248 payout;
         Status status;
         address claimer;
+        bytes32 projectId;
         string ipfsHash;
     }
-    // roleId to allowed   (creator privilege)
 
-    mapping(bytes32 => bool) public isCreatorRole;
+    struct Project {
+        uint128 cap; // 0 ⇒ unlimited
+        uint128 spent; // always tracked (even if cap==0)
+        bool exists;
+        mapping(address => bool) managers;
+    }
+
+    /*─────────────── Storage ─────────────────────*/
+    mapping(bytes32 => Project) private _projects;
+    mapping(uint256 => bytes32) private _taskProject;
+    mapping(uint256 => Task) private _tasks;
 
     IMembership public membership;
     IParticipationToken public token;
 
-    mapping(uint256 => Task) private _tasks;
+    mapping(bytes32 => bool) public isCreatorRole;
     uint256 public nextTaskId;
+
+    address public executor;
 
     /*─────────────── Events ─────────────────────*/
     event CreatorRoleUpdated(bytes32 indexed role, bool enabled);
-    event TaskCreated(uint256 indexed id, uint256 payout, string ipfsHash, string projectName);
+
+    // ── Project
+    event ProjectCreated(bytes32 indexed id, string name, uint256 cap);
+    event ProjectCapUpdated(bytes32 indexed id, uint256 oldCap, uint256 newCap);
+    event ProjectManagerAdded(bytes32 indexed id, address manager);
+    event ProjectManagerRemoved(bytes32 indexed id, address manager);
+    event ProjectDeleted(bytes32 indexed id, string name);
+
+    // ── Task
+    event TaskCreated(uint256 indexed id, bytes32 indexed projectId, uint256 payout, string ipfsHash);
     event TaskUpdated(uint256 indexed id, uint256 payout, string ipfsHash);
     event TaskClaimed(uint256 indexed id, address indexed claimer);
+    event TaskAssigned(uint256 indexed id, address indexed assignee, address indexed assigner);
     event TaskSubmitted(uint256 indexed id, string ipfsHash);
     event TaskCompleted(uint256 indexed id, address indexed completer);
     event TaskCancelled(uint256 indexed id, address indexed canceller);
-    event ProjectCreated(string name);
-    event ProjectDeleted(string name);
-    event TaskAssigned(uint256 indexed id, address indexed assignee, address indexed assigner);
-
+    event ExecutorSet(address indexed newExecutor);
     /*──────────────── Initialiser ───────────────*/
+
     function initialize(address tokenAddress, address membershipAddress, bytes32[] calldata creatorRoleIds)
         external
         initializer
@@ -93,46 +118,167 @@ contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgrad
 
     /*──────────────── Modifiers ─────────────────*/
     modifier onlyCreator() {
-        if (!isCreatorRole[membership.roleOf(_msgSender())]) revert NotCreator();
+        if (!isCreatorRole[membership.roleOf(_msgSender())] && _msgSender() != executor) revert NotCreator();
         _;
     }
 
     modifier onlyMember() {
-        if (membership.roleOf(_msgSender()) == bytes32(0)) revert NotMember();
+        if (_msgSender() != executor && membership.roleOf(_msgSender()) == bytes32(0)) {
+            revert NotMember();
+        }
         _;
     }
 
-    /*─────────────────── Core Logic ──────────────────*/
-    function createTask(uint256 payout, string calldata ipfsHash, string calldata projectName) external onlyCreator {
-        if (payout == 0 || payout > MAX_PAYOUT) revert InvalidPayout();
-        if (bytes(ipfsHash).length == 0) revert InvalidString();
-        if (bytes(projectName).length == 0) revert InvalidString();
-
-        uint256 id;
-        unchecked {
-            id = nextTaskId++;
-        }
-        _tasks[id] = Task({payout: uint248(payout), status: Status.UNCLAIMED, claimer: address(0), ipfsHash: ipfsHash});
-        emit TaskCreated(id, payout, ipfsHash, projectName);
+    modifier onlyPM(bytes32 pid) {
+        if (_msgSender() != executor && !_projects[pid].managers[_msgSender()]) revert NotPM();
+        _;
     }
 
-    /// @dev Update task before it is CLAIMED; once claimed only `ipfsHash` may change.
-    function updateTask(uint256 id, uint256 newPayout, string calldata newIpfsHash) external onlyCreator {
+    modifier projectExists(bytes32 pid) {
+        if (!_projects[pid].exists) revert UnknownProject();
+        _;
+    }
+
+    modifier onlyExecutor() {
+        if (_msgSender() != executor) revert NotExecutor();
+        _;
+    }
+
+    /*─────────────────── Project Logic ──────────────────*/
+    function _pid(string calldata name) private pure returns (bytes32) {
+        return keccak256(abi.encodePacked(name));
+    }
+
+    function createProject(
+        string calldata name,
+        uint256 cap, // 0 ⇒ unlimited
+        address[] calldata managers
+    ) external onlyCreator {
+        if (bytes(name).length == 0) revert InvalidString();
+        if (cap > MAX_PAYOUT) revert InvalidPayout();
+
+        bytes32 pid = _pid(name);
+        if (_projects[pid].exists) revert ProjectExists();
+
+        Project storage p = _projects[pid];
+        p.cap = uint128(cap);
+        p.exists = true;
+
+        // auto‑add caller as PM (remove later if you want zero managers)
+        p.managers[_msgSender()] = true;
+        emit ProjectManagerAdded(pid, _msgSender());
+
+        for (uint256 i; i < managers.length; ++i) {
+            address m = managers[i];
+            if (m == address(0)) revert ZeroAddress();
+            p.managers[m] = true;
+            emit ProjectManagerAdded(pid, m);
+        }
+
+        emit ProjectCreated(pid, name, cap);
+    }
+
+    function updateProjectCap(string calldata name, uint256 newCap) external onlyCreator {
+        if (bytes(name).length == 0) revert InvalidString();
+        if (newCap > MAX_PAYOUT) revert InvalidPayout();
+
+        bytes32 pid = _pid(name);
+        Project storage p = _projects[pid];
+        if (!p.exists) revert UnknownProject();
+        if (newCap != 0 && newCap < p.spent) revert CapBelowCommitted();
+
+        uint256 old = p.cap;
+        p.cap = uint128(newCap);
+        emit ProjectCapUpdated(pid, old, newCap);
+    }
+
+    function addProjectManager(string calldata name, address manager) external onlyCreator {
+        if (bytes(name).length == 0) revert InvalidString();
+        if (manager == address(0)) revert ZeroAddress();
+        bytes32 pid = _pid(name);
+        Project storage p = _projects[pid];
+        if (!p.exists) revert UnknownProject();
+        p.managers[manager] = true;
+        emit ProjectManagerAdded(pid, manager);
+    }
+
+    function removeProjectManager(string calldata name, address manager) external onlyCreator {
+        if (bytes(name).length == 0) revert InvalidString();
+        bytes32 pid = _pid(name);
+        Project storage p = _projects[pid];
+        if (!p.exists) revert UnknownProject();
+        p.managers[manager] = false;
+        emit ProjectManagerRemoved(pid, manager);
+    }
+
+    function deleteProject(string calldata name) external onlyCreator {
+        if (bytes(name).length == 0) revert InvalidString();
+        bytes32 pid = _pid(name);
+        Project storage p = _projects[pid];
+        if (!p.exists) revert UnknownProject();
+        if (p.cap != 0 && p.spent != p.cap) revert CapBelowCommitted();
+        delete _projects[pid];
+        emit ProjectDeleted(pid, name);
+    }
+
+    /*─────────────────── Task Logic ──────────────────*/
+    function createTask(uint256 payout, string calldata ipfsHash, string calldata projectName) external onlyMember {
+        if (payout == 0 || payout > MAX_PAYOUT) revert InvalidPayout();
+        if (bytes(ipfsHash).length == 0) revert InvalidString();
+
+        bytes32 pid = _pid(projectName);
+        Project storage p = _projects[pid];
+        if (!p.exists) revert UnknownProject();
+
+        // auth
+        if (_msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())] && !p.managers[_msgSender()]) {
+            revert NotPM();
+        }
+
+        // always track spent; enforce only when capped
+        uint256 newSpent = p.spent + payout;
+        if (p.cap != 0 && newSpent > p.cap) revert BudgetExceeded();
+        p.spent = uint128(newSpent);
+
+        uint256 id = nextTaskId++;
+        _tasks[id] = Task({
+            payout: uint248(payout),
+            status: Status.UNCLAIMED,
+            claimer: address(0),
+            projectId: pid,
+            ipfsHash: ipfsHash
+        });
+        _taskProject[id] = pid;
+
+        emit TaskCreated(id, pid, payout, ipfsHash);
+    }
+
+    function updateTask(uint256 id, uint256 newPayout, string calldata newIpfsHash) external {
         Task storage t = _task(id);
+        bytes32 pid = _taskProject[id];
+        Project storage p = _projects[pid];
+
+        if (_msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())] && !p.managers[_msgSender()]) {
+            revert NotPM();
+        }
 
         if (t.status == Status.CLAIMED || t.status == Status.SUBMITTED) {
-            // after claim: only allow ipfsHash bump
             if (bytes(newIpfsHash).length == 0) revert InvalidString();
             t.ipfsHash = newIpfsHash;
         } else if (t.status == Status.UNCLAIMED) {
-            // before claim: allow both
+            uint256 oldPayout = t.payout;
             if (newPayout == 0 || newPayout > MAX_PAYOUT) revert InvalidPayout();
-            if (bytes(newIpfsHash).length == 0) revert InvalidString();
+
+            uint256 tentative = p.spent - oldPayout + newPayout;
+            if (p.cap != 0 && tentative > p.cap) revert BudgetExceeded();
+            p.spent = uint128(tentative);
+
             t.payout = uint248(newPayout);
-            t.ipfsHash = newIpfsHash;
+            if (bytes(newIpfsHash).length != 0) t.ipfsHash = newIpfsHash;
         } else {
             revert AlreadyCompleted();
         }
+
         emit TaskUpdated(id, newPayout, newIpfsHash);
     }
 
@@ -145,16 +291,23 @@ contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgrad
         emit TaskClaimed(id, _msgSender());
     }
 
-    function assignTask(uint256 id, address assignee) external onlyCreator {
+    function assignTask(uint256 id, address assignee) external {
         if (assignee == address(0)) revert ZeroAddress();
         if (membership.roleOf(assignee) == bytes32(0)) revert NotMember();
 
         Task storage t = _task(id);
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
 
-        t.status  = Status.CLAIMED;
-        t.claimer = assignee;
+        bytes32 pid = _taskProject[id];
+        if (
+            _msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())]
+                && !_projects[pid].managers[_msgSender()]
+        ) {
+            revert NotPM();
+        }
 
+        t.status = Status.CLAIMED;
+        t.claimer = assignee;
         emit TaskAssigned(id, assignee, _msgSender());
     }
 
@@ -169,49 +322,71 @@ contract TaskManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgrad
         emit TaskSubmitted(id, ipfsHash);
     }
 
-    function completeTask(uint256 id) external nonReentrant onlyCreator {
+    function completeTask(uint256 id) external nonReentrant {
         Task storage t = _task(id);
         if (t.status != Status.SUBMITTED) revert AlreadyCompleted();
 
-        token.mint(t.claimer, t.payout);
+        bytes32 pid = _taskProject[id];
+        if (
+            _msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())]
+                && !_projects[pid].managers[_msgSender()]
+        ) {
+            revert NotPM();
+        }
 
+        token.mint(t.claimer, t.payout);
         t.status = Status.COMPLETED;
         emit TaskCompleted(id, _msgSender());
     }
 
-    /// @notice Cancel an unclaimed task to claw back storage.
-    function cancelTask(uint256 id) external onlyCreator {
+    function cancelTask(uint256 id) external {
         Task storage t = _task(id);
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+
+        bytes32 pid = _taskProject[id];
+        Project storage p = _projects[pid];
+        if (_msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())] && !p.managers[_msgSender()]) {
+            revert NotPM();
+        }
+
+        // always refund
+        p.spent -= uint128(t.payout);
+
         t.status = Status.CANCELLED;
         emit TaskCancelled(id, _msgSender());
     }
 
-    /*──────────── Project signalling ───────────*/
-    function createProject(string calldata name) external onlyCreator {
-        if (bytes(name).length == 0) revert InvalidString();
-        emit ProjectCreated(name);
-    }
-
-    function deleteProject(string calldata name) external onlyCreator {
-        if (bytes(name).length == 0) revert InvalidString();
-        emit ProjectDeleted(name);
-    }
-
     /*──────────── Governance Tools ───────────*/
-    function setCreatorRole(bytes32 role, bool enable) external onlyOwner {
+    function setCreatorRole(bytes32 role, bool enable) external onlyExecutor {
         isCreatorRole[role] = enable;
         emit CreatorRoleUpdated(role, enable);
+    }
+
+    function setExecutor(address newExecutor) external {
+        if (newExecutor == address(0)) revert ZeroAddress();
+        if (executor != address(0)) {
+            // After first set, only executor can update
+            if (msg.sender != executor) revert Unauthorized();
+        }
+        executor = newExecutor;
+        emit ExecutorSet(newExecutor);
     }
 
     /*──────────── View Helpers ───────────*/
     function getTask(uint256 id)
         external
         view
-        returns (uint256 payout, Status status, address claimer, string memory ipfs)
+        returns (uint256 payout, Status status, address claimer, bytes32 projectId, string memory ipfs)
     {
         Task storage t = _task(id);
-        return (t.payout, t.status, t.claimer, t.ipfsHash);
+        return (t.payout, t.status, t.claimer, t.projectId, t.ipfsHash);
+    }
+
+    function getProjectInfo(string calldata name) external view returns (uint256 cap, uint256 spent, bool isManager) {
+        bytes32 pid = _pid(name);
+        Project storage p = _projects[pid];
+        if (!p.exists) revert UnknownProject();
+        return (p.cap, p.spent, p.managers[_msgSender()]);
     }
 
     /*──────────── Internal Utils ───────────*/
