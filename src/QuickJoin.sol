@@ -7,7 +7,7 @@ import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.s
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 /*───────────────────────── Interface minimal stubs ───────────────────────*/
-interface IMembershipNFT {
+interface IMembership {
     function quickJoinMint(address newUser) external;
 }
 
@@ -31,7 +31,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     bytes4 public constant MODULE_ID = bytes4(keccak256("QuickJoin"));
 
     /* ───────── Storage ──────── */
-    IMembershipNFT private membershipNFT;
+    IMembership private membership;
     IUniversalAccountRegistry private accountRegistry;
 
     address public masterDeployAddress; // set once, but rotatable by executor
@@ -44,12 +44,12 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     event QuickJoinedByMaster(address indexed master, address indexed user, bool usernameCreated);
 
     /* ───────── Initialiser ───── */
-    function initialize(address executor_, address membershipNFT_, address accountRegistry_, address masterDeploy_)
+    function initialize(address executor_, address membership_, address accountRegistry_, address masterDeploy_)
         external
         initializer
     {
         if (
-            executor_ == address(0) || membershipNFT_ == address(0) || accountRegistry_ == address(0)
+            executor_ == address(0) || membership_ == address(0) || accountRegistry_ == address(0)
                 || masterDeploy_ == address(0)
         ) revert InvalidAddress();
 
@@ -57,11 +57,11 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         __ReentrancyGuard_init();
 
         executor = executor_;
-        membershipNFT = IMembershipNFT(membershipNFT_);
+        membership = IMembership(membership_);
         accountRegistry = IUniversalAccountRegistry(accountRegistry_);
         masterDeployAddress = masterDeploy_;
 
-        emit AddressesUpdated(membershipNFT_, accountRegistry_, masterDeploy_);
+        emit AddressesUpdated(membership_, accountRegistry_, masterDeploy_);
         emit ExecutorUpdated(executor_);
     }
 
@@ -77,19 +77,19 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     }
 
     /* ─────── Admin / DAO setters (executor‑gated) ─────── */
-    function updateAddresses(address membershipNFT_, address accountRegistry_, address masterDeploy_)
+    function updateAddresses(address membership_, address accountRegistry_, address masterDeploy_)
         external
         onlyExecutor
     {
-        if (membershipNFT_ == address(0) || accountRegistry_ == address(0) || masterDeploy_ == address(0)) {
+        if (membership_ == address(0) || accountRegistry_ == address(0) || masterDeploy_ == address(0)) {
             revert InvalidAddress();
         }
 
-        membershipNFT = IMembershipNFT(membershipNFT_);
+        membership = IMembership(membership_);
         accountRegistry = IUniversalAccountRegistry(accountRegistry_);
         masterDeployAddress = masterDeploy_;
 
-        emit AddressesUpdated(membershipNFT_, accountRegistry_, masterDeploy_);
+        emit AddressesUpdated(membership_, accountRegistry_, masterDeploy_);
     }
 
     function setExecutor(address newExec) external onlyExecutor {
@@ -110,7 +110,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
             created = true;
         }
 
-        membershipNFT.quickJoinMint(user);
+        membership.quickJoinMint(user);
         emit QuickJoined(user, created);
     }
 
@@ -125,7 +125,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     function quickJoinWithUser() external nonReentrant {
         string memory existing = accountRegistry.getUsername(_msgSender());
         if (bytes(existing).length == 0) revert NoUsername();
-        membershipNFT.quickJoinMint(_msgSender());
+        membership.quickJoinMint(_msgSender());
         emit QuickJoined(_msgSender(), false);
     }
 
@@ -141,7 +141,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         string memory existing = accountRegistry.getUsername(newUser);
         if (bytes(existing).length == 0) revert NoUsername();
 
-        membershipNFT.quickJoinMint(newUser);
+        membership.quickJoinMint(newUser);
         emit QuickJoinedByMaster(_msgSender(), newUser, false);
     }
 
