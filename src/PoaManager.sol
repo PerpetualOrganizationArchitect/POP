@@ -14,7 +14,7 @@ contract PoaManager is Ownable(msg.sender) {
     error SameImplementation();
 
     /*──────────── Storage ──────────*/
-    mapping(bytes32 => UpgradeableBeacon) public beacons; // typeId ⇒ beacon
+    mapping(bytes32 => UpgradeableBeacon) public beacons; // typeId to beacon
     bytes32[] public typeIds;
     ImplementationRegistry public immutable registry;
 

@@ -1,44 +1,49 @@
 // SPDX‑License‑Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-/*──────────────────────────── Errors ───────────────────────────*/
+/* ─────────── Custom errors ─────────── */
 error InvalidParam();
 error OrgExists();
 error OrgUnknown();
 error TypeTaken();
 error ContractUnknown();
-error NotRegistryOrOrg();
-error NotOrgOwner();
+error NotOrgExecutor();
+error OwnerOnlyDuringBootstrap(); // deployer tried after bootstrap
+error AutoUpgradeRequired(); // deployer must set autoUpgrade=true
 
-/*─────────────────────────── Registry ──────────────────────────*/
+/* ────────────────── Org Registry ────────────────── */
 contract OrgRegistry is Ownable(msg.sender) {
-    /*──────────── Data structs ───────────*/
+    /* ───── Data structs ───── */
     struct ContractInfo {
         address proxy; // BeaconProxy address
         address beacon; // Beacon address
-        bool autoUpgrade; // true = follows PoaManager beacon
-        address owner; // module owner
+        bool autoUpgrade; // true ⇒ proxy follows beacon
+        address owner; // module owner (immutable metadata)
     }
 
     struct OrgInfo {
-        address owner;
-        string name;
+        address executor; // DAO / governor / timelock that controls the org
         uint32 contractCount;
+        bool bootstrap; // TRUE until the executor (or deployer via `lastRegister`)
+            // finishes initial deployment. Afterwards the registry
+            // owner can no longer add contracts.
         bool exists;
+        string metaCID; // IPFS / Arweave metadata for the org
     }
 
-    /*──────────── Storage ───────────*/
+    /* ───── Storage ───── */
     mapping(bytes32 => OrgInfo) public orgOf; // orgId to OrgInfo
     mapping(bytes32 => ContractInfo) public contractOf; // contractId to ContractInfo
-    mapping(bytes32 => mapping(bytes32 => address)) public proxyOf; // orgId to typeId to proxy
+    mapping(bytes32 => mapping(bytes32 => address)) public proxyOf; // (orgId,typeId) to proxy
 
-    bytes32[] public orgIds; // all orgIds for enumeration
-    uint256 public totalContracts; // running total of registered contracts
+    bytes32[] public orgIds;
+    uint256 public totalContracts;
 
-    /*──────────── Events ───────────*/
-    event OrgRegistered(bytes32 indexed orgId, address owner, string name);
+    /* ───── Events ───── */
+    event OrgRegistered(bytes32 indexed orgId, address indexed executor, string metaCID);
+    event MetaUpdated(bytes32 indexed orgId, string newCID);
     event ContractRegistered(
         bytes32 indexed contractId,
         bytes32 indexed orgId,
@@ -48,81 +53,138 @@ contract OrgRegistry is Ownable(msg.sender) {
         bool autoUpgrade,
         address owner
     );
+    event AutoUpgradeSet(bytes32 indexed contractId, bool enabled);
 
-    /*──────────── Modifiers ─────────*/
-    modifier onlyRegistryOrOrg(bytes32 orgId) {
-        if (msg.sender != owner() && msg.sender != orgOf[orgId].owner) {
-            revert NotRegistryOrOrg();
-        }
-        _;
-    }
-
-    /*────────────────── Org logic ─────────────────*/
-    function registerOrg(bytes32 orgId, address orgOwner, string calldata name) external onlyOwner {
-        if (orgId == bytes32(0) || orgOwner == address(0)) revert InvalidParam();
+    /* ═════════════════ ORG  LOGIC ═════════════════ */
+    function registerOrg(bytes32 orgId, address executorAddr, string calldata metaCID) external onlyOwner {
+        if (orgId == bytes32(0) || executorAddr == address(0)) revert InvalidParam();
         if (orgOf[orgId].exists) revert OrgExists();
 
-        orgOf[orgId] = OrgInfo({owner: orgOwner, name: name, contractCount: 0, exists: true});
+        orgOf[orgId] = OrgInfo({
+            executor: executorAddr,
+            contractCount: 0,
+            bootstrap: true, // owner can add modules while true
+            exists: true,
+            metaCID: metaCID
+        });
         orgIds.push(orgId);
-
-        emit OrgRegistered(orgId, orgOwner, name);
+        emit OrgRegistered(orgId, executorAddr, metaCID);
     }
 
-    /*──────────────── Contract logic ──────────────*/
+    function updateOrgMeta(bytes32 orgId, string calldata newCID) external {
+        OrgInfo storage o = orgOf[orgId];
+        if (!o.exists) revert OrgUnknown();
+        if (msg.sender != o.executor) revert NotOrgExecutor();
+
+        o.metaCID = newCID;
+        emit MetaUpdated(orgId, newCID);
+    }
+
+    /* ══════════ CONTRACT  REGISTRATION  ══════════ */
+    /**
+     *  ‑ During **bootstrap** (`o.bootstrap == true`) the registry owner _may_
+     *    register contracts **if and only if `autoUpgrade == true`.**
+     *  ‑ Pass `lastRegister = true` on the deployer’s final call, or let the
+     *    executor register at least once, to end the bootstrap phase.
+     *
+     *  @param lastRegister  set TRUE when this is the deployer’s last module;
+     *                       it flips `bootstrap` to false.
+     */
     function registerOrgContract(
         bytes32 orgId,
-        string calldata typeName,
+        bytes32 typeId,
         address proxy,
         address beacon,
         bool autoUp,
-        address moduleOwner
-    ) external onlyRegistryOrOrg(orgId) {
-        if (!orgOf[orgId].exists) revert OrgUnknown();
-        if (bytes(typeName).length == 0 || proxy == address(0) || beacon == address(0) || moduleOwner == address(0)) {
-            revert InvalidParam();
+        address moduleOwner,
+        bool lastRegister
+    ) external {
+        OrgInfo storage o = orgOf[orgId];
+        if (!o.exists) revert OrgUnknown();
+
+        bool callerIsOwner = (msg.sender == owner());
+        bool callerIsExecutor = (msg.sender == o.executor);
+
+        if (callerIsOwner) {
+            // owner path allowed only during bootstrap, _and_ must opt‑in to auto‑upgrade
+            if (!o.bootstrap) revert OwnerOnlyDuringBootstrap();
+            if (!autoUp) revert AutoUpgradeRequired();
+        } else if (!callerIsExecutor) {
+            revert NotOrgExecutor();
         }
 
-        bytes32 typeId = keccak256(bytes(typeName));
+        if (typeId == bytes32(0) || proxy == address(0) || beacon == address(0) || moduleOwner == address(0)) {
+            revert InvalidParam();
+        }
         if (proxyOf[orgId][typeId] != address(0)) revert TypeTaken();
 
-        // Build deterministic contractId = keccak256(orgId, typeId)
         bytes32 contractId = keccak256(abi.encodePacked(orgId, typeId));
 
         contractOf[contractId] = ContractInfo({proxy: proxy, beacon: beacon, autoUpgrade: autoUp, owner: moduleOwner});
         proxyOf[orgId][typeId] = proxy;
 
         unchecked {
-            orgOf[orgId].contractCount++;
-            totalContracts++;
+            ++o.contractCount;
+            ++totalContracts;
         }
-
         emit ContractRegistered(contractId, orgId, typeId, proxy, beacon, autoUp, moduleOwner);
+
+        // Finish bootstrap if executor registered OR deployer signalled completion
+        if (callerIsExecutor || (callerIsOwner && lastRegister)) {
+            o.bootstrap = false;
+        }
     }
 
-    /*────────────── View helpers ─────────────*/
-    function getOrgContract(bytes32 orgId, string calldata typeName) external view returns (address) {
-        if (!orgOf[orgId].exists) revert OrgUnknown();
-        address proxy = proxyOf[orgId][keccak256(bytes(typeName))];
+    function setAutoUpgrade(bytes32 orgId, bytes32 typeId, bool enabled) external {
+        OrgInfo storage o = orgOf[orgId];
+        if (!o.exists) revert OrgUnknown();
+        if (msg.sender != o.executor) revert NotOrgExecutor();
+
+        address proxy = proxyOf[orgId][typeId];
         if (proxy == address(0)) revert ContractUnknown();
-        return proxy;
+
+        bytes32 contractId = keccak256(abi.encodePacked(orgId, typeId));
+        contractOf[contractId].autoUpgrade = enabled;
+
+        emit AutoUpgradeSet(contractId, enabled);
     }
 
-    function getContractBeacon(bytes32 contractId) external view returns (address) {
-        address beacon = contractOf[contractId].beacon;
+    /* ═════════════════  VIEW HELPERS  ═════════════════ */
+    function getOrgContract(bytes32 orgId, bytes32 typeId) external view returns (address proxy) {
+        if (!orgOf[orgId].exists) revert OrgUnknown();
+        proxy = proxyOf[orgId][typeId];
+        if (proxy == address(0)) revert ContractUnknown();
+    }
+
+    function getContractBeacon(bytes32 contractId) external view returns (address beacon) {
+        beacon = contractOf[contractId].beacon;
         if (beacon == address(0)) revert ContractUnknown();
-        return beacon;
     }
 
     function isAutoUpgrade(bytes32 contractId) external view returns (bool) {
-        if (contractOf[contractId].proxy == address(0)) revert ContractUnknown();
-        return contractOf[contractId].autoUpgrade;
+        ContractInfo storage c = contractOf[contractId];
+        if (c.proxy == address(0)) revert ContractUnknown();
+        return c.autoUpgrade;
     }
 
-    /// @notice Number of registered orgs
+    /* enumeration helpers */
     function orgCount() external view returns (uint256) {
         return orgIds.length;
     }
 
-    /*──────────── Storage gap ────────────*/
-    uint256[46] private __gap;
+    function getOrgMeta(bytes32 orgId) external view returns (string memory) {
+        return orgOf[orgId].metaCID;
+    }
+
+    function getOrgIds() external view returns (bytes32[] memory) {
+        return orgIds;
+    }
+
+    /* ─────────── Version ─────────── */
+    function version() external pure returns (string memory) {
+        return "v1";
+    }
+
+    /* ─────────── Storage gap ─────────── */
+    uint256[50] private __gap;
 }
