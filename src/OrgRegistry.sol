@@ -1,7 +1,8 @@
 // SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 
 /* ─────────── Custom errors ─────────── */
 error InvalidParam();
@@ -14,7 +15,7 @@ error OwnerOnlyDuringBootstrap(); // deployer tried after bootstrap
 error AutoUpgradeRequired(); // deployer must set autoUpgrade=true
 
 /* ────────────────── Org Registry ────────────────── */
-contract OrgRegistry is Ownable(msg.sender) {
+contract OrgRegistry is Initializable, OwnableUpgradeable {
     /* ───── Data structs ───── */
     struct ContractInfo {
         address proxy; // BeaconProxy address
@@ -55,6 +56,18 @@ contract OrgRegistry is Ownable(msg.sender) {
     );
     event AutoUpgradeSet(bytes32 indexed contractId, bool enabled);
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() initializer {}
+
+    /**
+     * @dev Initializes the contract, replacing the constructor for upgradeable pattern
+     * @param initialOwner The address that will own this registry
+     */
+    function initialize(address initialOwner) external initializer {
+        if (initialOwner == address(0)) revert InvalidParam();
+        __Ownable_init(initialOwner);
+    }
+
     /* ═════════════════ ORG  LOGIC ═════════════════ */
     function registerOrg(bytes32 orgId, address executorAddr, string calldata metaCID) external onlyOwner {
         if (orgId == bytes32(0) || executorAddr == address(0)) revert InvalidParam();
@@ -82,13 +95,13 @@ contract OrgRegistry is Ownable(msg.sender) {
 
     /* ══════════ CONTRACT  REGISTRATION  ══════════ */
     /**
-     *  ‑ During **bootstrap** (`o.bootstrap == true`) the registry owner _may_
+     *  ‑ During **bootstrap** (`o.bootstrap == true`) the registry owner _may_
      *    register contracts **if and only if `autoUpgrade == true`.**
-     *  ‑ Pass `lastRegister = true` on the deployer’s final call, or let the
+     *  ‑ Pass `lastRegister = true` on the deployer's final call, or let the
      *    executor register at least once, to end the bootstrap phase.
      *
-     *  @param lastRegister  set TRUE when this is the deployer’s last module;
-     *                       it flips `bootstrap` to false.
+     *  @param lastRegister  set TRUE when this is the deployer's last module;
+     *                       it flips `bootstrap` to false.
      */
     function registerOrgContract(
         bytes32 orgId,

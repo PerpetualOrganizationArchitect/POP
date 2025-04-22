@@ -2,9 +2,10 @@
 pragma solidity ^0.8.17;
 
 /*───────────────────  ImplementationRegistry  ───────────────────*/
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 
-contract ImplementationRegistry is Ownable(msg.sender) {
+contract ImplementationRegistry is Initializable, OwnableUpgradeable {
     /*──────────── Custom errors ───────────*/
     error EmptyString();
     error ImplZero();
@@ -36,6 +37,11 @@ contract ImplementationRegistry is Ownable(msg.sender) {
         address implementation,
         bool latest
     );
+
+    /*───────── Initializer ─────────────*/
+    function initialize(address owner) external initializer {
+        __Ownable_init(owner);
+    }
 
     /*───────── Internal utils ───────────*/
     function _id(string calldata s) internal pure returns (bytes32) {

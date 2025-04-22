@@ -4,7 +4,8 @@ pragma solidity ^0.8.20;
 /*───────────────────────────  OpenZeppelin  ───────────────────────────*/
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 
 /*────────────────────────────── Core deps ──────────────────────────────*/
 import "./OrgRegistry.sol";
@@ -65,10 +66,10 @@ error BeaconProbeFail();
 error OrgExistsMismatch();
 
 /*───────────────────────────  Deployer  ───────────────────────────────*/
-contract Deployer is Ownable(msg.sender) {
+contract Deployer is Initializable, OwnableUpgradeable {
     /* immutables */
-    IPoaManager public immutable poaManager;
-    OrgRegistry public immutable orgRegistry;
+    IPoaManager public poaManager;
+    OrgRegistry public orgRegistry;
 
     /* Local definition of OrgInfo struct to match OrgRegistry */
     struct OrgInfo {
@@ -84,9 +85,12 @@ contract Deployer is Ownable(msg.sender) {
         bytes32 indexed orgId, bytes32 indexed typeId, address proxy, address beacon, bool autoUpgrade, address owner
     );
 
-    /* constructor */
-    constructor(address _poaManager, address _orgRegistry) {
+    /* initializer */
+    constructor() initializer {}
+
+    function initialize(address _poaManager, address _orgRegistry) public initializer {
         if (_poaManager == address(0) || _orgRegistry == address(0)) revert InvalidAddress();
+        __Ownable_init(msg.sender);
         poaManager = IPoaManager(_poaManager);
         orgRegistry = OrgRegistry(_orgRegistry);
     }
@@ -366,4 +370,7 @@ contract Deployer is Ownable(msg.sender) {
         (,,, bool exists,) = orgRegistry.orgOf(id);
         return exists;
     }
+
+    /* ─────────── Storage gap ─────────── */
+    uint256[50] private __gap;
 }
