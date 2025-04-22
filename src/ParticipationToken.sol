@@ -13,7 +13,7 @@ interface IMembership {
 }
 
 /*──────────────────  Participation Token  ──────────────────*/
-contract ParticipationToken is Initializable, ERC20Upgradeable, ContextUpgradeable, ReentrancyGuardUpgradeable {
+contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardUpgradeable {
     /*──────────── Errors ───────────*/
     error NotTaskOrEdu();
     error NotExecutive();
@@ -59,7 +59,6 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ContextUpgradeab
         if (membershipAddr == address(0) || executor_ == address(0)) revert InvalidAddress();
 
         __ERC20_init(name_, symbol_);
-        __Context_init();
         __ReentrancyGuard_init();
 
         membership = IMembership(membershipAddr);
