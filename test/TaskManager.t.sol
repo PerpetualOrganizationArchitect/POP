@@ -67,7 +67,7 @@ contract TaskManagerTest is Test {
     address executor = makeAddr("executor");
 
     bytes32 constant CREATOR_ROLE = keccak256("CREATOR");
-    
+
     /* project IDs - will be populated at runtime */
     bytes32 UNLIM_ID;
     bytes32 CAPPED_ID;
