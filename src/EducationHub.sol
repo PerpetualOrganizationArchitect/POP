@@ -1,4 +1,4 @@
-// SPDX‑License‑Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 /*──────── OpenZeppelin v5.3 Upgradeables ────────*/
@@ -20,13 +20,15 @@ interface IMembership {
 }
 
 /*────────────────── EducationHub ─────────────────*/
+/// @title EducationHub – on‑chain learning modules that reward participation tokens
+/// @notice Metadata is emitted in events as compressed bytes rather than stored on‑chain
 contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
     /*────────── Constants ─────────*/
     bytes4 public constant MODULE_ID = 0x45445548; /* "EDUH" */
 
     /*────────── Errors ─────────*/
     error ZeroAddress();
-    error InvalidString();
+    error InvalidBytes();
     error InvalidPayout();
     error InvalidAnswer();
     error NotMember();
@@ -39,8 +41,7 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     /*────────── Types / Storage ─────────*/
     struct Module {
         bytes32 answerHash;
-        uint256 payout;
-        string ipfsHash;
+        uint128 payout;
         bool exists;
     }
 
@@ -56,8 +57,8 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     address public executor; // DAO / Timelock / Governor
 
     /*────────── Events ─────────*/
-    event ModuleCreated(uint256 indexed id, string ipfsHash, uint256 payout);
-    event ModuleUpdated(uint256 indexed id, string ipfsHash, uint256 payout);
+    event ModuleCreated(uint256 indexed id, uint256 payout, bytes metadata);
+    event ModuleUpdated(uint256 indexed id, uint256 payout, bytes metadata);
     event ModuleRemoved(uint256 indexed id);
     event ModuleCompleted(uint256 indexed id, address indexed learner);
     event CreatorRoleUpdated(bytes32 indexed role, bool enabled);
@@ -73,9 +74,7 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         address executorAddr,
         bytes32[] calldata creatorRoleIds
     ) external initializer {
-        if (tokenAddr == address(0) || membershipAddr == address(0) || executorAddr == address(0)) {
-            revert ZeroAddress();
-        }
+        if (tokenAddr == address(0) || membershipAddr == address(0) || executorAddr == address(0)) revert ZeroAddress();
 
         __Context_init();
         __ReentrancyGuard_init();
@@ -89,9 +88,12 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         emit MembershipSet(membershipAddr);
         emit ExecutorSet(executorAddr);
 
-        for (uint256 i; i < creatorRoleIds.length; ++i) {
+        for (uint256 i; i < creatorRoleIds.length;) {
             isCreatorRole[creatorRoleIds[i]] = true;
             emit CreatorRoleUpdated(creatorRoleIds[i], true);
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -148,38 +150,36 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     }
 
     /*────────── Module CRUD ────────*/
-    function createModule(string calldata ipfsHash, uint256 payout, uint8 correctAnswer)
+    function createModule(bytes calldata metadata, uint256 payout, uint8 correctAnswer)
         external
         onlyCreator
         whenNotPaused
     {
-        if (bytes(ipfsHash).length == 0) revert InvalidString();
-        if (payout == 0) revert InvalidPayout();
+        if (metadata.length == 0) revert InvalidBytes();
+        if (payout == 0 || payout > type(uint128).max) revert InvalidPayout();
 
-        uint256 id = nextModuleId++;
-        _modules[id] = Module({
-            answerHash: keccak256(abi.encodePacked(correctAnswer)),
-            payout: payout,
-            ipfsHash: ipfsHash,
-            exists: true
-        });
+        uint256 id = nextModuleId;
+        unchecked {
+            ++nextModuleId;
+        }
 
-        emit ModuleCreated(id, ipfsHash, payout);
+        _modules[id] =
+            Module({answerHash: keccak256(abi.encodePacked(correctAnswer)), payout: uint128(payout), exists: true});
+
+        emit ModuleCreated(id, payout, metadata);
     }
 
-    function updateModule(uint256 id, string calldata newIpfsHash, uint256 newPayout)
+    function updateModule(uint256 id, bytes calldata newMetadata, uint256 newPayout)
         external
         onlyCreator
         whenNotPaused
     {
         Module storage m = _module(id);
-        if (bytes(newIpfsHash).length == 0) revert InvalidString();
-        if (newPayout == 0) revert InvalidPayout();
+        if (newMetadata.length == 0) revert InvalidBytes();
+        if (newPayout == 0 || newPayout > type(uint128).max) revert InvalidPayout();
 
-        m.ipfsHash = newIpfsHash;
-        m.payout = newPayout;
-
-        emit ModuleUpdated(id, newIpfsHash, newPayout);
+        m.payout = uint128(newPayout);
+        emit ModuleUpdated(id, newPayout, newMetadata);
     }
 
     function removeModule(uint256 id) external onlyCreator whenNotPaused {
@@ -201,9 +201,9 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     }
 
     /*────────── View helpers ───────*/
-    function getModule(uint256 id) external view returns (uint256 payout, string memory ipfsHash, bool exists) {
+    function getModule(uint256 id) external view returns (uint256 payout, bool exists) {
         Module storage m = _module(id);
-        return (m.payout, m.ipfsHash, m.exists);
+        return (m.payout, m.exists);
     }
 
     function hasCompleted(address learner, uint256 id) external view returns (bool) {
