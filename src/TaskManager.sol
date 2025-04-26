@@ -38,7 +38,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     error Unauthorized();
 
     /*─────────────── Constants ──────────────────*/
-    uint256 public constant MAX_PAYOUT = 1e24; // 1,000,000 tokens (18 dec)
+    uint256 public constant MAX_PAYOUT = 1e24; // 1,000,000 tokens (18 decimals)
     bytes4 public constant MODULE_ID = 0x54534b32; // "TSK2"
 
     /*─────────────── Data Types ─────────────────*/
@@ -50,9 +50,10 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         CANCELLED
     }
 
+    /// @dev packed into 3 storage slots (payout+status, claimer, projectId)
     struct Task {
-        uint248 payout;
-        Status status;
+        uint128 payout; // fits MAX_PAYOUT
+        Status status; // stored as uint8
         address claimer;
         bytes32 projectId;
     }
@@ -66,7 +67,6 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     /*─────────────── Storage ─────────────────────*/
     mapping(bytes32 => Project) private _projects;
-    mapping(uint256 => bytes32) private _taskProject;
     mapping(uint256 => Task) private _tasks;
 
     IMembership public membership;
@@ -97,8 +97,8 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     event TaskCompleted(uint256 indexed id, address indexed completer);
     event TaskCancelled(uint256 indexed id, address indexed canceller);
     event ExecutorSet(address indexed newExecutor);
-    /*──────────────── Initialiser ───────────────*/
 
+    /*──────────────── Initialiser ───────────────*/
     function initialize(
         address tokenAddress,
         address membershipAddress,
@@ -115,9 +115,12 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         membership = IMembership(membershipAddress);
         executor = executorAddress;
 
-        for (uint256 i; i < creatorRoleIds.length; ++i) {
+        for (uint256 i; i < creatorRoleIds.length;) {
             isCreatorRole[creatorRoleIds[i]] = true;
             emit CreatorRoleUpdated(creatorRoleIds[i], true);
+            unchecked {
+                ++i;
+            }
         }
 
         emit ExecutorSet(executorAddress);
@@ -125,19 +128,20 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     /*──────────────── Modifiers ─────────────────*/
     modifier onlyCreator() {
-        if (!isCreatorRole[membership.roleOf(_msgSender())] && _msgSender() != executor) revert NotCreator();
+        address sender = _msgSender();
+        if (!isCreatorRole[membership.roleOf(sender)] && sender != executor) revert NotCreator();
         _;
     }
 
     modifier onlyMember() {
-        if (_msgSender() != executor && membership.roleOf(_msgSender()) == bytes32(0)) {
-            revert NotMember();
-        }
+        address sender = _msgSender();
+        if (sender != executor && membership.roleOf(sender) == bytes32(0)) revert NotMember();
         _;
     }
 
     modifier onlyPM(bytes32 pid) {
-        if (_msgSender() != executor && !_projects[pid].managers[_msgSender()]) revert NotPM();
+        address sender = _msgSender();
+        if (sender != executor && !_projects[pid].managers[sender]) revert NotPM();
         _;
     }
 
@@ -154,32 +158,36 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     /*─────────────────── Project Logic ──────────────────*/
     function createProject(
         bytes calldata metadata,
-        uint256 cap, // 0 to unlimited
+        uint256 cap, // 0 ⇒ unlimited
         address[] calldata managers
     ) external onlyCreator returns (bytes32 projectId) {
         if (metadata.length == 0) revert InvalidString();
         if (cap > MAX_PAYOUT) revert InvalidPayout();
 
-        // Generate project ID from counter
-        projectId = bytes32(nextProjectId++);
+        projectId = bytes32(nextProjectId);
+        unchecked {
+            ++nextProjectId;
+        }
 
         Project storage p = _projects[projectId];
         p.cap = uint128(cap);
         p.exists = true;
 
-        // auto‑add caller as PM (remove later if you want zero managers)
-        p.managers[_msgSender()] = true;
-        emit ProjectManagerAdded(projectId, _msgSender());
+        address sender = _msgSender();
+        p.managers[sender] = true;
+        emit ProjectManagerAdded(projectId, sender);
 
-        for (uint256 i; i < managers.length; ++i) {
+        for (uint256 i; i < managers.length;) {
             address m = managers[i];
             if (m == address(0)) revert ZeroAddress();
             p.managers[m] = true;
             emit ProjectManagerAdded(projectId, m);
+            unchecked {
+                ++i;
+            }
         }
 
         emit ProjectCreated(projectId, metadata, cap);
-        return projectId;
     }
 
     function updateProjectCap(bytes32 projectId, uint256 newCap) external onlyCreator projectExists(projectId) {
@@ -195,14 +203,12 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     function addProjectManager(bytes32 projectId, address manager) external onlyCreator projectExists(projectId) {
         if (manager == address(0)) revert ZeroAddress();
-        Project storage p = _projects[projectId];
-        p.managers[manager] = true;
+        _projects[projectId].managers[manager] = true;
         emit ProjectManagerAdded(projectId, manager);
     }
 
     function removeProjectManager(bytes32 projectId, address manager) external onlyCreator projectExists(projectId) {
-        Project storage p = _projects[projectId];
-        p.managers[manager] = false;
+        _projects[projectId].managers[manager] = false;
         emit ProjectManagerRemoved(projectId, manager);
     }
 
@@ -211,14 +217,15 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Project storage p = _projects[projectId];
         if (!p.exists) revert UnknownProject();
         if (p.cap != 0 && p.spent != p.cap) revert CapBelowCommitted();
-        delete _projects[projectId];
+
+        delete _projects[projectId]; // mapped struct & its storage pointers
         emit ProjectDeleted(projectId, metadata);
     }
 
     /*─────────────────── Task Logic ──────────────────*/
     function createTask(
         uint256 payout,
-        bytes calldata metadata, // compressed CBOR/deflate bytes
+        bytes calldata metadata, // compressed bytes
         bytes32 projectId
     ) external onlyMember {
         if (payout == 0 || payout > MAX_PAYOUT) revert InvalidPayout();
@@ -227,8 +234,8 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Project storage p = _projects[projectId];
         if (!p.exists) revert UnknownProject();
 
-        // auth
-        if (_msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())] && !p.managers[_msgSender()]) {
+        address sender = _msgSender();
+        if (sender != executor && !isCreatorRole[membership.roleOf(sender)] && !p.managers[sender]) {
             revert NotPM();
         }
 
@@ -236,34 +243,37 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         if (p.cap != 0 && newSpent > p.cap) revert BudgetExceeded();
         p.spent = uint128(newSpent);
 
-        uint256 id = nextTaskId++;
+        uint256 id = nextTaskId;
+        unchecked {
+            ++nextTaskId;
+        }
+
         _tasks[id] =
-            Task({payout: uint248(payout), status: Status.UNCLAIMED, claimer: address(0), projectId: projectId});
-        _taskProject[id] = projectId;
+            Task({payout: uint128(payout), status: Status.UNCLAIMED, claimer: address(0), projectId: projectId});
 
         emit TaskCreated(id, projectId, payout, metadata);
     }
 
     function updateTask(uint256 id, uint256 newPayout, bytes calldata newMetadata) external {
         Task storage t = _task(id);
-        bytes32 pid = _taskProject[id];
+        bytes32 pid = t.projectId;
         Project storage p = _projects[pid];
 
-        if (_msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())] && !p.managers[_msgSender()]) {
+        address sender = _msgSender();
+        if (sender != executor && !isCreatorRole[membership.roleOf(sender)] && !p.managers[sender]) {
             revert NotPM();
         }
 
         if (t.status == Status.CLAIMED || t.status == Status.SUBMITTED) {
-            if (newMetadata.length == 0) revert InvalidString(); // must supply fresh metadata
+            if (newMetadata.length == 0) revert InvalidString();
         } else if (t.status == Status.UNCLAIMED) {
-            uint256 oldPayout = t.payout;
             if (newPayout == 0 || newPayout > MAX_PAYOUT) revert InvalidPayout();
 
-            uint256 tentative = p.spent - oldPayout + newPayout;
+            uint256 tentative = p.spent - t.payout + newPayout;
             if (p.cap != 0 && tentative > p.cap) revert BudgetExceeded();
             p.spent = uint128(tentative);
 
-            t.payout = uint248(newPayout);
+            t.payout = uint128(newPayout);
         } else {
             revert AlreadyCompleted();
         }
@@ -287,17 +297,15 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Task storage t = _task(id);
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
 
-        bytes32 pid = _taskProject[id];
-        if (
-            _msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())]
-                && !_projects[pid].managers[_msgSender()]
-        ) {
+        bytes32 pid = t.projectId;
+        address sender = _msgSender();
+        if (sender != executor && !isCreatorRole[membership.roleOf(sender)] && !_projects[pid].managers[sender]) {
             revert NotPM();
         }
 
         t.status = Status.CLAIMED;
         t.claimer = assignee;
-        emit TaskAssigned(id, assignee, _msgSender());
+        emit TaskAssigned(id, assignee, sender);
     }
 
     function submitTask(uint256 id, bytes calldata metadata) external onlyMember {
@@ -314,34 +322,32 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Task storage t = _task(id);
         if (t.status != Status.SUBMITTED) revert AlreadyCompleted();
 
-        bytes32 pid = _taskProject[id];
-        if (
-            _msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())]
-                && !_projects[pid].managers[_msgSender()]
-        ) {
+        bytes32 pid = t.projectId;
+        address sender = _msgSender();
+        if (sender != executor && !isCreatorRole[membership.roleOf(sender)] && !_projects[pid].managers[sender]) {
             revert NotPM();
         }
 
-        token.mint(t.claimer, t.payout);
         t.status = Status.COMPLETED;
-        emit TaskCompleted(id, _msgSender());
+        token.mint(t.claimer, uint256(t.payout));
+        emit TaskCompleted(id, sender);
     }
 
     function cancelTask(uint256 id) external {
         Task storage t = _task(id);
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
 
-        bytes32 pid = _taskProject[id];
+        bytes32 pid = t.projectId;
         Project storage p = _projects[pid];
-        if (_msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())] && !p.managers[_msgSender()]) {
+
+        address sender = _msgSender();
+        if (sender != executor && !isCreatorRole[membership.roleOf(sender)] && !p.managers[sender]) {
             revert NotPM();
         }
 
-        // always refund
-        p.spent -= uint128(t.payout);
-
+        p.spent -= t.payout;
         t.status = Status.CANCELLED;
-        emit TaskCancelled(id, _msgSender());
+        emit TaskCancelled(id, sender);
     }
 
     /*──────────── Governance Tools ───────────*/

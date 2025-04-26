@@ -67,29 +67,29 @@ contract TaskManagerTest is Test {
     address executor = makeAddr("executor");
 
     bytes32 constant CREATOR_ROLE = keccak256("CREATOR");
-
-    /* project IDs */
-    bytes32 constant UNLIM_ID = keccak256("UNLIM");
-    bytes32 constant CAPPED_ID = keccak256("CAPPED");
-    bytes32 constant BUD_ID = keccak256("BUD");
-    bytes32 constant FLOW_ID = keccak256("FLOW");
-    bytes32 constant UPD_ID = keccak256("UPD");
-    bytes32 constant CAN_ID = keccak256("CAN");
-    bytes32 constant ACC_ID = keccak256("ACC");
-    bytes32 constant PROJECT_A_ID = keccak256("PROJECT_A");
-    bytes32 constant PROJECT_B_ID = keccak256("PROJECT_B");
-    bytes32 constant PROJECT_C_ID = keccak256("PROJECT_C");
-    bytes32 constant GOV_TEST_ID = keccak256("GOV_TEST");
-    bytes32 constant NEW_PROJECT_ID = keccak256("NEW_PROJECT");
-    bytes32 constant MULTI_PM_ID = keccak256("MULTI_PM");
-    bytes32 constant EDGE_ID = keccak256("EDGE");
-    bytes32 constant MEGA_ID = keccak256("MEGA");
-    bytes32 constant CAPPED_BIG_ID = keccak256("CAPPED_BIG");
-    bytes32 constant TO_DELETE_ID = keccak256("TO_DELETE");
-    bytes32 constant ZERO_CAP_ID = keccak256("ZERO_CAP");
-    bytes32 constant EXECUTOR_TEST_ID = keccak256("EXECUTOR_TEST");
-    bytes32 constant EXECUTOR_BYPASS_ID = keccak256("EXECUTOR_BYPASS");
-    bytes32 constant SHOULD_FAIL_ID = keccak256("SHOULD_FAIL");
+    
+    /* project IDs - will be populated at runtime */
+    bytes32 UNLIM_ID;
+    bytes32 CAPPED_ID;
+    bytes32 BUD_ID;
+    bytes32 FLOW_ID;
+    bytes32 UPD_ID;
+    bytes32 CAN_ID;
+    bytes32 ACC_ID;
+    bytes32 PROJECT_A_ID;
+    bytes32 PROJECT_B_ID;
+    bytes32 PROJECT_C_ID;
+    bytes32 GOV_TEST_ID;
+    bytes32 NEW_PROJECT_ID;
+    bytes32 MULTI_PM_ID;
+    bytes32 EDGE_ID;
+    bytes32 MEGA_ID;
+    bytes32 CAPPED_BIG_ID;
+    bytes32 TO_DELETE_ID;
+    bytes32 ZERO_CAP_ID;
+    bytes32 EXECUTOR_TEST_ID;
+    bytes32 EXECUTOR_BYPASS_ID;
+    bytes32 SHOULD_FAIL_ID;
 
     /* deployed contracts */
     TaskManager tm;
@@ -124,7 +124,7 @@ contract TaskManagerTest is Test {
 
     function test_CreateUnlimitedProjectAndTaskByAnotherCreator() public {
         vm.prank(creator1);
-        tm.createProject(UNLIM_ID, bytes("UNLIM"), 0, new address[](0));
+        UNLIM_ID = tm.createProject(bytes("UNLIM"), 0, new address[](0));
 
         // creator2 creates a task (should succeed, cap == 0)
         vm.prank(creator2);
@@ -139,7 +139,7 @@ contract TaskManagerTest is Test {
         managers[0] = pm1;
 
         vm.prank(creator1);
-        tm.createProject(CAPPED_ID, bytes("CAPPED"), 3 ether, managers);
+        CAPPED_ID = tm.createProject(bytes("CAPPED"), 3 ether, managers);
 
         // pm1 can create tasks until cap reached
         vm.prank(pm1);
@@ -156,7 +156,7 @@ contract TaskManagerTest is Test {
 
     function test_UpdateProjectCapLowerThanSpentShouldRevert() public {
         vm.prank(creator1);
-        tm.createProject(BUD_ID, bytes("BUD"), 2 ether, new address[](0));
+        BUD_ID = tm.createProject(bytes("BUD"), 2 ether, new address[](0));
 
         vm.prank(creator1);
         tm.createTask(2 ether, bytes("foo"), BUD_ID);
@@ -171,7 +171,7 @@ contract TaskManagerTest is Test {
 
     function _prepareFlow() internal returns (uint256 id) {
         vm.prank(creator1);
-        tm.createProject(FLOW_ID, bytes("FLOW"), 5 ether, new address[](0));
+        FLOW_ID = tm.createProject(bytes("FLOW"), 5 ether, new address[](0));
 
         address[] memory mgr = new address[](1);
         mgr[0] = pm1;
@@ -209,7 +209,7 @@ contract TaskManagerTest is Test {
 
     function test_UpdateTaskBeforeClaimAdjustsBudget() public {
         vm.prank(creator1);
-        tm.createProject(UPD_ID, bytes("UPD"), 3 ether, new address[](0));
+        UPD_ID = tm.createProject(bytes("UPD"), 3 ether, new address[](0));
 
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("foo"), UPD_ID);
@@ -240,7 +240,7 @@ contract TaskManagerTest is Test {
 
     function test_CancelTaskRefundsSpent() public {
         vm.prank(creator1);
-        tm.createProject(CAN_ID, bytes("CAN"), 2 ether, new address[](0));
+        CAN_ID = tm.createProject(bytes("CAN"), 2 ether, new address[](0));
 
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("foo"), CAN_ID);
@@ -259,7 +259,7 @@ contract TaskManagerTest is Test {
 
     function test_CreateTaskByNonMemberReverts() public {
         vm.prank(creator1);
-        tm.createProject(ACC_ID, bytes("ACC"), 0, new address[](0));
+        ACC_ID = tm.createProject(bytes("ACC"), 0, new address[](0));
 
         // creator2 is a member? => no, role==CREATOR, but our onlyMember modifier
         // checks roleOf != 0, so still passes. Use outsider (no role) to trigger revert.
@@ -284,9 +284,9 @@ contract TaskManagerTest is Test {
     function test_MultiProjectTaskManagement() public {
         // Create three projects with different caps
         vm.startPrank(creator1);
-        tm.createProject(PROJECT_A_ID, bytes("PROJECT_A"), 5 ether, new address[](0));
-        tm.createProject(PROJECT_B_ID, bytes("PROJECT_B"), 3 ether, new address[](0));
-        tm.createProject(PROJECT_C_ID, bytes("PROJECT_C"), 0, new address[](0)); // Unlimited
+        PROJECT_A_ID = tm.createProject(bytes("PROJECT_A"), 5 ether, new address[](0));
+        PROJECT_B_ID = tm.createProject(bytes("PROJECT_B"), 3 ether, new address[](0));
+        PROJECT_C_ID = tm.createProject(bytes("PROJECT_C"), 0, new address[](0)); // Unlimited
         vm.stopPrank();
 
         // Create multiple tasks across projects
@@ -332,7 +332,7 @@ contract TaskManagerTest is Test {
     function test_GovernanceAndRoleChanges() public {
         // Initial setup
         vm.prank(creator1);
-        tm.createProject(GOV_TEST_ID, bytes("GOV_TEST"), 5 ether, new address[](0));
+        GOV_TEST_ID = tm.createProject(bytes("GOV_TEST"), 5 ether, new address[](0));
 
         // Add new role to the creator roles using the executor
         bytes32 NEW_ROLE = keccak256("NEW_CREATOR");
@@ -345,7 +345,7 @@ contract TaskManagerTest is Test {
 
         // Test that new role can create projects
         vm.prank(newCreator);
-        tm.createProject(NEW_PROJECT_ID, bytes("NEW_PROJECT"), 1 ether, new address[](0));
+        NEW_PROJECT_ID = tm.createProject(bytes("NEW_PROJECT"), 1 ether, new address[](0));
 
         // Verify new project exists by creating a task
         vm.prank(newCreator);
@@ -358,7 +358,7 @@ contract TaskManagerTest is Test {
         // Verify the role can no longer create projects
         vm.prank(newCreator);
         vm.expectRevert(TaskManager.NotCreator.selector);
-        tm.createProject(SHOULD_FAIL_ID, bytes("SHOULD_FAIL"), 1 ether, new address[](0));
+        tm.createProject(bytes("SHOULD_FAIL"), 1 ether, new address[](0));
     }
 
     function test_ProjectManagerHierarchy() public {
@@ -370,7 +370,7 @@ contract TaskManagerTest is Test {
         managers[1] = pm2;
 
         vm.prank(creator1);
-        tm.createProject(MULTI_PM_ID, bytes("MULTI_PM"), 10 ether, managers);
+        MULTI_PM_ID = tm.createProject(bytes("MULTI_PM"), 10 ether, managers);
 
         // Each PM creates tasks
         vm.prank(pm1);
@@ -409,7 +409,7 @@ contract TaskManagerTest is Test {
 
     function test_TaskLifecycleEdgeCases() public {
         vm.prank(creator1);
-        tm.createProject(EDGE_ID, bytes("EDGE"), 10 ether, new address[](0));
+        EDGE_ID = tm.createProject(bytes("EDGE"), 10 ether, new address[](0));
 
         // Create and immediately cancel a task
         vm.startPrank(creator1);
@@ -463,7 +463,7 @@ contract TaskManagerTest is Test {
     function test_ProjectStress() public {
         // Create a large unlimited project
         vm.prank(creator1);
-        tm.createProject(MEGA_ID, bytes("MEGA"), 0, new address[](0));
+        MEGA_ID = tm.createProject(bytes("MEGA"), 0, new address[](0));
 
         // Add multiple project managers
         address[] memory pms = new address[](3);
@@ -537,7 +537,7 @@ contract TaskManagerTest is Test {
 
         // Create a second project with a hard cap
         vm.prank(creator1);
-        tm.createProject(CAPPED_BIG_ID, bytes("CAPPED_BIG"), 10 ether, pms);
+        CAPPED_BIG_ID = tm.createProject(bytes("CAPPED_BIG"), 10 ether, pms);
 
         // Create tasks up to the cap
         uint256 cappedTaskCount = 0;
@@ -576,7 +576,7 @@ contract TaskManagerTest is Test {
     function test_ProjectDeletionAndUpdating() public {
         // Create a project that will be deleted
         vm.prank(creator1);
-        tm.createProject(TO_DELETE_ID, bytes("TO_DELETE"), 3 ether, new address[](0));
+        TO_DELETE_ID = tm.createProject(bytes("TO_DELETE"), 3 ether, new address[](0));
 
         // Create a task, complete it, then verify project can be deleted
         vm.prank(creator1);
@@ -622,7 +622,7 @@ contract TaskManagerTest is Test {
 
         // Create a zero-cap project
         vm.prank(creator1);
-        tm.createProject(ZERO_CAP_ID, bytes("ZERO_CAP"), 0, new address[](0));
+        ZERO_CAP_ID = tm.createProject(bytes("ZERO_CAP"), 0, new address[](0));
 
         // Add tasks, verify we can still delete with non-zero spent
         vm.prank(creator1);
@@ -662,7 +662,7 @@ contract TaskManagerTest is Test {
 
         // Verify the new role works for creating projects
         vm.prank(testCreator);
-        tm.createProject(EXECUTOR_TEST_ID, bytes("EXECUTOR_TEST"), 1 ether, new address[](0));
+        EXECUTOR_TEST_ID = tm.createProject(bytes("EXECUTOR_TEST"), 1 ether, new address[](0));
 
         // New executor can revoke the role
         vm.prank(executor2);
@@ -671,13 +671,13 @@ contract TaskManagerTest is Test {
         // Role should no longer work
         vm.prank(testCreator);
         vm.expectRevert(TaskManager.NotCreator.selector);
-        tm.createProject(SHOULD_FAIL_ID, bytes("SHOULD_FAIL"), 1 ether, new address[](0));
+        tm.createProject(bytes("SHOULD_FAIL"), 1 ether, new address[](0));
     }
 
     function test_ExecutorBypassMemberCheck() public {
         // Create project
         vm.prank(creator1);
-        tm.createProject(EXECUTOR_BYPASS_ID, bytes("EXECUTOR_BYPASS"), 5 ether, new address[](0));
+        EXECUTOR_BYPASS_ID = tm.createProject(bytes("EXECUTOR_BYPASS"), 5 ether, new address[](0));
 
         // Executor should be able to create tasks even without member role
         // (executor address has no role but should bypass the member check)
