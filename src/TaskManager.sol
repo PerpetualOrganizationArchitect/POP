@@ -158,7 +158,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     /*─────────────────── Project Logic ──────────────────*/
     function createProject(
         bytes calldata metadata,
-        uint256 cap, // 0 ⇒ unlimited
+        uint256 cap, // 0 to unlimited
         address[] calldata managers
     ) external onlyCreator returns (bytes32 projectId) {
         if (metadata.length == 0) revert InvalidString();
@@ -230,6 +230,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     ) external onlyMember {
         if (payout == 0 || payout > MAX_PAYOUT) revert InvalidPayout();
         if (metadata.length == 0) revert InvalidString();
+        if (payout > type(uint128).max) revert InvalidPayout();
 
         Project storage p = _projects[projectId];
         if (!p.exists) revert UnknownProject();
@@ -255,6 +256,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     function updateTask(uint256 id, uint256 newPayout, bytes calldata newMetadata) external {
+        require(newPayout <= type(uint128).max, "Overflw");
         Task storage t = _task(id);
         bytes32 pid = t.projectId;
         Project storage p = _projects[pid];
@@ -323,6 +325,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         if (t.status != Status.SUBMITTED) revert AlreadyCompleted();
 
         bytes32 pid = t.projectId;
+        if (!_projects[pid].exists) revert UnknownProject();
         address sender = _msgSender();
         if (sender != executor && !isCreatorRole[membership.roleOf(sender)] && !_projects[pid].managers[sender]) {
             revert NotPM();
