@@ -256,7 +256,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     function updateTask(uint256 id, uint256 newPayout, bytes calldata newMetadata) external {
-        require(newPayout <= type(uint128).max, "Overflw");
+        if (newPayout > type(uint128).max) revert InvalidPayout();
         Task storage t = _task(id);
         bytes32 pid = t.projectId;
         Project storage p = _projects[pid];
