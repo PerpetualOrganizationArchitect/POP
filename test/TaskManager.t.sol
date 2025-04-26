@@ -68,6 +68,29 @@ contract TaskManagerTest is Test {
 
     bytes32 constant CREATOR_ROLE = keccak256("CREATOR");
 
+    /* project IDs */
+    bytes32 constant UNLIM_ID = keccak256("UNLIM");
+    bytes32 constant CAPPED_ID = keccak256("CAPPED");
+    bytes32 constant BUD_ID = keccak256("BUD");
+    bytes32 constant FLOW_ID = keccak256("FLOW");
+    bytes32 constant UPD_ID = keccak256("UPD");
+    bytes32 constant CAN_ID = keccak256("CAN");
+    bytes32 constant ACC_ID = keccak256("ACC");
+    bytes32 constant PROJECT_A_ID = keccak256("PROJECT_A");
+    bytes32 constant PROJECT_B_ID = keccak256("PROJECT_B");
+    bytes32 constant PROJECT_C_ID = keccak256("PROJECT_C");
+    bytes32 constant GOV_TEST_ID = keccak256("GOV_TEST");
+    bytes32 constant NEW_PROJECT_ID = keccak256("NEW_PROJECT");
+    bytes32 constant MULTI_PM_ID = keccak256("MULTI_PM");
+    bytes32 constant EDGE_ID = keccak256("EDGE");
+    bytes32 constant MEGA_ID = keccak256("MEGA");
+    bytes32 constant CAPPED_BIG_ID = keccak256("CAPPED_BIG");
+    bytes32 constant TO_DELETE_ID = keccak256("TO_DELETE");
+    bytes32 constant ZERO_CAP_ID = keccak256("ZERO_CAP");
+    bytes32 constant EXECUTOR_TEST_ID = keccak256("EXECUTOR_TEST");
+    bytes32 constant EXECUTOR_BYPASS_ID = keccak256("EXECUTOR_BYPASS");
+    bytes32 constant SHOULD_FAIL_ID = keccak256("SHOULD_FAIL");
+
     /* deployed contracts */
     TaskManager tm;
     MockToken token;
@@ -101,13 +124,13 @@ contract TaskManagerTest is Test {
 
     function test_CreateUnlimitedProjectAndTaskByAnotherCreator() public {
         vm.prank(creator1);
-        tm.createProject("UNLIM", 0, new address[](0));
+        tm.createProject(UNLIM_ID, bytes("UNLIM"), 0, new address[](0));
 
         // creator2 creates a task (should succeed, cap == 0)
         vm.prank(creator2);
-        tm.createTask(1 ether, "ipfs://meta", "UNLIM");
+        tm.createTask(1 ether, bytes("ipfs://meta"), UNLIM_ID);
 
-        (,, address claimer,,) = tm.getTask(0);
+        (,, address claimer,) = tm.getTask(0);
         assertEq(claimer, address(0), "should be unclaimed");
     }
 
@@ -116,49 +139,49 @@ contract TaskManagerTest is Test {
         managers[0] = pm1;
 
         vm.prank(creator1);
-        tm.createProject("CAPPED", 3 ether, managers);
+        tm.createProject(CAPPED_ID, bytes("CAPPED"), 3 ether, managers);
 
         // pm1 can create tasks until cap reached
         vm.prank(pm1);
-        tm.createTask(1 ether, "a", "CAPPED");
+        tm.createTask(1 ether, bytes("a"), CAPPED_ID);
 
         vm.prank(pm1);
-        tm.createTask(2 ether, "b", "CAPPED");
+        tm.createTask(2 ether, bytes("b"), CAPPED_ID);
 
         // next task (1 wei over budget) reverts
         vm.prank(pm1);
         vm.expectRevert(TaskManager.BudgetExceeded.selector);
-        tm.createTask(1, "c", "CAPPED");
+        tm.createTask(1, bytes("c"), CAPPED_ID);
     }
 
     function test_UpdateProjectCapLowerThanSpentShouldRevert() public {
         vm.prank(creator1);
-        tm.createProject("BUD", 2 ether, new address[](0));
+        tm.createProject(BUD_ID, bytes("BUD"), 2 ether, new address[](0));
 
         vm.prank(creator1);
-        tm.createTask(2 ether, "foo", "BUD");
+        tm.createTask(2 ether, bytes("foo"), BUD_ID);
 
         // try lowering cap below spent
         vm.prank(creator1);
         vm.expectRevert(TaskManager.CapBelowCommitted.selector);
-        tm.updateProjectCap("BUD", 1 ether);
+        tm.updateProjectCap(BUD_ID, 1 ether);
     }
 
     /*───────────────── TASK LIFECYCLE ───────────────────*/
 
     function _prepareFlow() internal returns (uint256 id) {
         vm.prank(creator1);
-        tm.createProject("FLOW", 5 ether, new address[](0));
+        tm.createProject(FLOW_ID, bytes("FLOW"), 5 ether, new address[](0));
 
         address[] memory mgr = new address[](1);
         mgr[0] = pm1;
 
         // assign pm1 retroactively
         vm.prank(creator1);
-        tm.addProjectManager("FLOW", pm1);
+        tm.addProjectManager(FLOW_ID, pm1);
 
         vm.prank(pm1);
-        tm.createTask(1 ether, "hash", "FLOW");
+        tm.createTask(1 ether, bytes("hash"), FLOW_ID);
         return 0;
     }
 
@@ -171,7 +194,7 @@ contract TaskManagerTest is Test {
 
         // member1 submits
         vm.prank(member1);
-        tm.submitTask(id, "hash2");
+        tm.submitTask(id, bytes("hash2"));
 
         // pm1 completes, mints token
         uint256 balBefore = token.balanceOf(member1);
@@ -180,23 +203,23 @@ contract TaskManagerTest is Test {
         tm.completeTask(id);
 
         assertEq(token.balanceOf(member1), balBefore + 1 ether, "minted payout");
-        (, TaskManager.Status st,,,) = tm.getTask(id);
+        (, TaskManager.Status st,,) = tm.getTask(id);
         assertEq(uint8(st), uint8(TaskManager.Status.COMPLETED));
     }
 
     function test_UpdateTaskBeforeClaimAdjustsBudget() public {
         vm.prank(creator1);
-        tm.createProject("UPD", 3 ether, new address[](0));
+        tm.createProject(UPD_ID, bytes("UPD"), 3 ether, new address[](0));
 
         vm.prank(creator1);
-        tm.createTask(1 ether, "foo", "UPD");
+        tm.createTask(1 ether, bytes("foo"), UPD_ID);
 
         // raise payout by 1 ether
         vm.prank(creator1);
-        tm.updateTask(0, 2 ether, "bar");
+        tm.updateTask(0, 2 ether, bytes("bar"));
 
         // spent should now be 2 ether
-        (uint256 cap, uint256 spent,) = tm.getProjectInfo("UPD");
+        (uint256 cap, uint256 spent,) = tm.getProjectInfo(UPD_ID);
         assertEq(cap, 3 ether);
         assertEq(spent, 2 ether);
     }
@@ -209,29 +232,26 @@ contract TaskManagerTest is Test {
 
         // attempt to change payout should still emit but NOT change storage
         vm.prank(pm1);
-        tm.updateTask(id, 5 ether, "newhash");
+        tm.updateTask(id, 5 ether, bytes("newhash"));
 
-        (,,,, string memory h) = tm.getTask(id);
-        assertEq(h, "newhash");
-
-        (uint256 payout,,,,) = tm.getTask(id);
+        (uint256 payout,,,) = tm.getTask(id);
         assertEq(payout, 1 ether, "payout unchanged");
     }
 
     function test_CancelTaskRefundsSpent() public {
         vm.prank(creator1);
-        tm.createProject("CAN", 2 ether, new address[](0));
+        tm.createProject(CAN_ID, bytes("CAN"), 2 ether, new address[](0));
 
         vm.prank(creator1);
-        tm.createTask(1 ether, "foo", "CAN");
+        tm.createTask(1 ether, bytes("foo"), CAN_ID);
 
-        (uint256 cap, uint256 spentBefore, bool isManager) = tm.getProjectInfo("CAN");
+        (uint256 cap, uint256 spentBefore, bool isManager) = tm.getProjectInfo(CAN_ID);
         assertEq(spentBefore, 1 ether);
 
         vm.prank(creator1);
         tm.cancelTask(0);
 
-        (, uint256 spentAfter,) = tm.getProjectInfo("CAN");
+        (, uint256 spentAfter,) = tm.getProjectInfo(CAN_ID);
         assertEq(spentAfter, 0);
     }
 
@@ -239,13 +259,13 @@ contract TaskManagerTest is Test {
 
     function test_CreateTaskByNonMemberReverts() public {
         vm.prank(creator1);
-        tm.createProject("ACC", 0, new address[](0));
+        tm.createProject(ACC_ID, bytes("ACC"), 0, new address[](0));
 
         // creator2 is a member? => no, role==CREATOR, but our onlyMember modifier
         // checks roleOf != 0, so still passes. Use outsider (no role) to trigger revert.
         vm.prank(outsider);
         vm.expectRevert(TaskManager.NotMember.selector);
-        tm.createTask(1, "x", "ACC");
+        tm.createTask(1, bytes("x"), ACC_ID);
     }
 
     function test_OnlyPMOrCreatorCanAssignTask() public {
@@ -264,20 +284,20 @@ contract TaskManagerTest is Test {
     function test_MultiProjectTaskManagement() public {
         // Create three projects with different caps
         vm.startPrank(creator1);
-        tm.createProject("PROJECT_A", 5 ether, new address[](0));
-        tm.createProject("PROJECT_B", 3 ether, new address[](0));
-        tm.createProject("PROJECT_C", 0, new address[](0)); // Unlimited
+        tm.createProject(PROJECT_A_ID, bytes("PROJECT_A"), 5 ether, new address[](0));
+        tm.createProject(PROJECT_B_ID, bytes("PROJECT_B"), 3 ether, new address[](0));
+        tm.createProject(PROJECT_C_ID, bytes("PROJECT_C"), 0, new address[](0)); // Unlimited
         vm.stopPrank();
 
         // Create multiple tasks across projects
         vm.prank(creator1);
-        tm.createTask(1 ether, "task1_A", "PROJECT_A");
+        tm.createTask(1 ether, bytes("task1_A"), PROJECT_A_ID);
 
         vm.prank(creator1);
-        tm.createTask(2 ether, "task1_B", "PROJECT_B");
+        tm.createTask(2 ether, bytes("task1_B"), PROJECT_B_ID);
 
         vm.prank(creator1);
-        tm.createTask(2 ether, "task1_C", "PROJECT_C");
+        tm.createTask(2 ether, bytes("task1_C"), PROJECT_C_ID);
 
         // Member claims tasks from different projects
         vm.startPrank(member1);
@@ -286,21 +306,21 @@ contract TaskManagerTest is Test {
         vm.stopPrank();
 
         // Budget verification
-        (uint256 capA, uint256 spentA,) = tm.getProjectInfo("PROJECT_A");
+        (uint256 capA, uint256 spentA,) = tm.getProjectInfo(PROJECT_A_ID);
         assertEq(spentA, 1 ether, "PROJECT_A spent should be 1 ether");
         assertEq(capA, 5 ether, "PROJECT_A cap should be 5 ether");
 
-        (uint256 capB, uint256 spentB,) = tm.getProjectInfo("PROJECT_B");
+        (uint256 capB, uint256 spentB,) = tm.getProjectInfo(PROJECT_B_ID);
         assertEq(spentB, 2 ether, "PROJECT_B spent should be 2 ether");
 
         // Test trying to exceed PROJECT_B budget
         vm.prank(creator1);
         vm.expectRevert(TaskManager.BudgetExceeded.selector);
-        tm.createTask(1 ether + 1, "task2_B", "PROJECT_B"); // Would exceed cap
+        tm.createTask(1 ether + 1, bytes("task2_B"), PROJECT_B_ID); // Would exceed cap
 
         // Complete task from PROJECT_C
         vm.prank(member1);
-        tm.submitTask(2, "completed_C");
+        tm.submitTask(2, bytes("completed_C"));
 
         vm.prank(creator1);
         tm.completeTask(2);
@@ -312,7 +332,7 @@ contract TaskManagerTest is Test {
     function test_GovernanceAndRoleChanges() public {
         // Initial setup
         vm.prank(creator1);
-        tm.createProject("GOV_TEST", 5 ether, new address[](0));
+        tm.createProject(GOV_TEST_ID, bytes("GOV_TEST"), 5 ether, new address[](0));
 
         // Add new role to the creator roles using the executor
         bytes32 NEW_ROLE = keccak256("NEW_CREATOR");
@@ -325,11 +345,11 @@ contract TaskManagerTest is Test {
 
         // Test that new role can create projects
         vm.prank(newCreator);
-        tm.createProject("NEW_PROJECT", 1 ether, new address[](0));
+        tm.createProject(NEW_PROJECT_ID, bytes("NEW_PROJECT"), 1 ether, new address[](0));
 
         // Verify new project exists by creating a task
         vm.prank(newCreator);
-        tm.createTask(0.5 ether, "new_task", "NEW_PROJECT");
+        tm.createTask(0.5 ether, bytes("new_task"), NEW_PROJECT_ID);
 
         // Disable the role using the executor
         vm.prank(executor);
@@ -338,7 +358,7 @@ contract TaskManagerTest is Test {
         // Verify the role can no longer create projects
         vm.prank(newCreator);
         vm.expectRevert(TaskManager.NotCreator.selector);
-        tm.createProject("SHOULD_FAIL", 1 ether, new address[](0));
+        tm.createProject(SHOULD_FAIL_ID, bytes("SHOULD_FAIL"), 1 ether, new address[](0));
     }
 
     function test_ProjectManagerHierarchy() public {
@@ -350,60 +370,60 @@ contract TaskManagerTest is Test {
         managers[1] = pm2;
 
         vm.prank(creator1);
-        tm.createProject("MULTI_PM", 10 ether, managers);
+        tm.createProject(MULTI_PM_ID, bytes("MULTI_PM"), 10 ether, managers);
 
         // Each PM creates tasks
         vm.prank(pm1);
-        tm.createTask(2 ether, "pm1_task", "MULTI_PM");
+        tm.createTask(2 ether, bytes("pm1_task"), MULTI_PM_ID);
 
         vm.prank(pm2);
-        tm.createTask(3 ether, "pm2_task", "MULTI_PM");
+        tm.createTask(3 ether, bytes("pm2_task"), MULTI_PM_ID);
 
         // PM1 can complete PM2's task
         vm.prank(member1);
         tm.claimTask(1);
 
         vm.prank(member1);
-        tm.submitTask(1, "completed_by_member");
+        tm.submitTask(1, bytes("completed_by_member"));
 
         vm.prank(pm1);
         tm.completeTask(1);
 
         // Creator removes PM2
         vm.prank(creator1);
-        tm.removeProjectManager("MULTI_PM", pm2);
+        tm.removeProjectManager(MULTI_PM_ID, pm2);
 
         // PM2 can no longer create tasks
         vm.prank(pm2);
         vm.expectRevert(TaskManager.NotPM.selector);
-        tm.createTask(1 ether, "should_fail", "MULTI_PM");
+        tm.createTask(1 ether, bytes("should_fail"), MULTI_PM_ID);
 
         // But PM1 still can
         vm.prank(pm1);
-        tm.createTask(1 ether, "still_works", "MULTI_PM");
+        tm.createTask(1 ether, bytes("still_works"), MULTI_PM_ID);
 
         // Verify overall budget tracking
-        (, uint256 spent,) = tm.getProjectInfo("MULTI_PM");
+        (, uint256 spent,) = tm.getProjectInfo(MULTI_PM_ID);
         assertEq(spent, 6 ether, "Project should track 6 ether spent");
     }
 
     function test_TaskLifecycleEdgeCases() public {
         vm.prank(creator1);
-        tm.createProject("EDGE", 10 ether, new address[](0));
+        tm.createProject(EDGE_ID, bytes("EDGE"), 10 ether, new address[](0));
 
         // Create and immediately cancel a task
         vm.startPrank(creator1);
-        tm.createTask(1 ether, "to_cancel", "EDGE");
+        tm.createTask(1 ether, bytes("to_cancel"), EDGE_ID);
         tm.cancelTask(0);
         vm.stopPrank();
 
         // Verify project budget is refunded
-        (, uint256 spent,) = tm.getProjectInfo("EDGE");
+        (, uint256 spent,) = tm.getProjectInfo(EDGE_ID);
         assertEq(spent, 0, "Budget should be refunded after cancel");
 
         // Create a task, assign it, then try operations that should fail
         vm.prank(creator1);
-        tm.createTask(2 ether, "edge_task", "EDGE");
+        tm.createTask(2 ether, bytes("edge_task"), EDGE_ID);
 
         vm.prank(creator1);
         tm.assignTask(1, member1);
@@ -419,11 +439,11 @@ contract TaskManagerTest is Test {
 
         vm.prank(nonClaimer);
         vm.expectRevert(TaskManager.NotClaimer.selector);
-        tm.submitTask(1, "wrong_submitter");
+        tm.submitTask(1, bytes("wrong_submitter"));
 
         // Submit correctly
         vm.prank(member1);
-        tm.submitTask(1, "correct_submission");
+        tm.submitTask(1, bytes("correct_submission"));
 
         // Try to cancel after submission
         vm.prank(creator1);
@@ -443,7 +463,7 @@ contract TaskManagerTest is Test {
     function test_ProjectStress() public {
         // Create a large unlimited project
         vm.prank(creator1);
-        tm.createProject("MEGA", 0, new address[](0));
+        tm.createProject(MEGA_ID, bytes("MEGA"), 0, new address[](0));
 
         // Add multiple project managers
         address[] memory pms = new address[](3);
@@ -458,7 +478,7 @@ contract TaskManagerTest is Test {
 
         for (uint256 i = 0; i < pms.length; i++) {
             vm.prank(creator1);
-            tm.addProjectManager("MEGA", pms[i]);
+            tm.addProjectManager(MEGA_ID, pms[i]);
         }
 
         // Create multiple members
@@ -480,7 +500,8 @@ contract TaskManagerTest is Test {
             address creator = pms[i % pms.length];
 
             vm.prank(creator);
-            tm.createTask(payout, string(abi.encodePacked("task", i)), "MEGA");
+            bytes memory taskMetadata = abi.encodePacked("task", i);
+            tm.createTask(payout, taskMetadata, MEGA_ID);
 
             // Assign tasks to different members
             address assignee = members[i % members.length];
@@ -490,7 +511,7 @@ contract TaskManagerTest is Test {
         }
 
         // Verify project spent
-        (, uint256 spent,) = tm.getProjectInfo("MEGA");
+        (, uint256 spent,) = tm.getProjectInfo(MEGA_ID);
         assertEq(spent, totalValue, "Project should track all task value");
 
         // Submit half the tasks
@@ -498,7 +519,8 @@ contract TaskManagerTest is Test {
             address submitter = members[i % members.length];
 
             vm.prank(submitter);
-            tm.submitTask(i, string(abi.encodePacked("completed", i)));
+            bytes memory completedMetadata = abi.encodePacked("completed", i);
+            tm.submitTask(i, completedMetadata);
         }
 
         // Complete a third of all tasks
@@ -506,7 +528,7 @@ contract TaskManagerTest is Test {
         uint256 completedValue = 0;
 
         for (uint256 i = 0; i < completedTasks; i++) {
-            (uint256 payout,,,,) = tm.getTask(i);
+            (uint256 payout,,,) = tm.getTask(i);
             completedValue += payout;
 
             vm.prank(pms[0]);
@@ -515,7 +537,7 @@ contract TaskManagerTest is Test {
 
         // Create a second project with a hard cap
         vm.prank(creator1);
-        tm.createProject("CAPPED_BIG", 10 ether, pms);
+        tm.createProject(CAPPED_BIG_ID, bytes("CAPPED_BIG"), 10 ether, pms);
 
         // Create tasks up to the cap
         uint256 cappedTaskCount = 0;
@@ -525,7 +547,8 @@ contract TaskManagerTest is Test {
             uint256 payout = 0.3 ether;
 
             vm.prank(pms[0]);
-            tm.createTask(payout, string(abi.encodePacked("capped_task", cappedTaskCount)), "CAPPED_BIG");
+            bytes memory taskMetadata = abi.encodePacked("capped_task", cappedTaskCount);
+            tm.createTask(payout, taskMetadata, CAPPED_BIG_ID);
 
             cappedTaskCount++;
             cappedSpent += payout;
@@ -534,10 +557,10 @@ contract TaskManagerTest is Test {
         // Verify we can't exceed cap
         vm.prank(pms[0]);
         vm.expectRevert(TaskManager.BudgetExceeded.selector);
-        tm.createTask(1 ether, "exceeds_cap", "CAPPED_BIG");
+        tm.createTask(1 ether, bytes("exceeds_cap"), CAPPED_BIG_ID);
 
         // Verify task counts and budget usage
-        (uint256 cap, uint256 actualSpent,) = tm.getProjectInfo("CAPPED_BIG");
+        (uint256 cap, uint256 actualSpent,) = tm.getProjectInfo(CAPPED_BIG_ID);
         assertEq(cap, 10 ether, "Cap should be preserved");
         assertEq(actualSpent, cappedSpent, "Spent should match tracked value");
 
@@ -553,61 +576,61 @@ contract TaskManagerTest is Test {
     function test_ProjectDeletionAndUpdating() public {
         // Create a project that will be deleted
         vm.prank(creator1);
-        tm.createProject("TO_DELETE", 3 ether, new address[](0));
+        tm.createProject(TO_DELETE_ID, bytes("TO_DELETE"), 3 ether, new address[](0));
 
         // Create a task, complete it, then verify project can be deleted
         vm.prank(creator1);
-        tm.createTask(1 ether, "task1", "TO_DELETE");
+        tm.createTask(1 ether, bytes("task1"), TO_DELETE_ID);
 
         vm.prank(creator1);
         tm.assignTask(0, member1);
 
         vm.prank(member1);
-        tm.submitTask(0, "completed");
+        tm.submitTask(0, bytes("completed"));
 
         vm.prank(creator1);
         tm.completeTask(0);
 
         // Create another task and cancel it
         vm.prank(creator1);
-        tm.createTask(2 ether, "task2", "TO_DELETE");
+        tm.createTask(2 ether, bytes("task2"), TO_DELETE_ID);
 
         vm.prank(creator1);
         tm.cancelTask(1);
 
         // Verify spent amount is 1 ether (from completed task)
-        (uint256 cap, uint256 spent,) = tm.getProjectInfo("TO_DELETE");
+        (uint256 cap, uint256 spent,) = tm.getProjectInfo(TO_DELETE_ID);
         assertEq(spent, 1 ether, "Project spent should only reflect completed task");
 
         // Try to delete - should fail because cap (3 ether) != spent (1 ether)
         vm.prank(creator1);
         vm.expectRevert(TaskManager.CapBelowCommitted.selector);
-        tm.deleteProject("TO_DELETE");
+        tm.deleteProject(TO_DELETE_ID, bytes("TO_DELETE"));
 
         // Update the cap to match spent amount
         vm.prank(creator1);
-        tm.updateProjectCap("TO_DELETE", 1 ether);
+        tm.updateProjectCap(TO_DELETE_ID, 1 ether);
 
         // Now deletion should succeed
         vm.prank(creator1);
-        tm.deleteProject("TO_DELETE");
+        tm.deleteProject(TO_DELETE_ID, bytes("TO_DELETE"));
 
         // Verify project no longer exists by trying to get info
         vm.prank(creator1);
         vm.expectRevert(TaskManager.UnknownProject.selector);
-        tm.getProjectInfo("TO_DELETE");
+        tm.getProjectInfo(TO_DELETE_ID);
 
         // Create a zero-cap project
         vm.prank(creator1);
-        tm.createProject("ZERO_CAP", 0, new address[](0));
+        tm.createProject(ZERO_CAP_ID, bytes("ZERO_CAP"), 0, new address[](0));
 
         // Add tasks, verify we can still delete with non-zero spent
         vm.prank(creator1);
-        tm.createTask(3 ether, "unlimited_task", "ZERO_CAP");
+        tm.createTask(3 ether, bytes("unlimited_task"), ZERO_CAP_ID);
 
         // Delete should succeed with zero cap, non-zero spent
         vm.prank(creator1);
-        tm.deleteProject("ZERO_CAP");
+        tm.deleteProject(ZERO_CAP_ID, bytes("ZERO_CAP"));
     }
 
     function test_ExecutorRoleManagement() public {
@@ -639,7 +662,7 @@ contract TaskManagerTest is Test {
 
         // Verify the new role works for creating projects
         vm.prank(testCreator);
-        tm.createProject("EXECUTOR_TEST", 1 ether, new address[](0));
+        tm.createProject(EXECUTOR_TEST_ID, bytes("EXECUTOR_TEST"), 1 ether, new address[](0));
 
         // New executor can revoke the role
         vm.prank(executor2);
@@ -648,18 +671,18 @@ contract TaskManagerTest is Test {
         // Role should no longer work
         vm.prank(testCreator);
         vm.expectRevert(TaskManager.NotCreator.selector);
-        tm.createProject("SHOULD_FAIL", 1 ether, new address[](0));
+        tm.createProject(SHOULD_FAIL_ID, bytes("SHOULD_FAIL"), 1 ether, new address[](0));
     }
 
     function test_ExecutorBypassMemberCheck() public {
         // Create project
         vm.prank(creator1);
-        tm.createProject("EXECUTOR_BYPASS", 5 ether, new address[](0));
+        tm.createProject(EXECUTOR_BYPASS_ID, bytes("EXECUTOR_BYPASS"), 5 ether, new address[](0));
 
         // Executor should be able to create tasks even without member role
         // (executor address has no role but should bypass the member check)
         vm.prank(executor);
-        tm.createTask(1 ether, "executor_task", "EXECUTOR_BYPASS");
+        tm.createTask(1 ether, bytes("executor_task"), EXECUTOR_BYPASS_ID);
 
         // Executor should be able to claim tasks
         vm.prank(executor);
@@ -667,11 +690,10 @@ contract TaskManagerTest is Test {
 
         // Executor should be able to submit tasks
         vm.prank(executor);
-        tm.submitTask(0, "executor_submission");
+        tm.submitTask(0, bytes("executor_submission"));
 
         // Verify task status and submission
-        (, TaskManager.Status status,,, string memory ipfs) = tm.getTask(0);
+        (, TaskManager.Status status,,) = tm.getTask(0);
         assertEq(uint8(status), uint8(TaskManager.Status.SUBMITTED));
-        assertEq(ipfs, "executor_submission");
     }
 }
