@@ -55,7 +55,6 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Status status;
         address claimer;
         bytes32 projectId;
-        string ipfsHash;
     }
 
     struct Project {
@@ -75,6 +74,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     mapping(bytes32 => bool) public isCreatorRole;
     uint256 public nextTaskId;
+    uint256 public nextProjectId;
 
     address public executor;
 
@@ -82,18 +82,18 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     event CreatorRoleUpdated(bytes32 indexed role, bool enabled);
 
     // ── Project
-    event ProjectCreated(bytes32 indexed id, string name, uint256 cap);
+    event ProjectCreated(bytes32 indexed id, bytes metadata, uint256 cap);
     event ProjectCapUpdated(bytes32 indexed id, uint256 oldCap, uint256 newCap);
     event ProjectManagerAdded(bytes32 indexed id, address manager);
     event ProjectManagerRemoved(bytes32 indexed id, address manager);
-    event ProjectDeleted(bytes32 indexed id, string name);
+    event ProjectDeleted(bytes32 indexed id, bytes metadata);
 
     // ── Task
-    event TaskCreated(uint256 indexed id, bytes32 indexed projectId, uint256 payout, string ipfsHash);
-    event TaskUpdated(uint256 indexed id, uint256 payout, string ipfsHash);
+    event TaskCreated(uint256 indexed id, bytes32 indexed projectId, uint256 payout, bytes metadata);
+    event TaskUpdated(uint256 indexed id, uint256 payout, bytes metadata);
+    event TaskSubmitted(uint256 indexed id, bytes metadata);
     event TaskClaimed(uint256 indexed id, address indexed claimer);
     event TaskAssigned(uint256 indexed id, address indexed assignee, address indexed assigner);
-    event TaskSubmitted(uint256 indexed id, string ipfsHash);
     event TaskCompleted(uint256 indexed id, address indexed completer);
     event TaskCancelled(uint256 indexed id, address indexed canceller);
     event ExecutorSet(address indexed newExecutor);
@@ -152,89 +152,79 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     /*─────────────────── Project Logic ──────────────────*/
-    function _pid(string calldata name) private pure returns (bytes32) {
-        return keccak256(abi.encodePacked(name));
-    }
-
     function createProject(
-        string calldata name,
-        uint256 cap, // 0 ⇒ unlimited
+        bytes calldata metadata,
+        uint256 cap, // 0 to unlimited
         address[] calldata managers
-    ) external onlyCreator {
-        if (bytes(name).length == 0) revert InvalidString();
+    ) external onlyCreator returns (bytes32 projectId) {
+        if (metadata.length == 0) revert InvalidString();
         if (cap > MAX_PAYOUT) revert InvalidPayout();
 
-        bytes32 pid = _pid(name);
-        if (_projects[pid].exists) revert ProjectExists();
+        // Generate project ID from counter
+        projectId = bytes32(nextProjectId++);
 
-        Project storage p = _projects[pid];
+        Project storage p = _projects[projectId];
         p.cap = uint128(cap);
         p.exists = true;
 
         // auto‑add caller as PM (remove later if you want zero managers)
         p.managers[_msgSender()] = true;
-        emit ProjectManagerAdded(pid, _msgSender());
+        emit ProjectManagerAdded(projectId, _msgSender());
 
         for (uint256 i; i < managers.length; ++i) {
             address m = managers[i];
             if (m == address(0)) revert ZeroAddress();
             p.managers[m] = true;
-            emit ProjectManagerAdded(pid, m);
+            emit ProjectManagerAdded(projectId, m);
         }
 
-        emit ProjectCreated(pid, name, cap);
+        emit ProjectCreated(projectId, metadata, cap);
+        return projectId;
     }
 
-    function updateProjectCap(string calldata name, uint256 newCap) external onlyCreator {
-        if (bytes(name).length == 0) revert InvalidString();
+    function updateProjectCap(bytes32 projectId, uint256 newCap) external onlyCreator projectExists(projectId) {
         if (newCap > MAX_PAYOUT) revert InvalidPayout();
 
-        bytes32 pid = _pid(name);
-        Project storage p = _projects[pid];
-        if (!p.exists) revert UnknownProject();
+        Project storage p = _projects[projectId];
         if (newCap != 0 && newCap < p.spent) revert CapBelowCommitted();
 
         uint256 old = p.cap;
         p.cap = uint128(newCap);
-        emit ProjectCapUpdated(pid, old, newCap);
+        emit ProjectCapUpdated(projectId, old, newCap);
     }
 
-    function addProjectManager(string calldata name, address manager) external onlyCreator {
-        if (bytes(name).length == 0) revert InvalidString();
+    function addProjectManager(bytes32 projectId, address manager) external onlyCreator projectExists(projectId) {
         if (manager == address(0)) revert ZeroAddress();
-        bytes32 pid = _pid(name);
-        Project storage p = _projects[pid];
-        if (!p.exists) revert UnknownProject();
+        Project storage p = _projects[projectId];
         p.managers[manager] = true;
-        emit ProjectManagerAdded(pid, manager);
+        emit ProjectManagerAdded(projectId, manager);
     }
 
-    function removeProjectManager(string calldata name, address manager) external onlyCreator {
-        if (bytes(name).length == 0) revert InvalidString();
-        bytes32 pid = _pid(name);
-        Project storage p = _projects[pid];
-        if (!p.exists) revert UnknownProject();
+    function removeProjectManager(bytes32 projectId, address manager) external onlyCreator projectExists(projectId) {
+        Project storage p = _projects[projectId];
         p.managers[manager] = false;
-        emit ProjectManagerRemoved(pid, manager);
+        emit ProjectManagerRemoved(projectId, manager);
     }
 
-    function deleteProject(string calldata name) external onlyCreator {
-        if (bytes(name).length == 0) revert InvalidString();
-        bytes32 pid = _pid(name);
-        Project storage p = _projects[pid];
+    function deleteProject(bytes32 projectId, bytes calldata metadata) external onlyCreator {
+        if (metadata.length == 0) revert InvalidString();
+        Project storage p = _projects[projectId];
         if (!p.exists) revert UnknownProject();
         if (p.cap != 0 && p.spent != p.cap) revert CapBelowCommitted();
-        delete _projects[pid];
-        emit ProjectDeleted(pid, name);
+        delete _projects[projectId];
+        emit ProjectDeleted(projectId, metadata);
     }
 
     /*─────────────────── Task Logic ──────────────────*/
-    function createTask(uint256 payout, string calldata ipfsHash, string calldata projectName) external onlyMember {
+    function createTask(
+        uint256 payout,
+        bytes calldata metadata, // compressed CBOR/deflate bytes
+        bytes32 projectId
+    ) external onlyMember {
         if (payout == 0 || payout > MAX_PAYOUT) revert InvalidPayout();
-        if (bytes(ipfsHash).length == 0) revert InvalidString();
+        if (metadata.length == 0) revert InvalidString();
 
-        bytes32 pid = _pid(projectName);
-        Project storage p = _projects[pid];
+        Project storage p = _projects[projectId];
         if (!p.exists) revert UnknownProject();
 
         // auth
@@ -242,25 +232,19 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
             revert NotPM();
         }
 
-        // always track spent; enforce only when capped
         uint256 newSpent = p.spent + payout;
         if (p.cap != 0 && newSpent > p.cap) revert BudgetExceeded();
         p.spent = uint128(newSpent);
 
         uint256 id = nextTaskId++;
-        _tasks[id] = Task({
-            payout: uint248(payout),
-            status: Status.UNCLAIMED,
-            claimer: address(0),
-            projectId: pid,
-            ipfsHash: ipfsHash
-        });
-        _taskProject[id] = pid;
+        _tasks[id] =
+            Task({payout: uint248(payout), status: Status.UNCLAIMED, claimer: address(0), projectId: projectId});
+        _taskProject[id] = projectId;
 
-        emit TaskCreated(id, pid, payout, ipfsHash);
+        emit TaskCreated(id, projectId, payout, metadata);
     }
 
-    function updateTask(uint256 id, uint256 newPayout, string calldata newIpfsHash) external {
+    function updateTask(uint256 id, uint256 newPayout, bytes calldata newMetadata) external {
         Task storage t = _task(id);
         bytes32 pid = _taskProject[id];
         Project storage p = _projects[pid];
@@ -270,8 +254,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         }
 
         if (t.status == Status.CLAIMED || t.status == Status.SUBMITTED) {
-            if (bytes(newIpfsHash).length == 0) revert InvalidString();
-            t.ipfsHash = newIpfsHash;
+            if (newMetadata.length == 0) revert InvalidString(); // must supply fresh metadata
         } else if (t.status == Status.UNCLAIMED) {
             uint256 oldPayout = t.payout;
             if (newPayout == 0 || newPayout > MAX_PAYOUT) revert InvalidPayout();
@@ -281,12 +264,11 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
             p.spent = uint128(tentative);
 
             t.payout = uint248(newPayout);
-            if (bytes(newIpfsHash).length != 0) t.ipfsHash = newIpfsHash;
         } else {
             revert AlreadyCompleted();
         }
 
-        emit TaskUpdated(id, newPayout, newIpfsHash);
+        emit TaskUpdated(id, newPayout, newMetadata);
     }
 
     function claimTask(uint256 id) external onlyMember {
@@ -318,15 +300,14 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit TaskAssigned(id, assignee, _msgSender());
     }
 
-    function submitTask(uint256 id, string calldata ipfsHash) external onlyMember {
+    function submitTask(uint256 id, bytes calldata metadata) external onlyMember {
         Task storage t = _task(id);
         if (t.status != Status.CLAIMED) revert AlreadySubmitted();
         if (t.claimer != _msgSender()) revert NotClaimer();
-        if (bytes(ipfsHash).length == 0) revert InvalidString();
+        if (metadata.length == 0) revert InvalidString();
 
         t.status = Status.SUBMITTED;
-        t.ipfsHash = ipfsHash;
-        emit TaskSubmitted(id, ipfsHash);
+        emit TaskSubmitted(id, metadata);
     }
 
     function completeTask(uint256 id) external nonReentrant {
@@ -379,15 +360,14 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     function getTask(uint256 id)
         external
         view
-        returns (uint256 payout, Status status, address claimer, bytes32 projectId, string memory ipfs)
+        returns (uint256 payout, Status status, address claimer, bytes32 projectId)
     {
         Task storage t = _task(id);
-        return (t.payout, t.status, t.claimer, t.projectId, t.ipfsHash);
+        return (t.payout, t.status, t.claimer, t.projectId);
     }
 
-    function getProjectInfo(string calldata name) external view returns (uint256 cap, uint256 spent, bool isManager) {
-        bytes32 pid = _pid(name);
-        Project storage p = _projects[pid];
+    function getProjectInfo(bytes32 projectId) external view returns (uint256 cap, uint256 spent, bool isManager) {
+        Project storage p = _projects[projectId];
         if (!p.exists) revert UnknownProject();
         return (p.cap, p.spent, p.managers[_msgSender()]);
     }
@@ -403,5 +383,5 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         return "v1";
     }
 
-    uint256[100] private __gap;
+    uint256[99] private __gap;
 }
