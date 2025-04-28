@@ -87,7 +87,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     // keccak256("poa.taskmanager.storage") to get a unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x63526636cf4c64c4a7f3c2d9d99b03ae7241d7cf2c66cdf29e29de6c110a7ab9;
+    bytes32 private constant _STORAGE_SLOT = 0x30bc214cbc65463577eb5b42c88d60986e26fc81ad89a2eb74550fb255f1e712;
 
     function _layout() private pure returns (Layout storage s) {
         assembly {
