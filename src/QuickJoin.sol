@@ -1,10 +1,11 @@
-// SPDX‑License‑Identifier: MIT
-pragma solidity ^0.8.20;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.21;
 
-/*────────────────────────── OpenZeppelin Upgradeables ────────────────────*/
-import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+/*────────────────────────── OpenZeppelin v5.3 Upgradeables ────────────────────*/
+import {Initializable} from "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import {ContextUpgradeable} from "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from
+    "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 /*───────────────────────── Interface minimal stubs ───────────────────────*/
 interface IMembership {
@@ -30,12 +31,23 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     uint256 internal constant MAX_USERNAME_LEN = 64;
     bytes4 public constant MODULE_ID = bytes4(keccak256("QuickJoin"));
 
-    /* ───────── Storage ──────── */
-    IMembership private membership;
-    IUniversalAccountRegistry private accountRegistry;
+    /* ───────── ERC-7201 Storage ──────── */
+    /// @custom:storage-location erc7201:poa.quickjoin.storage
+    struct Layout {
+        IMembership membership;
+        IUniversalAccountRegistry accountRegistry;
+        address masterDeployAddress;
+        address executor;
+    }
 
-    address public masterDeployAddress; // set once, but rotatable by executor
-    address public executor; // DAO / Timelock – hard‑authority
+    // keccak256("poa.quickjoin.storage")
+    bytes32 private constant _STORAGE_SLOT = 0x566f0545117c69d7a3001f74fa210927792975a5c779e9cbf2876fbc68ef7fa2;
+
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
     /* ───────── Events ───────── */
     event AddressesUpdated(address membership, address registry, address master);
@@ -56,10 +68,11 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         __Context_init();
         __ReentrancyGuard_init();
 
-        executor = executor_;
-        membership = IMembership(membership_);
-        accountRegistry = IUniversalAccountRegistry(accountRegistry_);
-        masterDeployAddress = masterDeploy_;
+        Layout storage l = _layout();
+        l.executor = executor_;
+        l.membership = IMembership(membership_);
+        l.accountRegistry = IUniversalAccountRegistry(accountRegistry_);
+        l.masterDeployAddress = masterDeploy_;
 
         emit AddressesUpdated(membership_, accountRegistry_, masterDeploy_);
         emit ExecutorUpdated(executor_);
@@ -67,16 +80,17 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
 
     /* ───────── Modifiers ─────── */
     modifier onlyMasterDeploy() {
-        if (_msgSender() != executor && _msgSender() != masterDeployAddress) revert OnlyMasterDeploy();
+        Layout storage l = _layout();
+        if (_msgSender() != l.executor && _msgSender() != l.masterDeployAddress) revert OnlyMasterDeploy();
         _;
     }
 
     modifier onlyExecutor() {
-        if (_msgSender() != executor) revert Unauthorized();
+        if (_msgSender() != _layout().executor) revert Unauthorized();
         _;
     }
 
-    /* ─────── Admin / DAO setters (executor‑gated) ─────── */
+    /* ─────── Admin / DAO setters (executor-gated) ─────── */
     function updateAddresses(address membership_, address accountRegistry_, address masterDeploy_)
         external
         onlyExecutor
@@ -85,16 +99,17 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
             revert InvalidAddress();
         }
 
-        membership = IMembership(membership_);
-        accountRegistry = IUniversalAccountRegistry(accountRegistry_);
-        masterDeployAddress = masterDeploy_;
+        Layout storage l = _layout();
+        l.membership = IMembership(membership_);
+        l.accountRegistry = IUniversalAccountRegistry(accountRegistry_);
+        l.masterDeployAddress = masterDeploy_;
 
         emit AddressesUpdated(membership_, accountRegistry_, masterDeploy_);
     }
 
     function setExecutor(address newExec) external onlyExecutor {
         if (newExec == address(0)) revert InvalidAddress();
-        executor = newExec;
+        _layout().executor = newExec;
         emit ExecutorUpdated(newExec);
     }
 
@@ -103,14 +118,16 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         if (user == address(0)) revert ZeroUser();
         if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
+        Layout storage l = _layout();
         bool created;
-        if (bytes(accountRegistry.getUsername(user)).length == 0) {
-            if (bytes(username).length == 0) revert NoUsername(); // require username on first registration
-            accountRegistry.registerAccountQuickJoin(username, user);
+
+        if (bytes(l.accountRegistry.getUsername(user)).length == 0) {
+            if (bytes(username).length == 0) revert NoUsername();
+            l.accountRegistry.registerAccountQuickJoin(username, user);
             created = true;
         }
 
-        membership.quickJoinMint(user);
+        l.membership.quickJoinMint(user);
         emit QuickJoined(user, created);
     }
 
@@ -123,13 +140,14 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
 
     /// 2) caller already registered a username elsewhere
     function quickJoinWithUser() external nonReentrant {
-        string memory existing = accountRegistry.getUsername(_msgSender());
+        Layout storage l = _layout();
+        string memory existing = l.accountRegistry.getUsername(_msgSender());
         if (bytes(existing).length == 0) revert NoUsername();
-        membership.quickJoinMint(_msgSender());
+        l.membership.quickJoinMint(_msgSender());
         emit QuickJoined(_msgSender(), false);
     }
 
-    /* ───────── Master‑deploy helper paths ─────── */
+    /* ───────── Master-deploy helper paths ─────── */
 
     function quickJoinNoUserMasterDeploy(string calldata username, address newUser) external onlyMasterDeploy {
         _quickJoin(newUser, username);
@@ -138,10 +156,10 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
 
     function quickJoinWithUserMasterDeploy(address newUser) external onlyMasterDeploy nonReentrant {
         if (newUser == address(0)) revert ZeroUser();
-        string memory existing = accountRegistry.getUsername(newUser);
+        Layout storage l = _layout();
+        string memory existing = l.accountRegistry.getUsername(newUser);
         if (bytes(existing).length == 0) revert NoUsername();
-
-        membership.quickJoinMint(newUser);
+        l.membership.quickJoinMint(newUser);
         emit QuickJoinedByMaster(_msgSender(), newUser, false);
     }
 
@@ -149,6 +167,4 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     function version() external pure returns (string memory) {
         return "v1";
     }
-
-    uint256[46] private __gap; // storage gap
 }
