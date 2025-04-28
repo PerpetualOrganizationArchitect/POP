@@ -1,7 +1,7 @@
 // SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.20;
 
-/*  OpenZeppelin v5.3 Upgradeables  */
+/*  OpenZeppelin v5.3 Upgradeables  */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
@@ -42,21 +42,10 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     bytes4 public constant MODULE_ID = 0x70766F74; /* "pvot" */
     uint8 public constant MAX_OPTIONS = 50;
     uint8 public constant MAX_CALLS = 20;
-    uint32 public constant MAX_DURATION_MIN = 43_200; /* 30 days */
+    uint32 public constant MAX_DURATION_MIN = 43_200; /* 30 days */
     uint32 public constant MIN_DURATION_MIN = 10;
-    uint256 public MIN_BAL; /* sybil floor */
 
-    /* ───────────── Storage ───────────── */
-    IERC20 public participationToken;
-    IMembership public membership;
-    IExecutor public executor;
-
-    mapping(address => bool) public allowedTarget;
-    mapping(bytes32 => bool) private _allowedRoles;
-
-    uint8 public quorumPercentage; // 1‑100
-    bool public quadraticVoting; // toggle
-
+    /* ───────────── Data Structures ───────────── */
     struct PollOption {
         uint128 votes;
     }
@@ -69,7 +58,28 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         IExecutor.Call[][] batches; // can be empty
     }
 
-    Proposal[] private _proposals;
+    /* ─────────── ERC-7201 Storage ─────────── */
+    /// @custom:storage-location erc7201:poa.participationvoting.storage
+    struct Layout {
+        IERC20 participationToken;
+        IMembership membership;
+        IExecutor executor;
+        mapping(address => bool) allowedTarget;
+        mapping(bytes32 => bool) _allowedRoles;
+        uint8 quorumPercentage; // 1‑100
+        bool quadraticVoting; // toggle
+        uint256 MIN_BAL; /* sybil floor */
+        Proposal[] _proposals;
+    }
+
+    // keccak256("poa.participationvoting.storage") → unique, collision-free slot
+    bytes32 private constant _STORAGE_SLOT = 0x961be98db34d61d2a5ef5b5cbadc7db40d3e0d4bad8902c41a8b75d5c73b5961;
+
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
     /* ───────────── Events ───────────── */
     event RoleSet(bytes32 role, bool allowed);
@@ -85,7 +95,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     event MinBalanceSet(uint256 newMinBalance);
 
     modifier onlyExecutor() {
-        if (_msgSender() != address(executor)) revert Unauthorized();
+        if (_msgSender() != address(_layout().executor)) revert Unauthorized();
         _;
     }
 
@@ -112,23 +122,24 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         __Pausable_init();
         __ReentrancyGuard_init();
 
-        membership = IMembership(membership_);
-        participationToken = IERC20(token_);
-        executor = IExecutor(executor_);
-        quorumPercentage = quorumPct;
-        quadraticVoting = quadratic_;
-        MIN_BAL = minBalance_;
+        Layout storage l = _layout();
+        l.membership = IMembership(membership_);
+        l.participationToken = IERC20(token_);
+        l.executor = IExecutor(executor_);
+        l.quorumPercentage = quorumPct;
+        l.quadraticVoting = quadratic_;
+        l.MIN_BAL = minBalance_;
 
         emit QuorumPercentageSet(quorumPct);
         emit QuadraticToggled(quadratic_);
         emit MinBalanceSet(minBalance_);
 
         for (uint256 i; i < initialRoles.length; ++i) {
-            _allowedRoles[initialRoles[i]] = true;
+            l._allowedRoles[initialRoles[i]] = true;
             emit RoleSet(initialRoles[i], true);
         }
         for (uint256 i; i < initialTargets.length; ++i) {
-            allowedTarget[initialTargets[i]] = true;
+            l.allowedTarget[initialTargets[i]] = true;
             emit TargetAllowed(initialTargets[i], true);
         }
     }
@@ -144,57 +155,59 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     function setExecutor(address a) external onlyExecutor {
         if (a == address(0)) revert ZeroAddress();
-        executor = IExecutor(a);
+        _layout().executor = IExecutor(a);
         emit ExecutorUpdated(a);
     }
 
     function setRoleAllowed(bytes32 r, bool ok) external onlyExecutor {
-        _allowedRoles[r] = ok;
+        _layout()._allowedRoles[r] = ok;
         emit RoleSet(r, ok);
     }
 
     function setTargetAllowed(address t, bool ok) external onlyExecutor {
         if (t == address(0)) revert ZeroAddress();
-        allowedTarget[t] = ok;
+        _layout().allowedTarget[t] = ok;
         emit TargetAllowed(t, ok);
     }
 
     function setQuorumPercentage(uint8 q) external onlyExecutor {
         require(q > 0 && q <= 100, "quorum");
-        quorumPercentage = q;
+        _layout().quorumPercentage = q;
         emit QuorumPercentageSet(q);
     }
 
     function toggleQuadratic() external onlyExecutor {
-        quadraticVoting = !quadraticVoting;
-        emit QuadraticToggled(quadraticVoting);
+        Layout storage l = _layout();
+        l.quadraticVoting = !l.quadraticVoting;
+        emit QuadraticToggled(l.quadraticVoting);
     }
 
     function setMinBalance(uint256 n) external onlyExecutor {
-        MIN_BAL = n;
+        _layout().MIN_BAL = n;
         emit MinBalanceSet(n);
     }
 
     /* ───────────── Modifiers ───────────── */
     modifier onlyCreator() {
-        if (_msgSender() != address(executor) && !_allowedRoles[membership.roleOf(_msgSender())]) {
+        Layout storage l = _layout();
+        if (_msgSender() != address(l.executor) && !l._allowedRoles[l.membership.roleOf(_msgSender())]) {
             revert Unauthorized();
         }
         _;
     }
 
     modifier exists(uint256 id) {
-        if (id >= _proposals.length) revert InvalidProposal();
+        if (id >= _layout()._proposals.length) revert InvalidProposal();
         _;
     }
 
     modifier notExpired(uint256 id) {
-        if (block.timestamp > _proposals[id].endTimestamp) revert VotingExpired();
+        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingExpired();
         _;
     }
 
     modifier isExpired(uint256 id) {
-        if (block.timestamp <= _proposals[id].endTimestamp) revert VotingOpen();
+        if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingOpen();
         _;
     }
 
@@ -209,16 +222,17 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         if (optionNames.length > MAX_OPTIONS) revert TooManyOptions();
         if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
 
+        Layout storage l = _layout();
         uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
-        Proposal storage p = _proposals.push();
+        Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
 
-        uint256 id = _proposals.length - 1;
+        uint256 id = l._proposals.length - 1;
         for (uint256 i; i < optionNames.length; ++i) {
             if (optionBatches[i].length > 0) {
                 if (optionBatches[i].length > MAX_CALLS) revert TooManyCalls();
                 for (uint256 j; j < optionBatches[i].length; ++j) {
-                    if (!allowedTarget[optionBatches[i][j].target]) revert TargetNotAllowed();
+                    if (!l.allowedTarget[optionBatches[i][j].target]) revert TargetNotAllowed();
                     if (optionBatches[i][j].target == address(this)) revert TargetSelf();
                 }
             }
@@ -238,12 +252,13 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     {
         if (idxs.length != weights.length) revert LengthMismatch();
 
-        uint256 bal = participationToken.balanceOf(_msgSender());
-        if (bal < MIN_BAL) revert MinBalance();
-        uint256 power = quadraticVoting ? Math.sqrt(bal) : bal;
+        Layout storage l = _layout();
+        uint256 bal = l.participationToken.balanceOf(_msgSender());
+        if (bal < l.MIN_BAL) revert MinBalance();
+        uint256 power = l.quadraticVoting ? Math.sqrt(bal) : bal;
         require(power > 0, "power=0");
 
-        Proposal storage p = _proposals[id];
+        Proposal storage p = l._proposals[id];
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
         uint256 seen;
@@ -286,21 +301,23 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         returns (uint256 winner, bool valid)
     {
         (winner, valid) = _calcWinner(id);
-        IExecutor.Call[] storage batch = _proposals[id].batches[winner];
+        Layout storage l = _layout();
+        IExecutor.Call[] storage batch = l._proposals[id].batches[winner];
 
         if (valid && batch.length > 0) {
             for (uint256 i; i < batch.length; ++i) {
                 if (batch[i].target == address(this)) revert TargetSelf();
-                if (!allowedTarget[batch[i].target]) revert TargetNotAllowed();
+                if (!l.allowedTarget[batch[i].target]) revert TargetNotAllowed();
             }
-            executor.execute(id, batch);
+            l.executor.execute(id, batch);
         }
         emit Winner(id, winner, valid);
     }
 
     /* ─────────── Cleanup ─────────── */
     function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
-        Proposal storage p = _proposals[id];
+        Layout storage l = _layout();
+        Proposal storage p = l._proposals[id];
         require(p.batches.length > 0 || voters.length > 0, "nothing");
         uint256 cleaned;
         for (uint256 i; i < voters.length && i < 4_000; ++i) {
@@ -315,7 +332,8 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     /* ───────────── View helpers ───────────── */
     function _calcWinner(uint256 id) internal view returns (uint256 win, bool ok) {
-        Proposal storage p = _proposals[id];
+        Layout storage l = _layout();
+        Proposal storage p = l._proposals[id];
         uint128 high;
         uint128 second;
         for (uint256 i; i < p.options.length; ++i) {
@@ -328,11 +346,11 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
                 second = v;
             }
         }
-        ok = (uint256(high) * 100 > uint256(p.totalWeight) * quorumPercentage) && (high > second);
+        ok = (uint256(high) * 100 > uint256(p.totalWeight) * l.quorumPercentage) && (high > second);
     }
 
     function proposalsCount() external view returns (uint256) {
-        return _proposals.length;
+        return _layout()._proposals.length;
     }
 
     function version() external pure returns (string memory) {
@@ -343,5 +361,32 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         return MODULE_ID;
     }
 
-    uint256[50] private __gap;
+    /* ─────────── Public getters for storage variables ─────────── */
+    function MIN_BAL() external view returns (uint256) {
+        return _layout().MIN_BAL;
+    }
+
+    function participationToken() external view returns (IERC20) {
+        return _layout().participationToken;
+    }
+
+    function membership() external view returns (IMembership) {
+        return _layout().membership;
+    }
+
+    function executor() external view returns (IExecutor) {
+        return _layout().executor;
+    }
+
+    function allowedTarget(address target) external view returns (bool) {
+        return _layout().allowedTarget[target];
+    }
+
+    function quorumPercentage() external view returns (uint8) {
+        return _layout().quorumPercentage;
+    }
+
+    function quadraticVoting() external view returns (bool) {
+        return _layout().quadraticVoting;
+    }
 }

@@ -1,7 +1,7 @@
 // SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.20;
 
-/*  OpenZeppelin v5.3 Upgradeables  */
+/*  OpenZeppelin v5.3 Upgradeables  */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
@@ -40,29 +40,10 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     bytes4 public constant MODULE_ID = 0x68766f74; /* "hfot" */
     uint8 public constant MAX_OPTIONS = 50;
     uint8 public constant MAX_CALLS = 20;
-    uint32 public constant MAX_DURATION = 43_200; /* 30 days */
-    uint32 public constant MIN_DURATION = 10; /* 10 min   */
+    uint32 public constant MAX_DURATION = 43_200; /* 30 days */
+    uint32 public constant MIN_DURATION = 10; /* 10 min   */
 
-    /* ─────── Config / storage ─────── */
-    IERC20 public participationToken;
-    IMembership public membership;
-    IExecutor public executor;
-
-    mapping(address => bool) public allowedTarget; // execution allow‑list
-    mapping(bytes32 => bool) private _allowedRoles; // who can create
-
-    uint8 public quorumPct; // 1‑100
-    uint8 public ddSharePct; // e.g. 50 = 50 %
-    bool public quadraticVoting;
-    uint256 public MIN_BAL; // min PT balance to participate
-
-    /* ─────── Vote bookkeeping ───────
-       We store RAW points:
-
-       * Each DD voter contributes **100** raw points in total,
-         distributed per‑option according to weights.
-       * Each PT voter contributes **ptPower×100** raw points in total.
-    */
+    /* ─────── Data Structures ─────── */
     struct PollOption {
         uint128 ddRaw; // sum of DD raw points (0‑100 per voter)
         uint128 ptRaw; // sum of PT raw points (power×weight)
@@ -77,7 +58,31 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         IExecutor.Call[][] batches;
     }
 
-    Proposal[] private _proposals;
+    /* ─────── ERC-7201 Storage ─────── */
+    /// @custom:storage-location erc7201:poa.hybridvoting.storage
+    struct Layout {
+        /* Config / Storage */
+        IERC20 participationToken;
+        IMembership membership;
+        IExecutor executor;
+        mapping(address => bool) allowedTarget; // execution allow‑list
+        mapping(bytes32 => bool) _allowedRoles; // who can create
+        uint8 quorumPct; // 1‑100
+        uint8 ddSharePct; // e.g. 50 = 50 %
+        bool quadraticVoting;
+        uint256 MIN_BAL; // min PT balance to participate
+        /* Vote Bookkeeping */
+        Proposal[] _proposals;
+    }
+
+    // keccak256("poa.hybridvoting.storage") → unique, collision-free slot
+    bytes32 private constant _STORAGE_SLOT = 0x5ca2a7292ae8f852850852b5f984e5237d39f3240052e7ba31e27bf071bdb62b;
+
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
     /* ─────── Events ─────── */
     event RoleSet(bytes32 role, bool allowed);
@@ -92,8 +97,8 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     event QuadraticToggled(bool enabled);
     event MinBalanceSet(uint256 newMinBalance);
     event ProposalCleaned(uint256 id, uint256 cleaned);
-    /* ─────── Initialiser ─────── */
 
+    /* ─────── Initialiser ─────── */
     constructor() initializer {}
 
     function initialize(
@@ -119,32 +124,33 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         __Pausable_init();
         __ReentrancyGuard_init();
 
-        membership = IMembership(membership_);
-        participationToken = IERC20(token_);
-        executor = IExecutor(executor_);
+        Layout storage l = _layout();
+        l.membership = IMembership(membership_);
+        l.participationToken = IERC20(token_);
+        l.executor = IExecutor(executor_);
 
-        quorumPct = quorum_;
+        l.quorumPct = quorum_;
         emit QuorumSet(quorum_);
-        ddSharePct = ddShare_;
+        l.ddSharePct = ddShare_;
         emit SplitSet(ddShare_);
-        quadraticVoting = quadratic_;
+        l.quadraticVoting = quadratic_;
         emit QuadraticToggled(quadratic_);
-        MIN_BAL = minBalance_;
+        l.MIN_BAL = minBalance_;
         emit MinBalanceSet(minBalance_);
 
         for (uint256 i; i < initialRoles.length; ++i) {
-            _allowedRoles[initialRoles[i]] = true;
+            l._allowedRoles[initialRoles[i]] = true;
             emit RoleSet(initialRoles[i], true);
         }
         for (uint256 i; i < initialTargets.length; ++i) {
-            allowedTarget[initialTargets[i]] = true;
+            l.allowedTarget[initialTargets[i]] = true;
             emit TargetAllowed(initialTargets[i], true);
         }
     }
 
     /* ─────── Governance setters (executor‑gated) ─────── */
     modifier onlyExecutor() {
-        if (_msgSender() != address(executor)) revert Unauthorized();
+        if (_msgSender() != address(_layout().executor)) revert Unauthorized();
         _;
     }
 
@@ -158,62 +164,64 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
 
     function setExecutor(address a) external onlyExecutor {
         if (a == address(0)) revert ZeroAddress();
-        executor = IExecutor(a);
+        _layout().executor = IExecutor(a);
         emit ExecutorUpdated(a);
     }
 
     function setRoleAllowed(bytes32 r, bool ok) external onlyExecutor {
-        _allowedRoles[r] = ok;
+        _layout()._allowedRoles[r] = ok;
         emit RoleSet(r, ok);
     }
 
     function setTargetAllowed(address t, bool ok) external onlyExecutor {
-        allowedTarget[t] = ok;
+        _layout().allowedTarget[t] = ok;
         emit TargetAllowed(t, ok);
     }
 
     function setQuorum(uint8 q) external onlyExecutor {
         require(q > 0 && q <= 100, "quorum");
-        quorumPct = q;
+        _layout().quorumPct = q;
         emit QuorumSet(q);
     }
 
     function setSplit(uint8 s) external onlyExecutor {
         require(s <= 100, "split");
-        ddSharePct = s;
+        _layout().ddSharePct = s;
         emit SplitSet(s);
     }
 
     function toggleQuadratic() external onlyExecutor {
-        quadraticVoting = !quadraticVoting;
-        emit QuadraticToggled(quadraticVoting);
+        Layout storage l = _layout();
+        l.quadraticVoting = !l.quadraticVoting;
+        emit QuadraticToggled(l.quadraticVoting);
     }
 
     function setMinBalance(uint256 n) external onlyExecutor {
-        MIN_BAL = n;
+        _layout().MIN_BAL = n;
         emit MinBalanceSet(n);
     }
 
     /* ─────── Helpers & modifiers ─────── */
     modifier onlyCreator() {
-        if (_msgSender() != address(executor) && !_allowedRoles[membership.roleOf(_msgSender())]) {
+        Layout storage l = _layout();
+        if (_msgSender() != address(l.executor) && !l._allowedRoles[l.membership.roleOf(_msgSender())]) {
             revert Unauthorized();
         }
         _;
     }
 
     modifier exists(uint256 id) {
-        if (id >= _proposals.length) revert InvalidProposal();
+        if (id >= _layout()._proposals.length) revert InvalidProposal();
         _;
     }
 
     modifier notExpired(uint256 id) {
-        if (block.timestamp > _proposals[id].endTimestamp) revert VotingExpired();
+        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingExpired();
         _;
     }
 
     modifier isExpired(uint256 id) {
-        if (block.timestamp <= _proposals[id].endTimestamp) revert VotingOpen();
+        if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingOpen();
         _;
     }
 
@@ -228,16 +236,17 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         if (names.length > MAX_OPTIONS) revert TooManyOptions();
         if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert DurationOutOfRange();
 
+        Layout storage l = _layout();
         uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
-        Proposal storage p = _proposals.push();
+        Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
 
-        uint256 id = _proposals.length - 1;
+        uint256 id = l._proposals.length - 1;
         for (uint256 i; i < names.length; ++i) {
             if (batches[i].length > 0) {
                 if (batches[i].length > MAX_CALLS) revert TooManyCalls();
                 for (uint256 j; j < batches[i].length; ++j) {
-                    if (!allowedTarget[batches[i][j].target]) revert TargetNotAllowed();
+                    if (!l.allowedTarget[batches[i][j].target]) revert TargetNotAllowed();
                     if (batches[i][j].target == address(this)) revert TargetSelf();
                 }
             }
@@ -257,15 +266,16 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     {
         if (idxs.length != weights.length) revert LengthMismatch();
 
-        Proposal storage p = _proposals[id];
+        Layout storage l = _layout();
+        Proposal storage p = l._proposals[id];
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
         /* collect raw powers */
-        bool hasRole = _allowedRoles[membership.roleOf(_msgSender())];
+        bool hasRole = l._allowedRoles[l.membership.roleOf(_msgSender())];
         uint256 ddRawVoter = hasRole ? 100 : 0; // always 0 or 100
-        uint256 bal = participationToken.balanceOf(_msgSender());
-        if (bal < MIN_BAL) bal = 0;
-        uint256 ptPower = (bal == 0) ? 0 : (quadraticVoting ? Math.sqrt(bal) : bal);
+        uint256 bal = l.participationToken.balanceOf(_msgSender());
+        if (bal < l.MIN_BAL) bal = 0;
+        uint256 ptPower = (bal == 0) ? 0 : (l.quadraticVoting ? Math.sqrt(bal) : bal);
         uint256 ptRawVoter = ptPower * 100; // raw numerator
 
         if (ddRawVoter == 0 && ptRawVoter == 0) revert Unauthorized();
@@ -306,15 +316,16 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         whenNotPaused
         returns (uint256 winner, bool valid)
     {
-        Proposal storage p = _proposals[id];
+        Layout storage l = _layout();
+        Proposal storage p = l._proposals[id];
 
         if (p.ddTotalRaw == 0 && p.ptTotalRaw == 0) {
             emit Winner(id, 0, false);
             return (0, false);
         }
 
-        uint256 sliceDD = ddSharePct;
-        uint256 slicePT = 100 - ddSharePct;
+        uint256 sliceDD = l.ddSharePct;
+        uint256 slicePT = 100 - l.ddSharePct;
         uint256 hi;
         uint256 second;
 
@@ -335,27 +346,28 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
             }
         }
 
-        valid = (hi * 100 >= uint256(sliceDD + slicePT) * quorumPct) && (hi > second);
+        valid = (hi * 100 >= uint256(sliceDD + slicePT) * l.quorumPct) && (hi > second);
 
         IExecutor.Call[] storage batch = p.batches[winner];
         if (valid && batch.length > 0) {
             for (uint256 i; i < batch.length; ++i) {
-                if (!allowedTarget[batch[i].target]) revert TargetNotAllowed();
+                if (!l.allowedTarget[batch[i].target]) revert TargetNotAllowed();
             }
-            executor.execute(id, batch);
+            l.executor.execute(id, batch);
         }
         emit Winner(id, winner, valid);
     }
-    /* ─────── Cleanup (storage‑refund helper) ─────── */
 
+    /* ─────── Cleanup (storage‑refund helper) ─────── */
     function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
-        Proposal storage p = _proposals[id];
+        Layout storage l = _layout();
+        Proposal storage p = l._proposals[id];
 
         // nothing to do?
         require(p.batches.length > 0 || voters.length > 0, "nothing");
 
         uint256 cleaned;
-        // cap loop to stay well below the 4 million refund limit
+        // cap loop to stay well below the 4 million refund limit
         for (uint256 i; i < voters.length && i < 4_000; ++i) {
             if (p.hasVoted[voters[i]]) {
                 delete p.hasVoted[voters[i]];
@@ -375,7 +387,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
 
     /* ─────── View helpers ─────── */
     function proposalsCount() external view returns (uint256) {
-        return _proposals.length;
+        return _layout()._proposals.length;
     }
 
     function version() external pure returns (string memory) {
@@ -386,5 +398,36 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         return MODULE_ID;
     }
 
-    uint256[60] private __gap;
+    /* ─────── Public getters for storage variables ─────── */
+    function participationToken() external view returns (IERC20) {
+        return _layout().participationToken;
+    }
+
+    function membership() external view returns (IMembership) {
+        return _layout().membership;
+    }
+
+    function executor() external view returns (IExecutor) {
+        return _layout().executor;
+    }
+
+    function allowedTarget(address target) external view returns (bool) {
+        return _layout().allowedTarget[target];
+    }
+
+    function quorumPct() external view returns (uint8) {
+        return _layout().quorumPct;
+    }
+
+    function ddSharePct() external view returns (uint8) {
+        return _layout().ddSharePct;
+    }
+
+    function quadraticVoting() external view returns (bool) {
+        return _layout().quadraticVoting;
+    }
+
+    function MIN_BAL() external view returns (uint256) {
+        return _layout().MIN_BAL;
+    }
 }
