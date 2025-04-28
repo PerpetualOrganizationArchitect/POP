@@ -67,9 +67,22 @@ error OrgExistsMismatch();
 
 /*───────────────────────────  Deployer  ───────────────────────────────*/
 contract Deployer is Initializable, OwnableUpgradeable {
-    /* immutables */
-    IPoaManager public poaManager;
-    OrgRegistry public orgRegistry;
+    /*───────────── ERC-7201 Storage ───────────*/
+    /// @custom:storage-location erc7201:poa.deployer.storage
+    struct Layout {
+        /* immutables */
+        IPoaManager poaManager;
+        OrgRegistry orgRegistry;
+    }
+
+    // keccak256("poa.deployer.storage") to get a unique, collision-free slot
+    bytes32 private constant _STORAGE_SLOT = 0x4f6cf4b446a382b8bde8d35e8ca59cc30d80d9a326b56d1a5212b27a0198fc7f;
+
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
     /* Local definition of OrgInfo struct to match OrgRegistry */
     struct OrgInfo {
@@ -91,8 +104,10 @@ contract Deployer is Initializable, OwnableUpgradeable {
     function initialize(address _poaManager, address _orgRegistry) public initializer {
         if (_poaManager == address(0) || _orgRegistry == address(0)) revert InvalidAddress();
         __Ownable_init(msg.sender);
-        poaManager = IPoaManager(_poaManager);
-        orgRegistry = OrgRegistry(_orgRegistry);
+
+        Layout storage l = _layout();
+        l.poaManager = IPoaManager(_poaManager);
+        l.orgRegistry = OrgRegistry(_orgRegistry);
     }
 
     /*──────────────────────── INTERNAL CORE ───────────────────────*/
@@ -107,17 +122,19 @@ contract Deployer is Initializable, OwnableUpgradeable {
     ) internal returns (address proxy) {
         if (initData.length == 0) revert EmptyInit();
 
+        Layout storage l = _layout();
+
         /* 1. beacon handling */
         address beacon;
         if (autoUpgrade) {
             if (customImpl != address(0)) revert UnsupportedType();
-            beacon = poaManager.getBeacon(typeName);
+            beacon = l.poaManager.getBeacon(typeName);
             if (beacon == address(0)) revert UnsupportedType();
             // paranoia‑check – the PoaManager must own the beacon
             (bool ok,) = beacon.staticcall(abi.encodeWithSignature("implementation()"));
-            if (!ok || Ownable(beacon).owner() != address(poaManager)) revert BeaconProbeFail();
+            if (!ok || Ownable(beacon).owner() != address(l.poaManager)) revert BeaconProbeFail();
         } else {
-            address impl = (customImpl == address(0)) ? poaManager.getCurrentImplementation(typeName) : customImpl;
+            address impl = (customImpl == address(0)) ? l.poaManager.getCurrentImplementation(typeName) : customImpl;
             if (impl == address(0)) revert UnsupportedType();
             beacon = address(new UpgradeableBeacon(impl, moduleOwner));
         }
@@ -127,7 +144,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
         /* 3. book‑keeping in OrgRegistry */
         bytes32 typeId = keccak256(bytes(typeName));
-        orgRegistry.registerOrgContract(orgId, typeId, proxy, beacon, autoUpgrade, moduleOwner, lastRegister);
+        l.orgRegistry.registerOrgContract(orgId, typeId, proxy, beacon, autoUpgrade, moduleOwner, lastRegister);
 
         emit ContractDeployed(orgId, typeId, proxy, beacon, autoUpgrade, moduleOwner);
     }
@@ -303,12 +320,14 @@ contract Deployer is Initializable, OwnableUpgradeable {
             address educationHub
         )
     {
+        Layout storage l = _layout();
+
         /* 0. ensure Org exists (or create) */
-        if (orgRegistry.orgCount() == 0 || !_orgExists(orgId)) {
-            orgRegistry.registerOrg(orgId, executorEOA, orgName);
+        if (l.orgRegistry.orgCount() == 0 || !_orgExists(orgId)) {
+            l.orgRegistry.registerOrg(orgId, executorEOA, orgName);
         } else {
             // Destructure the tuple returned by orgOf
-            (address currentExec,,,,) = orgRegistry.orgOf(orgId);
+            (address currentExec,,,,) = l.orgRegistry.orgOf(orgId);
             if (currentExec != executorEOA) revert OrgExistsMismatch();
         }
 
@@ -367,10 +386,22 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
     function _orgExists(bytes32 id) internal view returns (bool) {
         // Destructure the tuple to get the exists field (4th element)
-        (,,, bool exists,) = orgRegistry.orgOf(id);
+        (,,, bool exists,) = _layout().orgRegistry.orgOf(id);
         return exists;
     }
 
-    /* ─────────── Storage gap ─────────── */
-    uint256[50] private __gap;
+    // Public getter for poaManager
+    function poaManager() external view returns (address) {
+        return address(_layout().poaManager);
+    }
+
+    // Public getter for orgRegistry
+    function orgRegistry() external view returns (address) {
+        return address(_layout().orgRegistry);
+    }
+
+    /* ─────────── Version ─────────── */
+    function version() external pure returns (string memory) {
+        return "v1";
+    }
 }

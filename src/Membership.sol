@@ -26,20 +26,32 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
     bytes32 private constant EXEC_ROLE = keccak256("EXECUTIVE");
     bytes4 public constant MODULE_ID = 0x4d424552; /* "MBER" */
 
-    /* ─────── Storage ─────── */
-    uint256 private _nextTokenId;
+    /*───────────── ERC-7201 Storage ───────────*/
+    /// @custom:storage-location erc7201:poa.membership.storage
+    struct Layout {
+        /* ─────── Core Storage ─────── */
+        uint256 _nextTokenId;
+        mapping(bytes32 => string) roleImage; // roleId to baseURI
+        mapping(address => bytes32) roleOf; // member to roleId
+        mapping(bytes32 => bool) isExecutiveRole;
+        mapping(address => uint256) lastExecAction;
+        mapping(address => uint256) lastDemotedAt;
+        mapping(address => uint256) _tokenOf; // soul‑bound tokenId
+        mapping(bytes32 => bool) roleCanVote; // voting flag per role
+        /* ─────── Administrative Addresses ─────── */
+        address quickJoin; // set once, rotatable by executor
+        address electionContract; // set once, rotatable by executor
+        address executor; // authoritative DAO / timelock
+    }
 
-    mapping(bytes32 => string) public roleImage; // roleId to baseURI
-    mapping(address => bytes32) public roleOf; // member to roleId
-    mapping(bytes32 => bool) public isExecutiveRole;
-    mapping(address => uint256) public lastExecAction;
-    mapping(address => uint256) public lastDemotedAt;
-    mapping(address => uint256) private _tokenOf; // soul‑bound tokenId
-    mapping(bytes32 => bool) public roleCanVote; // voting flag per role
+    // keccak256("poa.membership.storage") to get a unique, collision-free slot
+    bytes32 private constant _STORAGE_SLOT = 0xee63a658f61e1047aaffc2cd263e58ed6906d1be391d3fb1f8e04e44738846b6;
 
-    address public quickJoin; // set once, rotatable by executor
-    address public electionContract; // set once, rotatable by executor
-    address public executor; // authoritative DAO / timelock
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
     /* ─────── Events ─────── */
     event Minted(address indexed member, bytes32 role, uint256 tokenId);
@@ -64,7 +76,9 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
             revert ArrayLengthMismatch();
         }
         if (executor_ == address(0)) revert ZeroAddress();
-        executor = executor_;
+
+        Layout storage l = _layout();
+        l.executor = executor_;
 
         __ERC721_init(name_, "MBR");
         __ReentrancyGuard_init();
@@ -72,36 +86,39 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
         /* role meta */
         for (uint256 i; i < roleNames.length; ++i) {
             bytes32 id = keccak256(bytes(roleNames[i]));
-            roleImage[id] = roleImages[i];
-            roleCanVote[id] = roleCanVote_[i];
+            l.roleImage[id] = roleImages[i];
+            l.roleCanVote[id] = roleCanVote_[i];
             emit RoleImageSet(id, roleImages[i]);
         }
 
         /* exec roles */
         for (uint256 i; i < executiveRoles.length; ++i) {
-            isExecutiveRole[executiveRoles[i]] = true;
+            l.isExecutiveRole[executiveRoles[i]] = true;
         }
-        isExecutiveRole[EXEC_ROLE] = true;
+        l.isExecutiveRole[EXEC_ROLE] = true;
 
         // assure DEFAULT_ROLE has a fallback image
-        if (bytes(roleImage[DEFAULT_ROLE]).length == 0 && roleImages.length > 0) {
-            roleImage[DEFAULT_ROLE] = roleImages[0];
+        if (bytes(l.roleImage[DEFAULT_ROLE]).length == 0 && roleImages.length > 0) {
+            l.roleImage[DEFAULT_ROLE] = roleImages[0];
         }
     }
 
     /* ─────── Modifiers ─────── */
     modifier onlyExecutor() {
-        if (msg.sender != executor) revert Unauthorized();
+        Layout storage l = _layout();
+        if (msg.sender != l.executor) revert Unauthorized();
         _;
     }
 
     modifier onlyExecutive() {
-        if (msg.sender != executor && !isExecutiveRole[roleOf[msg.sender]]) revert NotExecutive();
+        Layout storage l = _layout();
+        if (msg.sender != l.executor && !l.isExecutiveRole[l.roleOf[msg.sender]]) revert NotExecutive();
         _;
     }
 
     modifier onlyQuickJoin() {
-        if (msg.sender != executor && msg.sender != quickJoin) revert NotQuickJoin();
+        Layout storage l = _layout();
+        if (msg.sender != l.executor && msg.sender != l.quickJoin) revert NotQuickJoin();
         _;
     }
 
@@ -122,46 +139,50 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
 
     /* ─────── Admin setters ─────── */
     function setQuickJoin(address qj) external {
+        Layout storage l = _layout();
         if (qj == address(0)) revert ZeroAddress();
-        if (quickJoin != address(0) && msg.sender != executor) revert Unauthorized();
-        quickJoin = qj;
+        if (l.quickJoin != address(0) && msg.sender != l.executor) revert Unauthorized();
+        l.quickJoin = qj;
         emit QuickJoinSet(qj);
     }
 
     function setElectionContract(address el) external {
+        Layout storage l = _layout();
         if (el == address(0)) revert ZeroAddress();
-        if (electionContract != address(0) && msg.sender != executor) revert Unauthorized();
-        electionContract = el;
+        if (l.electionContract != address(0) && msg.sender != l.executor) revert Unauthorized();
+        l.electionContract = el;
         emit ElectionSet(el);
     }
 
     function setRoleImage(bytes32 role, string calldata uri) external onlyExecutor {
-        roleImage[role] = uri;
+        _layout().roleImage[role] = uri;
         emit RoleImageSet(role, uri);
     }
 
     function setVotingRole(bytes32 role, bool can) external onlyExecutor {
-        roleCanVote[role] = can;
+        _layout().roleCanVote[role] = can;
         emit VotingRoleUpdated(role, can);
     }
 
     /* ─────── Core membership logic ─────── */
     function _issue(address to, bytes32 role) private {
-        if (bytes(roleImage[role]).length == 0) revert RoleImageMissing();
+        Layout storage l = _layout();
+        if (bytes(l.roleImage[role]).length == 0) revert RoleImageMissing();
 
-        uint256 old = _tokenOf[to];
+        uint256 old = l._tokenOf[to];
         if (old != 0) _burn(old); // replace old token
 
-        uint256 id = ++_nextTokenId;
+        uint256 id = ++l._nextTokenId;
         _mint(to, id);
 
-        roleOf[to] = role;
-        _tokenOf[to] = id;
+        l.roleOf[to] = role;
+        l._tokenOf[to] = id;
         emit Minted(to, role, id);
     }
 
     function mintOrChange(address member, bytes32 role) external {
-        if (msg.sender != executor && !isExecutiveRole[roleOf[msg.sender]] && msg.sender != electionContract) {
+        Layout storage l = _layout();
+        if (msg.sender != l.executor && !l.isExecutiveRole[l.roleOf[msg.sender]] && msg.sender != l.electionContract) {
             revert NotExecutive();
         }
 
@@ -170,48 +191,86 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
     }
 
     function quickJoinMint(address user) external onlyQuickJoin {
-        if (roleOf[user] != bytes32(0)) revert AlreadyMember();
-        _issue(user, _nextTokenId == 0 ? EXEC_ROLE : DEFAULT_ROLE);
+        Layout storage l = _layout();
+        if (l.roleOf[user] != bytes32(0)) revert AlreadyMember();
+        _issue(user, l._nextTokenId == 0 ? EXEC_ROLE : DEFAULT_ROLE);
     }
 
     function resign() external {
-        if (roleOf[msg.sender] == bytes32(0)) revert NoMember();
-        _burn(_tokenOf[msg.sender]);
-        delete roleOf[msg.sender];
-        delete _tokenOf[msg.sender];
+        Layout storage l = _layout();
+        if (l.roleOf[msg.sender] == bytes32(0)) revert NoMember();
+        _burn(l._tokenOf[msg.sender]);
+        delete l.roleOf[msg.sender];
+        delete l._tokenOf[msg.sender];
         emit MemberRemoved(msg.sender);
     }
 
     function downgradeExecutive(address exec) external onlyExecutive {
-        if (!isExecutiveRole[roleOf[exec]]) revert NotExecutive();
-        if (block.timestamp < lastExecAction[msg.sender] + ONE_WEEK) revert Cooldown();
-        if (block.timestamp < lastDemotedAt[exec] + ONE_WEEK) revert Cooldown();
+        Layout storage l = _layout();
+        if (!l.isExecutiveRole[l.roleOf[exec]]) revert NotExecutive();
+        if (block.timestamp < l.lastExecAction[msg.sender] + ONE_WEEK) revert Cooldown();
+        if (block.timestamp < l.lastDemotedAt[exec] + ONE_WEEK) revert Cooldown();
 
         _issue(exec, DEFAULT_ROLE);
-        lastExecAction[msg.sender] = block.timestamp;
-        lastDemotedAt[exec] = block.timestamp;
+        l.lastExecAction[msg.sender] = block.timestamp;
+        l.lastDemotedAt[exec] = block.timestamp;
         emit ExecutiveDowngraded(exec, msg.sender);
     }
 
     /* ─────── Views ─────── */
     function isMember(address u) external view returns (bool) {
-        return roleOf[u] != bytes32(0);
+        return _layout().roleOf[u] != bytes32(0);
     }
 
     function canVote(address u) external view returns (bool) {
-        return roleCanVote[roleOf[u]];
+        return _layout().roleCanVote[_layout().roleOf[u]];
     }
 
     function tokenURI(uint256 id) public view override returns (string memory) {
+        Layout storage l = _layout();
         if (_ownerOf(id) == address(0)) revert InvalidTokenId();
-        string memory uri = roleImage[roleOf[ownerOf(id)]];
-        if (bytes(uri).length == 0) uri = roleImage[DEFAULT_ROLE];
+        string memory uri = l.roleImage[l.roleOf[ownerOf(id)]];
+        if (bytes(uri).length == 0) uri = l.roleImage[DEFAULT_ROLE];
         return uri;
+    }
+
+    function roleOf(address user) external view returns (bytes32) {
+        return _layout().roleOf[user];
+    }
+
+    function roleImage(bytes32 role) external view returns (string memory) {
+        return _layout().roleImage[role];
+    }
+
+    function isExecutiveRole(bytes32 role) external view returns (bool) {
+        return _layout().isExecutiveRole[role];
+    }
+
+    function lastExecAction(address user) external view returns (uint256) {
+        return _layout().lastExecAction[user];
+    }
+
+    function lastDemotedAt(address user) external view returns (uint256) {
+        return _layout().lastDemotedAt[user];
+    }
+
+    function roleCanVote(bytes32 role) external view returns (bool) {
+        return _layout().roleCanVote[role];
+    }
+
+    function quickJoin() external view returns (address) {
+        return _layout().quickJoin;
+    }
+
+    function electionContract() external view returns (address) {
+        return _layout().electionContract;
+    }
+
+    function executor() external view returns (address) {
+        return _layout().executor;
     }
 
     function version() external pure returns (string memory) {
         return "v1";
     }
-
-    uint256[40] private __gap;
 }

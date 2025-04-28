@@ -34,13 +34,25 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         string metaCID; // IPFS / Arweave metadata for the org
     }
 
-    /* ───── Storage ───── */
-    mapping(bytes32 => OrgInfo) public orgOf; // orgId to OrgInfo
-    mapping(bytes32 => ContractInfo) public contractOf; // contractId to ContractInfo
-    mapping(bytes32 => mapping(bytes32 => address)) public proxyOf; // (orgId,typeId) to proxy
+    /*───────────── ERC-7201 Storage ───────────*/
+    /// @custom:storage-location erc7201:poa.orgregistry.storage
+    struct Layout {
+        /* ───── Storage ───── */
+        mapping(bytes32 => OrgInfo) orgOf; // orgId to OrgInfo
+        mapping(bytes32 => ContractInfo) contractOf; // contractId to ContractInfo
+        mapping(bytes32 => mapping(bytes32 => address)) proxyOf; // (orgId,typeId) to proxy
+        bytes32[] orgIds;
+        uint256 totalContracts;
+    }
 
-    bytes32[] public orgIds;
-    uint256 public totalContracts;
+    // keccak256("poa.orgregistry.storage") to get a unique, collision-free slot
+    bytes32 private constant _STORAGE_SLOT = 0x3ffb0627b419b7b77c77f589dd229844c112a8c125dceec0d56dda0674b35489;
+
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
     /* ───── Events ───── */
     event OrgRegistered(bytes32 indexed orgId, address indexed executor, string metaCID);
@@ -71,21 +83,24 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     /* ═════════════════ ORG  LOGIC ═════════════════ */
     function registerOrg(bytes32 orgId, address executorAddr, string calldata metaCID) external onlyOwner {
         if (orgId == bytes32(0) || executorAddr == address(0)) revert InvalidParam();
-        if (orgOf[orgId].exists) revert OrgExists();
 
-        orgOf[orgId] = OrgInfo({
+        Layout storage l = _layout();
+        if (l.orgOf[orgId].exists) revert OrgExists();
+
+        l.orgOf[orgId] = OrgInfo({
             executor: executorAddr,
             contractCount: 0,
             bootstrap: true, // owner can add modules while true
             exists: true,
             metaCID: metaCID
         });
-        orgIds.push(orgId);
+        l.orgIds.push(orgId);
         emit OrgRegistered(orgId, executorAddr, metaCID);
     }
 
     function updateOrgMeta(bytes32 orgId, string calldata newCID) external {
-        OrgInfo storage o = orgOf[orgId];
+        Layout storage l = _layout();
+        OrgInfo storage o = l.orgOf[orgId];
         if (!o.exists) revert OrgUnknown();
         if (msg.sender != o.executor) revert NotOrgExecutor();
 
@@ -112,7 +127,8 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         address moduleOwner,
         bool lastRegister
     ) external {
-        OrgInfo storage o = orgOf[orgId];
+        Layout storage l = _layout();
+        OrgInfo storage o = l.orgOf[orgId];
         if (!o.exists) revert OrgUnknown();
 
         bool callerIsOwner = (msg.sender == owner());
@@ -129,16 +145,16 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         if (typeId == bytes32(0) || proxy == address(0) || beacon == address(0) || moduleOwner == address(0)) {
             revert InvalidParam();
         }
-        if (proxyOf[orgId][typeId] != address(0)) revert TypeTaken();
+        if (l.proxyOf[orgId][typeId] != address(0)) revert TypeTaken();
 
         bytes32 contractId = keccak256(abi.encodePacked(orgId, typeId));
 
-        contractOf[contractId] = ContractInfo({proxy: proxy, beacon: beacon, autoUpgrade: autoUp, owner: moduleOwner});
-        proxyOf[orgId][typeId] = proxy;
+        l.contractOf[contractId] = ContractInfo({proxy: proxy, beacon: beacon, autoUpgrade: autoUp, owner: moduleOwner});
+        l.proxyOf[orgId][typeId] = proxy;
 
         unchecked {
             ++o.contractCount;
-            ++totalContracts;
+            ++l.totalContracts;
         }
         emit ContractRegistered(contractId, orgId, typeId, proxy, beacon, autoUp, moduleOwner);
 
@@ -149,55 +165,87 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     }
 
     function setAutoUpgrade(bytes32 orgId, bytes32 typeId, bool enabled) external {
-        OrgInfo storage o = orgOf[orgId];
+        Layout storage l = _layout();
+        OrgInfo storage o = l.orgOf[orgId];
         if (!o.exists) revert OrgUnknown();
         if (msg.sender != o.executor) revert NotOrgExecutor();
 
-        address proxy = proxyOf[orgId][typeId];
+        address proxy = l.proxyOf[orgId][typeId];
         if (proxy == address(0)) revert ContractUnknown();
 
         bytes32 contractId = keccak256(abi.encodePacked(orgId, typeId));
-        contractOf[contractId].autoUpgrade = enabled;
+        l.contractOf[contractId].autoUpgrade = enabled;
 
         emit AutoUpgradeSet(contractId, enabled);
     }
 
     /* ═════════════════  VIEW HELPERS  ═════════════════ */
     function getOrgContract(bytes32 orgId, bytes32 typeId) external view returns (address proxy) {
-        if (!orgOf[orgId].exists) revert OrgUnknown();
-        proxy = proxyOf[orgId][typeId];
+        Layout storage l = _layout();
+        if (!l.orgOf[orgId].exists) revert OrgUnknown();
+        proxy = l.proxyOf[orgId][typeId];
         if (proxy == address(0)) revert ContractUnknown();
     }
 
     function getContractBeacon(bytes32 contractId) external view returns (address beacon) {
-        beacon = contractOf[contractId].beacon;
+        Layout storage l = _layout();
+        beacon = l.contractOf[contractId].beacon;
         if (beacon == address(0)) revert ContractUnknown();
     }
 
     function isAutoUpgrade(bytes32 contractId) external view returns (bool) {
-        ContractInfo storage c = contractOf[contractId];
+        Layout storage l = _layout();
+        ContractInfo storage c = l.contractOf[contractId];
         if (c.proxy == address(0)) revert ContractUnknown();
         return c.autoUpgrade;
     }
 
     /* enumeration helpers */
     function orgCount() external view returns (uint256) {
-        return orgIds.length;
+        return _layout().orgIds.length;
     }
 
     function getOrgMeta(bytes32 orgId) external view returns (string memory) {
-        return orgOf[orgId].metaCID;
+        return _layout().orgOf[orgId].metaCID;
     }
 
     function getOrgIds() external view returns (bytes32[] memory) {
-        return orgIds;
+        return _layout().orgIds;
+    }
+
+    /* Public getters for storage variables */
+    function orgOf(bytes32 orgId)
+        external
+        view
+        returns (address executor, uint32 contractCount, bool bootstrap, bool exists, string memory metaCID)
+    {
+        OrgInfo storage o = _layout().orgOf[orgId];
+        return (o.executor, o.contractCount, o.bootstrap, o.exists, o.metaCID);
+    }
+
+    function contractOf(bytes32 contractId)
+        external
+        view
+        returns (address proxy, address beacon, bool autoUpgrade, address owner)
+    {
+        ContractInfo storage c = _layout().contractOf[contractId];
+        return (c.proxy, c.beacon, c.autoUpgrade, c.owner);
+    }
+
+    function proxyOf(bytes32 orgId, bytes32 typeId) external view returns (address) {
+        return _layout().proxyOf[orgId][typeId];
+    }
+
+    function totalContracts() external view returns (uint256) {
+        return _layout().totalContracts;
+    }
+
+    function orgIds(uint256 index) external view returns (bytes32) {
+        return _layout().orgIds[index];
     }
 
     /* ─────────── Version ─────────── */
     function version() external pure returns (string memory) {
         return "v1";
     }
-
-    /* ─────────── Storage gap ─────────── */
-    uint256[50] private __gap;
 }
