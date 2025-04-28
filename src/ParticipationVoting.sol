@@ -84,9 +84,8 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     /* ───────────── Events ───────────── */
     event RoleSet(bytes32 role, bool allowed);
-    event NewProposal(uint256 id, bytes metadata, uint64 endTs, uint64 createdAt);
-    event PollOptionNames(uint256 id, uint256 idx, string name);
-    event VoteCast(uint256 id, address voter, uint16[] idxs, uint8[] weights);
+    event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 createdAt);
+    event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
     event ExecutorUpdated(address newExecutor);
     event TargetAllowed(address target, bool allowed);
@@ -216,12 +215,12 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     function createProposal(
         bytes calldata metadata,
         uint32 minutesDuration,
-        string[] calldata optionNames,
+        uint8 numOptions,
         IExecutor.Call[][] calldata optionBatches
     ) external onlyCreator whenNotPaused {
         if (metadata.length == 0) revert InvalidMetadata();
-        if (optionNames.length == 0 || optionNames.length != optionBatches.length) revert LengthMismatch();
-        if (optionNames.length > MAX_OPTIONS) revert TooManyOptions();
+        if (numOptions == 0 || numOptions != optionBatches.length) revert LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
         if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
 
         Layout storage l = _layout();
@@ -230,7 +229,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         p.endTimestamp = endTs;
 
         uint256 id = l._proposals.length - 1;
-        for (uint256 i; i < optionNames.length; ++i) {
+        for (uint256 i; i < numOptions; ++i) {
             if (optionBatches[i].length > 0) {
                 if (optionBatches[i].length > MAX_CALLS) revert TooManyCalls();
                 for (uint256 j; j < optionBatches[i].length; ++j) {
@@ -240,13 +239,12 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
             }
             p.options.push(PollOption(0));
             p.batches.push(optionBatches[i]);
-            emit PollOptionNames(id, i, optionNames[i]);
         }
-        emit NewProposal(id, metadata, endTs, uint64(block.timestamp));
+        emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
     }
 
     /* ───────────── Voting ───────────── */
-    function vote(uint256 id, uint16[] calldata idxs, uint8[] calldata weights)
+    function vote(uint256 id, uint8[] calldata idxs, uint8[] calldata weights)
         external
         exists(id)
         notExpired(id)
@@ -266,7 +264,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         uint256 seen;
         uint256 sum;
         for (uint256 i; i < idxs.length; ++i) {
-            uint16 ix = idxs[i];
+            uint8 ix = idxs[i];
             if (ix >= p.options.length) revert InvalidIndex();
             if ((seen >> ix) & 1 == 1) revert DuplicateIndex();
             seen |= 1 << ix;

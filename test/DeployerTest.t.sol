@@ -201,19 +201,17 @@ contract DeployerTest is Test {
         QuickJoin(quickJoinProxy).quickJoinNoUser("v2");
 
         /* create proposal */
-        string[] memory optNames = new string[](2);
-        optNames[0] = "YES";
-        optNames[1] = "NO";
+        uint8 optNumber = 2;
 
         IExecutor.Call[][] memory batches = new IExecutor.Call[][](2);
         batches[0] = new IExecutor.Call[](0);
         batches[1] = new IExecutor.Call[](0);
 
         vm.prank(voter1);
-        HybridVoting(hybridProxy).createProposal("ipfs://test", 60, optNames, batches);
+        HybridVoting(hybridProxy).createProposal("ipfs://test", 60, optNumber, batches);
 
         /* vote YES */
-        uint16[] memory idxList = new uint16[](1);
+        uint8[] memory idxList = new uint8[](1);
         idxList[0] = 0;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;

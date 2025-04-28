@@ -171,7 +171,7 @@ contract HybridVotingTest is Test {
 
         // Convert string to bytes for metadata
         bytes memory metadata = bytes("ipfs://test");
-        hv.createProposal(metadata, 30, _defaultNames(), batches);
+        hv.createProposal(metadata, 30, 2, batches);
 
         vm.stopPrank();
 
@@ -202,13 +202,13 @@ contract HybridVotingTest is Test {
 
         // Convert string to bytes for metadata
         bytes memory metadata = bytes("ipfs://p");
-        hv.createProposal(metadata, 15, _defaultNames(), batches);
+        hv.createProposal(metadata, 15, 2, batches);
         vm.stopPrank();
         return 0;
     }
 
     function _voteYES(address voter) internal {
-        uint16[] memory idx = new uint16[](1);
+        uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
@@ -219,7 +219,7 @@ contract HybridVotingTest is Test {
     function testDDOnlyWeight() public {
         _create();
         /* bob has no DD role => revert */
-        uint16[] memory idx = new uint16[](1);
+        uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
@@ -245,7 +245,7 @@ contract HybridVotingTest is Test {
         _voteYES(carol);
 
         /* NO vote: Bob */
-        uint16[] memory idx = new uint16[](1);
+        uint8[] memory idx = new uint8[](1);
         idx[0] = 1;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
@@ -400,7 +400,7 @@ contract HybridVotingTest is Test {
         // 6. Vote opposing options
 
         // TokenHolder votes YES (option 0)
-        uint16[] memory idxYes = new uint16[](1);
+        uint8[] memory idxYes = new uint8[](1);
         idxYes[0] = 0;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
@@ -410,7 +410,7 @@ contract HybridVotingTest is Test {
         console.log("Token holder voted YES with 100 ether tokens (50% of weight = 50 power)");
 
         // RoleHolder votes NO (option 1)
-        uint16[] memory idxNo = new uint16[](1);
+        uint8[] memory idxNo = new uint8[](1);
         idxNo[0] = 1;
 
         vm.prank(roleHolder);
