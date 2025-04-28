@@ -38,23 +38,33 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     error ModuleUnknown();
     error AlreadyCompleted();
 
-    /*────────── Types / Storage ─────────*/
+    /*────────── Types ─────────*/
     struct Module {
         bytes32 answerHash;
         uint128 payout;
         bool exists;
     }
 
-    mapping(uint256 => Module) private _modules;
-    mapping(address => mapping(uint256 => uint256)) private _progress;
-    uint256 public nextModuleId;
+    /*────────── ERC-7201 Storage ─────────*/
+    /// @custom:storage-location erc7201:poa.educationhub.storage
+    struct Layout {
+        mapping(uint256 => Module) _modules;
+        mapping(address => mapping(uint256 => uint256)) _progress;
+        uint256 nextModuleId;
+        mapping(bytes32 => bool) isCreatorRole;
+        IParticipationToken token;
+        IMembership membership;
+        address executor; // DAO / Timelock / Governor
+    }
 
-    // roleId to allowed (creator privilege)
-    mapping(bytes32 => bool) public isCreatorRole;
+    // keccak256("poa.educationhub.storage") → unique, collision-free slot
+    bytes32 private constant _STORAGE_SLOT = 0x5dc09eed2545e1c49e29265cd02140e8b217f2e2a19c33f42e35fa06d63dcb0a;
 
-    IParticipationToken public token;
-    IMembership public membership;
-    address public executor; // DAO / Timelock / Governor
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
     /*────────── Events ─────────*/
     event ModuleCreated(uint256 indexed id, uint256 payout, bytes metadata);
@@ -80,16 +90,17 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         __ReentrancyGuard_init();
         __Pausable_init();
 
-        token = IParticipationToken(tokenAddr);
-        membership = IMembership(membershipAddr);
-        executor = executorAddr;
+        Layout storage l = _layout();
+        l.token = IParticipationToken(tokenAddr);
+        l.membership = IMembership(membershipAddr);
+        l.executor = executorAddr;
 
         emit TokenSet(tokenAddr);
         emit MembershipSet(membershipAddr);
         emit ExecutorSet(executorAddr);
 
         for (uint256 i; i < creatorRoleIds.length;) {
-            isCreatorRole[creatorRoleIds[i]] = true;
+            l.isCreatorRole[creatorRoleIds[i]] = true;
             emit CreatorRoleUpdated(creatorRoleIds[i], true);
             unchecked {
                 ++i;
@@ -99,53 +110,56 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
 
     /*────────── Modifiers ─────────*/
     modifier onlyMember() {
-        if (_msgSender() != executor && !membership.isMember(_msgSender())) revert NotMember();
+        Layout storage l = _layout();
+        if (_msgSender() != l.executor && !l.membership.isMember(_msgSender())) revert NotMember();
         _;
     }
 
     modifier onlyCreator() {
-        if (_msgSender() != executor && !isCreatorRole[membership.roleOf(_msgSender())]) revert NotCreator();
+        Layout storage l = _layout();
+        if (_msgSender() != l.executor && !l.isCreatorRole[l.membership.roleOf(_msgSender())]) revert NotCreator();
         _;
     }
 
     modifier onlyExecutor() {
-        if (_msgSender() != executor) revert NotExecutor();
+        if (_msgSender() != _layout().executor) revert NotExecutor();
         _;
     }
 
-    /*────────── DAO / Admin Setters ───────*/
+    /*────────── DAO / Admin Setters ───────*/
     function setExecutor(address newExec) external {
+        Layout storage l = _layout();
         if (newExec == address(0)) revert ZeroAddress();
-        if (_msgSender() != executor) revert NotExecutor();
-        executor = newExec;
+        if (_msgSender() != l.executor) revert NotExecutor();
+        l.executor = newExec;
         emit ExecutorSet(newExec);
     }
 
     function setToken(address newToken) external onlyExecutor {
         if (newToken == address(0)) revert ZeroAddress();
-        token = IParticipationToken(newToken);
+        _layout().token = IParticipationToken(newToken);
         emit TokenSet(newToken);
     }
 
     function setMembership(address newMembership) external onlyExecutor {
         if (newMembership == address(0)) revert ZeroAddress();
-        membership = IMembership(newMembership);
+        _layout().membership = IMembership(newMembership);
         emit MembershipSet(newMembership);
     }
 
     function setCreatorRole(bytes32 role, bool enable) external onlyExecutor {
-        isCreatorRole[role] = enable;
+        _layout().isCreatorRole[role] = enable;
         emit CreatorRoleUpdated(role, enable);
     }
 
     /*────────── Pause Control (executor) ───────*/
     function pause() external {
-        if (_msgSender() != executor) revert NotExecutor();
+        if (_msgSender() != _layout().executor) revert NotExecutor();
         _pause();
     }
 
     function unpause() external {
-        if (_msgSender() != executor) revert NotExecutor();
+        if (_msgSender() != _layout().executor) revert NotExecutor();
         _unpause();
     }
 
@@ -158,12 +172,13 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         if (metadata.length == 0) revert InvalidBytes();
         if (payout == 0 || payout > type(uint128).max) revert InvalidPayout();
 
-        uint256 id = nextModuleId;
+        Layout storage l = _layout();
+        uint256 id = l.nextModuleId;
         unchecked {
-            ++nextModuleId;
+            ++l.nextModuleId;
         }
 
-        _modules[id] =
+        l._modules[id] =
             Module({answerHash: keccak256(abi.encodePacked(correctAnswer)), payout: uint128(payout), exists: true});
 
         emit ModuleCreated(id, payout, metadata);
@@ -184,7 +199,7 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
 
     function removeModule(uint256 id) external onlyCreator whenNotPaused {
         _module(id); // existence check
-        delete _modules[id];
+        delete _layout()._modules[id];
         emit ModuleRemoved(id);
     }
 
@@ -194,7 +209,8 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         if (_isCompleted(_msgSender(), id)) revert AlreadyCompleted();
         if (keccak256(abi.encodePacked(answer)) != m.answerHash) revert InvalidAnswer();
 
-        token.mint(_msgSender(), m.payout);
+        Layout storage l = _layout();
+        l.token.mint(_msgSender(), m.payout);
         _setCompleted(_msgSender(), id);
 
         emit ModuleCompleted(id, _msgSender());
@@ -212,28 +228,49 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
 
     /*────────── Internal utils ───────*/
     function _module(uint256 id) internal view returns (Module storage m) {
-        m = _modules[id];
+        Layout storage l = _layout();
+        m = l._modules[id];
         if (!m.exists) revert ModuleUnknown();
     }
 
     function _isCompleted(address user, uint256 id) internal view returns (bool) {
         uint256 word = id >> 8;
         uint256 bit = 1 << (id & 0xff);
-        return _progress[user][word] & bit != 0;
+        return _layout()._progress[user][word] & bit != 0;
     }
 
     function _setCompleted(address user, uint256 id) internal {
+        Layout storage l = _layout();
         uint256 word = id >> 8;
         uint256 bit = 1 << (id & 0xff);
         unchecked {
-            _progress[user][word] |= bit;
+            l._progress[user][word] |= bit;
         }
     }
 
-    /*────────── Version / Gap ───────*/
+    /*────────── Public getters for storage variables ─────────*/
+    function nextModuleId() external view returns (uint256) {
+        return _layout().nextModuleId;
+    }
+
+    function isCreatorRole(bytes32 role) external view returns (bool) {
+        return _layout().isCreatorRole[role];
+    }
+
+    function token() external view returns (IParticipationToken) {
+        return _layout().token;
+    }
+
+    function membership() external view returns (IMembership) {
+        return _layout().membership;
+    }
+
+    function executor() external view returns (address) {
+        return _layout().executor;
+    }
+
+    /*────────── Version ───────*/
     function version() external pure returns (string memory) {
         return "v1";
     }
-
-    uint256[60] private __gap;
 }

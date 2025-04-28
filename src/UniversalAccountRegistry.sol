@@ -19,9 +19,21 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     uint256 private constant MAX_LEN = 64;
     address private constant BURN_ADDRESS = address(0xdead);
 
-    /*──────────────────────────── Storage ──────────────────────────────*/
-    mapping(address => string) public addressToUsername;
-    mapping(bytes32 => address) public ownerOfUsernameHash;
+    /*──────────────────────── ERC-7201 Storage ──────────────────────────*/
+    /// @custom:storage-location erc7201:poa.universalaccountregistry.storage
+    struct Layout {
+        mapping(address => string) addressToUsername;
+        mapping(bytes32 => address) ownerOfUsernameHash;
+    }
+
+    // keccak256("poa.universalaccountregistry.storage") to unique, collision-free slot
+    bytes32 private constant _STORAGE_SLOT = 0x7930448747c45b59575e0d27c83e46a902e6071fea71aa7dda420fff16e39ee5;
+
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
     /*──────────────────────────── Events ───────────────────────────────*/
     event UserRegistered(address indexed user, string username);
@@ -51,7 +63,7 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
 
     /**
      * @notice Batch onboarding helper (gas‑friendlier for DAOs).
-     * @dev Arrays must be equal length and ≤ 100 to stay within block gas.
+     * @dev Arrays must be equal length and ≤ 100 to stay within block gas.
      */
     function registerBatch(address[] calldata users, string[] calldata names) external {
         uint256 len = users.length;
@@ -69,20 +81,21 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
 
     /*──────────── Username mutation & voluntary delete ────────────────*/
     function changeUsername(string calldata newUsername) external {
-        string storage oldName = addressToUsername[msg.sender];
+        Layout storage l = _layout();
+        string storage oldName = l.addressToUsername[msg.sender];
         if (bytes(oldName).length == 0) revert AccountUnknown();
 
         (bytes32 newHash, string memory norm) = _validate(newUsername);
-        if (ownerOfUsernameHash[newHash] != address(0)) revert UsernameTaken();
+        if (l.ownerOfUsernameHash[newHash] != address(0)) revert UsernameTaken();
 
         // reserve new
-        ownerOfUsernameHash[newHash] = msg.sender;
+        l.ownerOfUsernameHash[newHash] = msg.sender;
 
         // keep old reserved forever by burning ownership
         bytes32 oldHash = keccak256(bytes(_toLower(oldName)));
-        ownerOfUsernameHash[oldHash] = BURN_ADDRESS;
+        l.ownerOfUsernameHash[oldHash] = BURN_ADDRESS;
 
-        addressToUsername[msg.sender] = norm;
+        l.addressToUsername[msg.sender] = norm;
         emit UsernameChanged(msg.sender, norm);
     }
 
@@ -91,23 +104,32 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
      *         reserved (cannot be claimed by others).
      */
     function deleteAccount() external {
-        string storage oldName = addressToUsername[msg.sender];
+        Layout storage l = _layout();
+        string storage oldName = l.addressToUsername[msg.sender];
         if (bytes(oldName).length == 0) revert AccountUnknown();
 
         bytes32 oldHash = keccak256(bytes(_toLower(oldName)));
-        ownerOfUsernameHash[oldHash] = BURN_ADDRESS;
-        delete addressToUsername[msg.sender];
+        l.ownerOfUsernameHash[oldHash] = BURN_ADDRESS;
+        delete l.addressToUsername[msg.sender];
 
         emit UserDeleted(msg.sender, oldName);
     }
 
     /*────────────────────────── View Helpers ──────────────────────────*/
+    function addressToUsername(address user) external view returns (string memory) {
+        return _layout().addressToUsername[user];
+    }
+
+    function ownerOfUsernameHash(bytes32 hash) external view returns (address) {
+        return _layout().ownerOfUsernameHash[hash];
+    }
+
     function getUsername(address user) external view returns (string memory) {
-        return addressToUsername[user];
+        return _layout().addressToUsername[user];
     }
 
     function getAddressOfUsername(string calldata name) external view returns (address) {
-        return ownerOfUsernameHash[keccak256(bytes(_toLower(name)))];
+        return _layout().ownerOfUsernameHash[keccak256(bytes(_toLower(name)))];
     }
 
     /*────────────────────────── Version Hook ──────────────────────────*/
@@ -117,13 +139,14 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
 
     /*──────────────────── Internal Registration ───────────────────────*/
     function _register(address user, string calldata username) internal {
-        if (bytes(addressToUsername[user]).length != 0) revert AccountExists();
+        Layout storage l = _layout();
+        if (bytes(l.addressToUsername[user]).length != 0) revert AccountExists();
 
         (bytes32 hash, string memory norm) = _validate(username);
-        if (ownerOfUsernameHash[hash] != address(0)) revert UsernameTaken();
+        if (l.ownerOfUsernameHash[hash] != address(0)) revert UsernameTaken();
 
-        ownerOfUsernameHash[hash] = user;
-        addressToUsername[user] = norm;
+        l.ownerOfUsernameHash[hash] = user;
+        l.addressToUsername[user] = norm;
 
         emit UserRegistered(user, norm);
     }
@@ -160,7 +183,4 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         }
         return string(b);
     }
-
-    /*───────────── Upgrade storage gap ─────────────*/
-    uint256[45] private __gap;
 }

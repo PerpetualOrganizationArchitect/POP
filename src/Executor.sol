@@ -1,7 +1,7 @@
     // SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.20;
 
-/* OpenZeppelin v5.3 Upgradeables */
+/* OpenZeppelin v5.3 Upgradeables */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
@@ -34,8 +34,20 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     /* ─────────── Constants ─────────── */
     uint8 public constant MAX_CALLS_PER_BATCH = 20;
 
-    /* ─────────── Storage ─────────── */
-    address public allowedCaller; // sole authorised governor
+    /* ─────────── ERC-7201 Storage ─────────── */
+    /// @custom:storage-location erc7201:poa.executor.storage
+    struct Layout {
+        address allowedCaller; // sole authorised governor
+    }
+
+    // keccak256("poa.executor.storage") → unique, collision-free slot
+    bytes32 private constant _STORAGE_SLOT = 0x4a2328a3c3b056def98e04ebb0cc7ccc084886f7998dd0a6d16fd24be55ffa5d;
+
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
     /* ─────────── Events ─────────── */
     event CallerSet(address indexed caller);
@@ -54,17 +66,18 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     /* ─────────── Governor management ─────────── */
     function setCaller(address newCaller) external {
         if (newCaller == address(0)) revert ZeroAddress();
-        if (allowedCaller != address(0)) {
+        Layout storage l = _layout();
+        if (l.allowedCaller != address(0)) {
             // After first set, only current caller can change
-            if (msg.sender != allowedCaller) revert UnauthorizedCaller();
+            if (msg.sender != l.allowedCaller) revert UnauthorizedCaller();
         }
-        allowedCaller = newCaller;
+        l.allowedCaller = newCaller;
         emit CallerSet(newCaller);
     }
 
     /* ─────────── Batch execution ─────────── */
     function execute(uint256 proposalId, Call[] calldata batch) external override whenNotPaused nonReentrant {
-        if (msg.sender != allowedCaller) revert UnauthorizedCaller();
+        if (msg.sender != _layout().allowedCaller) revert UnauthorizedCaller();
         uint256 len = batch.length;
         if (len == 0) revert EmptyBatch();
         if (len > MAX_CALLS_PER_BATCH) revert TooManyCalls();
@@ -100,6 +113,11 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
         emit Swept(to, bal);
     }
 
+    /* ─────────── View Helpers ─────────── */
+    function allowedCaller() external view returns (address) {
+        return _layout().allowedCaller;
+    }
+
     /* accept ETH for payable calls within a batch */
     receive() external payable {}
 
@@ -107,7 +125,4 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     function version() external pure returns (string memory) {
         return "v1";
     }
-
-    /* ─────────── Storage gap ─────────── */
-    uint256[50] private __gap; // initial deployment gap
 }
