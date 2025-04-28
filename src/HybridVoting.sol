@@ -35,6 +35,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     error TargetNotAllowed();
     error TargetSelf();
     error ZeroAddress();
+    error InvalidMetadata();
 
     /* ─────── Constants ─────── */
     bytes4 public constant MODULE_ID = 0x68766f74; /* "hfot" */
@@ -87,7 +88,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     /* ─────── Events ─────── */
     event RoleSet(bytes32 role, bool allowed);
     event TargetAllowed(address target, bool allowed);
-    event NewProposal(uint256 id, string ipfsCID, uint64 endTs, uint64 created);
+    event NewProposal(uint256 id, bytes metadata, uint64 endTs, uint64 created);
     event PollOptionNames(uint256 id, uint256 idx, string name);
     event VoteCast(uint256 id, address voter, uint16[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
@@ -227,11 +228,12 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
 
     /* ─────── Proposal creation ─────── */
     function createProposal(
-        string calldata ipfsCID,
+        bytes calldata metadata,
         uint32 minutesDuration,
         string[] calldata names,
         IExecutor.Call[][] calldata batches
     ) external onlyCreator whenNotPaused {
+        if (metadata.length == 0) revert InvalidMetadata();
         if (names.length == 0 || names.length != batches.length) revert LengthMismatch();
         if (names.length > MAX_OPTIONS) revert TooManyOptions();
         if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert DurationOutOfRange();
@@ -254,7 +256,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
             p.batches.push(batches[i]);
             emit PollOptionNames(id, i, names[i]);
         }
-        emit NewProposal(id, ipfsCID, endTs, uint64(block.timestamp));
+        emit NewProposal(id, metadata, endTs, uint64(block.timestamp));
     }
 
     /* ─────── Voting ─────── */

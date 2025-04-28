@@ -35,6 +35,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     error TargetSelf();
     error EmptyBatch(); // no longer used, kept for layout
     error ZeroAddress();
+    error InvalidMetadata();
 
     /* ─────────── Constants ─────────── */
     bytes4 public constant MODULE_ID = 0x6464766f; /* "ddvo"  */
@@ -78,7 +79,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
 
     /* ─────────── Events ─────────── */
     event RoleSet(bytes32 role, bool allowed);
-    event NewProposal(uint256 id, string ipfs, uint64 endTs, uint64 created);
+    event NewProposal(uint256 id, bytes metadata, uint64 endTs, uint64 created);
     event PollOptionNames(uint256 id, uint256 idx, string name);
     event VoteCast(uint256 id, address voter, uint16[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
@@ -184,11 +185,12 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
 
     /* ────────── Proposal Creation ────────── */
     function createProposal(
-        string calldata ipfsCID,
+        bytes calldata metadata,
         uint32 minutesDuration,
         string[] calldata names,
         IExecutor.Call[][] calldata batches
     ) external onlyCreator whenNotPaused {
+        if (metadata.length == 0) revert InvalidMetadata();
         if (names.length == 0 || names.length != batches.length) revert LengthMismatch();
         if (names.length > MAX_OPTIONS) revert TooManyOptions();
         if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
@@ -211,7 +213,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
             p.batches.push(batches[i]);
             emit PollOptionNames(id, i, names[i]);
         }
-        emit NewProposal(id, ipfsCID, endTs, uint64(block.timestamp));
+        emit NewProposal(id, metadata, endTs, uint64(block.timestamp));
     }
 
     /* ─────────── Voting ─────────── */

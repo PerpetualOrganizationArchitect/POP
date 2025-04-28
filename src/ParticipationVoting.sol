@@ -37,6 +37,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     error ZeroAddress();
     error MinBalance();
     error Overflow();
+    error InvalidMetadata();
 
     /* ───────────── Constants ───────────── */
     bytes4 public constant MODULE_ID = 0x70766F74; /* "pvot" */
@@ -83,7 +84,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     /* ───────────── Events ───────────── */
     event RoleSet(bytes32 role, bool allowed);
-    event NewProposal(uint256 id, string ipfsCID, uint64 endTs, uint64 createdAt);
+    event NewProposal(uint256 id, bytes metadata, uint64 endTs, uint64 createdAt);
     event PollOptionNames(uint256 id, uint256 idx, string name);
     event VoteCast(uint256 id, address voter, uint16[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
@@ -213,11 +214,12 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     /* ────────── Proposal Creation ────────── */
     function createProposal(
-        string calldata ipfsCID,
+        bytes calldata metadata,
         uint32 minutesDuration,
         string[] calldata optionNames,
         IExecutor.Call[][] calldata optionBatches
     ) external onlyCreator whenNotPaused {
+        if (metadata.length == 0) revert InvalidMetadata();
         if (optionNames.length == 0 || optionNames.length != optionBatches.length) revert LengthMismatch();
         if (optionNames.length > MAX_OPTIONS) revert TooManyOptions();
         if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
@@ -240,7 +242,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
             p.batches.push(optionBatches[i]);
             emit PollOptionNames(id, i, optionNames[i]);
         }
-        emit NewProposal(id, ipfsCID, endTs, uint64(block.timestamp));
+        emit NewProposal(id, metadata, endTs, uint64(block.timestamp));
     }
 
     /* ───────────── Voting ───────────── */
