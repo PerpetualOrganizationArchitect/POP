@@ -40,31 +40,41 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     bytes4 public constant MODULE_ID = 0x6464766f; /* "ddvo"  */
     uint8 public constant MAX_OPTIONS = 50;
     uint8 public constant MAX_CALLS = 20;
-    uint32 public constant MAX_DURATION_MIN = 43_200; /* 30 days */
+    uint32 public constant MAX_DURATION_MIN = 43_200; /* 30 days */
     uint32 public constant MIN_DURATION_MIN = 10; /* spam guard */
 
-    /* ─────────── Storage ─────────── */
-    IMembership public membership;
-    IExecutor public executor;
-
-    mapping(address => bool) public allowedTarget; // execution allow‑list
-    mapping(bytes32 => bool) private _allowedRoles; // who can create proposals
-
-    uint8 public quorumPercentage; // 1‑100
-
+    /* ─────────── Data Structures ─────────── */
     struct PollOption {
         uint96 votes;
     }
 
     struct Proposal {
-        uint128 totalWeight; // voters × 100
+        uint128 totalWeight; // voters × 100
         uint64 endTimestamp;
         PollOption[] options;
         mapping(address => bool) hasVoted;
         IExecutor.Call[][] batches; // per‑option execution
     }
 
-    Proposal[] private _proposals;
+    /* ─────────── ERC-7201 Storage ─────────── */
+    /// @custom:storage-location erc7201:poa.directdemocracy.storage
+    struct Layout {
+        IMembership membership;
+        IExecutor executor;
+        mapping(address => bool) allowedTarget; // execution allow‑list
+        mapping(bytes32 => bool) _allowedRoles; // who can create proposals
+        uint8 quorumPercentage; // 1‑100
+        Proposal[] _proposals;
+    }
+
+    // keccak256("poa.directdemocracy.storage") → unique, collision-free slot
+    bytes32 private constant _STORAGE_SLOT = 0x1da04eb4a741346cdb49b5da943a0c13e79399ef962f913efcd36d95ee6d7c38;
+
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
     /* ─────────── Events ─────────── */
     event RoleSet(bytes32 role, bool allowed);
@@ -96,24 +106,25 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         __Pausable_init();
         __ReentrancyGuard_init();
 
-        membership = IMembership(membership_);
-        executor = IExecutor(executor_);
-        quorumPercentage = quorumPct;
+        Layout storage l = _layout();
+        l.membership = IMembership(membership_);
+        l.executor = IExecutor(executor_);
+        l.quorumPercentage = quorumPct;
         emit QuorumPercentageSet(quorumPct);
 
         for (uint256 i; i < initialRoles.length; ++i) {
-            _allowedRoles[initialRoles[i]] = true;
+            l._allowedRoles[initialRoles[i]] = true;
             emit RoleSet(initialRoles[i], true);
         }
         for (uint256 i; i < initialTargets.length; ++i) {
-            allowedTarget[initialTargets[i]] = true;
+            l.allowedTarget[initialTargets[i]] = true;
             emit TargetAllowed(initialTargets[i], true);
         }
     }
 
     /* ─────────── Admin (executor‑gated) ─────────── */
     modifier onlyExecutor() {
-        if (_msgSender() != address(executor)) revert Unauthorized();
+        if (_msgSender() != address(_layout().executor)) revert Unauthorized();
         _;
     }
 
@@ -127,46 +138,47 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
 
     function setExecutor(address a) external onlyExecutor {
         if (a == address(0)) revert ZeroAddress();
-        executor = IExecutor(a);
+        _layout().executor = IExecutor(a);
         emit ExecutorUpdated(a);
     }
 
     function setRoleAllowed(bytes32 r, bool ok) external onlyExecutor {
-        _allowedRoles[r] = ok;
+        _layout()._allowedRoles[r] = ok;
         emit RoleSet(r, ok);
     }
 
     function setTargetAllowed(address t, bool ok) external onlyExecutor {
-        allowedTarget[t] = ok;
+        _layout().allowedTarget[t] = ok;
         emit TargetAllowed(t, ok);
     }
 
     function setQuorumPercentage(uint8 q) external onlyExecutor {
         require(q > 0 && q <= 100, "quorum");
-        quorumPercentage = q;
+        _layout().quorumPercentage = q;
         emit QuorumPercentageSet(q);
     }
 
     /* ─────────── Modifiers ─────────── */
     modifier onlyCreator() {
-        if (_msgSender() != address(executor) && !_allowedRoles[membership.roleOf(_msgSender())]) {
+        Layout storage l = _layout();
+        if (_msgSender() != address(l.executor) && !l._allowedRoles[l.membership.roleOf(_msgSender())]) {
             revert Unauthorized();
         }
         _;
     }
 
     modifier exists(uint256 id) {
-        if (id >= _proposals.length) revert InvalidProposal();
+        if (id >= _layout()._proposals.length) revert InvalidProposal();
         _;
     }
 
     modifier notExpired(uint256 id) {
-        if (block.timestamp > _proposals[id].endTimestamp) revert VotingExpired();
+        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingExpired();
         _;
     }
 
     modifier isExpired(uint256 id) {
-        if (block.timestamp <= _proposals[id].endTimestamp) revert VotingOpen();
+        if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingOpen();
         _;
     }
 
@@ -181,16 +193,17 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         if (names.length > MAX_OPTIONS) revert TooManyOptions();
         if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
 
+        Layout storage l = _layout();
         uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
-        Proposal storage p = _proposals.push();
+        Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
 
-        uint256 id = _proposals.length - 1;
+        uint256 id = l._proposals.length - 1;
         for (uint256 i; i < names.length; ++i) {
             if (batches[i].length > 0) {
                 if (batches[i].length > MAX_CALLS) revert TooManyCalls();
                 for (uint256 j; j < batches[i].length; ++j) {
-                    if (!allowedTarget[batches[i][j].target]) revert TargetNotAllowed();
+                    if (!l.allowedTarget[batches[i][j].target]) revert TargetNotAllowed();
                     if (batches[i][j].target == address(this)) revert TargetSelf();
                 }
             }
@@ -209,9 +222,10 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         whenNotPaused
     {
         if (idxs.length != weights.length) revert LengthMismatch();
-        if (_msgSender() != address(executor) && !membership.canVote(_msgSender())) revert Unauthorized();
+        Layout storage l = _layout();
+        if (_msgSender() != address(l.executor) && !l.membership.canVote(_msgSender())) revert Unauthorized();
 
-        Proposal storage p = _proposals[id];
+        Proposal storage p = l._proposals[id];
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
         uint256 seen;
@@ -253,21 +267,23 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         returns (uint256 winner, bool valid)
     {
         (winner, valid) = _calcWinner(id);
-        IExecutor.Call[] storage batch = _proposals[id].batches[winner];
+        Layout storage l = _layout();
+        IExecutor.Call[] storage batch = l._proposals[id].batches[winner];
 
         if (valid && batch.length > 0) {
             for (uint256 i; i < batch.length; ++i) {
                 if (batch[i].target == address(this)) revert TargetSelf();
-                if (!allowedTarget[batch[i].target]) revert TargetNotAllowed();
+                if (!l.allowedTarget[batch[i].target]) revert TargetNotAllowed();
             }
-            executor.execute(id, batch);
+            l.executor.execute(id, batch);
         }
         emit Winner(id, winner, valid);
     }
 
     /* ─────────── Cleanup ─────────── */
     function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
-        Proposal storage p = _proposals[id];
+        Layout storage l = _layout();
+        Proposal storage p = l._proposals[id];
         require(p.batches.length > 0 || voters.length > 0, "nothing");
         uint256 cleaned;
         for (uint256 i; i < voters.length && i < 4_000; ++i) {
@@ -282,7 +298,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
 
     /* ─────────── View helpers ─────────── */
     function _calcWinner(uint256 id) internal view returns (uint256 win, bool ok) {
-        Proposal storage p = _proposals[id];
+        Layout storage l = _layout();
+        Proposal storage p = l._proposals[id];
         uint96 hi;
         uint96 second;
         for (uint256 i; i < p.options.length; ++i) {
@@ -295,11 +312,11 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
                 second = v;
             }
         }
-        ok = (uint256(hi) * 100 > uint256(p.totalWeight) * quorumPercentage) && (hi > second);
+        ok = (uint256(hi) * 100 > uint256(p.totalWeight) * l.quorumPercentage) && (hi > second);
     }
 
     function proposalsCount() external view returns (uint256) {
-        return _proposals.length;
+        return _layout()._proposals.length;
     }
 
     /* ─────────── Version / ID ─────────── */
@@ -311,5 +328,20 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         return MODULE_ID;
     }
 
-    uint256[60] private __gap; // storage gap
+    /* ─────────── Public getters for storage variables ─────────── */
+    function membership() external view returns (IMembership) {
+        return _layout().membership;
+    }
+
+    function executor() external view returns (IExecutor) {
+        return _layout().executor;
+    }
+
+    function allowedTarget(address target) external view returns (bool) {
+        return _layout().allowedTarget[target];
+    }
+
+    function quorumPercentage() external view returns (uint8) {
+        return _layout().quorumPercentage;
+    }
 }
