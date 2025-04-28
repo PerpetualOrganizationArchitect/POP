@@ -20,13 +20,25 @@ contract ImplementationRegistry is Initializable, OwnableUpgradeable {
         bool exists; // type exists flag
     }
 
-    //  typeId ⇒ (versionId ⇒ impl)
-    mapping(bytes32 => mapping(bytes32 => address)) private _impls;
-    //  typeId ⇒ Meta
-    mapping(bytes32 => Meta) private _meta;
+    /*───────────── ERC-7201 Storage ───────────*/
+    /// @custom:storage-location erc7201:poa.implementationregistry.storage
+    struct Layout {
+        //  typeId ⇒ (versionId ⇒ impl)
+        mapping(bytes32 => mapping(bytes32 => address)) _impls;
+        //  typeId ⇒ Meta
+        mapping(bytes32 => Meta) _meta;
+        // master list of typeIds for off‑chain iteration
+        bytes32[] typeIds;
+    }
 
-    // master list of typeIds for off‑chain iteration
-    bytes32[] public typeIds;
+    // keccak256("poa.implementationregistry.storage") to get a unique, collision-free slot
+    bytes32 private constant _STORAGE_SLOT = 0x5f9c962a1b4199db74b9968808a6126c9e2ae410e9b0e0c406e3de1c293c43d1;
+
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
     /*──────────── Events ────────────────*/
     event ImplementationRegistered(
@@ -56,60 +68,75 @@ contract ImplementationRegistry is Initializable, OwnableUpgradeable {
     {
         if (impl == address(0)) revert ImplZero();
 
+        Layout storage l = _layout();
         bytes32 tId = _id(typeName);
         bytes32 vId = _id(version);
 
-        if (_impls[tId][vId] != address(0)) revert VersionExists();
+        if (l._impls[tId][vId] != address(0)) revert VersionExists();
 
         // first time this type?
-        if (!_meta[tId].exists) {
-            _meta[tId].exists = true;
-            typeIds.push(tId);
+        if (!l._meta[tId].exists) {
+            l._meta[tId].exists = true;
+            l.typeIds.push(tId);
         }
         // store
-        _impls[tId][vId] = impl;
-        _meta[tId].versions.push(vId);
+        l._impls[tId][vId] = impl;
+        l._meta[tId].versions.push(vId);
 
-        if (setLatest) _meta[tId].latest = vId;
+        if (setLatest) l._meta[tId].latest = vId;
 
         emit ImplementationRegistered(tId, typeName, vId, version, impl, setLatest);
     }
 
     function setLatestVersion(string calldata typeName, string calldata version) external onlyOwner {
+        Layout storage l = _layout();
         bytes32 tId = _id(typeName);
         bytes32 vId = _id(version);
 
-        if (_impls[tId][vId] == address(0)) revert VersionUnknown();
-        _meta[tId].latest = vId;
+        if (l._impls[tId][vId] == address(0)) revert VersionUnknown();
+        l._meta[tId].latest = vId;
     }
 
     /*──────── View helpers ────────*/
     function getLatestImplementation(string calldata typeName) external view returns (address) {
+        Layout storage l = _layout();
         bytes32 tId = _id(typeName);
-        bytes32 vId = _meta[tId].latest;
+        bytes32 vId = l._meta[tId].latest;
         if (vId == bytes32(0)) revert TypeUnknown();
-        return _impls[tId][vId];
+        return l._impls[tId][vId];
     }
 
     function getImplementation(string calldata typeName, string calldata version) external view returns (address) {
+        Layout storage l = _layout();
         bytes32 tId = _id(typeName);
         bytes32 vId = _id(version);
-        address impl = _impls[tId][vId];
+        address impl = l._impls[tId][vId];
         if (impl == address(0)) revert VersionUnknown();
         return impl;
     }
 
     function getVersionCount(string calldata typeName) external view returns (uint256) {
-        return _meta[_id(typeName)].versions.length;
+        return _layout()._meta[_id(typeName)].versions.length;
     }
 
     function getVersionIdAt(string calldata typeName, uint256 index) external view returns (bytes32) {
-        Meta storage m = _meta[_id(typeName)];
+        Layout storage l = _layout();
+        Meta storage m = l._meta[_id(typeName)];
         if (index >= m.versions.length) revert VersionUnknown();
         return m.versions[index];
     }
 
     function typeCount() external view returns (uint256) {
-        return typeIds.length;
+        return _layout().typeIds.length;
+    }
+
+    // Public getter for typeIds
+    function typeIds(uint256 index) external view returns (bytes32) {
+        return _layout().typeIds[index];
+    }
+
+    /*───────── Version helper ─────────────*/
+    function version() external pure returns (string memory) {
+        return "v1";
     }
 }

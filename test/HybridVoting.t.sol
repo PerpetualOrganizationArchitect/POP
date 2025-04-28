@@ -169,7 +169,9 @@ contract HybridVotingTest is Test {
         batches[0][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
         batches[1][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
 
-        hv.createProposal("ipfs://test", 30, _defaultNames(), batches);
+        // Convert string to bytes for metadata
+        bytes memory metadata = bytes("ipfs://test");
+        hv.createProposal(metadata, 30, _defaultNames(), batches);
 
         vm.stopPrank();
 
@@ -198,7 +200,9 @@ contract HybridVotingTest is Test {
             data: ""
         });
 
-        hv.createProposal("ipfs://p", 15, _defaultNames(), batches);
+        // Convert string to bytes for metadata
+        bytes memory metadata = bytes("ipfs://p");
+        hv.createProposal(metadata, 15, _defaultNames(), batches);
         vm.stopPrank();
         return 0;
     }
