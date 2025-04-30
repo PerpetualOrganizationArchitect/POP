@@ -7,6 +7,7 @@ import {ReentrancyGuardUpgradeable} from
     "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {ContextUpgradeable} from "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {TaskPerm} from "./libs/TaskPerm.sol";
 
 /*────────── External Interfaces ──────────*/
 interface IMembership {
@@ -32,7 +33,6 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     error ProjectExists();
     error NotCreator();
     error NotMember();
-    error NotPM();
     error AlreadyClaimed();
     error AlreadySubmitted();
     error AlreadyCompleted();
@@ -84,6 +84,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         uint256 nextTaskId;
         uint256 nextProjectId;
         address executor;
+        /* ─────── Granular permissions ─────── */
+        mapping(bytes32 => uint8) rolePermGlobal;
+        mapping(bytes32 => mapping(bytes32 => uint8)) rolePermProj;
     }
 
     // keccak256("poa.taskmanager.storage") to get a unique, collision-free slot
@@ -157,13 +160,6 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         _;
     }
 
-    modifier onlyPM(bytes32 pid) {
-        Layout storage l = _layout();
-        address sender = _msgSender();
-        if (sender != l.executor && !l._projects[pid].managers[sender]) revert NotPM();
-        _;
-    }
-
     modifier projectExists(bytes32 pid) {
         if (!_layout()._projects[pid].exists) revert UnknownProject();
         _;
@@ -171,6 +167,32 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     modifier onlyExecutor() {
         if (_msgSender() != _layout().executor) revert NotExecutor();
+        _;
+    }
+
+    modifier canCreate(bytes32 pid) {
+        address sender = _msgSender();
+        if (!TaskPerm.has(_permMask(sender, pid), TaskPerm.CREATE) && !_isPM(pid, sender)) revert Unauthorized();
+        _;
+    }
+
+    modifier canClaim(uint256 tid) {
+        Layout storage l = _layout();
+        bytes32 pid = l._tasks[tid].projectId;
+        address sender = _msgSender();
+        if (!TaskPerm.has(_permMask(sender, pid), TaskPerm.CLAIM) && !_isPM(pid, sender)) revert Unauthorized();
+        _;
+    }
+
+    modifier canReview(bytes32 pid) {
+        address sender = _msgSender();
+        if (!TaskPerm.has(_permMask(sender, pid), TaskPerm.REVIEW) && !_isPM(pid, sender)) revert Unauthorized();
+        _;
+    }
+
+    modifier canAssign(bytes32 pid) {
+        address sender = _msgSender();
+        if (!TaskPerm.has(_permMask(sender, pid), TaskPerm.ASSIGN) && !_isPM(pid, sender)) revert Unauthorized();
         _;
     }
 
@@ -238,18 +260,13 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     /*────────────── Task Logic ───────────────*/
-    function createTask(uint256 payout, bytes calldata metadata, bytes32 pid) external onlyMember {
+    function createTask(uint256 payout, bytes calldata metadata, bytes32 pid) external canCreate(pid) {
         Layout storage l = _layout();
         if (payout == 0 || payout > MAX_PAYOUT || payout > type(uint128).max) revert InvalidPayout();
         if (metadata.length == 0) revert InvalidString();
 
         Project storage p = l._projects[pid];
         if (!p.exists) revert UnknownProject();
-
-        address sender = _msgSender();
-        if (sender != l.executor && !l.isCreatorRole[l.membership.roleOf(sender)] && !p.managers[sender]) {
-            revert NotPM();
-        }
 
         uint256 newSpent = p.spent + payout;
         if (p.cap != 0 && newSpent > p.cap) revert BudgetExceeded();
@@ -260,17 +277,15 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit TaskCreated(id, pid, payout, metadata);
     }
 
-    function updateTask(uint256 id, uint256 newPayout, bytes calldata newMetadata) external {
+    function updateTask(uint256 id, uint256 newPayout, bytes calldata newMetadata)
+        external
+        canCreate(_layout()._tasks[id].projectId)
+    {
         Layout storage l = _layout();
         if (newPayout > type(uint128).max) revert InvalidPayout();
 
         Task storage t = _task(l, id);
         Project storage p = l._projects[t.projectId];
-
-        address sender = _msgSender();
-        if (sender != l.executor && !l.isCreatorRole[l.membership.roleOf(sender)] && !p.managers[sender]) {
-            revert NotPM();
-        }
 
         if (t.status == Status.CLAIMED || t.status == Status.SUBMITTED) {
             if (newMetadata.length == 0) revert InvalidString();
@@ -287,7 +302,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit TaskUpdated(id, newPayout, newMetadata);
     }
 
-    function claimTask(uint256 id) external onlyMember {
+    function claimTask(uint256 id) external canClaim(id) {
         Layout storage l = _layout();
         Task storage t = _task(l, id);
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
@@ -297,7 +312,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit TaskClaimed(id, _msgSender());
     }
 
-    function assignTask(uint256 id, address assignee) external {
+    function assignTask(uint256 id, address assignee) external canAssign(_layout()._tasks[id].projectId) {
         if (assignee == address(0)) revert ZeroAddress();
         Layout storage l = _layout();
         if (l.membership.roleOf(assignee) == bytes32(0)) revert NotMember();
@@ -307,9 +322,6 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
         Project storage p = l._projects[t.projectId];
         address sender = _msgSender();
-        if (sender != l.executor && !l.isCreatorRole[l.membership.roleOf(sender)] && !p.managers[sender]) {
-            revert NotPM();
-        }
 
         t.status = Status.CLAIMED;
         t.claimer = assignee;
@@ -327,32 +339,26 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit TaskSubmitted(id, metadata);
     }
 
-    function completeTask(uint256 id) external nonReentrant {
+    function completeTask(uint256 id) external nonReentrant canReview(_layout()._tasks[id].projectId) {
         Layout storage l = _layout();
         Task storage t = _task(l, id);
         if (t.status != Status.SUBMITTED) revert AlreadyCompleted();
 
         Project storage p = l._projects[t.projectId];
         address sender = _msgSender();
-        if (sender != l.executor && !l.isCreatorRole[l.membership.roleOf(sender)] && !p.managers[sender]) {
-            revert NotPM();
-        }
 
         t.status = Status.COMPLETED;
         l.token.mint(t.claimer, uint256(t.payout));
         emit TaskCompleted(id, sender);
     }
 
-    function cancelTask(uint256 id) external {
+    function cancelTask(uint256 id) external canCreate(_layout()._tasks[id].projectId) {
         Layout storage l = _layout();
         Task storage t = _task(l, id);
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
 
         Project storage p = l._projects[t.projectId];
         address sender = _msgSender();
-        if (sender != l.executor && !l.isCreatorRole[l.membership.roleOf(sender)] && !p.managers[sender]) {
-            revert NotPM();
-        }
 
         p.spent -= t.payout;
         t.status = Status.CANCELLED;
@@ -369,6 +375,30 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         if (newExec == address(0)) revert ZeroAddress();
         _layout().executor = newExec;
         emit ExecutorSet(newExec);
+    }
+
+    /*──────── Permission admin ────────*/
+    /// DAO-level (executor) — set global default mask for a role
+    function setRolePerm(bytes32 role, uint8 mask) external onlyExecutor {
+        _layout().rolePermGlobal[role] = mask;
+    }
+
+    /// Project creator — override within their project
+    function setProjectRolePerm(bytes32 pid, bytes32 role, uint8 mask) external onlyCreator projectExists(pid) {
+        _layout().rolePermProj[pid][role] = mask;
+    }
+
+    /*────────────── Internal Perm Utils ─────────────*/
+    function _permMask(address user, bytes32 pid) internal view returns (uint8 mask) {
+        Layout storage l = _layout();
+        bytes32 role = l.membership.roleOf(user);
+        mask = l.rolePermProj[pid][role];
+        if (mask == 0) mask = l.rolePermGlobal[role];
+    }
+
+    function _isPM(bytes32 pid, address who) internal view returns (bool) {
+        Layout storage l = _layout();
+        return (who == l.executor) || l._projects[pid].managers[who];
     }
 
     /*────────── View Helpers ─────────────*/
