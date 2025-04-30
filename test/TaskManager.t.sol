@@ -67,6 +67,8 @@ contract TaskManagerTest is Test {
     address executor = makeAddr("executor");
 
     bytes32 constant CREATOR_ROLE = keccak256("CREATOR");
+    bytes32 constant PM_ROLE = keccak256("PM");
+    bytes32 constant MEMBER_ROLE = keccak256("MEMBER");
 
     /* project IDs - will be populated at runtime */
     bytes32 UNLIM_ID;
@@ -108,8 +110,8 @@ contract TaskManagerTest is Test {
         // give creator role to two addresses, membership role to pm1 / member1
         setRole(creator1, CREATOR_ROLE);
         setRole(creator2, CREATOR_ROLE);
-        setRole(pm1, bytes32("PM"));
-        setRole(member1, bytes32("MEMBER"));
+        setRole(pm1, PM_ROLE);
+        setRole(member1, MEMBER_ROLE);
 
         // initialize TaskManager
         tm = new TaskManager();
@@ -118,6 +120,12 @@ contract TaskManagerTest is Test {
 
         vm.prank(creator1);
         tm.initialize(address(token), address(membership), creatorRoles, executor);
+
+        // Set up default permissions
+        vm.prank(executor);
+        tm.setRolePerm(PM_ROLE, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN);
+        vm.prank(executor);
+        tm.setRolePerm(MEMBER_ROLE, TaskPerm.CLAIM);
     }
 
     /*───────────────── PROJECT SCENARIOS ───────────────*/
@@ -261,22 +269,83 @@ contract TaskManagerTest is Test {
         vm.prank(creator1);
         ACC_ID = tm.createProject(bytes("ACC"), 0, new address[](0));
 
-        // creator2 is a member? => no, role==CREATOR, but our onlyMember modifier
-        // checks roleOf != 0, so still passes. Use outsider (no role) to trigger revert.
+        // outsider has no role and no permissions
         vm.prank(outsider);
         vm.expectRevert(TaskManager.NotMember.selector);
         tm.createTask(1, bytes("x"), ACC_ID);
     }
 
-    function test_OnlyPMOrCreatorCanAssignTask() public {
+    function test_OnlyAuthorizedCanAssignTask() public {
         uint256 id = _prepareFlow();
 
+        // outsider has no permissions
         vm.prank(outsider);
-        vm.expectRevert(TaskManager.NotPM.selector);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.assignTask(id, member1);
 
+        // creator1 has ASSIGN permission
         vm.prank(creator1);
         tm.assignTask(id, member1); // should succeed
+    }
+
+    function test_ProjectSpecificPermissions() public {
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(bytes("PERM_TEST"), 5 ether, new address[](0));
+
+        // Set up a custom role with specific permissions
+        bytes32 customRole = keccak256("CUSTOM");
+        address customUser = makeAddr("customUser");
+        setRole(customUser, customRole);
+
+        // Set project-specific permissions
+        vm.prank(creator1);
+        tm.setProjectRolePerm(projectId, customRole, TaskPerm.CREATE | TaskPerm.REVIEW);
+
+        // Custom user should be able to create tasks
+        vm.prank(customUser);
+        tm.createTask(1 ether, bytes("custom_task"), projectId);
+
+        // But not assign tasks (no ASSIGN permission)
+        vm.prank(customUser);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.assignTask(0, member1);
+
+        // Member should be able to claim (has global CLAIM permission)
+        vm.prank(member1);
+        tm.claimTask(0);
+    }
+
+    function test_GlobalVsProjectPermissions() public {
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(bytes("PERM_TEST"), 5 ether, new address[](0));
+
+        // Set up a role with global permissions
+        bytes32 globalRole = keccak256("GLOBAL");
+        address globalUser = makeAddr("globalUser");
+        setRole(globalUser, globalRole);
+
+        // Set global permissions
+        vm.prank(executor);
+        tm.setRolePerm(globalRole, TaskPerm.CREATE | TaskPerm.REVIEW);
+
+        // Override in project
+        vm.prank(creator1);
+        tm.setProjectRolePerm(projectId, globalRole, TaskPerm.CREATE);
+
+        // User should only have CREATE permission in this project
+        vm.prank(globalUser);
+        tm.createTask(1 ether, bytes("task"), projectId);
+
+        // But not REVIEW (project override removed it)
+        vm.prank(member1);
+        tm.claimTask(0);
+
+        vm.prank(member1);
+        vm.submitTask(0, bytes("submitted"));
+
+        vm.prank(globalUser);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.completeTask(0);
     }
 
     /*───────────────── COMPLEX SCENARIOS ───────────────────*/
@@ -366,7 +435,7 @@ contract TaskManagerTest is Test {
         address[] memory managers = new address[](2);
         managers[0] = pm1;
         address pm2 = makeAddr("pm2");
-        setRole(pm2, bytes32("PM"));
+        setRole(pm2, PM_ROLE);
         managers[1] = pm2;
 
         vm.prank(creator1);
@@ -379,7 +448,7 @@ contract TaskManagerTest is Test {
         vm.prank(pm2);
         tm.createTask(3 ether, bytes("pm2_task"), MULTI_PM_ID);
 
-        // PM1 can complete PM2's task
+        // PM1 can complete PM2's task (has REVIEW permission)
         vm.prank(member1);
         tm.claimTask(1);
 
@@ -393,9 +462,9 @@ contract TaskManagerTest is Test {
         vm.prank(creator1);
         tm.removeProjectManager(MULTI_PM_ID, pm2);
 
-        // PM2 can no longer create tasks
+        // PM2 can no longer create tasks (no longer a manager)
         vm.prank(pm2);
-        vm.expectRevert(TaskManager.NotPM.selector);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.createTask(1 ether, bytes("should_fail"), MULTI_PM_ID);
 
         // But PM1 still can

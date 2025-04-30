@@ -327,7 +327,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
             l.orgRegistry.registerOrg(orgId, executorEOA, bytes(orgName));
         } else {
             // Destructure the tuple returned by orgOf
-            (address currentExec,,,,) = l.orgRegistry.orgOf(orgId);
+            (address currentExec,,,) = l.orgRegistry.orgOf(orgId);
             if (currentExec != executorEOA) revert OrgExistsMismatch();
         }
 
@@ -386,7 +386,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
     function _orgExists(bytes32 id) internal view returns (bool) {
         // Destructure the tuple to get the exists field (4th element)
-        (,,, bool exists,) = _layout().orgRegistry.orgOf(id);
+        (,,, bool exists) = _layout().orgRegistry.orgOf(id);
         return exists;
     }
 

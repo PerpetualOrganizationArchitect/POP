@@ -202,7 +202,6 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         return _layout().orgIds.length;
     }
 
-
     function getOrgIds() external view returns (bytes32[] memory) {
         return _layout().orgIds;
     }
