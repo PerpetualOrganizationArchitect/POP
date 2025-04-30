@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.21;
+pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 
@@ -58,8 +58,10 @@ contract TaskManagerBeaconTest is Test {
         beacon = new UpgradeableBeacon(address(implV1), owner);
 
         // encode init data
+        bytes32[] memory creatorRoles = new bytes32[](1);
+        creatorRoles[0] = CREATOR_ROLE;
         bytes memory data =
-            abi.encodeCall(TaskManager.initialize, (address(token), address(membership), new bytes32[](0), owner));
+            abi.encodeCall(TaskManager.initialize, (address(token), address(membership), creatorRoles, owner));
         // deploy BeaconProxy
         BeaconProxy bp = new BeaconProxy(address(beacon), data);
         proxy = TaskManager(address(bp));
@@ -67,8 +69,20 @@ contract TaskManagerBeaconTest is Test {
     }
 
     function _seedData() internal returns (bytes32 pid, uint256 tid) {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = CREATOR_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = CREATOR_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = CREATOR_ROLE;
+
         vm.prank(owner);
-        pid = proxy.createProject(bytes("meta"), 1000 ether, new address[](0));
+        pid = proxy.createProject(
+            bytes("meta"), 1000 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
         vm.prank(owner);
         proxy.createTask(100 ether, bytes("task-meta"), pid);
         tid = 0;
@@ -77,9 +91,8 @@ contract TaskManagerBeaconTest is Test {
     function test_BeaconUpgradeKeepsStorageIntact() public {
         (bytes32 pid, uint256 tid) = _seedData();
 
-        // ─── read with the v1 interface (4 returns) ───
+        // ─── read with the v1 interface ───
         (uint256 payoutB, TaskManager.Status statusB, address claimerB, bytes32 projB) = proxy.getTask(tid);
-
         (uint256 capB, uint256 spentB,) = proxy.getProjectInfo(pid);
 
         // ─── upgrade beacon to V2 ───

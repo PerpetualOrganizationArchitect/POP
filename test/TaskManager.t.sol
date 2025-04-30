@@ -5,8 +5,8 @@ import "forge-std/Test.sol";
 import "forge-std/console.sol";
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
 import {TaskManager} from "../src/TaskManager.sol";
+import {TaskPerm} from "../src/libs/TaskPerm.sol";
 
 /*────────────────── Mock Contracts ──────────────────*/
 contract MockToken is Test, IERC20 {
@@ -121,7 +121,7 @@ contract TaskManagerTest is Test {
         vm.prank(creator1);
         tm.initialize(address(token), address(membership), creatorRoles, executor);
 
-        // Set up default permissions
+        // Set up default global permissions
         vm.prank(executor);
         tm.setRolePerm(PM_ROLE, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN);
         vm.prank(executor);
@@ -131,8 +131,19 @@ contract TaskManagerTest is Test {
     /*───────────────── PROJECT SCENARIOS ───────────────*/
 
     function test_CreateUnlimitedProjectAndTaskByAnotherCreator() public {
+        // Create project with specific role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         vm.prank(creator1);
-        UNLIM_ID = tm.createProject(bytes("UNLIM"), 0, new address[](0));
+        UNLIM_ID =
+            tm.createProject(bytes("UNLIM"), 0, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
 
         // creator2 creates a task (should succeed, cap == 0)
         vm.prank(creator2);
@@ -146,8 +157,19 @@ contract TaskManagerTest is Test {
         address[] memory managers = new address[](1);
         managers[0] = pm1;
 
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = PM_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         vm.prank(creator1);
-        CAPPED_ID = tm.createProject(bytes("CAPPED"), 3 ether, managers);
+        CAPPED_ID =
+            tm.createProject(bytes("CAPPED"), 3 ether, managers, createRoles, claimRoles, reviewRoles, assignRoles);
 
         // pm1 can create tasks until cap reached
         vm.prank(pm1);
@@ -162,15 +184,111 @@ contract TaskManagerTest is Test {
         tm.createTask(1, bytes("c"), CAPPED_ID);
     }
 
-    function test_UpdateProjectCapLowerThanSpentShouldRevert() public {
+    function test_ProjectSpecificRolePermissions() public {
+        // Create custom roles
+        bytes32 customCreateRole = keccak256("CUSTOM_CREATE");
+        bytes32 customReviewRole = keccak256("CUSTOM_REVIEW");
+        address customCreator = makeAddr("customCreator");
+        address customReviewer = makeAddr("customReviewer");
+        setRole(customCreator, customCreateRole);
+        setRole(customReviewer, customReviewRole);
+
+        // Set up project with custom role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = customCreateRole;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = customReviewRole;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         vm.prank(creator1);
-        BUD_ID = tm.createProject(bytes("BUD"), 2 ether, new address[](0));
+        bytes32 projectId = tm.createProject(
+            bytes("CUSTOM_ROLES"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
+
+        // Custom creator should be able to create tasks
+        vm.prank(customCreator);
+        tm.createTask(1 ether, bytes("custom_task"), projectId);
+
+        // But not review tasks
+        vm.prank(member1);
+        tm.claimTask(0);
+
+        vm.prank(member1);
+        tm.submitTask(0, bytes("submitted"));
+
+        vm.prank(customCreator);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.completeTask(0);
+
+        // Custom reviewer should be able to review
+        vm.prank(customReviewer);
+        tm.completeTask(0);
+    }
+
+    function test_ProjectRolePermissionOverrides() public {
+        // Create a role with global permissions
+        bytes32 globalRole = keccak256("GLOBAL");
+        address globalUser = makeAddr("globalUser");
+        setRole(globalUser, globalRole);
+
+        // Set global permissions
+        vm.prank(executor);
+        tm.setRolePerm(globalRole, TaskPerm.CREATE | TaskPerm.REVIEW);
+
+        // Create project with different permissions for the same role
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = globalRole;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE; // Note: globalRole not included here
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("OVERRIDE"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
+
+        // Global user should be able to create (global permission)
+        vm.prank(globalUser);
+        tm.createTask(1 ether, bytes("task"), projectId);
+
+        // But not review (project override)
+        vm.prank(member1);
+        tm.claimTask(0);
+
+        vm.prank(member1);
+        tm.submitTask(0, bytes("submitted"));
+
+        vm.prank(globalUser);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.completeTask(0);
+    }
+
+    function test_UpdateProjectCapLowerThanSpentShouldRevert() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
+        vm.prank(creator1);
+        BUD_ID =
+            tm.createProject(bytes("BUD"), 2 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
 
         vm.prank(creator1);
         tm.createTask(2 ether, bytes("foo"), BUD_ID);
 
         // try lowering cap below spent
-        vm.prank(creator1);
+        vm.prank(executor);
         vm.expectRevert(TaskManager.CapBelowCommitted.selector);
         tm.updateProjectCap(BUD_ID, 1 ether);
     }
@@ -178,14 +296,26 @@ contract TaskManagerTest is Test {
     /*───────────────── TASK LIFECYCLE ───────────────────*/
 
     function _prepareFlow() internal returns (uint256 id) {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         vm.prank(creator1);
-        FLOW_ID = tm.createProject(bytes("FLOW"), 5 ether, new address[](0));
+        FLOW_ID = tm.createProject(
+            bytes("FLOW"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
 
         address[] memory mgr = new address[](1);
         mgr[0] = pm1;
 
         // assign pm1 retroactively
-        vm.prank(creator1);
+        vm.prank(executor);
         tm.addProjectManager(FLOW_ID, pm1);
 
         vm.prank(pm1);
@@ -216,8 +346,19 @@ contract TaskManagerTest is Test {
     }
 
     function test_UpdateTaskBeforeClaimAdjustsBudget() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         vm.prank(creator1);
-        UPD_ID = tm.createProject(bytes("UPD"), 3 ether, new address[](0));
+        UPD_ID =
+            tm.createProject(bytes("UPD"), 3 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
 
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("foo"), UPD_ID);
@@ -247,8 +388,19 @@ contract TaskManagerTest is Test {
     }
 
     function test_CancelTaskRefundsSpent() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         vm.prank(creator1);
-        CAN_ID = tm.createProject(bytes("CAN"), 2 ether, new address[](0));
+        CAN_ID =
+            tm.createProject(bytes("CAN"), 2 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
 
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("foo"), CAN_ID);
@@ -266,12 +418,22 @@ contract TaskManagerTest is Test {
     /*───────────────── ACCESS CONTROL ───────────────────*/
 
     function test_CreateTaskByNonMemberReverts() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         vm.prank(creator1);
-        ACC_ID = tm.createProject(bytes("ACC"), 0, new address[](0));
+        ACC_ID = tm.createProject(bytes("ACC"), 0, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
 
         // outsider has no role and no permissions
         vm.prank(outsider);
-        vm.expectRevert(TaskManager.NotMember.selector);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.createTask(1, bytes("x"), ACC_ID);
     }
 
@@ -289,8 +451,20 @@ contract TaskManagerTest is Test {
     }
 
     function test_ProjectSpecificPermissions() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         vm.prank(creator1);
-        bytes32 projectId = tm.createProject(bytes("PERM_TEST"), 5 ether, new address[](0));
+        bytes32 projectId = tm.createProject(
+            bytes("PERM_TEST"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
 
         // Set up a custom role with specific permissions
         bytes32 customRole = keccak256("CUSTOM");
@@ -316,8 +490,20 @@ contract TaskManagerTest is Test {
     }
 
     function test_GlobalVsProjectPermissions() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         vm.prank(creator1);
-        bytes32 projectId = tm.createProject(bytes("PERM_TEST"), 5 ether, new address[](0));
+        bytes32 projectId = tm.createProject(
+            bytes("PERM_TEST"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
 
         // Set up a role with global permissions
         bytes32 globalRole = keccak256("GLOBAL");
@@ -341,7 +527,7 @@ contract TaskManagerTest is Test {
         tm.claimTask(0);
 
         vm.prank(member1);
-        vm.submitTask(0, bytes("submitted"));
+        tm.submitTask(0, bytes("submitted"));
 
         vm.prank(globalUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
@@ -351,11 +537,26 @@ contract TaskManagerTest is Test {
     /*───────────────── COMPLEX SCENARIOS ───────────────────*/
 
     function test_MultiProjectTaskManagement() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         // Create three projects with different caps
         vm.startPrank(creator1);
-        PROJECT_A_ID = tm.createProject(bytes("PROJECT_A"), 5 ether, new address[](0));
-        PROJECT_B_ID = tm.createProject(bytes("PROJECT_B"), 3 ether, new address[](0));
-        PROJECT_C_ID = tm.createProject(bytes("PROJECT_C"), 0, new address[](0)); // Unlimited
+        PROJECT_A_ID = tm.createProject(
+            bytes("PROJECT_A"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
+        PROJECT_B_ID = tm.createProject(
+            bytes("PROJECT_B"), 3 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
+        PROJECT_C_ID =
+            tm.createProject(bytes("PROJECT_C"), 0, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
         vm.stopPrank();
 
         // Create multiple tasks across projects
@@ -399,9 +600,21 @@ contract TaskManagerTest is Test {
     }
 
     function test_GovernanceAndRoleChanges() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         // Initial setup
         vm.prank(creator1);
-        GOV_TEST_ID = tm.createProject(bytes("GOV_TEST"), 5 ether, new address[](0));
+        GOV_TEST_ID = tm.createProject(
+            bytes("GOV_TEST"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
 
         // Add new role to the creator roles using the executor
         bytes32 NEW_ROLE = keccak256("NEW_CREATOR");
@@ -414,7 +627,9 @@ contract TaskManagerTest is Test {
 
         // Test that new role can create projects
         vm.prank(newCreator);
-        NEW_PROJECT_ID = tm.createProject(bytes("NEW_PROJECT"), 1 ether, new address[](0));
+        NEW_PROJECT_ID = tm.createProject(
+            bytes("NEW_PROJECT"), 1 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
 
         // Verify new project exists by creating a task
         vm.prank(newCreator);
@@ -427,28 +642,41 @@ contract TaskManagerTest is Test {
         // Verify the role can no longer create projects
         vm.prank(newCreator);
         vm.expectRevert(TaskManager.NotCreator.selector);
-        tm.createProject(bytes("SHOULD_FAIL"), 1 ether, new address[](0));
+        tm.createProject(
+            bytes("SHOULD_FAIL"), 1 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
     }
 
     function test_ProjectManagerHierarchy() public {
-        // Create a project with multiple managers
+        // Create a project with multiple managers and specific role permissions
         address[] memory managers = new address[](2);
         managers[0] = pm1;
         address pm2 = makeAddr("pm2");
-        setRole(pm2, PM_ROLE);
+        // Note: pm2 has no role initially
         managers[1] = pm2;
 
-        vm.prank(creator1);
-        MULTI_PM_ID = tm.createProject(bytes("MULTI_PM"), 10 ether, managers);
+        // Set up role permissions - only PM_ROLE has permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = PM_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
 
-        // Each PM creates tasks
+        vm.prank(creator1);
+        MULTI_PM_ID =
+            tm.createProject(bytes("MULTI_PM"), 10 ether, managers, createRoles, claimRoles, reviewRoles, assignRoles);
+
+        // Both PMs should be able to create tasks (as project managers)
         vm.prank(pm1);
         tm.createTask(2 ether, bytes("pm1_task"), MULTI_PM_ID);
 
         vm.prank(pm2);
         tm.createTask(3 ether, bytes("pm2_task"), MULTI_PM_ID);
 
-        // PM1 can complete PM2's task (has REVIEW permission)
+        // PM1 can complete PM2's task (as project manager)
         vm.prank(member1);
         tm.claimTask(1);
 
@@ -458,27 +686,46 @@ contract TaskManagerTest is Test {
         vm.prank(pm1);
         tm.completeTask(1);
 
-        // Creator removes PM2
-        vm.prank(creator1);
+        // Remove PM2 as project manager
+        vm.prank(executor);
         tm.removeProjectManager(MULTI_PM_ID, pm2);
 
-        // PM2 can no longer create tasks (no longer a manager)
+        // PM2 can no longer create tasks (no longer a project manager and no role)
         vm.prank(pm2);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.createTask(1 ether, bytes("should_fail"), MULTI_PM_ID);
 
-        // But PM1 still can
+        // But PM1 still can (still a project manager)
         vm.prank(pm1);
         tm.createTask(1 ether, bytes("still_works"), MULTI_PM_ID);
 
+        // Now give PM2 the PM_ROLE
+        setRole(pm2, PM_ROLE);
+
+        // PM2 should now be able to create tasks again (has PM_ROLE with CREATE permission)
+        vm.prank(pm2);
+        tm.createTask(1 ether, bytes("pm2_with_role"), MULTI_PM_ID);
+
         // Verify overall budget tracking
         (, uint256 spent,) = tm.getProjectInfo(MULTI_PM_ID);
-        assertEq(spent, 6 ether, "Project should track 6 ether spent");
+        assertEq(spent, 7 ether, "Project should track 7 ether spent");
     }
 
     function test_TaskLifecycleEdgeCases() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         vm.prank(creator1);
-        EDGE_ID = tm.createProject(bytes("EDGE"), 10 ether, new address[](0));
+        EDGE_ID = tm.createProject(
+            bytes("EDGE"), 10 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
 
         // Create and immediately cancel a task
         vm.startPrank(creator1);
@@ -530,9 +777,20 @@ contract TaskManagerTest is Test {
     }
 
     function test_ProjectStress() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         // Create a large unlimited project
         vm.prank(creator1);
-        MEGA_ID = tm.createProject(bytes("MEGA"), 0, new address[](0));
+        MEGA_ID =
+            tm.createProject(bytes("MEGA"), 0, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
 
         // Add multiple project managers
         address[] memory pms = new address[](3);
@@ -546,7 +804,7 @@ contract TaskManagerTest is Test {
         pms[2] = pm3;
 
         for (uint256 i = 0; i < pms.length; i++) {
-            vm.prank(creator1);
+            vm.prank(executor);
             tm.addProjectManager(MEGA_ID, pms[i]);
         }
 
@@ -606,7 +864,8 @@ contract TaskManagerTest is Test {
 
         // Create a second project with a hard cap
         vm.prank(creator1);
-        CAPPED_BIG_ID = tm.createProject(bytes("CAPPED_BIG"), 10 ether, pms);
+        CAPPED_BIG_ID =
+            tm.createProject(bytes("CAPPED_BIG"), 10 ether, pms, createRoles, claimRoles, reviewRoles, assignRoles);
 
         // Create tasks up to the cap
         uint256 cappedTaskCount = 0;
@@ -643,9 +902,21 @@ contract TaskManagerTest is Test {
     }
 
     function test_ProjectDeletionAndUpdating() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         // Create a project that will be deleted
         vm.prank(creator1);
-        TO_DELETE_ID = tm.createProject(bytes("TO_DELETE"), 3 ether, new address[](0));
+        TO_DELETE_ID = tm.createProject(
+            bytes("TO_DELETE"), 3 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
 
         // Create a task, complete it, then verify project can be deleted
         vm.prank(creator1);
@@ -677,7 +948,7 @@ contract TaskManagerTest is Test {
         tm.deleteProject(TO_DELETE_ID, bytes("TO_DELETE"));
 
         // Update the cap to match spent amount
-        vm.prank(creator1);
+        vm.prank(executor);
         tm.updateProjectCap(TO_DELETE_ID, 1 ether);
 
         // Now deletion should succeed
@@ -691,7 +962,8 @@ contract TaskManagerTest is Test {
 
         // Create a zero-cap project
         vm.prank(creator1);
-        ZERO_CAP_ID = tm.createProject(bytes("ZERO_CAP"), 0, new address[](0));
+        ZERO_CAP_ID =
+            tm.createProject(bytes("ZERO_CAP"), 0, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
 
         // Add tasks, verify we can still delete with non-zero spent
         vm.prank(creator1);
@@ -703,6 +975,16 @@ contract TaskManagerTest is Test {
     }
 
     function test_ExecutorRoleManagement() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         // Create new executor
         address executor2 = makeAddr("executor2");
 
@@ -731,7 +1013,9 @@ contract TaskManagerTest is Test {
 
         // Verify the new role works for creating projects
         vm.prank(testCreator);
-        EXECUTOR_TEST_ID = tm.createProject(bytes("EXECUTOR_TEST"), 1 ether, new address[](0));
+        EXECUTOR_TEST_ID = tm.createProject(
+            bytes("EXECUTOR_TEST"), 1 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
 
         // New executor can revoke the role
         vm.prank(executor2);
@@ -740,13 +1024,27 @@ contract TaskManagerTest is Test {
         // Role should no longer work
         vm.prank(testCreator);
         vm.expectRevert(TaskManager.NotCreator.selector);
-        tm.createProject(bytes("SHOULD_FAIL"), 1 ether, new address[](0));
+        tm.createProject(
+            bytes("SHOULD_FAIL"), 1 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
     }
 
     function test_ExecutorBypassMemberCheck() public {
+        // Set up role permissions
+        bytes32[] memory createRoles = new bytes32[](1);
+        createRoles[0] = CREATOR_ROLE;
+        bytes32[] memory claimRoles = new bytes32[](1);
+        claimRoles[0] = MEMBER_ROLE;
+        bytes32[] memory reviewRoles = new bytes32[](1);
+        reviewRoles[0] = PM_ROLE;
+        bytes32[] memory assignRoles = new bytes32[](1);
+        assignRoles[0] = PM_ROLE;
+
         // Create project
         vm.prank(creator1);
-        EXECUTOR_BYPASS_ID = tm.createProject(bytes("EXECUTOR_BYPASS"), 5 ether, new address[](0));
+        EXECUTOR_BYPASS_ID = tm.createProject(
+            bytes("EXECUTOR_BYPASS"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+        );
 
         // Executor should be able to create tasks even without member role
         // (executor address has no role but should bypass the member check)
