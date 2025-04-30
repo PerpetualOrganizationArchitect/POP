@@ -31,7 +31,6 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
             // finishes initial deployment. Afterwards the registry
             // owner can no longer add contracts.
         bool exists;
-        string metaCID; // IPFS / Arweave metadata for the org
     }
 
     /*───────────── ERC-7201 Storage ───────────*/
@@ -55,8 +54,8 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     }
 
     /* ───── Events ───── */
-    event OrgRegistered(bytes32 indexed orgId, address indexed executor, string metaCID);
-    event MetaUpdated(bytes32 indexed orgId, string newCID);
+    event OrgRegistered(bytes32 indexed orgId, address indexed executor, bytes metaData);
+    event MetaUpdated(bytes32 indexed orgId, bytes newMetaData);
     event ContractRegistered(
         bytes32 indexed contractId,
         bytes32 indexed orgId,
@@ -81,7 +80,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     }
 
     /* ═════════════════ ORG  LOGIC ═════════════════ */
-    function registerOrg(bytes32 orgId, address executorAddr, string calldata metaCID) external onlyOwner {
+    function registerOrg(bytes32 orgId, address executorAddr, bytes calldata metaData) external onlyOwner {
         if (orgId == bytes32(0) || executorAddr == address(0)) revert InvalidParam();
 
         Layout storage l = _layout();
@@ -91,21 +90,19 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
             executor: executorAddr,
             contractCount: 0,
             bootstrap: true, // owner can add modules while true
-            exists: true,
-            metaCID: metaCID
+            exists: true
         });
         l.orgIds.push(orgId);
-        emit OrgRegistered(orgId, executorAddr, metaCID);
+        emit OrgRegistered(orgId, executorAddr, metaData);
     }
 
-    function updateOrgMeta(bytes32 orgId, string calldata newCID) external {
+    function updateOrgMeta(bytes32 orgId, bytes calldata newMetaData) external {
         Layout storage l = _layout();
         OrgInfo storage o = l.orgOf[orgId];
         if (!o.exists) revert OrgUnknown();
         if (msg.sender != o.executor) revert NotOrgExecutor();
 
-        o.metaCID = newCID;
-        emit MetaUpdated(orgId, newCID);
+        emit MetaUpdated(orgId, newMetaData);
     }
 
     /* ══════════ CONTRACT  REGISTRATION  ══════════ */
@@ -205,9 +202,6 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         return _layout().orgIds.length;
     }
 
-    function getOrgMeta(bytes32 orgId) external view returns (string memory) {
-        return _layout().orgOf[orgId].metaCID;
-    }
 
     function getOrgIds() external view returns (bytes32[] memory) {
         return _layout().orgIds;
@@ -217,10 +211,10 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     function orgOf(bytes32 orgId)
         external
         view
-        returns (address executor, uint32 contractCount, bool bootstrap, bool exists, string memory metaCID)
+        returns (address executor, uint32 contractCount, bool bootstrap, bool exists)
     {
         OrgInfo storage o = _layout().orgOf[orgId];
-        return (o.executor, o.contractCount, o.bootstrap, o.exists, o.metaCID);
+        return (o.executor, o.contractCount, o.bootstrap, o.exists);
     }
 
     function contractOf(bytes32 contractId)

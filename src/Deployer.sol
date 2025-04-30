@@ -324,7 +324,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
         /* 0. ensure Org exists (or create) */
         if (l.orgRegistry.orgCount() == 0 || !_orgExists(orgId)) {
-            l.orgRegistry.registerOrg(orgId, executorEOA, orgName);
+            l.orgRegistry.registerOrg(orgId, executorEOA, bytes(orgName));
         } else {
             // Destructure the tuple returned by orgOf
             (address currentExec,,,,) = l.orgRegistry.orgOf(orgId);
