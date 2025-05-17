@@ -114,12 +114,11 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     }
 
     /* ───────── Internal helper ─────── */
-    function _quickJoin(address user, string memory username) private nonReentrant {
+    function _quickJoin(address user, string memory username) private nonReentrant returns (bool created) {
         if (user == address(0)) revert ZeroUser();
         if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
         Layout storage l = _layout();
-        bool created;
 
         if (bytes(l.accountRegistry.getUsername(user)).length == 0) {
             if (bytes(username).length == 0) revert NoUsername();
@@ -129,6 +128,8 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
 
         l.membership.quickJoinMint(user);
         emit QuickJoined(user, created);
+
+        return created;
     }
 
     /* ───────── Public user paths ─────── */
@@ -150,8 +151,8 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     /* ───────── Master-deploy helper paths ─────── */
 
     function quickJoinNoUserMasterDeploy(string calldata username, address newUser) external onlyMasterDeploy {
-        _quickJoin(newUser, username);
-        emit QuickJoinedByMaster(_msgSender(), newUser, bytes(username).length > 0);
+        bool created = _quickJoin(newUser, username);
+        emit QuickJoinedByMaster(_msgSender(), newUser, created);
     }
 
     function quickJoinWithUserMasterDeploy(address newUser) external onlyMasterDeploy nonReentrant {
