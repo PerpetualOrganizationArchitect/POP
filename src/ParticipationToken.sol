@@ -23,6 +23,7 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
     error AlreadyApproved();
     error AlreadySet();
     error InvalidAddress();
+    error InvalidIPFSHash();
     error ZeroAmount();
     error TransfersDisabled();
     error Unauthorized();
@@ -145,7 +146,7 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
     /*────────── Request flow ─────────*/
     function requestTokens(uint96 amount, string calldata ipfsHash) external isMember {
         if (amount == 0) revert ZeroAmount();
-        if (bytes(ipfsHash).length == 0) revert ZeroAmount();
+        if (bytes(ipfsHash).length == 0) revert InvalidIPFSHash();
 
         Layout storage l = _layout();
         uint256 requestId = ++l.requestCounter;
