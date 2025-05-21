@@ -62,6 +62,16 @@ contract DeployerTest is Test {
     address eduHubProxy;
     address accountRegProxy;
 
+    function _deployFullOrg()
+        internal
+        returns (address hybrid, address exec, address member, address qj, address token, address tm, address hub)
+    {
+        vm.startPrank(orgOwner);
+        (hybrid, exec, member, qj, token, tm, hub) =
+            deployer.deployFullOrg(ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true);
+        vm.stopPrank();
+    }
+
     /*══════════════════════════════════════════ SET‑UP ══════════════════════════════════════════*/
     function setUp() public {
         /*–– deploy bare implementations ––*/
@@ -225,5 +235,37 @@ contract DeployerTest is Test {
 
         assertTrue(valid, "quorum not reached");
         assertEq(winner, 0, "YES should win");
+    }
+
+    function testFullOrgDeploymentRegistersContracts() public {
+        (address hybrid, address exec, address member, address qj, address token, address tm, address hub) =
+            _deployFullOrg();
+
+        (address executorAddr, uint32 count, bool boot, bool exists) = orgRegistry.orgOf(ORG_ID);
+        assertEq(executorAddr, orgOwner);
+        assertEq(count, 7);
+        assertFalse(boot);
+        assertTrue(exists);
+
+        bytes32 typeId = keccak256("Membership");
+        bytes32 contractId = keccak256(abi.encodePacked(ORG_ID, typeId));
+        (address proxy, address beacon, bool autoUp, address owner) = orgRegistry.contractOf(contractId);
+        assertEq(proxy, member);
+        assertTrue(autoUp);
+        assertEq(owner, exec);
+
+        address impl = deployer.getBeaconImplementation(beacon);
+        assertEq(impl, poaManager.getCurrentImplementation("Membership"));
+        assertEq(deployer.poaManager(), address(poaManager));
+        assertEq(deployer.orgRegistry(), address(orgRegistry));
+    }
+
+    function testDeployFullOrgMismatchExecutorReverts() public {
+        _deployFullOrg();
+        address other = address(99);
+        vm.startPrank(other);
+        vm.expectRevert(abi.encodeWithSignature("OrgExistsMismatch()"));
+        deployer.deployFullOrg(ORG_ID, other, "Hybrid DAO", accountRegProxy, true);
+        vm.stopPrank();
     }
 }
