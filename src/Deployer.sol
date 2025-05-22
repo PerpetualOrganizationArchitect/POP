@@ -275,7 +275,11 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address token,
         bool autoUp,
         address customImpl,
-        bool lastRegister
+        bool lastRegister,
+        uint8 quorumPct,
+        uint8 ddSplit,
+        bool quadratic,
+        uint256 minBal
     ) internal returns (address hvProxy) {
         bytes32[] memory roles = new bytes32[](3);
         roles[0] = keccak256("DEFAULT");
@@ -293,10 +297,10 @@ contract Deployer is Initializable, OwnableUpgradeable {
             executorAddr,
             roles,
             targets,
-            50, // quorum %
-            50, // DD/PT split %
-            false,
-            4 ether
+            quorumPct,
+            ddSplit,
+            quadratic,
+            minBal
         );
         hvProxy = _deploy(orgId, "HybridVoting", executorAddr, autoUp, customImpl, init, lastRegister);
     }
@@ -307,7 +311,11 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address executorEOA, // multisig / DAO address
         string calldata orgName,
         address registryAddr, // external username registry
-        bool autoUpgrade
+        bool autoUpgrade,
+        uint8 quorumPct,
+        uint8 ddSplit,
+        bool quadratic,
+        uint256 minBal
     )
         external
         returns (
@@ -370,7 +378,11 @@ contract Deployer is Initializable, OwnableUpgradeable {
             participationToken,
             autoUpgrade,
             address(0),
-            true // <--- Added lastRegister = true here
+            true,
+            quorumPct,
+            ddSplit,
+            quadratic,
+            minBal
         );
 
         /* link executor to governor */
