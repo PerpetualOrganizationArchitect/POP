@@ -67,8 +67,18 @@ contract DeployerTest is Test {
         returns (address hybrid, address exec, address member, address qj, address token, address tm, address hub)
     {
         vm.startPrank(orgOwner);
-        (hybrid, exec, member, qj, token, tm, hub) =
-            deployer.deployFullOrg(ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether);
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+        (hybrid, exec, member, qj, token, tm, hub) = deployer.deployFullOrg(
+            ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        );
         vm.stopPrank();
     }
 
@@ -173,6 +183,16 @@ contract DeployerTest is Test {
         /*–––– deploy a full org via the new flow ––––*/
         vm.startPrank(orgOwner);
 
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
         (
             address _hybrid,
             address _executor,
@@ -181,7 +201,9 @@ contract DeployerTest is Test {
             address _token,
             address _taskMgr,
             address _eduHub
-        ) = deployer.deployFullOrg(ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether);
+        ) = deployer.deployFullOrg(
+            ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        );
 
         vm.stopPrank();
 
@@ -259,7 +281,18 @@ contract DeployerTest is Test {
         address other = address(99);
         vm.startPrank(other);
         vm.expectRevert(abi.encodeWithSignature("OrgExistsMismatch()"));
-        deployer.deployFullOrg(ORG_ID, other, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether);
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+        deployer.deployFullOrg(
+            ORG_ID, other, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        );
         vm.stopPrank();
     }
 }
