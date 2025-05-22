@@ -165,23 +165,12 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address executorAddr,
         string memory orgName,
         bool autoUp,
-        address customImpl
+        address customImpl,
+        string[] memory roleNames,
+        string[] memory roleImages,
+        bool[] memory roleCanVote
     ) internal returns (address membershipProxy) {
-        /* build minimal default role‑set */
-        string[] memory names = new string[](2);
-        string[] memory images = new string[](2);
-        bool[] memory canVote = new bool[](2);
-
-        names[0] = "DEFAULT";
-        names[1] = "EXECUTIVE";
-
-        // Set meaningful image URIs for each role
-        images[0] = "ipfs://default-role-image"; // Placeholder URI for default role
-        images[1] = "ipfs://executive-role-image"; // Placeholder URI for executive role
-
-        canVote[0] = true;
-        canVote[1] = true;
-
+        /* membership init parameters */
         bytes32[] memory execRoles = new bytes32[](1);
         execRoles[0] = keccak256("EXECUTIVE");
 
@@ -189,9 +178,9 @@ contract Deployer is Initializable, OwnableUpgradeable {
             "initialize(address,string,string[],string[],bool[],bytes32[])",
             executorAddr,
             orgName,
-            names,
-            images,
-            canVote,
+            roleNames,
+            roleImages,
+            roleCanVote,
             execRoles
         );
 
@@ -275,7 +264,11 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address token,
         bool autoUp,
         address customImpl,
-        bool lastRegister
+        bool lastRegister,
+        uint8 quorumPct,
+        uint8 ddSplit,
+        bool quadratic,
+        uint256 minBal
     ) internal returns (address hvProxy) {
         bytes32[] memory roles = new bytes32[](3);
         roles[0] = keccak256("DEFAULT");
@@ -293,10 +286,10 @@ contract Deployer is Initializable, OwnableUpgradeable {
             executorAddr,
             roles,
             targets,
-            50, // quorum %
-            50, // DD/PT split %
-            false,
-            4 ether
+            quorumPct,
+            ddSplit,
+            quadratic,
+            minBal
         );
         hvProxy = _deploy(orgId, "HybridVoting", executorAddr, autoUp, customImpl, init, lastRegister);
     }
@@ -307,7 +300,14 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address executorEOA, // multisig / DAO address
         string calldata orgName,
         address registryAddr, // external username registry
-        bool autoUpgrade
+        bool autoUpgrade,
+        string[] calldata roleNames,
+        string[] calldata roleImages,
+        bool[] calldata roleCanVote,
+        uint8 quorumPct,
+        uint8 ddSplit,
+        bool quadratic,
+        uint256 minBal
     )
         external
         returns (
@@ -335,7 +335,8 @@ contract Deployer is Initializable, OwnableUpgradeable {
         executorAddr = _deployExecutor(orgId, executorEOA, autoUpgrade, address(0));
 
         /* 2. Membership NFT */
-        membership = _deployMembership(orgId, executorAddr, orgName, autoUpgrade, address(0));
+        membership =
+            _deployMembership(orgId, executorAddr, orgName, autoUpgrade, address(0), roleNames, roleImages, roleCanVote);
 
         /* 3. QuickJoin */
         quickJoin =
@@ -370,7 +371,11 @@ contract Deployer is Initializable, OwnableUpgradeable {
             participationToken,
             autoUpgrade,
             address(0),
-            true // <--- Added lastRegister = true here
+            true,
+            quorumPct,
+            ddSplit,
+            quadratic,
+            minBal
         );
 
         /* link executor to governor */

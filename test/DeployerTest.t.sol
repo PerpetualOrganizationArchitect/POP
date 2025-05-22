@@ -67,8 +67,30 @@ contract DeployerTest is Test {
         returns (address hybrid, address exec, address member, address qj, address token, address tm, address hub)
     {
         vm.startPrank(orgOwner);
-        (hybrid, exec, member, qj, token, tm, hub) =
-            deployer.deployFullOrg(ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true);
+        string[] memory roleNames = new string[](2);
+        roleNames[0] = "DEFAULT";
+        roleNames[1] = "EXECUTIVE";
+        string[] memory roleImages = new string[](2);
+        roleImages[0] = "default";
+        roleImages[1] = "exec";
+        bool[] memory roleCanVote = new bool[](2);
+        roleCanVote[0] = true;
+        roleCanVote[1] = true;
+
+        (hybrid, exec, member, qj, token, tm, hub) = deployer.deployFullOrg(
+            ORG_ID,
+            orgOwner,
+            "Hybrid DAO",
+            accountRegProxy,
+            true,
+            roleNames,
+            roleImages,
+            roleCanVote,
+            50,
+            50,
+            false,
+            4 ether
+        );
         vm.stopPrank();
     }
 
@@ -173,6 +195,16 @@ contract DeployerTest is Test {
         /*–––– deploy a full org via the new flow ––––*/
         vm.startPrank(orgOwner);
 
+        string[] memory roleNames = new string[](2);
+        roleNames[0] = "DEFAULT";
+        roleNames[1] = "EXECUTIVE";
+        string[] memory roleImages = new string[](2);
+        roleImages[0] = "default";
+        roleImages[1] = "exec";
+        bool[] memory roleCanVote = new bool[](2);
+        roleCanVote[0] = true;
+        roleCanVote[1] = true;
+
         (
             address _hybrid,
             address _executor,
@@ -186,7 +218,14 @@ contract DeployerTest is Test {
             orgOwner,
             "Hybrid DAO",
             accountRegProxy,
-            true // auto‑upgrade
+            true,
+            roleNames,
+            roleImages,
+            roleCanVote,
+            50,
+            50,
+            false,
+            4 ether
         );
 
         vm.stopPrank();
@@ -265,7 +304,30 @@ contract DeployerTest is Test {
         address other = address(99);
         vm.startPrank(other);
         vm.expectRevert(abi.encodeWithSignature("OrgExistsMismatch()"));
-        deployer.deployFullOrg(ORG_ID, other, "Hybrid DAO", accountRegProxy, true);
+        string[] memory roleNames = new string[](2);
+        roleNames[0] = "DEFAULT";
+        roleNames[1] = "EXECUTIVE";
+        string[] memory roleImages = new string[](2);
+        roleImages[0] = "default";
+        roleImages[1] = "exec";
+        bool[] memory roleCanVote = new bool[](2);
+        roleCanVote[0] = true;
+        roleCanVote[1] = true;
+
+        deployer.deployFullOrg(
+            ORG_ID,
+            other,
+            "Hybrid DAO",
+            accountRegProxy,
+            true,
+            roleNames,
+            roleImages,
+            roleCanVote,
+            50,
+            50,
+            false,
+            4 ether
+        );
         vm.stopPrank();
     }
 }
