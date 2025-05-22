@@ -68,7 +68,7 @@ contract DeployerTest is Test {
     {
         vm.startPrank(orgOwner);
         (hybrid, exec, member, qj, token, tm, hub) =
-            deployer.deployFullOrg(ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true);
+            deployer.deployFullOrg(ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether);
         vm.stopPrank();
     }
 
@@ -181,13 +181,7 @@ contract DeployerTest is Test {
             address _token,
             address _taskMgr,
             address _eduHub
-        ) = deployer.deployFullOrg(
-            ORG_ID,
-            orgOwner,
-            "Hybrid DAO",
-            accountRegProxy,
-            true // auto‑upgrade
-        );
+        ) = deployer.deployFullOrg(ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether);
 
         vm.stopPrank();
 
@@ -265,7 +259,7 @@ contract DeployerTest is Test {
         address other = address(99);
         vm.startPrank(other);
         vm.expectRevert(abi.encodeWithSignature("OrgExistsMismatch()"));
-        deployer.deployFullOrg(ORG_ID, other, "Hybrid DAO", accountRegProxy, true);
+        deployer.deployFullOrg(ORG_ID, other, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether);
         vm.stopPrank();
     }
 }
