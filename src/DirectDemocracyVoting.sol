@@ -36,6 +36,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     error EmptyBatch(); // no longer used, kept for layout
     error ZeroAddress();
     error InvalidMetadata();
+    error RoleNotAllowed();
 
     /* ─────────── Constants ─────────── */
     bytes4 public constant MODULE_ID = 0x6464766f; /* "ddvo"  */
@@ -55,6 +56,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         PollOption[] options;
         mapping(address => bool) hasVoted;
         IExecutor.Call[][] batches; // per‑option execution
+        mapping(bytes32 => bool) allowedRoles; // who may vote
+        bool restricted; // if true only allowedRoles can vote
     }
 
     /* ─────────── ERC-7201 Storage ─────────── */
@@ -112,13 +115,19 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         l.quorumPercentage = quorumPct;
         emit QuorumPercentageSet(quorumPct);
 
-        for (uint256 i; i < initialRoles.length; ++i) {
+        for (uint256 i; i < initialRoles.length;) {
             l._allowedRoles[initialRoles[i]] = true;
             emit RoleSet(initialRoles[i], true);
+            unchecked {
+                ++i;
+            }
         }
-        for (uint256 i; i < initialTargets.length; ++i) {
+        for (uint256 i; i < initialTargets.length;) {
             l.allowedTarget[initialTargets[i]] = true;
             emit TargetAllowed(initialTargets[i], true);
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -200,16 +209,57 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         p.endTimestamp = endTs;
 
         uint256 id = l._proposals.length - 1;
-        for (uint256 i; i < numOptions; ++i) {
-            if (batches[i].length > 0) {
-                if (batches[i].length > MAX_CALLS) revert TooManyCalls();
-                for (uint256 j; j < batches[i].length; ++j) {
+        for (uint256 i; i < numOptions;) {
+            uint256 len = batches[i].length;
+            if (len > 0) {
+                if (len > MAX_CALLS) revert TooManyCalls();
+                for (uint256 j; j < len;) {
                     if (!l.allowedTarget[batches[i][j].target]) revert TargetNotAllowed();
                     if (batches[i][j].target == address(this)) revert TargetSelf();
+                    unchecked {
+                        ++j;
+                    }
                 }
             }
             p.options.push(PollOption(0));
             p.batches.push(batches[i]);
+            unchecked {
+                ++i;
+            }
+        }
+        emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
+    }
+
+    /// @notice Create a poll restricted to certain roles. Execution is disabled.
+    function createRolePoll(bytes calldata metadata, uint32 minutesDuration, uint8 numOptions, bytes32[] calldata roles)
+        external
+        onlyCreator
+        whenNotPaused
+    {
+        if (metadata.length == 0) revert InvalidMetadata();
+        if (numOptions == 0) revert LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
+        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
+
+        Layout storage l = _layout();
+        uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
+        Proposal storage p = l._proposals.push();
+        p.endTimestamp = endTs;
+        p.restricted = roles.length > 0;
+
+        uint256 id = l._proposals.length - 1;
+        for (uint256 i; i < numOptions;) {
+            p.options.push(PollOption(0));
+            p.batches.push();
+            unchecked {
+                ++i;
+            }
+        }
+        for (uint256 i; i < roles.length;) {
+            p.allowedRoles[roles[i]] = true;
+            unchecked {
+                ++i;
+            }
         }
         emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
     }
@@ -226,11 +276,15 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         if (_msgSender() != address(l.executor) && !l.membership.canVote(_msgSender())) revert Unauthorized();
 
         Proposal storage p = l._proposals[id];
+        if (p.restricted) {
+            bytes32 r = l.membership.roleOf(_msgSender());
+            if (!p.allowedRoles[r]) revert RoleNotAllowed();
+        }
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
         uint256 seen;
         uint256 sum;
-        for (uint256 i; i < idxs.length; ++i) {
+        for (uint256 i; i < idxs.length;) {
             uint8 ix = idxs[i];
             if (ix >= p.options.length) revert InvalidIndex();
             if ((seen >> ix) & 1 == 1) revert DuplicateIndex();
@@ -241,6 +295,9 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
             unchecked {
                 sum += w;
             }
+            unchecked {
+                ++i;
+            }
         }
         if (sum != 100) revert WeightSumNot100(sum);
 
@@ -249,9 +306,10 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
             p.totalWeight += 100;
         }
 
-        for (uint256 i; i < idxs.length; ++i) {
+        for (uint256 i; i < idxs.length;) {
             unchecked {
                 p.options[idxs[i]].votes += uint96(weights[i]);
+                ++i;
             }
         }
         emit VoteCast(id, _msgSender(), idxs, weights);
@@ -271,9 +329,12 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         IExecutor.Call[] storage batch = l._proposals[id].batches[winner];
 
         if (valid && batch.length > 0) {
-            for (uint256 i; i < batch.length; ++i) {
+            for (uint256 i; i < batch.length;) {
                 if (batch[i].target == address(this)) revert TargetSelf();
                 if (!l.allowedTarget[batch[i].target]) revert TargetNotAllowed();
+                unchecked {
+                    ++i;
+                }
             }
             l.executor.execute(id, batch);
         }
@@ -286,10 +347,15 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         Proposal storage p = l._proposals[id];
         require(p.batches.length > 0 || voters.length > 0, "nothing");
         uint256 cleaned;
-        for (uint256 i; i < voters.length && i < 4_000; ++i) {
+        for (uint256 i; i < voters.length && i < 4_000;) {
             if (p.hasVoted[voters[i]]) {
                 delete p.hasVoted[voters[i]];
-                ++cleaned;
+                unchecked {
+                    ++cleaned;
+                }
+            }
+            unchecked {
+                ++i;
             }
         }
         if (cleaned == 0 && p.batches.length > 0) delete p.batches;
@@ -302,7 +368,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         Proposal storage p = l._proposals[id];
         uint96 hi;
         uint96 second;
-        for (uint256 i; i < p.options.length; ++i) {
+        for (uint256 i; i < p.options.length;) {
             uint96 v = p.options[i].votes;
             if (v > hi) {
                 second = hi;
@@ -310,6 +376,9 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
                 win = i;
             } else if (v > second) {
                 second = v;
+            }
+            unchecked {
+                ++i;
             }
         }
         ok = (uint256(hi) * 100 > uint256(p.totalWeight) * l.quorumPercentage) && (hi > second);
@@ -343,5 +412,17 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
 
     function quorumPercentage() external view returns (uint8) {
         return _layout().quorumPercentage;
+    }
+
+    function pollRoleAllowed(uint256 id, bytes32 role) external view returns (bool) {
+        Layout storage l = _layout();
+        if (id >= l._proposals.length) revert InvalidProposal();
+        return l._proposals[id].allowedRoles[role];
+    }
+
+    function pollRestricted(uint256 id) external view returns (bool) {
+        Layout storage l = _layout();
+        if (id >= l._proposals.length) revert InvalidProposal();
+        return l._proposals[id].restricted;
     }
 }
