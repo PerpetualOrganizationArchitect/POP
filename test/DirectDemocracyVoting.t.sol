@@ -68,6 +68,12 @@ contract DDVotingTest is Test {
         return dd.proposalsCount() - 1;
     }
 
+    function _createRolePoll(uint8 opts, bytes32[] memory roles) internal returns (uint256) {
+        vm.prank(creator);
+        dd.createRolePoll("meta", 10, opts, roles);
+        return dd.proposalsCount() - 1;
+    }
+
     function testInitializeZeroAddress() public {
         DirectDemocracyVoting impl = new DirectDemocracyVoting();
         bytes32[] memory r = new bytes32[](1);
@@ -296,6 +302,33 @@ contract DDVotingTest is Test {
         vm.prank(voter);
         vm.expectRevert(abi.encodeWithSelector(DirectDemocracyVoting.WeightSumNot100.selector, 40));
         dd.vote(id, idx, w);
+    }
+
+    function testRolePollRestrictions() public {
+        bytes32[] memory roles = new bytes32[](1);
+        roles[0] = ROLE;
+        uint256 id = _createRolePoll(2, roles);
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 0;
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+
+        address other = address(0x3);
+        m.setRole(other, keccak256("OTHER"), true);
+        vm.prank(other);
+        vm.expectRevert(DirectDemocracyVoting.RoleNotAllowed.selector);
+        dd.vote(id, idx, w);
+
+        vm.prank(voter);
+        dd.vote(id, idx, w);
+    }
+
+    function testPollRestrictedViews() public {
+        bytes32[] memory roles = new bytes32[](1);
+        roles[0] = ROLE;
+        uint256 id = _createRolePoll(1, roles);
+        assertTrue(dd.pollRestricted(id));
+        assertTrue(dd.pollRoleAllowed(id, ROLE));
     }
 
     function testAnnounceWinner() public {
