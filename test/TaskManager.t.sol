@@ -1065,85 +1065,85 @@ contract TaskManagerTest is Test {
     }
 
     /*───────────────── GRANULAR PERMISSION TESTS ────────────────────*/
-    
+
     function test_CombinedPermissions() public {
         // Create a new role with combined permissions
         bytes32 MULTI_ROLE = keccak256("MULTI_ROLE");
         address multiUser = makeAddr("multiUser");
         setRole(multiUser, MULTI_ROLE);
-        
+
         // Set global permissions (CREATE | CLAIM)
         vm.prank(executor);
         tm.setRolePerm(MULTI_ROLE, TaskPerm.CREATE | TaskPerm.CLAIM);
-        
+
         // Create project
         bytes32[] memory emptyRoles = new bytes32[](0);
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
             bytes("COMBINED_TEST"), 5 ether, new address[](0), emptyRoles, emptyRoles, emptyRoles, emptyRoles
         );
-        
+
         // User should be able to create tasks with CREATE permission
         vm.prank(multiUser);
         tm.createTask(1 ether, bytes("multi_task"), projectId);
-        
+
         // User should be able to claim tasks with CLAIM permission
         vm.prank(multiUser);
         tm.claimTask(0);
-        
+
         // But not complete tasks (no REVIEW permission)
         vm.prank(multiUser);
         tm.submitTask(0, bytes("submission"));
-        
+
         vm.prank(multiUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.completeTask(0);
     }
-    
+
     function test_PermissionChangesAfterCreation() public {
         // Create new role and user
         bytes32 DYNAMIC_ROLE = keccak256("DYNAMIC_ROLE");
         address dynamicUser = makeAddr("dynamicUser");
         setRole(dynamicUser, DYNAMIC_ROLE);
-        
+
         // Initially no permissions for this role
-        
+
         // Create project
         bytes32[] memory emptyRoles = new bytes32[](0);
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
             bytes("DYNAMIC_TEST"), 5 ether, new address[](0), emptyRoles, emptyRoles, emptyRoles, emptyRoles
         );
-        
+
         // User can't create tasks (no permissions)
         vm.prank(dynamicUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.createTask(1 ether, bytes("should_fail"), projectId);
-        
+
         // Grant CREATE permission at project level
         vm.prank(creator1);
         tm.setProjectRolePerm(projectId, DYNAMIC_ROLE, TaskPerm.CREATE);
-        
+
         // Now user can create tasks
         vm.prank(dynamicUser);
         tm.createTask(1 ether, bytes("now_works"), projectId);
-        
+
         // Another user claims and submits
         vm.prank(member1);
         tm.claimTask(0);
-        
+
         vm.prank(member1);
         tm.submitTask(0, bytes("submitted"));
-        
+
         // User still can't complete (no REVIEW permission)
         vm.prank(dynamicUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.completeTask(0);
-        
+
         // Add REVIEW permission
         vm.prank(creator1);
         tm.setProjectRolePerm(projectId, DYNAMIC_ROLE, TaskPerm.CREATE | TaskPerm.REVIEW);
-        
+
         // Now user can complete tasks
         vm.prank(dynamicUser);
         tm.completeTask(0);
@@ -1154,59 +1154,59 @@ contract TaskManagerTest is Test {
         bytes32 OVERRIDE_ROLE = keccak256("OVERRIDE_ROLE");
         address overrideUser = makeAddr("overrideUser");
         setRole(overrideUser, OVERRIDE_ROLE);
-        
+
         // Set full permissions globally
         vm.prank(executor);
         tm.setRolePerm(OVERRIDE_ROLE, TaskPerm.CREATE | TaskPerm.CLAIM | TaskPerm.REVIEW | TaskPerm.ASSIGN);
-        
+
         // Create project
         bytes32[] memory emptyRoles = new bytes32[](0);
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
             bytes("OVERRIDE_TEST"), 5 ether, new address[](0), emptyRoles, emptyRoles, emptyRoles, emptyRoles
         );
-        
+
         // Create a second project to verify global perms still work there
         vm.prank(creator1);
         bytes32 projectId2 = tm.createProject(
             bytes("GLOBAL_TEST"), 5 ether, new address[](0), emptyRoles, emptyRoles, emptyRoles, emptyRoles
         );
-        
+
         // Restrict permissions on the first project (only CREATE)
         vm.prank(creator1);
         tm.setProjectRolePerm(projectId, OVERRIDE_ROLE, TaskPerm.CREATE);
-        
+
         // User can create tasks in both projects
         vm.prank(overrideUser);
         tm.createTask(1 ether, bytes("task1"), projectId);
-        
+
         vm.prank(overrideUser);
         tm.createTask(1 ether, bytes("task2"), projectId2);
-        
+
         // In first project, user can't assign tasks (project override)
         vm.prank(overrideUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.assignTask(0, member1);
-        
+
         // But in second project, user can assign tasks (global permission)
         vm.prank(overrideUser);
         tm.assignTask(1, member1);
-        
+
         // User can submit claimed task
         vm.prank(member1);
         tm.submitTask(1, bytes("submission"));
-        
+
         // In first project, user can't complete tasks (project override)
         vm.prank(member1);
         tm.claimTask(0);
-        
+
         vm.prank(member1);
         tm.submitTask(0, bytes("submission"));
-        
+
         vm.prank(overrideUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.completeTask(0);
-        
+
         // But in second project, user can complete tasks (global permission)
         vm.prank(overrideUser);
         tm.completeTask(1);
@@ -1217,23 +1217,31 @@ contract TaskManagerTest is Test {
         bytes32 TEMP_ROLE = keccak256("TEMP_ROLE");
         address tempUser = makeAddr("tempUser");
         setRole(tempUser, TEMP_ROLE);
-        
+
         // Give CREATE permission
         vm.prank(executor);
         tm.setRolePerm(TEMP_ROLE, TaskPerm.CREATE);
-        
+
         // Create project
         vm.prank(creator1);
-        bytes32 projectId = tm.createProject(bytes("TEMP"), 5 ether, new address[](0), new bytes32[](0), new bytes32[](0), new bytes32[](0), new bytes32[](0));
-        
+        bytes32 projectId = tm.createProject(
+            bytes("TEMP"),
+            5 ether,
+            new address[](0),
+            new bytes32[](0),
+            new bytes32[](0),
+            new bytes32[](0),
+            new bytes32[](0)
+        );
+
         // User can create tasks
         vm.prank(tempUser);
         tm.createTask(1 ether, bytes("task"), projectId);
-        
+
         // Revoke permission
         vm.prank(executor);
         tm.setRolePerm(TEMP_ROLE, 0);
-        
+
         // User can't create tasks anymore
         vm.prank(tempUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
@@ -1246,18 +1254,18 @@ contract TaskManagerTest is Test {
         bytes32 CLAIM_ROLE = keccak256("CLAIM_ONLY");
         bytes32 REVIEW_ROLE = keccak256("REVIEW_ONLY");
         bytes32 ASSIGN_ROLE = keccak256("ASSIGN_ONLY");
-        
+
         // Create 4 users with respective roles
         address createUser = makeAddr("createUser");
         address claimUser = makeAddr("claimUser");
         address reviewUser = makeAddr("reviewUser");
         address assignUser = makeAddr("assignUser");
-        
+
         setRole(createUser, CREATE_ROLE);
         setRole(claimUser, CLAIM_ROLE);
         setRole(reviewUser, REVIEW_ROLE);
         setRole(assignUser, ASSIGN_ROLE);
-        
+
         // Set permissions
         vm.startPrank(executor);
         tm.setRolePerm(CREATE_ROLE, TaskPerm.CREATE);
@@ -1265,59 +1273,67 @@ contract TaskManagerTest is Test {
         tm.setRolePerm(REVIEW_ROLE, TaskPerm.REVIEW);
         tm.setRolePerm(ASSIGN_ROLE, TaskPerm.ASSIGN);
         vm.stopPrank();
-        
+
         // Create project
         vm.prank(creator1);
-        bytes32 projectId = tm.createProject(bytes("PERM_FLAGS"), 5 ether, new address[](0), new bytes32[](0), new bytes32[](0), new bytes32[](0), new bytes32[](0));
-        
+        bytes32 projectId = tm.createProject(
+            bytes("PERM_FLAGS"),
+            5 ether,
+            new address[](0),
+            new bytes32[](0),
+            new bytes32[](0),
+            new bytes32[](0),
+            new bytes32[](0)
+        );
+
         // Test CREATE permission - should succeed
         vm.prank(createUser);
         tm.createTask(1 ether, bytes("create_task"), projectId);
-        
+
         // createUser should not be able to claim or assign
         vm.prank(createUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.claimTask(0);
-        
+
         vm.prank(createUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.assignTask(0, claimUser);
-        
+
         // Test ASSIGN permission - should succeed
         vm.prank(assignUser);
         tm.assignTask(0, claimUser);
-        
+
         // assignUser should not be able to create or review
         vm.prank(assignUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.createTask(1 ether, bytes("assign_fail"), projectId);
-        
+
         // Test CLAIM permission - indirectly tested by previous assign
         // Create a new task for claiming
         vm.prank(createUser);
         tm.createTask(1 ether, bytes("for_claiming"), projectId);
-        
+
         // claimUser should be able to claim
         vm.prank(claimUser);
         tm.claimTask(1);
-        
+
         // claimUser can submit but not complete
         vm.prank(claimUser);
         tm.submitTask(1, bytes("claim_submission"));
-        
+
         vm.prank(claimUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.completeTask(1);
-        
+
         // Test REVIEW permission - should succeed
         vm.prank(reviewUser);
         tm.completeTask(1);
-        
+
         // reviewUser should not be able to create or assign
         vm.prank(reviewUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.createTask(1 ether, bytes("review_fail"), projectId);
-        
+
         vm.prank(reviewUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.assignTask(0, claimUser);
