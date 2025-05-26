@@ -316,65 +316,65 @@ contract Deployer is Initializable, OwnableUpgradeable {
         // ─────────────────────────────────────────────────────────────
         //  Deploy EligibilityModule
         // ─────────────────────────────────────────────────────────────
-        // eligibilityModule = new EligibilityModule(executorAddr);
-        // address eligibilityModuleAddress = address(eligibilityModule);
+        eligibilityModule = new EligibilityModule(executorAddr);
+        address eligibilityModuleAddress = address(eligibilityModule);
         
-        // // ─────────────────────────────────────────────────────────────
-        // //  Deploy ToggleModule
-        // // ─────────────────────────────────────────────────────────────
-        // toggleModule = new ToggleModule(executorAddr);
-        // address toggleModuleAddress = address(toggleModule);
+        // ─────────────────────────────────────────────────────────────
+        //  Deploy ToggleModule
+        // ─────────────────────────────────────────────────────────────
+        toggleModule = new ToggleModule(executorAddr);
+        address toggleModuleAddress = address(toggleModule);
 
-        // // ─────────────────────────────────────────────────────────────
-        // //  Mint the Top Hat *to this deployer* so we can configure
-        // // ─────────────────────────────────────────────────────────────
-        // topHatId = hats.mintTopHat(
-        //     address(this),                        // wearer for now
-        //     string(abi.encodePacked("ipfs://", orgName)),
-        //     ""                                    //image uri
-        // );
+        // ─────────────────────────────────────────────────────────────
+        //  Mint the Top Hat *to this deployer* so we can configure
+        // ─────────────────────────────────────────────────────────────
+        topHatId = hats.mintTopHat(
+            address(this),                        // wearer for now
+            string(abi.encodePacked("ipfs://", orgName)),
+            ""                                    //image uri
+        );
 
-        // // ─────────────────────────────────────────────────────────────
-        // //  Create & (optionally) mint child hats for each role
-        // // ─────────────────────────────────────────────────────────────
-        // uint256 len = roleNames.length;
-        // roleHatIds = new uint256[](len);
+        // ─────────────────────────────────────────────────────────────
+        //  Create & (optionally) mint child hats for each role
+        // ─────────────────────────────────────────────────────────────
+        uint256 len = roleNames.length;
+        roleHatIds = new uint256[](len);
 
-        // // Create hats one at a time instead of using batchCreateHats
-        // for (uint256 i; i < len; ++i) {
-        //     roleHatIds[i] = hats.createHat(
-        //         topHatId,                         // admin = parent Top Hat
-        //         roleNames[i],                     // details + placeholder URI
-        //         type(uint32).max,                 // unlimited supply
-        //         eligibilityModuleAddress,         // eligibility module
-        //         toggleModuleAddress,              // toggle module
-        //         true,                             // mutable
-        //         roleNames[i]                      // data blob (optional)
-        //     );
+        // Create hats one at a time instead of using batchCreateHats
+        for (uint256 i; i < len; ++i) {
+            roleHatIds[i] = hats.createHat(
+                topHatId,                         // admin = parent Top Hat
+                roleNames[i],                     // details + placeholder URI
+                type(uint32).max,                 // unlimited supply
+                eligibilityModuleAddress,         // eligibility module
+                toggleModuleAddress,              // toggle module
+                true,                             // mutable
+                roleNames[i]                      // data blob (optional)
+            );
 
-        //     // Give the role hat to the Executor right away if flagged
-        //     if (roleCanVote[i]) {
-        //         hats.mintHat(roleHatIds[i], executorAddr);
-        //     }
-        // }
+            // Give the role hat to the Executor right away if flagged
+            if (roleCanVote[i]) {
+                hats.mintHat(roleHatIds[i], executorAddr);
+            }
+        }
 
-        // // ─────────────────────────────────────────────────────────────
-        // //  Pass Top Hat ownership to the Executor
-        // hats.transferHat(topHatId, address(this), executorAddr);
+        // ─────────────────────────────────────────────────────────────
+        //  Pass Top Hat ownership to the Executor
+        hats.transferHat(topHatId, address(this), executorAddr);
 
-        // // ─────────────────────────────────────────────────────────────
-        // //  Book-keep in OrgRegistry so other modules can
-        // //     fetch the hat IDs later.  Delete if you don't need it.
-        // // ─────────────────────────────────────────────────────────────
-        // _layout().orgRegistry.registerOrgContract(
-        //     orgId,
-        //     keccak256("HATS_ROOT"),
-        //     executorAddr,          // pointer; here we store the executor address
-        //     address(0),            // no beacon
-        //     false,
-        //     executorAddr,
-        //     false
-        // );
+        // ─────────────────────────────────────────────────────────────
+        //  Book-keep in OrgRegistry so other modules can
+        //     fetch the hat IDs later.  Delete if you don't need it.
+        // ─────────────────────────────────────────────────────────────
+        _layout().orgRegistry.registerOrgContract(
+            orgId,
+            keccak256("HATS_ROOT"),
+            executorAddr,          // pointer; here we store the executor address
+            address(0),            // no beacon
+            false,
+            executorAddr,
+            false
+        );
     }
 
     /*════════════════  FULL ORG  DEPLOYMENT  ════════════════*/
