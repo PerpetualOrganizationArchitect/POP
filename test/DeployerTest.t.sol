@@ -295,4 +295,42 @@ contract DeployerTest is Test {
         );
         vm.stopPrank();
     }
+
+    function testHatsTreeDeployment() public {
+        vm.startPrank(orgOwner);
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        (address hybrid, address exec, address member, address qj, address token, address tm, address hub) = 
+            deployer.deployFullOrg(
+                ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+            );
+
+        // Verify Hats tree registration in OrgRegistry
+        bytes32 hatsRootTypeId = keccak256("HATS_ROOT");
+        bytes32 contractId = keccak256(abi.encodePacked(ORG_ID, hatsRootTypeId));
+        (address proxy, address beacon, bool autoUp, address owner) = orgRegistry.contractOf(contractId);
+        
+        // The proxy should be the executor address since that's where we store it
+        assertEq(proxy, exec);
+        assertFalse(autoUp);
+        assertEq(owner, exec);
+
+        // Verify EligibilityModule and ToggleModule were deployed
+        assertTrue(address(deployer.eligibilityModule()) != address(0), "EligibilityModule not deployed");
+        assertTrue(address(deployer.toggleModule()) != address(0), "ToggleModule not deployed");
+
+        // Verify modules are owned by executor
+        assertEq(deployer.eligibilityModule().admin(), exec);
+        assertEq(deployer.toggleModule().admin(), exec);
+
+        vm.stopPrank();
+    }
 }
