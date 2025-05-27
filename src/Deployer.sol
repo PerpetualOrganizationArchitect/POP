@@ -6,9 +6,9 @@ import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import { Hats } from "@hats-protocol/src/Hats.sol";
-import { EligibilityModule } from "./EligibilityModule.sol";
-import { ToggleModule } from "./ToggleModule.sol";
+import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
+import {EligibilityModule} from "./EligibilityModule.sol";
+import {ToggleModule} from "./ToggleModule.sol";
 
 /*────────────────────────────── Core deps ──────────────────────────────*/
 import "./OrgRegistry.sol";
@@ -78,7 +78,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
         OrgRegistry orgRegistry;
     }
 
-    Hats public hats;
+    IHats public hats;
     EligibilityModule public eligibilityModule;
     ToggleModule public toggleModule;
 
@@ -108,14 +108,14 @@ contract Deployer is Initializable, OwnableUpgradeable {
     /* initializer */
     constructor() initializer {}
 
-    function initialize(address _poaManager, address _orgRegistry) public initializer {
-        if (_poaManager == address(0) || _orgRegistry == address(0)) revert InvalidAddress();
+    function initialize(address _poaManager, address _orgRegistry, address _hats) public initializer {
+        if (_poaManager == address(0) || _orgRegistry == address(0) || _hats == address(0)) revert InvalidAddress();
         __Ownable_init(msg.sender);
 
         Layout storage l = _layout();
         l.poaManager = IPoaManager(_poaManager);
         l.orgRegistry = OrgRegistry(_orgRegistry);
-        hats = Hats(0x3bc1A0Ad72417f2d411118085256fC53CBdDd137);
+        hats = IHats(_hats);
     }
 
     /*──────────────────────── INTERNAL CORE ───────────────────────*/
@@ -302,37 +302,38 @@ contract Deployer is Initializable, OwnableUpgradeable {
     }
 
     function _setupHatsTree(
-        bytes32  orgId,            
-        address  executorAddr,
-        string   memory orgName,
+        bytes32 orgId,
+        address executorAddr,
+        string memory orgName,
         string[] memory roleNames,
-        bool[]   memory roleCanVote
-    )
-        internal                               
-        returns (uint256 topHatId, uint256[] memory roleHatIds)
-    {
+        bool[] memory roleCanVote
+    ) internal returns (uint256 topHatId, uint256[] memory roleHatIds) {
         require(roleNames.length == roleCanVote.length, "HATS_SETUP: array mismatch");
 
         // ─────────────────────────────────────────────────────────────
-        //  Deploy EligibilityModule
+        //  Deploy EligibilityModule with Deployer as initial admin
         // ─────────────────────────────────────────────────────────────
-        eligibilityModule = new EligibilityModule(executorAddr);
+        eligibilityModule = new EligibilityModule(address(this));
         address eligibilityModuleAddress = address(eligibilityModule);
-        
+
         // ─────────────────────────────────────────────────────────────
-        //  Deploy ToggleModule
+        //  Deploy ToggleModule with Deployer as initial admin
         // ─────────────────────────────────────────────────────────────
-        toggleModule = new ToggleModule(executorAddr);
+        toggleModule = new ToggleModule(address(this));
         address toggleModuleAddress = address(toggleModule);
 
         // ─────────────────────────────────────────────────────────────
         //  Mint the Top Hat *to this deployer* so we can configure
         // ─────────────────────────────────────────────────────────────
         topHatId = hats.mintTopHat(
-            address(this),                        // wearer for now
+            address(this), // wearer for now
             string(abi.encodePacked("ipfs://", orgName)),
-            ""                                    //image uri
+            "" //image uri
         );
+
+        // Configure Top Hat eligibility and toggle
+        eligibilityModule.setHatRules(topHatId, true, true);
+        toggleModule.setHatStatus(topHatId, true);
 
         // ─────────────────────────────────────────────────────────────
         //  Create & (optionally) mint child hats for each role
@@ -343,14 +344,18 @@ contract Deployer is Initializable, OwnableUpgradeable {
         // Create hats one at a time instead of using batchCreateHats
         for (uint256 i; i < len; ++i) {
             roleHatIds[i] = hats.createHat(
-                topHatId,                         // admin = parent Top Hat
-                roleNames[i],                     // details + placeholder URI
-                type(uint32).max,                 // unlimited supply
-                eligibilityModuleAddress,         // eligibility module
-                toggleModuleAddress,              // toggle module
-                true,                             // mutable
-                roleNames[i]                      // data blob (optional)
+                topHatId, // admin = parent Top Hat
+                roleNames[i], // details + placeholder URI
+                type(uint32).max, // unlimited supply
+                eligibilityModuleAddress, // eligibility module
+                toggleModuleAddress, // toggle module
+                true, // mutable
+                roleNames[i] // data blob (optional)
             );
+
+            // Configure role hat eligibility and toggle
+            eligibilityModule.setHatRules(roleHatIds[i], true, true);
+            toggleModule.setHatStatus(roleHatIds[i], true);
 
             // Give the role hat to the Executor right away if flagged
             if (roleCanVote[i]) {
@@ -363,18 +368,16 @@ contract Deployer is Initializable, OwnableUpgradeable {
         hats.transferHat(topHatId, address(this), executorAddr);
 
         // ─────────────────────────────────────────────────────────────
+        //  Transfer module admin rights to the Executor
+        // ─────────────────────────────────────────────────────────────
+        eligibilityModule.transferAdmin(executorAddr);
+        toggleModule.transferAdmin(executorAddr);
+
+        // ─────────────────────────────────────────────────────────────
         //  Book-keep in OrgRegistry so other modules can
         //     fetch the hat IDs later.  Delete if you don't need it.
         // ─────────────────────────────────────────────────────────────
-        _layout().orgRegistry.registerOrgContract(
-            orgId,
-            keccak256("HATS_ROOT"),
-            executorAddr,          // pointer; here we store the executor address
-            address(0),            // no beacon
-            false,
-            executorAddr,
-            false
-        );
+        _layout().orgRegistry.registerHatsTree(orgId, topHatId, roleHatIds);
     }
 
     /*════════════════  FULL ORG  DEPLOYMENT  ════════════════*/
@@ -462,13 +465,8 @@ contract Deployer is Initializable, OwnableUpgradeable {
         executorAddr = _deployExecutor(params.orgId, params.executorEOA, params.autoUpgrade, address(0));
 
         /* 2. Setup Hats Tree */
-        (uint256 topHatId, uint256[] memory roleHatIds) = _setupHatsTree(
-            params.orgId,
-            executorAddr,
-            params.orgName,
-            params.roleNames,
-            params.roleCanVote
-        );
+        (uint256 topHatId, uint256[] memory roleHatIds) =
+            _setupHatsTree(params.orgId, executorAddr, params.orgName, params.roleNames, params.roleCanVote);
 
         /* 3. Membership NFT */
         membership = _deployMembership(
@@ -484,48 +482,24 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
         /* 4. QuickJoin */
         quickJoin = _deployQuickJoin(
-            params.orgId,
-            executorAddr,
-            membership,
-            params.registryAddr,
-            address(this),
-            params.autoUpgrade,
-            address(0)
+            params.orgId, executorAddr, membership, params.registryAddr, address(this), params.autoUpgrade, address(0)
         );
 
         /* 5. Participation token */
         string memory tName = string(abi.encodePacked(params.orgName, " Token"));
         string memory tSymbol = "PT";
-        participationToken = _deployPT(
-            params.orgId,
-            executorAddr,
-            tName,
-            tSymbol,
-            membership,
-            params.autoUpgrade,
-            address(0)
-        );
+        participationToken =
+            _deployPT(params.orgId, executorAddr, tName, tSymbol, membership, params.autoUpgrade, address(0));
 
         /* 6. TaskManager */
         taskManager = _deployTaskManager(
-            params.orgId,
-            executorAddr,
-            participationToken,
-            membership,
-            params.autoUpgrade,
-            address(0)
+            params.orgId, executorAddr, participationToken, membership, params.autoUpgrade, address(0)
         );
         IParticipationToken(participationToken).setTaskManager(taskManager);
 
         /* 7. EducationHub */
         educationHub = _deployEducationHub(
-            params.orgId,
-            executorAddr,
-            membership,
-            participationToken,
-            params.autoUpgrade,
-            address(0),
-            false
+            params.orgId, executorAddr, membership, participationToken, params.autoUpgrade, address(0), false
         );
         IParticipationToken(participationToken).setEducationHub(educationHub);
 

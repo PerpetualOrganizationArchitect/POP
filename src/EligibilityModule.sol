@@ -7,8 +7,8 @@ pragma solidity ^0.8.19;
  *         on a per-hat basis in the Hats Protocol. controlled by the admin.
  */
 
- //TODO: make specific to wearers
- 
+//TODO: make specific to wearers
+
 contract EligibilityModule {
     /// @notice The admin who can update eligibility settings
     address public admin;
@@ -27,7 +27,7 @@ contract EligibilityModule {
     event HatRulesUpdated(uint256 indexed hatId, bool eligible, bool standing);
 
     /**
-     * @dev Set the admin 
+     * @dev Set the admin
      */
     constructor(address _admin) {
         admin = _admin;
@@ -47,11 +47,7 @@ contract EligibilityModule {
      * @param _eligible Whether the wearer is eligible (true) or not (false)
      * @param _standing Whether the wearer is in good standing (true) or bad (false)
      */
-    function setHatRules(
-        uint256 hatId,
-        bool _eligible,
-        bool _standing
-    ) external onlyAdmin {
+    function setHatRules(uint256 hatId, bool _eligible, bool _standing) external onlyAdmin {
         hatRules[hatId] = HatRules(_eligible, _standing);
         emit HatRulesUpdated(hatId, _eligible, _standing);
     }
@@ -64,10 +60,7 @@ contract EligibilityModule {
      * @return eligible uint256 (0 = ineligible, 1 = eligible)
      * @return standing uint256 (0 = bad standing, 1 = good standing)
      */
-    function getWearerStatus(
-        address wearer,
-        uint256 hatId
-    )
+    function getWearerStatus(address wearer, uint256 hatId)
         external
         view
         returns (uint256 eligible, uint256 standing)

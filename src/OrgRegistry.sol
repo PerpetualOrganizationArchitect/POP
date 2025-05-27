@@ -40,6 +40,8 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         mapping(bytes32 => OrgInfo) orgOf; // orgId to OrgInfo
         mapping(bytes32 => ContractInfo) contractOf; // contractId to ContractInfo
         mapping(bytes32 => mapping(bytes32 => address)) proxyOf; // (orgId,typeId) to proxy
+        mapping(bytes32 => uint256) topHatOf; // orgId to topHatId
+        mapping(bytes32 => mapping(uint256 => uint256)) roleHatOf; // orgId => roleIndex => hatId
         bytes32[] orgIds;
         uint256 totalContracts;
     }
@@ -66,6 +68,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         address owner
     );
     event AutoUpgradeSet(bytes32 indexed contractId, bool enabled);
+    event HatsTreeRegistered(bytes32 indexed orgId, uint256 topHatId, uint256[] roleHatIds);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() initializer {}
@@ -235,6 +238,38 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
 
     function orgIds(uint256 index) external view returns (bytes32) {
         return _layout().orgIds[index];
+    }
+
+    /* ══════════ HATS TREE REGISTRATION ══════════ */
+    function registerHatsTree(bytes32 orgId, uint256 topHatId, uint256[] calldata roleHatIds) external {
+        Layout storage l = _layout();
+        OrgInfo storage o = l.orgOf[orgId];
+        if (!o.exists) revert OrgUnknown();
+
+        bool callerIsOwner = (msg.sender == owner());
+        bool callerIsExecutor = (msg.sender == o.executor);
+
+        if (callerIsOwner) {
+            // owner path allowed only during bootstrap
+            if (!o.bootstrap) revert OwnerOnlyDuringBootstrap();
+        } else if (!callerIsExecutor) {
+            revert NotOrgExecutor();
+        }
+
+        l.topHatOf[orgId] = topHatId;
+        for (uint256 i = 0; i < roleHatIds.length; i++) {
+            l.roleHatOf[orgId][i] = roleHatIds[i];
+        }
+
+        emit HatsTreeRegistered(orgId, topHatId, roleHatIds);
+    }
+
+    function getTopHat(bytes32 orgId) external view returns (uint256) {
+        return _layout().topHatOf[orgId];
+    }
+
+    function getRoleHat(bytes32 orgId, uint256 roleIndex) external view returns (uint256) {
+        return _layout().roleHatOf[orgId][roleIndex];
     }
 
     /* ─────────── Version ─────────── */
