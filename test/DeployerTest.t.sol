@@ -24,6 +24,7 @@ import "../src/PoaManager.sol";
 import "../src/OrgRegistry.sol";
 import {Deployer} from "../src/Deployer.sol";
 import {IExecutor} from "../src/Executor.sol";
+import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 
 /*────────────── Test contract ───────────*/
 contract DeployerTest is Test {
@@ -47,6 +48,7 @@ contract DeployerTest is Test {
     address public constant orgOwner = address(2);
     address public constant voter1 = address(3);
     address public constant voter2 = address(4);
+    address public constant SEPOLIA_HATS = 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137;
 
     /*–––– ids ––––*/
     bytes32 public constant ORG_ID = keccak256("AUTO-UPGRADE-ORG");
@@ -84,6 +86,9 @@ contract DeployerTest is Test {
 
     /*══════════════════════════════════════════ SET‑UP ══════════════════════════════════════════*/
     function setUp() public {
+        // Fork Sepolia using the RPC URL from foundry.toml
+        vm.createSelectFork("sepolia");
+
         /*–– deploy bare implementations ––*/
         hybridImpl = new HybridVoting();
         execImpl = new Executor();
@@ -144,8 +149,9 @@ contract DeployerTest is Test {
         console.log("OrgRegistry owner after init:", orgRegistry.owner());
 
         // Create Deployer proxy - initialize with msg.sender (poaAdmin) for proper ownership
-        bytes memory deployerInit =
-            abi.encodeWithSignature("initialize(address,address)", address(poaManager), address(orgRegistry));
+        bytes memory deployerInit = abi.encodeWithSignature(
+            "initialize(address,address,address)", address(poaManager), address(orgRegistry), SEPOLIA_HATS
+        );
         deployer = Deployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
 
         // Debug to verify Deployer owner
@@ -308,28 +314,44 @@ contract DeployerTest is Test {
         voting[0] = true;
         voting[1] = true;
 
-        (address hybrid, address exec, address member, address qj, address token, address tm, address hub) = 
-            deployer.deployFullOrg(
-                ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
-            );
+        (address hybrid, address exec, address member, address qj, address token, address tm, address hub) = deployer
+            .deployFullOrg(
+            ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        );
 
-        // Verify Hats tree registration in OrgRegistry
-        bytes32 hatsRootTypeId = keccak256("HATS_ROOT");
-        bytes32 contractId = keccak256(abi.encodePacked(ORG_ID, hatsRootTypeId));
-        (address proxy, address beacon, bool autoUp, address owner) = orgRegistry.contractOf(contractId);
-        
-        // The proxy should be the executor address since that's where we store it
-        assertEq(proxy, exec);
-        assertFalse(autoUp);
-        assertEq(owner, exec);
+        // Verify Hats tree registration
+        uint256 topHatId = orgRegistry.getTopHat(ORG_ID);
+        assertTrue(topHatId != 0, "Top hat should be registered");
 
-        // Verify EligibilityModule and ToggleModule were deployed
-        assertTrue(address(deployer.eligibilityModule()) != address(0), "EligibilityModule not deployed");
-        assertTrue(address(deployer.toggleModule()) != address(0), "ToggleModule not deployed");
+        uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
+        uint256 executiveRoleHat = orgRegistry.getRoleHat(ORG_ID, 1);
+        assertTrue(defaultRoleHat != 0, "Default role hat should be registered");
+        assertTrue(executiveRoleHat != 0, "Executive role hat should be registered");
 
-        // Verify modules are owned by executor
-        assertEq(deployer.eligibilityModule().admin(), exec);
-        assertEq(deployer.toggleModule().admin(), exec);
+        // Test creating a new role as executor
+        vm.stopPrank();
+        vm.startPrank(exec); // Switch to executor
+
+        // Create a new role hat
+        uint256 newRoleHatId = IHats(SEPOLIA_HATS).createHat(
+            topHatId, // admin = parent Top Hat
+            "NEW_ROLE", // details
+            type(uint32).max, // unlimited supply
+            address(deployer.eligibilityModule()), // eligibility module
+            address(deployer.toggleModule()), // toggle module
+            true, // mutable
+            "NEW_ROLE" // data blob
+        );
+
+        // Configure the new role hat
+        deployer.eligibilityModule().setHatRules(newRoleHatId, true, true);
+        deployer.toggleModule().setHatStatus(newRoleHatId, true);
+
+        // Mint the new role hat to the executor
+        IHats(SEPOLIA_HATS).mintHat(newRoleHatId, exec);
+
+        // Verify the new role hat was created and minted
+        assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(exec, newRoleHatId), "Executor should wear the new role hat");
 
         vm.stopPrank();
     }

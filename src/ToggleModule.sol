@@ -23,7 +23,7 @@ contract ToggleModule {
      * @dev Set the admin on construction
      */
     constructor(address _admin) {
-       admin = _admin;
+        admin = _admin;
     }
 
     /**
