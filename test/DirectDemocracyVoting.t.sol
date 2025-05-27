@@ -4,24 +4,8 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/DirectDemocracyVoting.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-
-contract MockMembership is IMembership {
-    mapping(address => bytes32) public role;
-    mapping(address => bool) public voters;
-
-    function roleOf(address u) external view returns (bytes32) {
-        return role[u];
-    }
-
-    function canVote(address u) external view returns (bool) {
-        return voters[u];
-    }
-
-    function setRole(address u, bytes32 r, bool canV) external {
-        role[u] = r;
-        voters[u] = canV;
-    }
-}
+import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {MockHats} from "./mocks/MockHats.sol";
 
 contract MockExecutor is IExecutor {
     Call[] public last;
@@ -36,24 +20,28 @@ contract MockExecutor is IExecutor {
 
 contract DDVotingTest is Test {
     DirectDemocracyVoting dd;
-    MockMembership m;
+    MockHats hats;
     MockExecutor exec;
     address creator = address(0x1);
     address voter = address(0x2);
 
-    bytes32 constant ROLE = keccak256("ROLE");
+    uint256 constant HAT_ID = 1;
 
     function setUp() public {
-        m = new MockMembership();
+        hats = new MockHats();
         exec = new MockExecutor();
-        m.setRole(creator, ROLE, true);
-        m.setRole(voter, ROLE, true);
+        
+        // Mint hats to creator and voter
+        hats.mintHat(HAT_ID, creator);
+        hats.mintHat(HAT_ID, voter);
 
         DirectDemocracyVoting impl = new DirectDemocracyVoting();
-        bytes32[] memory roles = new bytes32[](1);
-        roles[0] = ROLE;
-        bytes memory data =
-            abi.encodeCall(DirectDemocracyVoting.initialize, (address(m), address(exec), roles, new address[](0), 50));
+        uint256[] memory initialHats = new uint256[](1);
+        initialHats[0] = HAT_ID;
+        bytes memory data = abi.encodeCall(
+            DirectDemocracyVoting.initialize,
+            (address(hats), address(exec), initialHats, new address[](0), 50)
+        );
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), data);
         dd = DirectDemocracyVoting(address(proxy));
     }
@@ -68,18 +56,20 @@ contract DDVotingTest is Test {
         return dd.proposalsCount() - 1;
     }
 
-    function _createRolePoll(uint8 opts, bytes32[] memory roles) internal returns (uint256) {
+    function _createHatPoll(uint8 opts, uint256[] memory hatIds) internal returns (uint256) {
         vm.prank(creator);
-        dd.createRolePoll("meta", 10, opts, roles);
+        dd.createHatPoll("meta", 10, opts, hatIds);
         return dd.proposalsCount() - 1;
     }
 
     function testInitializeZeroAddress() public {
         DirectDemocracyVoting impl = new DirectDemocracyVoting();
-        bytes32[] memory r = new bytes32[](1);
-        r[0] = ROLE;
-        bytes memory data =
-            abi.encodeCall(DirectDemocracyVoting.initialize, (address(0), address(exec), r, new address[](0), 50));
+        uint256[] memory h = new uint256[](1);
+        h[0] = HAT_ID;
+        bytes memory data = abi.encodeCall(
+            DirectDemocracyVoting.initialize,
+            (address(0), address(exec), h, new address[](0), 50)
+        );
         vm.expectRevert(DirectDemocracyVoting.ZeroAddress.selector);
         new ERC1967Proxy(address(impl), data);
     }
@@ -87,7 +77,8 @@ contract DDVotingTest is Test {
     function testInitializeBadQuorum() public {
         DirectDemocracyVoting impl = new DirectDemocracyVoting();
         bytes memory data = abi.encodeCall(
-            DirectDemocracyVoting.initialize, (address(m), address(exec), new bytes32[](0), new address[](0), 0)
+            DirectDemocracyVoting.initialize,
+            (address(hats), address(exec), new uint256[](0), new address[](0), 0)
         );
         vm.expectRevert("quorum");
         new ERC1967Proxy(address(impl), data);
@@ -125,16 +116,16 @@ contract DDVotingTest is Test {
         dd.setExecutor(address(0));
     }
 
-    function testSetRoleAllowed() public {
+    function testSetHatAllowed() public {
         vm.prank(address(exec));
-        dd.setRoleAllowed(ROLE, false);
+        dd.setHatAllowed(HAT_ID, false);
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
         b[0] = new IExecutor.Call[](0);
         vm.prank(creator);
         vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
         dd.createProposal("m", 10, 1, b);
         vm.prank(address(exec));
-        dd.setRoleAllowed(ROLE, true);
+        dd.setHatAllowed(HAT_ID, true);
         vm.prank(creator);
         dd.createProposal("m", 10, 1, b);
         assertEq(dd.proposalsCount(), 1);
@@ -234,7 +225,7 @@ contract DDVotingTest is Test {
     }
 
     function testVoteUnauthorized() public {
-        m.setRole(voter, ROLE, false);
+        hats.setHatWearerStatus(HAT_ID, voter, false, false);
         uint256 id = _createSimple(1);
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
@@ -304,31 +295,46 @@ contract DDVotingTest is Test {
         dd.vote(id, idx, w);
     }
 
-    function testRolePollRestrictions() public {
-        bytes32[] memory roles = new bytes32[](1);
-        roles[0] = ROLE;
-        uint256 id = _createRolePoll(2, roles);
+    function testHatPollRestrictions() public {
+        // Create a different hat for the poll
+        uint256 POLL_HAT_ID = 2;
+        hats.createHat(1, "Poll Hat", type(uint32).max, address(0), address(0), true, "");
+        
+        uint256[] memory hatIds = new uint256[](1);
+        hatIds[0] = POLL_HAT_ID;  // Use the new hat ID for the poll
+        uint256 id = _createHatPoll(2, hatIds);
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
 
-        address other = address(0x3);
-        m.setRole(other, keccak256("OTHER"), true);
-        vm.prank(other);
+        // First test: voter with no hat should get Unauthorized
+        address noHatVoter = address(0x3);
+        vm.prank(noHatVoter);
+        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        dd.vote(id, idx, w);
+
+        // Second test: voter with valid hat but not the specific poll hat should get RoleNotAllowed
+        address wrongHatVoter = address(0x4);
+        // Give them a valid voting hat (HAT_ID) but not the specific hat for this poll
+        hats.mintHat(HAT_ID, wrongHatVoter);
+        vm.prank(wrongHatVoter);
         vm.expectRevert(DirectDemocracyVoting.RoleNotAllowed.selector);
         dd.vote(id, idx, w);
 
+        // Third test: voter with correct hat should succeed
+        // Give the voter the poll-specific hat
+        hats.mintHat(POLL_HAT_ID, voter);
         vm.prank(voter);
         dd.vote(id, idx, w);
     }
 
     function testPollRestrictedViews() public {
-        bytes32[] memory roles = new bytes32[](1);
-        roles[0] = ROLE;
-        uint256 id = _createRolePoll(1, roles);
+        uint256[] memory hatIds = new uint256[](1);
+        hatIds[0] = HAT_ID;
+        uint256 id = _createHatPoll(1, hatIds);
         assertTrue(dd.pollRestricted(id));
-        assertTrue(dd.pollRoleAllowed(id, ROLE));
+        assertTrue(dd.pollHatAllowed(id, HAT_ID));
     }
 
     function testAnnounceWinner() public {
