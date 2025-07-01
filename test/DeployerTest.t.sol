@@ -232,6 +232,17 @@ contract DeployerTest is Test {
         vm.prank(voter2);
         QuickJoin(quickJoinProxy).quickJoinNoUser("v2");
 
+        // Give voter1 the actual hats they need from the Hats Protocol
+        // voter1 gets EXECUTIVE role in Membership, so give them the Executive hat for voting/creating
+        uint256 executiveRoleHat = orgRegistry.getRoleHat(ORG_ID, 1); // EXECUTIVE role hat
+        vm.prank(executorProxy);
+        IHats(SEPOLIA_HATS).mintHat(executiveRoleHat, voter1);
+
+        // Give voter2 the default hat for voting
+        uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0); // DEFAULT role hat  
+        vm.prank(executorProxy);
+        IHats(SEPOLIA_HATS).mintHat(defaultRoleHat, voter2);
+
         /* create proposal */
         uint8 optNumber = 2;
 

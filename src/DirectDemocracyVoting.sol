@@ -12,7 +12,7 @@ import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 
 /* ──────────────────  Direct‑democracy governor  ─────────────────────── */
 contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
-    /* ─────────── Errors (same id set) ─────────── */
+    /* ─────────── Errors ─────────── */
     error Unauthorized();
     error AlreadyVoted();
     error InvalidProposal();
@@ -28,7 +28,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     error TooManyCalls();
     error TargetNotAllowed();
     error TargetSelf();
-    error EmptyBatch(); // no longer used, kept for layout
+    error EmptyBatch();
     error ZeroAddress();
     error InvalidMetadata();
     error RoleNotAllowed();
@@ -51,7 +51,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         PollOption[] options;
         mapping(address => bool) hasVoted;
         IExecutor.Call[][] batches; // per‑option execution
-        mapping(uint256 => bool) allowedHats; // which hats can vote
+        uint256[] pollHatIds; // array of specific hat IDs for this poll
         bool restricted; // if true only allowedHats can vote
     }
 
@@ -61,7 +61,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         IHats hats;
         IExecutor executor;
         mapping(address => bool) allowedTarget; // execution allow‑list
-        mapping(uint256 => bool) _allowedHats; // which hats can create proposals
+        uint256[] _votingHatIds; // array of allowed voting hat IDs
+        uint256[] _creatorHatIds; // array of allowed creator hat IDs
         uint8 quorumPercentage; // 1‑100
         Proposal[] _proposals;
     }
@@ -77,6 +78,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
 
     /* ─────────── Events ─────────── */
     event HatSet(uint256 hat, bool allowed);
+    event CreatorHatSet(uint256 hat, bool allowed);
     event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created);
     event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
@@ -92,6 +94,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         address hats_,
         address executor_,
         uint256[] calldata initialHats,
+        uint256[] calldata initialCreatorHats,
         address[] calldata initialTargets,
         uint8 quorumPct
     ) external initializer {
@@ -111,8 +114,15 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         emit QuorumPercentageSet(quorumPct);
 
         for (uint256 i; i < initialHats.length;) {
-            l._allowedHats[initialHats[i]] = true;
+            l._votingHatIds.push(initialHats[i]);
             emit HatSet(initialHats[i], true);
+            unchecked {
+                ++i;
+            }
+        }
+        for (uint256 i; i < initialCreatorHats.length;) {
+            l._creatorHatIds.push(initialCreatorHats[i]);
+            emit CreatorHatSet(initialCreatorHats[i], true);
             unchecked {
                 ++i;
             }
@@ -147,8 +157,55 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     }
 
     function setHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        _layout()._allowedHats[h] = ok;
+        Layout storage l = _layout();
+        
+        // Check if hat is already in the array
+        bool wasAllowed = false;
+        uint256 existingIndex = type(uint256).max;
+        for (uint256 i = 0; i < l._votingHatIds.length; i++) {
+            if (l._votingHatIds[i] == h) {
+                wasAllowed = true;
+                existingIndex = i;
+                break;
+            }
+        }
+        
+        if (ok && !wasAllowed) {
+            // Adding new hat
+            l._votingHatIds.push(h);
+        } else if (!ok && wasAllowed) {
+            // Removing hat - remove from array
+            l._votingHatIds[existingIndex] = l._votingHatIds[l._votingHatIds.length - 1];
+            l._votingHatIds.pop();
+        }
+        
         emit HatSet(h, ok);
+    }
+
+    function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
+        Layout storage l = _layout();
+        
+        // Check if hat is already in the array
+        bool wasAllowed = false;
+        uint256 existingIndex = type(uint256).max;
+        for (uint256 i = 0; i < l._creatorHatIds.length; i++) {
+            if (l._creatorHatIds[i] == h) {
+                wasAllowed = true;
+                existingIndex = i;
+                break;
+            }
+        }
+        
+        if (ok && !wasAllowed) {
+            // Adding new hat
+            l._creatorHatIds.push(h);
+        } else if (!ok && wasAllowed) {
+            // Removing hat - remove from array
+            l._creatorHatIds[existingIndex] = l._creatorHatIds[l._creatorHatIds.length - 1];
+            l._creatorHatIds.pop();
+        }
+        
+        emit CreatorHatSet(h, ok);
     }
 
     function setTargetAllowed(address t, bool ok) external onlyExecutor {
@@ -166,17 +223,17 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     modifier onlyCreator() {
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
-            bool canCreate = false;
-            for (uint256 i; i < 256;) {
-                if (l._allowedHats[i] && l.hats.isWearerOfHat(_msgSender(), i)) {
-                    canCreate = true;
-                    break;
-                }
-                unchecked {
-                    ++i;
-                }
-            }
+            bool canCreate = _hasCreatorHat(_msgSender());
             if (!canCreate) revert Unauthorized();
+        }
+        _;
+    }
+
+    modifier onlyVoter() {
+        Layout storage l = _layout();
+        if (_msgSender() != address(l.executor)) {
+            bool canVote = _hasVotingHat(_msgSender());
+            if (!canVote) revert Unauthorized();
         }
         _;
     }
@@ -236,7 +293,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     }
 
     /// @notice Create a poll restricted to certain hats. Execution is disabled.
-    function createHatPoll(bytes calldata metadata, uint32 minutesDuration, uint8 numOptions, uint256[] calldata hats)
+    function createHatPoll(bytes calldata metadata, uint32 minutesDuration, uint8 numOptions, uint256[] calldata hatIds)
         external
         onlyCreator
         whenNotPaused
@@ -250,7 +307,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
         Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
-        p.restricted = hats.length > 0;
+        p.restricted = hatIds.length > 0;
 
         uint256 id = l._proposals.length - 1;
         for (uint256 i; i < numOptions;) {
@@ -260,8 +317,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
                 ++i;
             }
         }
-        for (uint256 i; i < hats.length;) {
-            p.allowedHats[hats[i]] = true;
+        for (uint256 i; i < hatIds.length;) {
+            p.pollHatIds.push(hatIds[i]);
             unchecked {
                 ++i;
             }
@@ -274,36 +331,19 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         external
         exists(id)
         notExpired(id)
+        onlyVoter
         whenNotPaused
     {
         if (idxs.length != weights.length) revert LengthMismatch();
         Layout storage l = _layout();
         
-        // Check if voter is executor or has a voting hat
-        if (_msgSender() != address(l.executor)) {
-            bool canVote = false;
-            for (uint256 i; i < 256;) {
-                if (l._allowedHats[i] && l.hats.isWearerOfHat(_msgSender(), i)) {
-                    canVote = true;
-                    break;
-                }
-                unchecked {
-                    ++i;
-                }
-            }
-            if (!canVote) revert Unauthorized();
-        }
-
         Proposal storage p = l._proposals[id];
         if (p.restricted) {
             bool hasAllowedHat = false;
-            for (uint256 i; i < 256;) {
-                if (p.allowedHats[i] && l.hats.isWearerOfHat(_msgSender(), i)) {
+            for (uint256 i = 0; i < p.pollHatIds.length; i++) {
+                if (l.hats.isWearerOfHat(_msgSender(), p.pollHatIds[i])) {
                     hasAllowedHat = true;
                     break;
-                }
-                unchecked {
-                    ++i;
                 }
             }
             if (!hasAllowedHat) revert RoleNotAllowed();
@@ -445,12 +485,40 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     function pollHatAllowed(uint256 id, uint256 hat) external view returns (bool) {
         Layout storage l = _layout();
         if (id >= l._proposals.length) revert InvalidProposal();
-        return l._proposals[id].allowedHats[hat];
+        for (uint256 i = 0; i < l._proposals[id].pollHatIds.length; i++) {
+            if (l._proposals[id].pollHatIds[i] == hat) {
+                return true;
+            }
+        }
+        return false;
     }
 
     function pollRestricted(uint256 id) external view returns (bool) {
         Layout storage l = _layout();
         if (id >= l._proposals.length) revert InvalidProposal();
         return l._proposals[id].restricted;
+    }
+
+    /* ─────────── Internal Helper Functions ─────────── */
+    function _hasVotingHat(address user) internal view returns (bool) {
+        Layout storage l = _layout();
+        // Check only the specific allowed voting hats
+        for (uint256 i = 0; i < l._votingHatIds.length; i++) {
+            if (l.hats.isWearerOfHat(user, l._votingHatIds[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _hasCreatorHat(address user) internal view returns (bool) {
+        Layout storage l = _layout();
+        // Check only the specific allowed creator hats
+        for (uint256 i = 0; i < l._creatorHatIds.length; i++) {
+            if (l.hats.isWearerOfHat(user, l._creatorHatIds[i])) {
+                return true;
+            }
+        }
+        return false;
     }
 }

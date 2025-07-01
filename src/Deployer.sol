@@ -36,10 +36,12 @@ interface IExecutorAdmin {
 /*── init‑selector helpers (reduce bytecode & safety) ────────────────────*/
 interface IHybridVotingInit {
     function initialize(
-        address membership_,
+        address hats_,
         address token_,
         address executor_,
-        bytes32[] calldata roles,
+        uint256[] calldata initialVotingHats,
+        uint256[] calldata initialDemocracyHats,
+        uint256[] calldata initialCreatorHats,
         address[] calldata targets,
         uint8 quorumPct,
         uint8 ddSplit,
@@ -277,10 +279,20 @@ contract Deployer is Initializable, OwnableUpgradeable {
         bool quadratic,
         uint256 minBal
     ) internal returns (address hvProxy) {
-        bytes32[] memory roles = new bytes32[](3);
-        roles[0] = keccak256("DEFAULT");
-        roles[1] = keccak256("EXECUTIVE");
-        roles[2] = keccak256("Member");
+        Layout storage l = _layout();
+        
+        // Get the role hat IDs (we know there are at least 2: DEFAULT and EXECUTIVE)
+        uint256[] memory votingHats = new uint256[](2);
+        votingHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
+        votingHats[1] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
+        
+        // For democracy hats, use only the EXECUTIVE role hat (gives DD voting power)
+        uint256[] memory democracyHats = new uint256[](1);
+        democracyHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
+        
+        // For creator hats, use the EXECUTIVE role hat
+        uint256[] memory creatorHats = new uint256[](1);
+        creatorHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
 
         address[] memory targets = new address[](2);
         targets[0] = membership;
@@ -288,10 +300,12 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
         bytes memory init = abi.encodeWithSelector(
             IHybridVotingInit.initialize.selector,
-            membership,
+            address(hats),
             token,
             executorAddr,
-            roles,
+            votingHats,
+            democracyHats,
+            creatorHats,
             targets,
             quorumPct,
             ddSplit,
