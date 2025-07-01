@@ -13,6 +13,8 @@ import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
 import {IExecutor} from "../src/Executor.sol";
+import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {MockHats} from "./mocks/MockHats.sol";
 
 /* ───────────── Local lightweight mocks ───────────── */
 contract MockERC20 is IERC20 {
@@ -47,30 +49,6 @@ contract MockERC20 is IERC20 {
     }
 }
 
-interface IMembership {
-    function roleOf(address) external view returns (bytes32);
-    function canVote(address) external view returns (bool);
-}
-
-contract MockMembership is IMembership {
-    mapping(address => bytes32) public roleOfAddr;
-    mapping(bytes32 => bool) public canVoteRole;
-
-    function roleOf(address u) external view returns (bytes32) {
-        return roleOfAddr[u];
-    }
-
-    function canVote(address u) external view returns (bool) {
-        return canVoteRole[roleOfAddr[u]];
-    }
-
-    /* helpers */
-    function setRole(address u, bytes32 r, bool canVote_) external {
-        roleOfAddr[u] = r;
-        canVoteRole[r] = canVote_;
-    }
-}
-
 contract MockExecutor is IExecutor {
     event Executed(uint256 id, Call[] batch);
 
@@ -91,48 +69,65 @@ contract MockExecutor is IExecutor {
 contract HybridVotingTest is Test {
     /* actors */
     address owner = vm.addr(1);
-    address alice = vm.addr(2); // has role, some tokens
-    address bob = vm.addr(3); // no role, many tokens
-    address carol = vm.addr(4); // role + tokens (quadratic test)
+    address alice = vm.addr(2); // has executive hat (voting + DD power), some tokens
+    address bob = vm.addr(3); // has default hat (voting only, no DD power), many tokens
+    address carol = vm.addr(4); // has executive hat (voting + DD power), tokens
     address nonExecutor = vm.addr(5); // someone without executor access
 
     /* contracts */
     MockERC20 token;
-    MockMembership membership;
+    MockHats hats;
     MockExecutor exec;
     HybridVoting hv;
 
-    /* constants */
-    bytes32 ROLE_EXEC = keccak256("EXEC");
+    /* hat constants */
+    uint256 constant DEFAULT_HAT_ID = 1;
+    uint256 constant EXECUTIVE_HAT_ID = 2;
+    uint256 constant CREATOR_HAT_ID = 3;
 
     /* ────────── set‑up ────────── */
     function setUp() public {
         token = new MockERC20();
-        membership = new MockMembership();
+        hats = new MockHats();
         exec = new MockExecutor();
 
-        /* give roles */
-        membership.setRole(alice, ROLE_EXEC, true);
-        membership.setRole(carol, ROLE_EXEC, true);
+        /* give hats */
+        hats.mintHat(DEFAULT_HAT_ID, alice);
+        hats.mintHat(EXECUTIVE_HAT_ID, alice);
+        hats.mintHat(CREATOR_HAT_ID, alice);
+        hats.mintHat(DEFAULT_HAT_ID, bob); // Bob gets voting permission but no DD power
+        hats.mintHat(DEFAULT_HAT_ID, carol);
+        hats.mintHat(EXECUTIVE_HAT_ID, carol);
+        hats.mintHat(CREATOR_HAT_ID, carol);
 
         /* mint tokens (18 dec) - adjust balances to make sure YES wins */
         token.mint(bob, 400e18); // reduce bob's tokens
         token.mint(alice, 400e18); // increase alice's balance
         token.mint(carol, 600e18); // increase carol's balance
 
-        /* prepare allowed roles/targets for init */
-        bytes32[] memory roles = new bytes32[](1);
-        roles[0] = ROLE_EXEC;
+        /* prepare allowed hats/targets for init */
+        uint256[] memory votingHats = new uint256[](2);
+        votingHats[0] = DEFAULT_HAT_ID;
+        votingHats[1] = EXECUTIVE_HAT_ID;
+        
+        uint256[] memory democracyHats = new uint256[](1);
+        democracyHats[0] = EXECUTIVE_HAT_ID; // Only EXECUTIVE hat gets DD power
+        
+        uint256[] memory creatorHats = new uint256[](1);
+        creatorHats[0] = CREATOR_HAT_ID;
+        
         address[] memory targets = new address[](1);
         targets[0] = address(0xCA11); // random allowed call target
 
         bytes memory initData = abi.encodeCall(
             HybridVoting.initialize,
             (
-                address(membership), // membership
+                address(hats), // hats
                 address(token), // participation token
                 address(exec), // executor
-                roles, // allowed role(s)
+                votingHats, // allowed voting hats
+                democracyHats, // allowed democracy hats (DD power)
+                creatorHats, // allowed creator hats
                 targets, // allowed target(s)
                 uint8(50), // quorum %
                 uint8(50), // 50‑50 split DD : PT
@@ -178,10 +173,25 @@ contract HybridVotingTest is Test {
         assertEq(hv.proposalsCount(), 1, "should store proposal");
     }
 
+    function testCreateProposalUnauthorized() public {
+        // Bob has no creator hat, should fail
+        vm.startPrank(bob);
+
+        IExecutor.Call[][] memory batches = new IExecutor.Call[][](2);
+        batches[0] = new IExecutor.Call[](0);
+        batches[1] = new IExecutor.Call[](0);
+
+        bytes memory metadata = bytes("ipfs://test");
+        vm.expectRevert(HybridVoting.Unauthorized.selector);
+        hv.createProposal(metadata, 30, 2, batches);
+
+        vm.stopPrank();
+    }
+
     /* ───────────────────────── VOTING paths ───────────────────────── */
 
     function _create() internal returns (uint256) {
-        /* anyone with creator role */
+        /* anyone with creator hat */
         vm.startPrank(alice);
 
         IExecutor.Call[][] memory batches = new IExecutor.Call[][](2);
@@ -218,18 +228,31 @@ contract HybridVotingTest is Test {
 
     function testDDOnlyWeight() public {
         _create();
-        /* bob has no DD role => revert */
+        /* bob has voting hat but no DD hat => can vote but only contributes PT power */
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
         vm.prank(bob);
-        hv.vote(0, idx, w); // should succeed thanks to token balance
-        /* check tallies: totalWeight = blendedPower of bob
-           bob 1000 tokens, DD share 50%, so blended= (0*50 + 1000*50)/100 = 500 */
-        /* cheap sanity: totalWeight stored */
-        (, bytes memory data) = address(hv).call(abi.encodeWithSignature("proposalsCount()"));
-        assertEq(uint256(bytes32(data)), 1);
+        hv.vote(0, idx, w); // should succeed because bob has voting hat, but no DD power
+        /* bob contributes only PT power (400e18 tokens), no DD power */
+    }
+
+    function testVoteUnauthorized() public {
+        _create();
+        
+        // Create a voter with no hats and insufficient tokens
+        address poorVoter = vm.addr(10);
+        token.mint(poorVoter, 0.5 ether); // Below minimum balance
+        
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 0;
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+        
+        vm.prank(poorVoter);
+        vm.expectRevert(HybridVoting.Unauthorized.selector);
+        hv.vote(0, idx, w);
     }
 
     function testBlendAndExecution() public {
@@ -239,22 +262,21 @@ contract HybridVotingTest is Test {
         vm.prank(address(exec));
         hv.toggleQuadratic();
 
-        /* YES votes: Alice and Carol */
+        /* YES votes: Alice and Carol (both have DD power) */
         _voteYES(alice);
-
         _voteYES(carol);
 
-        /* NO vote: Bob */
+        /* NO vote: Bob (has voting permission but no DD power, only PT power) */
         uint8[] memory idx = new uint8[](1);
         idx[0] = 1;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
         vm.prank(bob);
-        hv.vote(id, idx, w);
+        hv.vote(id, idx, w); // should succeed with PT power only
 
         /* advance time, finalise */
         vm.warp(block.timestamp + 16 minutes);
-        vm.prank(bob);
+        vm.prank(alice);
         (uint256 win, bool ok) = hv.announceWinner(id);
 
         assertTrue(ok, "quorum not met");
@@ -275,6 +297,70 @@ contract HybridVotingTest is Test {
         _create();
     }
 
+    /* ───────────────────────── HAT MANAGEMENT TESTS ───────────────────────── */
+    function testSetHatAllowed() public {
+        // Test that executor can modify voting hat permissions
+        vm.prank(address(exec));
+        hv.setHatAllowed(DEFAULT_HAT_ID, false);
+        
+        // Alice should still be able to vote with EXECUTIVE_HAT_ID (DD power)
+        _create();
+        _voteYES(alice);
+        
+        // Create a new voter with only the disabled DEFAULT_HAT_ID and insufficient tokens
+        address hatOnlyVoter = vm.addr(15);
+        hats.mintHat(DEFAULT_HAT_ID, hatOnlyVoter);
+        token.mint(hatOnlyVoter, 0.5 ether); // Below minimum balance
+        
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 1;
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+        
+        // This voter should not be able to vote (no valid DD hat, insufficient PT tokens)
+        vm.prank(hatOnlyVoter);
+        vm.expectRevert(HybridVoting.Unauthorized.selector);
+        hv.vote(0, idx, w);
+        
+        // Re-enable the hat and the same voter should now be able to vote
+        vm.prank(address(exec));
+        hv.setHatAllowed(DEFAULT_HAT_ID, true);
+        
+        vm.prank(hatOnlyVoter);
+        hv.vote(0, idx, w); // Should work now with DD power from hat
+    }
+
+    function testSetCreatorHatAllowed() public {
+        // Test that executor can modify creator hat permissions
+        uint256 newCreatorHat = 99;
+        address newCreator = vm.addr(20);
+        
+        // Give new creator the new hat
+        hats.mintHat(newCreatorHat, newCreator);
+        
+        // Enable new hat as creator hat
+        vm.prank(address(exec));
+        hv.setCreatorHatAllowed(newCreatorHat, true);
+        
+        // New creator should be able to create proposal
+        IExecutor.Call[][] memory batches = new IExecutor.Call[][](2);
+        batches[0] = new IExecutor.Call[](0);
+        batches[1] = new IExecutor.Call[](0);
+        
+        vm.prank(newCreator);
+        hv.createProposal(bytes("ipfs://test"), 15, 2, batches);
+        assertEq(hv.proposalsCount(), 1);
+        
+        // Disable new hat
+        vm.prank(address(exec));
+        hv.setCreatorHatAllowed(newCreatorHat, false);
+        
+        // Should now fail
+        vm.prank(newCreator);
+        vm.expectRevert(HybridVoting.Unauthorized.selector);
+        hv.createProposal(bytes("ipfs://test2"), 15, 2, batches);
+    }
+
     /* ───────────────────────── UNAUTHORIZED ACCESS TESTS ───────────────────────── */
     function testOnlyExecutorRevertWhenNonExecutorCallsAdminFunctions() public {
         // Test that non-executors cannot call admin functions
@@ -288,9 +374,13 @@ contract HybridVotingTest is Test {
         vm.expectRevert();
         hv.setExecutor(nonExecutor);
 
-        // Set role allowed
+        // Set hat allowed
         vm.expectRevert();
-        hv.setRoleAllowed(ROLE_EXEC, false);
+        hv.setHatAllowed(DEFAULT_HAT_ID, false);
+
+        // Set creator hat allowed
+        vm.expectRevert();
+        hv.setCreatorHatAllowed(CREATOR_HAT_ID, false);
 
         // Set target allowed
         vm.expectRevert();
@@ -369,62 +459,48 @@ contract HybridVotingTest is Test {
     }
 
     function testSpecialCase() public {
-        // This test creates a tie between a role-based voter and a token-based voter
+        // This test verifies the difference between voting hats and democracy hats
+        // and creates a perfect tie scenario with 50-50 hybrid split
 
         // 1. Setup specific test actors
-        address tokenHolder = vm.addr(40); // No role, only tokens
-        address roleHolder = vm.addr(41); // Has role, no tokens
+        address votingOnlyUser = vm.addr(40); // Has voting hat but no democracy hat
+        address democracyUser = vm.addr(41); // Has democracy hat but insufficient tokens
 
-        // 2. Configure with exact values for a tie
-        bytes32 testRole = keccak256("TIE_TEST_ROLE");
-        membership.setRole(roleHolder, testRole, true);
+        // 2. Give hats
+        hats.mintHat(DEFAULT_HAT_ID, votingOnlyUser); // Voting permission only
+        hats.mintHat(EXECUTIVE_HAT_ID, democracyUser); // Both voting and DD power
 
-        vm.prank(address(exec));
-        hv.setRoleAllowed(testRole, true);
+        // 3. Give tokens to create perfect tie scenario
+        // votingOnlyUser: only PT power (gets 100% of PT slice = 50% total)
+        token.mint(votingOnlyUser, 100 ether);
+        // democracyUser: only DD power (gets 100% of DD slice = 50% total)
+        token.mint(democracyUser, 0.5 ether); // Below MIN_BAL, so no PT power
 
-        // 3. Set DD to exactly 50% (balanced) - this is already the default
-
-        // 4. Mint tokens for precise balance - we need tokenHolder's voting power
-        // to exactly match roleHolder's DD power (DD_UNIT * ddSharePct / 100)
-        // DD_UNIT = 100, ddSharePct = 50, so roleholder gets 50 power
-
-        // For tokenHolder:
-        // MIN_BAL = 1 ether requirement
-        // And we need token balance * (100-ddSharePct)/100 = 50
-        // So token balance = 100 ether (satisfies min balance and gives exactly 50 power)
-        token.mint(tokenHolder, 100 ether);
-
-        // 5. Create a test proposal
+        // 4. Create a test proposal
         uint256 id = _create();
 
-        // 6. Vote opposing options
-
-        // TokenHolder votes YES (option 0)
+        // 5. Both users vote
         uint8[] memory idxYes = new uint8[](1);
         idxYes[0] = 0;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
 
-        vm.prank(tokenHolder);
+        // votingOnlyUser votes YES (only PT power: 50% of total)
+        vm.prank(votingOnlyUser);
         hv.vote(id, idxYes, w);
-        console.log("Token holder voted YES with 100 ether tokens (50% of weight = 50 power)");
 
-        // RoleHolder votes NO (option 1)
+        // democracyUser votes NO (only DD power: 50% of total)
         uint8[] memory idxNo = new uint8[](1);
         idxNo[0] = 1;
 
-        vm.prank(roleHolder);
+        vm.prank(democracyUser);
         hv.vote(id, idxNo, w);
-        console.log("Role holder voted NO with role power (50% of DD_UNIT = 50 power)");
 
-        // 7. Advance time and check results
+        // 6. Advance time and check results
         vm.warp(block.timestamp + 16 minutes);
         (uint256 win, bool valid) = hv.announceWinner(id);
 
-        console.log("Voting result - valid:", valid);
-        console.log("Winning option:", win);
-
-        // 8. The result should be invalid due to a tie (high == second)
-        assertFalse(valid, "Vote should be invalid due to tie");
+        // 7. Should be invalid due to perfect tie (50-50 split)
+        assertFalse(valid, "Should be invalid due to perfect tie");
     }
 }

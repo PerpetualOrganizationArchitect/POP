@@ -9,12 +9,7 @@ import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgra
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IExecutor} from "./Executor.sol";
-
-/* ─────────── External Interfaces ─────────── */
-interface IMembership {
-    function roleOf(address) external view returns (bytes32);
-    function canVote(address) external view returns (bool);
-}
+import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 
 /// Participation‑weighted governor (power = balance or √balance)
 contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
@@ -63,10 +58,11 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     /// @custom:storage-location erc7201:poa.participationvoting.storage
     struct Layout {
         IERC20 participationToken;
-        IMembership membership;
+        IHats hats;
         IExecutor executor;
         mapping(address => bool) allowedTarget;
-        mapping(bytes32 => bool) _allowedRoles;
+        uint256[] _votingHatIds; // array of allowed voting hat IDs
+        uint256[] _creatorHatIds; // array of allowed creator hat IDs
         uint8 quorumPercentage; // 1‑100
         bool quadraticVoting; // toggle
         uint256 MIN_BAL; /* sybil floor */
@@ -83,7 +79,8 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     }
 
     /* ───────────── Events ───────────── */
-    event RoleSet(bytes32 role, bool allowed);
+    event HatSet(uint256 hat, bool allowed);
+    event CreatorHatSet(uint256 hat, bool allowed);
     event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 createdAt);
     event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
@@ -104,15 +101,16 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     function initialize(
         address executor_,
-        address membership_,
+        address hats_,
         address token_,
-        bytes32[] calldata initialRoles,
+        uint256[] calldata initialHats,
+        uint256[] calldata initialCreatorHats,
         address[] calldata initialTargets,
         uint8 quorumPct,
         bool quadratic_,
         uint256 minBalance_
     ) external initializer {
-        if (membership_ == address(0) || token_ == address(0) || executor_ == address(0)) {
+        if (hats_ == address(0) || token_ == address(0) || executor_ == address(0)) {
             revert ZeroAddress();
         }
         require(quorumPct > 0 && quorumPct <= 100, "quorum");
@@ -123,7 +121,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         __ReentrancyGuard_init();
 
         Layout storage l = _layout();
-        l.membership = IMembership(membership_);
+        l.hats = IHats(hats_);
         l.participationToken = IERC20(token_);
         l.executor = IExecutor(executor_);
         l.quorumPercentage = quorumPct;
@@ -134,9 +132,13 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         emit QuadraticToggled(quadratic_);
         emit MinBalanceSet(minBalance_);
 
-        for (uint256 i; i < initialRoles.length; ++i) {
-            l._allowedRoles[initialRoles[i]] = true;
-            emit RoleSet(initialRoles[i], true);
+        for (uint256 i; i < initialHats.length; ++i) {
+            l._votingHatIds.push(initialHats[i]);
+            emit HatSet(initialHats[i], true);
+        }
+        for (uint256 i; i < initialCreatorHats.length; ++i) {
+            l._creatorHatIds.push(initialCreatorHats[i]);
+            emit CreatorHatSet(initialCreatorHats[i], true);
         }
         for (uint256 i; i < initialTargets.length; ++i) {
             l.allowedTarget[initialTargets[i]] = true;
@@ -159,9 +161,56 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         emit ExecutorUpdated(a);
     }
 
-    function setRoleAllowed(bytes32 r, bool ok) external onlyExecutor {
-        _layout()._allowedRoles[r] = ok;
-        emit RoleSet(r, ok);
+    function setHatAllowed(uint256 h, bool ok) external onlyExecutor {
+        Layout storage l = _layout();
+        
+        // Check if hat is already in the array
+        bool wasAllowed = false;
+        uint256 existingIndex = type(uint256).max;
+        for (uint256 i = 0; i < l._votingHatIds.length; i++) {
+            if (l._votingHatIds[i] == h) {
+                wasAllowed = true;
+                existingIndex = i;
+                break;
+            }
+        }
+        
+        if (ok && !wasAllowed) {
+            // Adding new hat
+            l._votingHatIds.push(h);
+        } else if (!ok && wasAllowed) {
+            // Removing hat - remove from array
+            l._votingHatIds[existingIndex] = l._votingHatIds[l._votingHatIds.length - 1];
+            l._votingHatIds.pop();
+        }
+        
+        emit HatSet(h, ok);
+    }
+
+    function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
+        Layout storage l = _layout();
+        
+        // Check if hat is already in the array
+        bool wasAllowed = false;
+        uint256 existingIndex = type(uint256).max;
+        for (uint256 i = 0; i < l._creatorHatIds.length; i++) {
+            if (l._creatorHatIds[i] == h) {
+                wasAllowed = true;
+                existingIndex = i;
+                break;
+            }
+        }
+        
+        if (ok && !wasAllowed) {
+            // Adding new hat
+            l._creatorHatIds.push(h);
+        } else if (!ok && wasAllowed) {
+            // Removing hat - remove from array
+            l._creatorHatIds[existingIndex] = l._creatorHatIds[l._creatorHatIds.length - 1];
+            l._creatorHatIds.pop();
+        }
+        
+        emit CreatorHatSet(h, ok);
     }
 
     function setTargetAllowed(address t, bool ok) external onlyExecutor {
@@ -190,8 +239,18 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     /* ───────────── Modifiers ───────────── */
     modifier onlyCreator() {
         Layout storage l = _layout();
-        if (_msgSender() != address(l.executor) && !l._allowedRoles[l.membership.roleOf(_msgSender())]) {
-            revert Unauthorized();
+        if (_msgSender() != address(l.executor)) {
+            bool canCreate = _hasCreatorHat(_msgSender());
+            if (!canCreate) revert Unauthorized();
+        }
+        _;
+    }
+
+    modifier onlyVoter() {
+        Layout storage l = _layout();
+        if (_msgSender() != address(l.executor)) {
+            bool canVote = _hasVotingHat(_msgSender());
+            if (!canVote) revert Unauthorized();
         }
         _;
     }
@@ -248,11 +307,13 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         external
         exists(id)
         notExpired(id)
+        onlyVoter
         whenNotPaused
     {
         if (idxs.length != weights.length) revert LengthMismatch();
 
         Layout storage l = _layout();
+        
         uint256 bal = l.participationToken.balanceOf(_msgSender());
         if (bal < l.MIN_BAL) revert MinBalance();
         uint256 power = l.quadraticVoting ? Math.sqrt(bal) : bal;
@@ -370,8 +431,8 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         return _layout().participationToken;
     }
 
-    function membership() external view returns (IMembership) {
-        return _layout().membership;
+    function hats() external view returns (IHats) {
+        return _layout().hats;
     }
 
     function executor() external view returns (IExecutor) {
@@ -388,5 +449,28 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     function quadraticVoting() external view returns (bool) {
         return _layout().quadraticVoting;
+    }
+
+    /* ───────────── Internal Helper Functions ───────────── */
+    function _hasVotingHat(address user) internal view returns (bool) {
+        Layout storage l = _layout();
+        // Check only the specific allowed voting hats
+        for (uint256 i = 0; i < l._votingHatIds.length; i++) {
+            if (l.hats.isWearerOfHat(user, l._votingHatIds[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _hasCreatorHat(address user) internal view returns (bool) {
+        Layout storage l = _layout();
+        // Check only the specific allowed creator hats
+        for (uint256 i = 0; i < l._creatorHatIds.length; i++) {
+            if (l.hats.isWearerOfHat(user, l._creatorHatIds[i])) {
+                return true;
+            }
+        }
+        return false;
     }
 }
