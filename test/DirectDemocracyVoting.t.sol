@@ -15,7 +15,7 @@ contract MockExecutor is IExecutor {
         for (uint256 i; i < batch.length; ++i) {
             last.push(batch[i]);
             // Actually execute the call on the target
-            (bool success, ) = batch[i].target.call{value: batch[i].value}(batch[i].data);
+            (bool success,) = batch[i].target.call{value: batch[i].value}(batch[i].data);
             require(success, "MockExecutor: call failed");
         }
     }
@@ -458,10 +458,10 @@ contract DDVotingTest is Test {
 
         // Create election with 3 candidates (3 options)
         // Option 0: Alice wins -> mint executive hat to Alice
-        // Option 1: Bob wins -> mint executive hat to Bob  
+        // Option 1: Bob wins -> mint executive hat to Bob
         // Option 2: Charlie wins -> mint executive hat to Charlie
         IExecutor.Call[][] memory batches = new IExecutor.Call[][](3);
-        
+
         // Alice option (index 0)
         batches[0] = new IExecutor.Call[](1);
         batches[0][0] = IExecutor.Call({
@@ -510,7 +510,7 @@ contract DDVotingTest is Test {
 
         // Announce winner and execute - Bob should get the hat
         (uint256 winner, bool valid) = dd.announceWinner(proposalId);
-        
+
         assertTrue(valid, "Vote should be valid");
         assertEq(winner, 1, "Bob (option 1) should win");
 
@@ -538,7 +538,7 @@ contract DDVotingTest is Test {
 
         // Create election where winner gets both executive and manager hats
         IExecutor.Call[][] memory batches = new IExecutor.Call[][](2);
-        
+
         // Alice option: gets both hats
         batches[0] = new IExecutor.Call[](2);
         batches[0][0] = IExecutor.Call({
@@ -577,7 +577,7 @@ contract DDVotingTest is Test {
         // Fast forward and execute
         vm.warp(block.timestamp + 61 minutes);
         (uint256 winner, bool valid) = dd.announceWinner(proposalId);
-        
+
         assertTrue(valid, "Vote should be valid");
         assertEq(winner, 0, "Alice (option 0) should win");
 

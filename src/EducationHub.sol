@@ -47,14 +47,14 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     struct Layout {
         mapping(uint256 => Module) _modules;
         mapping(address => mapping(uint256 => uint256)) _progress;
-        uint48 nextModuleId;                          // packed with executor address
-        address executor;                             // 20 bytes + 6 bytes = 26 bytes (fits in one slot)
+        uint48 nextModuleId; // packed with executor address
+        address executor; // 20 bytes + 6 bytes = 26 bytes (fits in one slot)
         IHats hats;
         IParticipationToken token;
-        uint256[] creatorHatIds;                      // enumeration array for creator hats
-        mapping(uint256 => uint256) idxCreator;       // hatId -> index+1 for creator hats
-        uint256[] memberHatIds;                       // enumeration array for member hats
-        mapping(uint256 => uint256) idxMember;        // hatId -> index+1 for member hats
+        uint256[] creatorHatIds; // enumeration array for creator hats
+        mapping(uint256 => uint256) idxCreator; // hatId -> index+1 for creator hats
+        uint256[] memberHatIds; // enumeration array for member hats
+        mapping(uint256 => uint256) idxMember; // hatId -> index+1 for member hats
     }
 
     // keccak256("poa.educationhub.storage") → unique, collision-free slot

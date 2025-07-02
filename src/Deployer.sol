@@ -288,10 +288,10 @@ contract Deployer is Initializable, OwnableUpgradeable {
         memberHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
 
         bytes memory init = abi.encodeWithSignature(
-            "initialize(address,address,address,uint256[],uint256[])", 
-            token, 
-            address(hats), 
-            executorAddr, 
+            "initialize(address,address,address,uint256[],uint256[])",
+            token,
+            address(hats),
+            executorAddr,
             creatorHats,
             memberHats
         );
