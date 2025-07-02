@@ -38,7 +38,9 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     uint8 public constant MAX_CALLS = 20;
     uint32 public constant MAX_DURATION = 43_200; /* 30 days */
     uint32 public constant MIN_DURATION = 10; /* 10 min   */
-
+    
+    /* ─────── Hat Type Enum ─────── */
+    enum HatType { VOTING, DEMOCRACY, CREATOR }
     /* ─────── Data Structures ─────── */
     struct PollOption {
         uint128 ddRaw; // sum of DD raw points (0‑100 per voter)
@@ -139,21 +141,37 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         l.MIN_BAL = minBalance_;
         emit MinBalanceSet(minBalance_);
 
-        for (uint256 i; i < initialVotingHats.length; ++i) {
-            l._votingHatIds.push(initialVotingHats[i]);
-            emit HatSet(initialVotingHats[i], true);
+        _initializeHats(initialVotingHats, initialDemocracyHats, initialCreatorHats);
+        _initializeTargets(initialTargets);
+    }
+
+    /* ─────── Internal Initialization Helpers ─────── */
+    function _initializeHats(
+        uint256[] calldata votingHats,
+        uint256[] calldata democracyHats,
+        uint256[] calldata creatorHats
+    ) internal {
+        Layout storage l = _layout();
+        
+        for (uint256 i; i < votingHats.length; ++i) {
+            l._votingHatIds.push(votingHats[i]);
+            emit HatSet(votingHats[i], true);
         }
-        for (uint256 i; i < initialDemocracyHats.length; ++i) {
-            l._democracyHatIds.push(initialDemocracyHats[i]);
-            emit DemocracyHatSet(initialDemocracyHats[i], true);
+        for (uint256 i; i < democracyHats.length; ++i) {
+            l._democracyHatIds.push(democracyHats[i]);
+            emit DemocracyHatSet(democracyHats[i], true);
         }
-        for (uint256 i; i < initialCreatorHats.length; ++i) {
-            l._creatorHatIds.push(initialCreatorHats[i]);
-            emit CreatorHatSet(initialCreatorHats[i], true);
+        for (uint256 i; i < creatorHats.length; ++i) {
+            l._creatorHatIds.push(creatorHats[i]);
+            emit CreatorHatSet(creatorHats[i], true);
         }
-        for (uint256 i; i < initialTargets.length; ++i) {
-            l.allowedTarget[initialTargets[i]] = true;
-            emit TargetAllowed(initialTargets[i], true);
+    }
+
+    function _initializeTargets(address[] calldata targets) internal {
+        Layout storage l = _layout();
+        for (uint256 i; i < targets.length; ++i) {
+            l.allowedTarget[targets[i]] = true;
+            emit TargetAllowed(targets[i], true);
         }
     }
 
@@ -177,55 +195,14 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         emit ExecutorUpdated(a);
     }
 
+    /* ─────── Consolidated Hat Management ─────── */
     function setHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        Layout storage l = _layout();
-        
-        // Check if hat is already in the array
-        bool wasAllowed = false;
-        uint256 existingIndex = type(uint256).max;
-        for (uint256 i = 0; i < l._votingHatIds.length; i++) {
-            if (l._votingHatIds[i] == h) {
-                wasAllowed = true;
-                existingIndex = i;
-                break;
-            }
-        }
-        
-        if (ok && !wasAllowed) {
-            // Adding new hat
-            l._votingHatIds.push(h);
-        } else if (!ok && wasAllowed) {
-            // Removing hat - remove from array
-            l._votingHatIds[existingIndex] = l._votingHatIds[l._votingHatIds.length - 1];
-            l._votingHatIds.pop();
-        }
-        
+        _setHatAllowed(h, ok, HatType.VOTING);
         emit HatSet(h, ok);
     }
 
     function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        Layout storage l = _layout();
-        
-        // Check if hat is already in the array
-        bool wasAllowed = false;
-        uint256 existingIndex = type(uint256).max;
-        for (uint256 i = 0; i < l._creatorHatIds.length; i++) {
-            if (l._creatorHatIds[i] == h) {
-                wasAllowed = true;
-                existingIndex = i;
-                break;
-            }
-        }
-        
-        if (ok && !wasAllowed) {
-            // Adding new hat
-            l._creatorHatIds.push(h);
-        } else if (!ok && wasAllowed) {
-            // Removing hat - remove from array
-            l._creatorHatIds[existingIndex] = l._creatorHatIds[l._creatorHatIds.length - 1];
-            l._creatorHatIds.pop();
-        }
-        
+        _setHatAllowed(h, ok, HatType.CREATOR);
         emit CreatorHatSet(h, ok);
     }
 
@@ -258,47 +235,57 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     }
 
     function setDemocracyHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        Layout storage l = _layout();
-        
-        // Check if hat is already in the array
-        bool wasAllowed = false;
-        uint256 existingIndex = type(uint256).max;
-        for (uint256 i = 0; i < l._democracyHatIds.length; i++) {
-            if (l._democracyHatIds[i] == h) {
-                wasAllowed = true;
-                existingIndex = i;
-                break;
-            }
-        }
-        
-        if (ok && !wasAllowed) {
-            // Adding new hat
-            l._democracyHatIds.push(h);
-        } else if (!ok && wasAllowed) {
-            // Removing hat - remove from array
-            l._democracyHatIds[existingIndex] = l._democracyHatIds[l._democracyHatIds.length - 1];
-            l._democracyHatIds.pop();
-        }
-        
+        _setHatAllowed(h, ok, HatType.DEMOCRACY);
         emit DemocracyHatSet(h, ok);
     }
 
-    /* ─────── Helpers & modifiers ─────── */
-    modifier onlyCreator() {
+    function _setHatAllowed(uint256 h, bool ok, HatType hatType) internal {
         Layout storage l = _layout();
-        if (_msgSender() != address(l.executor)) {
-            bool canCreate = _hasCreatorHat(_msgSender());
-            if (!canCreate) revert Unauthorized();
+        
+        if (hatType == HatType.VOTING) {
+            _updateHatArray(l._votingHatIds, h, ok);
+        } else if (hatType == HatType.DEMOCRACY) {
+            _updateHatArray(l._democracyHatIds, h, ok);
+        } else {
+            _updateHatArray(l._creatorHatIds, h, ok);
         }
+    }
+
+    function _updateHatArray(uint256[] storage hatArray, uint256 h, bool ok) internal {
+        (bool wasAllowed, uint256 existingIndex) = _findHatIndex(hatArray, h);
+        
+        if (ok && !wasAllowed) {
+            hatArray.push(h);
+        } else if (!ok && wasAllowed) {
+            hatArray[existingIndex] = hatArray[hatArray.length - 1];
+            hatArray.pop();
+        }
+    }
+
+    function _findHatIndex(uint256[] storage hatArray, uint256 h) internal view returns (bool found, uint256 index) {
+        for (uint256 i = 0; i < hatArray.length; i++) {
+            if (hatArray[i] == h) {
+                return (true, i);
+            }
+        }
+        return (false, 0);
+    }
+
+    /* ─────── Helpers & modifiers ─────── */
+    function _checkPermission(HatType requiredType) internal view {
+        Layout storage l = _layout();
+        if (_msgSender() != address(l.executor) && !_hasHat(_msgSender(), requiredType)) {
+            revert Unauthorized();
+        }
+    }
+
+    modifier onlyCreator() {
+        _checkPermission(HatType.CREATOR);
         _;
     }
 
     modifier onlyVoter() {
-        Layout storage l = _layout();
-        if (_msgSender() != address(l.executor)) {
-            bool canVote = _hasVotingHat(_msgSender());
-            if (!canVote) revert Unauthorized();
-        }
+        _checkPermission(HatType.VOTING);
         _;
     }
 
@@ -364,8 +351,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
         /* collect raw powers */
-        bool hasVotingHat = (_msgSender() == address(l.executor)) || _hasVotingHat(_msgSender());
-        bool hasDemocracyHat = (_msgSender() == address(l.executor)) || _hasDemocracyHat(_msgSender());
+        bool hasDemocracyHat = (_msgSender() == address(l.executor)) || _hasHat(_msgSender(), HatType.DEMOCRACY);
         
         uint256 ddRawVoter = hasDemocracyHat ? 100 : 0; // DD power only if has democracy hat
         uint256 bal = l.participationToken.balanceOf(_msgSender());
@@ -524,37 +510,38 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         return _layout().MIN_BAL;
     }
 
-    /* ─────── Internal Helper Functions ─────── */
-    function _hasVotingHat(address user) internal view returns (bool) {
+    /* ─────── Consolidated Hat Checking ─────── */
+    function _hasHat(address user, HatType hatType) internal view returns (bool) {
         Layout storage l = _layout();
-        // Check only the specific allowed voting hats
-        for (uint256 i = 0; i < l._votingHatIds.length; i++) {
-            if (l.hats.isWearerOfHat(user, l._votingHatIds[i])) {
+        
+        if (hatType == HatType.VOTING) {
+            return _checkHatArray(l._votingHatIds, user, l.hats);
+        } else if (hatType == HatType.DEMOCRACY) {
+            return _checkHatArray(l._democracyHatIds, user, l.hats);
+        } else {
+            return _checkHatArray(l._creatorHatIds, user, l.hats);
+        }
+    }
+
+    function _checkHatArray(uint256[] storage hatArray, address user, IHats hatsContract) internal view returns (bool) {
+        for (uint256 i = 0; i < hatArray.length; i++) {
+            if (hatsContract.isWearerOfHat(user, hatArray[i])) {
                 return true;
             }
         }
         return false;
+    }
+
+    /* ─────── Legacy Helper Functions (for compatibility) ─────── */
+    function _hasVotingHat(address user) internal view returns (bool) {
+        return _hasHat(user, HatType.VOTING);
     }
 
     function _hasCreatorHat(address user) internal view returns (bool) {
-        Layout storage l = _layout();
-        // Check only the specific allowed creator hats
-        for (uint256 i = 0; i < l._creatorHatIds.length; i++) {
-            if (l.hats.isWearerOfHat(user, l._creatorHatIds[i])) {
-                return true;
-            }
-        }
-        return false;
+        return _hasHat(user, HatType.CREATOR);
     }
 
     function _hasDemocracyHat(address user) internal view returns (bool) {
-        Layout storage l = _layout();
-        // Check only the specific allowed democracy hats
-        for (uint256 i = 0; i < l._democracyHatIds.length; i++) {
-            if (l.hats.isWearerOfHat(user, l._democracyHatIds[i])) {
-                return true;
-            }
-        }
-        return false;
+        return _hasHat(user, HatType.DEMOCRACY);
     }
 }
