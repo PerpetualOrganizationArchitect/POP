@@ -93,6 +93,12 @@ contract PVotingTest is Test {
         return pv.proposalsCount() - 1;
     }
 
+    function _createHatPoll(uint8 opts, uint256[] memory hatIds) internal returns (uint256) {
+        vm.prank(creator);
+        pv.createHatPoll("meta", 10, opts, hatIds);
+        return pv.proposalsCount() - 1;
+    }
+
     function testInitializeZeroAddress() public {
         ParticipationVoting impl = new ParticipationVoting();
         uint256[] memory h = new uint256[](1);
@@ -444,5 +450,58 @@ contract PVotingTest is Test {
         address[] memory vs = new address[](1);
         vs[0] = voter;
         pv.cleanupProposal(id, vs);
+    }
+
+    function testCreateHatPoll() public {
+        uint256[] memory hatIds = new uint256[](1);
+        hatIds[0] = HAT_ID;
+        
+        // Expect the NewHatProposal event to be emitted
+        vm.expectEmit(true, true, true, true);
+        emit ParticipationVoting.NewHatProposal(0, "meta", 2, uint64(block.timestamp + 10 minutes), uint64(block.timestamp), hatIds);
+        
+        uint256 id = _createHatPoll(2, hatIds);
+        assertTrue(pv.pollRestricted(id));
+        assertTrue(pv.pollHatAllowed(id, HAT_ID));
+        assertFalse(pv.pollHatAllowed(id, CREATOR_HAT_ID));
+    }
+
+    function testHatPollRestrictions() public {
+        // Create a different hat for the poll
+        uint256 POLL_HAT_ID = 99;
+        hats.createHat(POLL_HAT_ID, "Poll Hat", type(uint32).max, address(0), address(0), true, "");
+        
+        uint256[] memory hatIds = new uint256[](1);
+        hatIds[0] = POLL_HAT_ID;
+        uint256 id = _createHatPoll(2, hatIds);
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 0;
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+
+        // First test: voter with valid hat but not the specific poll hat should get RoleNotAllowed
+        vm.prank(voter);
+        vm.expectRevert(ParticipationVoting.RoleNotAllowed.selector);
+        pv.vote(id, idx, w);
+
+        // Second test: voter with correct hat should succeed
+        hats.mintHat(POLL_HAT_ID, voter);
+        vm.prank(voter);
+        pv.vote(id, idx, w);
+    }
+
+    function testHatPollUnrestricted() public {
+        // Empty hat IDs should create unrestricted poll
+        uint256[] memory hatIds = new uint256[](0);
+        uint256 id = _createHatPoll(1, hatIds);
+        assertFalse(pv.pollRestricted(id));
+        
+        // Anyone with voting hat should be able to vote
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 0;
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+        vm.prank(voter);
+        pv.vote(id, idx, w);
     }
 }

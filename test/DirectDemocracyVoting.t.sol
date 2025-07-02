@@ -389,6 +389,11 @@ contract DDVotingTest is Test {
     function testPollRestrictedViews() public {
         uint256[] memory hatIds = new uint256[](1);
         hatIds[0] = HAT_ID;
+        
+        // Expect the NewHatProposal event to be emitted
+        vm.expectEmit(true, true, true, true);
+        emit DirectDemocracyVoting.NewHatProposal(0, "meta", 1, uint64(block.timestamp + 10 minutes), uint64(block.timestamp), hatIds);
+        
         uint256 id = _createHatPoll(1, hatIds);
         assertTrue(dd.pollRestricted(id));
         assertTrue(dd.pollHatAllowed(id, HAT_ID));

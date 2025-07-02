@@ -33,6 +33,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     error MinBalance();
     error Overflow();
     error InvalidMetadata();
+    error RoleNotAllowed();
 
     /* ───────────── Constants ───────────── */
     bytes4 public constant MODULE_ID = 0x70766F74; /* "pvot" */
@@ -55,6 +56,8 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         PollOption[] options;
         mapping(address => bool) hasVoted;
         IExecutor.Call[][] batches; // can be empty
+        uint256[] pollHatIds; // array of specific hat IDs for this poll
+        bool restricted; // if true only pollHatIds can vote
     }
 
     /* ─────────── ERC-7201 Storage ─────────── */
@@ -85,6 +88,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     event HatSet(uint256 hat, bool allowed);
     event CreatorHatSet(uint256 hat, bool allowed);
     event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 createdAt);
+    event NewHatProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 createdAt, uint256[] hatIds);
     event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
     event ExecutorUpdated(address newExecutor);
@@ -293,6 +297,34 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
     }
 
+    /// @notice Create a poll restricted to certain hats. Execution is disabled.
+    function createHatPoll(bytes calldata metadata, uint32 minutesDuration, uint8 numOptions, uint256[] calldata hatIds)
+        external
+        onlyCreator
+        whenNotPaused
+    {
+        if (metadata.length == 0) revert InvalidMetadata();
+        if (numOptions == 0) revert LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
+        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
+
+        Layout storage l = _layout();
+        uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
+        Proposal storage p = l._proposals.push();
+        p.endTimestamp = endTs;
+        p.restricted = hatIds.length > 0;
+
+        uint256 id = l._proposals.length - 1;
+        for (uint256 i; i < numOptions; ++i) {
+            p.options.push(PollOption(0));
+            p.batches.push();
+        }
+        for (uint256 i; i < hatIds.length; ++i) {
+            p.pollHatIds.push(hatIds[i]);
+        }
+        emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
+    }
+
     /* ───────────── Voting ───────────── */
     function vote(uint256 id, uint8[] calldata idxs, uint8[] calldata weights)
         external
@@ -311,6 +343,16 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         require(power > 0, "power=0");
 
         Proposal storage p = l._proposals[id];
+        if (p.restricted) {
+            bool hasAllowedHat = false;
+            for (uint256 i = 0; i < p.pollHatIds.length; i++) {
+                if (l.hats.isWearerOfHat(_msgSender(), p.pollHatIds[i])) {
+                    hasAllowedHat = true;
+                    break;
+                }
+            }
+            if (!hasAllowedHat) revert RoleNotAllowed();
+        }
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
         uint256 seen;
@@ -440,6 +482,23 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     function quadraticVoting() external view returns (bool) {
         return _layout().quadraticVoting;
+    }
+
+    function pollHatAllowed(uint256 id, uint256 hat) external view returns (bool) {
+        Layout storage l = _layout();
+        if (id >= l._proposals.length) revert InvalidProposal();
+        for (uint256 i = 0; i < l._proposals[id].pollHatIds.length; i++) {
+            if (l._proposals[id].pollHatIds[i] == hat) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function pollRestricted(uint256 id) external view returns (bool) {
+        Layout storage l = _layout();
+        if (id >= l._proposals.length) revert InvalidProposal();
+        return l._proposals[id].restricted;
     }
 
     /* ───────────── Internal Helper Functions ───────────── */
