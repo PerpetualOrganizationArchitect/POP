@@ -59,14 +59,14 @@ contract PVotingTest is Test {
         hats = new MockHats();
         t = new MockToken();
         exec = new MockExecutor();
-        
+
         // Mint voting hat to both creator and voter
         hats.mintHat(HAT_ID, creator);
         hats.mintHat(HAT_ID, voter);
-        
+
         // Mint creator hat only to creator
         hats.mintHat(CREATOR_HAT_ID, creator);
-        
+
         // Give voter some tokens
         t.mint(voter, 10 ether);
 
@@ -77,7 +77,17 @@ contract PVotingTest is Test {
         initialCreatorHats[0] = CREATOR_HAT_ID;
         bytes memory data = abi.encodeCall(
             ParticipationVoting.initialize,
-            (address(exec), address(hats), address(t), initialHats, initialCreatorHats, new address[](0), 50, false, 1 ether)
+            (
+                address(exec),
+                address(hats),
+                address(t),
+                initialHats,
+                initialCreatorHats,
+                new address[](0),
+                50,
+                false,
+                1 ether
+            )
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), data);
         pv = ParticipationVoting(address(proxy));
@@ -117,7 +127,17 @@ contract PVotingTest is Test {
         ParticipationVoting impl = new ParticipationVoting();
         bytes memory data = abi.encodeCall(
             ParticipationVoting.initialize,
-            (address(exec), address(hats), address(t), new uint256[](0), new uint256[](0), new address[](0), 0, false, 1 ether)
+            (
+                address(exec),
+                address(hats),
+                address(t),
+                new uint256[](0),
+                new uint256[](0),
+                new address[](0),
+                0,
+                false,
+                1 ether
+            )
         );
         vm.expectRevert("quorum");
         new ERC1967Proxy(address(impl), data);
@@ -164,7 +184,7 @@ contract PVotingTest is Test {
         vm.prank(creator);
         pv.createProposal("m", 10, 1, b);
         assertEq(pv.proposalsCount(), 1);
-        
+
         // But voting should fail
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
@@ -173,7 +193,7 @@ contract PVotingTest is Test {
         vm.prank(voter);
         vm.expectRevert(ParticipationVoting.Unauthorized.selector);
         pv.vote(0, idx, w);
-        
+
         // Re-enable voting
         vm.prank(address(exec));
         pv.setHatAllowed(HAT_ID, true);
@@ -184,11 +204,11 @@ contract PVotingTest is Test {
     function testSetCreatorHatAllowed() public {
         uint256 newHatId = 123;
         address newCreator = address(0xbeef);
-        
+
         // Create and assign new hat
         hats.createHat(newHatId, "New Creator Hat", 1, address(0), address(0), true, "");
         hats.mintHat(newHatId, newCreator);
-        
+
         // Enable new hat as creator hat
         vm.prank(address(exec));
         pv.setCreatorHatAllowed(newHatId, true);
@@ -203,7 +223,7 @@ contract PVotingTest is Test {
         // Disable new hat
         vm.prank(address(exec));
         pv.setCreatorHatAllowed(newHatId, false);
-        
+
         // Should now fail
         vm.prank(newCreator);
         vm.expectRevert(ParticipationVoting.Unauthorized.selector);
@@ -455,11 +475,13 @@ contract PVotingTest is Test {
     function testCreateHatPoll() public {
         uint256[] memory hatIds = new uint256[](1);
         hatIds[0] = HAT_ID;
-        
+
         // Expect the NewHatProposal event to be emitted
         vm.expectEmit(true, true, true, true);
-        emit ParticipationVoting.NewHatProposal(0, "meta", 2, uint64(block.timestamp + 10 minutes), uint64(block.timestamp), hatIds);
-        
+        emit ParticipationVoting.NewHatProposal(
+            0, "meta", 2, uint64(block.timestamp + 10 minutes), uint64(block.timestamp), hatIds
+        );
+
         uint256 id = _createHatPoll(2, hatIds);
         assertTrue(pv.pollRestricted(id));
         assertTrue(pv.pollHatAllowed(id, HAT_ID));
@@ -470,7 +492,7 @@ contract PVotingTest is Test {
         // Create a different hat for the poll
         uint256 POLL_HAT_ID = 99;
         hats.createHat(POLL_HAT_ID, "Poll Hat", type(uint32).max, address(0), address(0), true, "");
-        
+
         uint256[] memory hatIds = new uint256[](1);
         hatIds[0] = POLL_HAT_ID;
         uint256 id = _createHatPoll(2, hatIds);
@@ -495,7 +517,7 @@ contract PVotingTest is Test {
         uint256[] memory hatIds = new uint256[](0);
         uint256 id = _createHatPoll(1, hatIds);
         assertFalse(pv.pollRestricted(id));
-        
+
         // Anyone with voting hat should be able to vote
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;

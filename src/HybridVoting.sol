@@ -39,10 +39,15 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     uint8 public constant MAX_CALLS = 20;
     uint32 public constant MAX_DURATION = 43_200; /* 30 days */
     uint32 public constant MIN_DURATION = 10; /* 10 min   */
-    
+
     /* ─────── Hat Type Enum ─────── */
-    enum HatType { VOTING, DEMOCRACY, CREATOR }
+    enum HatType {
+        VOTING,
+        DEMOCRACY,
+        CREATOR
+    }
     /* ─────── Data Structures ─────── */
+
     struct PollOption {
         uint128 ddRaw; // sum of DD raw points (0‑100 per voter)
         uint128 ptRaw; // sum of PT raw points (power×weight)
@@ -157,7 +162,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         uint256[] calldata creatorHats
     ) internal {
         Layout storage l = _layout();
-        
+
         for (uint256 i; i < votingHats.length; ++i) {
             _setHatAllowed(votingHats[i], true, HatType.VOTING);
         }
@@ -240,7 +245,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
 
     function _setHatAllowed(uint256 h, bool ok, HatType hatType) internal {
         Layout storage l = _layout();
-        
+
         if (hatType == HatType.VOTING) {
             // Find if hat already exists
             uint256 existingIndex = type(uint256).max;
@@ -250,7 +255,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
                     break;
                 }
             }
-            
+
             if (ok && existingIndex == type(uint256).max) {
                 // Adding new hat (not found)
                 l.votingHatIds.push(h);
@@ -270,7 +275,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
                     break;
                 }
             }
-            
+
             if (ok && existingIndex == type(uint256).max) {
                 // Adding new hat (not found)
                 l.democracyHatIds.push(h);
@@ -290,7 +295,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
                     break;
                 }
             }
-            
+
             if (ok && existingIndex == type(uint256).max) {
                 // Adding new hat (not found)
                 l.creatorHatIds.push(h);
@@ -424,7 +429,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
 
         /* collect raw powers */
         bool hasDemocracyHat = (_msgSender() == address(l.executor)) || _hasHat(_msgSender(), HatType.DEMOCRACY);
-        
+
         uint256 ddRawVoter = hasDemocracyHat ? 100 : 0; // DD power only if has democracy hat
         uint256 bal = l.participationToken.balanceOf(_msgSender());
         if (bal < l.MIN_BAL) bal = 0;
@@ -599,7 +604,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     function _hasHat(address user, HatType hatType) internal view returns (bool) {
         Layout storage l = _layout();
         uint256[] storage ids;
-        
+
         if (hatType == HatType.VOTING) {
             ids = l.votingHatIds;
         } else if (hatType == HatType.DEMOCRACY) {
@@ -607,7 +612,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         } else {
             ids = l.creatorHatIds;
         }
-        
+
         uint256 len = ids.length;
         if (len == 0) return false;
         if (len == 1) return l.hats.isWearerOfHat(user, ids[0]); // micro-optimise 1-ID case

@@ -13,7 +13,6 @@ import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 
 /// Participation‑weighted governor (power = balance or √balance)
 contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
-
     /* ─────────────── Errors ─────────────── */
     error Unauthorized();
     error AlreadyVoted();
@@ -44,7 +43,10 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     uint32 public constant MIN_DURATION_MIN = 10;
 
     /* ─────────── Hat Type Enum ─────────── */
-    enum HatType { VOTING, CREATOR }
+    enum HatType {
+        VOTING,
+        CREATOR
+    }
 
     /* ───────────── Data Structures ───────────── */
     struct PollOption {
@@ -90,7 +92,9 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     event HatSet(uint256 hat, bool allowed);
     event CreatorHatSet(uint256 hat, bool allowed);
     event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 createdAt);
-    event NewHatProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 createdAt, uint256[] hatIds);
+    event NewHatProposal(
+        uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 createdAt, uint256[] hatIds
+    );
     event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
     event ExecutorUpdated(address newExecutor);
@@ -178,7 +182,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     function _setHatAllowed(uint256 h, bool ok, HatType hatType) internal {
         Layout storage l = _layout();
-        
+
         if (hatType == HatType.VOTING) {
             // Find if hat already exists
             uint256 existingIndex = type(uint256).max;
@@ -188,7 +192,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
                     break;
                 }
             }
-            
+
             if (ok && existingIndex == type(uint256).max) {
                 // Adding new hat (not found)
                 l.votingHatIds.push(h);
@@ -208,7 +212,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
                     break;
                 }
             }
-            
+
             if (ok && existingIndex == type(uint256).max) {
                 // Adding new hat (not found)
                 l.creatorHatIds.push(h);
@@ -351,7 +355,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         if (idxs.length != weights.length) revert LengthMismatch();
 
         Layout storage l = _layout();
-        
+
         uint256 bal = l.participationToken.balanceOf(_msgSender());
         if (bal < l.MIN_BAL) revert MinBalance();
         uint256 power = l.quadraticVoting ? Math.sqrt(bal) : bal;
@@ -516,8 +520,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     /// @dev Returns true if `user` wears *any* hat of the requested type.
     function _hasHat(address user, HatType hatType) internal view returns (bool) {
         Layout storage l = _layout();
-        uint256[] storage ids =
-            hatType == HatType.VOTING ? l.votingHatIds : l.creatorHatIds;
+        uint256[] storage ids = hatType == HatType.VOTING ? l.votingHatIds : l.creatorHatIds;
 
         uint256 len = ids.length;
         if (len == 0) return false;

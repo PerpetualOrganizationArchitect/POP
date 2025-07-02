@@ -11,8 +11,7 @@ import {IExecutor} from "./Executor.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 
 /* ──────────────────  Direct‑democracy governor  ─────────────────────── */
-contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable{
-
+contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
     /* ─────────── Errors ─────────── */
     error Unauthorized();
     error AlreadyVoted();
@@ -42,7 +41,10 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     uint32 public constant MIN_DURATION_MIN = 10; /* spam guard */
 
     /* ─────────── Hat Type Enum ─────────── */
-    enum HatType { VOTING, CREATOR }
+    enum HatType {
+        VOTING,
+        CREATOR
+    }
 
     /* ─────────── Data Structures ─────────── */
     struct PollOption {
@@ -170,7 +172,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
 
     function _setHatAllowed(uint256 h, bool ok, HatType hatType) internal {
         Layout storage l = _layout();
-        
+
         if (hatType == HatType.VOTING) {
             // Find if hat already exists
             uint256 existingIndex = type(uint256).max;
@@ -180,7 +182,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
                     break;
                 }
             }
-            
+
             if (ok && existingIndex == type(uint256).max) {
                 // Adding new hat (not found)
                 l.votingHatIds.push(h);
@@ -200,7 +202,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
                     break;
                 }
             }
-            
+
             if (ok && existingIndex == type(uint256).max) {
                 // Adding new hat (not found)
                 l.creatorHatIds.push(h);
@@ -343,7 +345,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     {
         if (idxs.length != weights.length) revert LengthMismatch();
         Layout storage l = _layout();
-        
+
         Proposal storage p = l._proposals[id];
         if (p.restricted) {
             bool hasAllowedHat = false;
@@ -507,7 +509,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     function _hasHat(address user, HatType hatType) internal view returns (bool) {
         Layout storage l = _layout();
         uint256[] storage ids = hatType == HatType.VOTING ? l.votingHatIds : l.creatorHatIds;
-        
+
         uint256 len = ids.length;
         if (len == 0) return false;
         if (len == 1) return l.hats.isWearerOfHat(user, ids[0]); // micro-optimise 1-ID case

@@ -239,7 +239,7 @@ contract DeployerTest is Test {
         IHats(SEPOLIA_HATS).mintHat(executiveRoleHat, voter1);
 
         // Give voter2 the default hat for voting
-        uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0); // DEFAULT role hat  
+        uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0); // DEFAULT role hat
         vm.prank(executorProxy);
         IHats(SEPOLIA_HATS).mintHat(defaultRoleHat, voter2);
 

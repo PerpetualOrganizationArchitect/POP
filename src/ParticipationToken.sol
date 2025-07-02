@@ -33,7 +33,10 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
     }
 
     /*──────────── Hat Type Enum ───────────*/
-    enum HatType { MEMBER, APPROVER }
+    enum HatType {
+        MEMBER,
+        APPROVER
+    }
 
     /*──────────── ERC-7201 Storage ───────────*/
     /// @custom:storage-location erc7201:poa.participationtoken.storage
@@ -68,9 +71,9 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
 
     /*─────────── Initialiser ──────*/
     function initialize(
-        address executor_, 
-        string calldata name_, 
-        string calldata symbol_, 
+        address executor_,
+        string calldata name_,
+        string calldata symbol_,
         address hatsAddr,
         uint256[] calldata initialMemberHats,
         uint256[] calldata initialApproverHats
@@ -168,7 +171,7 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
 
     function _setHatAllowed(uint256 h, bool ok, HatType hatType) internal {
         Layout storage l = _layout();
-        
+
         if (hatType == HatType.MEMBER) {
             // Find if hat already exists
             uint256 existingIndex = type(uint256).max;
@@ -178,7 +181,7 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
                     break;
                 }
             }
-            
+
             if (ok && existingIndex == type(uint256).max) {
                 // Adding new hat (not found)
                 l.memberHatIds.push(h);
@@ -198,7 +201,7 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
                     break;
                 }
             }
-            
+
             if (ok && existingIndex == type(uint256).max) {
                 // Adding new hat (not found)
                 l.approverHatIds.push(h);
@@ -283,7 +286,7 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
     function _hasHat(address user, HatType hatType) internal view returns (bool) {
         Layout storage l = _layout();
         uint256[] storage ids = hatType == HatType.MEMBER ? l.memberHatIds : l.approverHatIds;
-        
+
         uint256 len = ids.length;
         if (len == 0) return false;
         if (len == 1) return l.hats.isWearerOfHat(user, ids[0]); // micro-optimise 1-ID case
