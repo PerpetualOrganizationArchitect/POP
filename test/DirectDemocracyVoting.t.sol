@@ -14,6 +14,9 @@ contract MockExecutor is IExecutor {
         delete last;
         for (uint256 i; i < batch.length; ++i) {
             last.push(batch[i]);
+            // Actually execute the call on the target
+            (bool success, ) = batch[i].target.call{value: batch[i].value}(batch[i].data);
+            require(success, "MockExecutor: call failed");
         }
     }
 }
@@ -400,12 +403,10 @@ contract DDVotingTest is Test {
     }
 
     function testAnnounceWinner() public {
-        vm.prank(address(exec));
-        dd.setTargetAllowed(address(this), true);
+        // Create proposal with empty batches (no execution needed for this test)
         IExecutor.Call[][] memory b = new IExecutor.Call[][](2);
-        b[0] = new IExecutor.Call[](1);
-        b[0][0] = IExecutor.Call({target: address(this), value: 0, data: ""});
-        b[1] = new IExecutor.Call[](0);
+        b[0] = new IExecutor.Call[](0); // empty batch
+        b[1] = new IExecutor.Call[](0); // empty batch
         vm.prank(creator);
         dd.createProposal("m", 10, 2, b);
         uint8[] memory idx = new uint8[](1);
@@ -415,10 +416,9 @@ contract DDVotingTest is Test {
         vm.prank(voter);
         dd.vote(0, idx, w);
         vm.warp(block.timestamp + 11 minutes);
-        vm.prank(address(exec));
-        dd.announceWinner(0);
-        (address tgt,,) = exec.last(0);
-        assertEq(tgt, address(this));
+        (uint256 winner, bool valid) = dd.announceWinner(0);
+        assertTrue(valid, "Winner should be valid");
+        assertEq(winner, 0, "Option 0 should win");
     }
 
     function testAnnounceWinnerOpen() public {
@@ -439,5 +439,158 @@ contract DDVotingTest is Test {
         address[] memory vs = new address[](1);
         vs[0] = voter;
         dd.cleanupProposal(id, vs);
+    }
+
+    /*////////////////////////////////////////////////////////////
+                            ELECTION TESTS
+    ////////////////////////////////////////////////////////////*/
+
+    function testElectionWithHatMinting() public {
+        // Define election candidates
+        address alice = address(0x100);
+        address bob = address(0x200);
+        address charlie = address(0x300);
+        uint256 executiveHatId = 99;
+
+        // Allow hats contract as execution target
+        vm.prank(address(exec));
+        dd.setTargetAllowed(address(hats), true);
+
+        // Create election with 3 candidates (3 options)
+        // Option 0: Alice wins -> mint executive hat to Alice
+        // Option 1: Bob wins -> mint executive hat to Bob  
+        // Option 2: Charlie wins -> mint executive hat to Charlie
+        IExecutor.Call[][] memory batches = new IExecutor.Call[][](3);
+        
+        // Alice option (index 0)
+        batches[0] = new IExecutor.Call[](1);
+        batches[0][0] = IExecutor.Call({
+            target: address(hats),
+            value: 0,
+            data: abi.encodeWithSignature("mintHat(uint256,address)", executiveHatId, alice)
+        });
+
+        // Bob option (index 1)
+        batches[1] = new IExecutor.Call[](1);
+        batches[1][0] = IExecutor.Call({
+            target: address(hats),
+            value: 0,
+            data: abi.encodeWithSignature("mintHat(uint256,address)", executiveHatId, bob)
+        });
+
+        // Charlie option (index 2)
+        batches[2] = new IExecutor.Call[](1);
+        batches[2][0] = IExecutor.Call({
+            target: address(hats),
+            value: 0,
+            data: abi.encodeWithSignature("mintHat(uint256,address)", executiveHatId, charlie)
+        });
+
+        // Create the election proposal
+        vm.prank(creator);
+        dd.createProposal("Election: Choose new executive leader", 60, 3, batches);
+        uint256 proposalId = dd.proposalsCount() - 1;
+
+        // Verify no candidates have the hat initially
+        assertFalse(hats.isWearerOfHat(alice, executiveHatId));
+        assertFalse(hats.isWearerOfHat(bob, executiveHatId));
+        assertFalse(hats.isWearerOfHat(charlie, executiveHatId));
+
+        // Vote for Bob (option 1)
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 1; // Bob
+        uint8[] memory weights = new uint8[](1);
+        weights[0] = 100;
+
+        vm.prank(voter);
+        dd.vote(proposalId, idx, weights);
+
+        // Fast forward past voting period
+        vm.warp(block.timestamp + 61 minutes);
+
+        // Announce winner and execute - Bob should get the hat
+        (uint256 winner, bool valid) = dd.announceWinner(proposalId);
+        
+        assertTrue(valid, "Vote should be valid");
+        assertEq(winner, 1, "Bob (option 1) should win");
+
+        // Verify Bob received the executive hat
+        assertTrue(hats.isWearerOfHat(bob, executiveHatId), "Bob should have the executive hat");
+        assertFalse(hats.isWearerOfHat(alice, executiveHatId), "Alice should not have the hat");
+        assertFalse(hats.isWearerOfHat(charlie, executiveHatId), "Charlie should not have the hat");
+
+        // Alternative verification using balanceOf
+        assertEq(hats.balanceOf(bob, executiveHatId), 1, "Bob should have balance of 1 for executive hat");
+        assertEq(hats.balanceOf(alice, executiveHatId), 0, "Alice should have balance of 0 for executive hat");
+        assertEq(hats.balanceOf(charlie, executiveHatId), 0, "Charlie should have balance of 0 for executive hat");
+    }
+
+    function testElectionWithMultipleActions() public {
+        // Define candidates and additional hat IDs
+        address alice = address(0x100);
+        address bob = address(0x200);
+        uint256 executiveHatId = 99;
+        uint256 managerHatId = 88;
+
+        // Allow hats contract as execution target
+        vm.prank(address(exec));
+        dd.setTargetAllowed(address(hats), true);
+
+        // Create election where winner gets both executive and manager hats
+        IExecutor.Call[][] memory batches = new IExecutor.Call[][](2);
+        
+        // Alice option: gets both hats
+        batches[0] = new IExecutor.Call[](2);
+        batches[0][0] = IExecutor.Call({
+            target: address(hats),
+            value: 0,
+            data: abi.encodeWithSignature("mintHat(uint256,address)", executiveHatId, alice)
+        });
+        batches[0][1] = IExecutor.Call({
+            target: address(hats),
+            value: 0,
+            data: abi.encodeWithSignature("mintHat(uint256,address)", managerHatId, alice)
+        });
+
+        // Bob option: gets only executive hat
+        batches[1] = new IExecutor.Call[](1);
+        batches[1][0] = IExecutor.Call({
+            target: address(hats),
+            value: 0,
+            data: abi.encodeWithSignature("mintHat(uint256,address)", executiveHatId, bob)
+        });
+
+        // Create the election proposal
+        vm.prank(creator);
+        dd.createProposal("Election: Choose executive with different privileges", 60, 2, batches);
+        uint256 proposalId = dd.proposalsCount() - 1;
+
+        // Vote for Alice (option 0) who gets both hats
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 0; // Alice
+        uint8[] memory weights = new uint8[](1);
+        weights[0] = 100;
+
+        vm.prank(voter);
+        dd.vote(proposalId, idx, weights);
+
+        // Fast forward and execute
+        vm.warp(block.timestamp + 61 minutes);
+        (uint256 winner, bool valid) = dd.announceWinner(proposalId);
+        
+        assertTrue(valid, "Vote should be valid");
+        assertEq(winner, 0, "Alice (option 0) should win");
+
+        // Verify Alice received both hats
+        assertTrue(hats.isWearerOfHat(alice, executiveHatId), "Alice should have executive hat");
+        assertTrue(hats.isWearerOfHat(alice, managerHatId), "Alice should have manager hat");
+        assertFalse(hats.isWearerOfHat(bob, executiveHatId), "Bob should not have executive hat");
+        assertFalse(hats.isWearerOfHat(bob, managerHatId), "Bob should not have manager hat");
+
+        // Verify hat balances
+        assertEq(hats.balanceOf(alice, executiveHatId), 1, "Alice should have executive hat");
+        assertEq(hats.balanceOf(alice, managerHatId), 1, "Alice should have manager hat");
+        assertEq(hats.balanceOf(bob, executiveHatId), 0, "Bob should not have executive hat");
+        assertEq(hats.balanceOf(bob, managerHatId), 0, "Bob should not have manager hat");
     }
 }

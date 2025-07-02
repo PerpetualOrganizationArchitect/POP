@@ -40,7 +40,6 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
         mapping(bytes32 => bool) roleCanVote; // voting flag per role
         /* ─────── Administrative Addresses ─────── */
         address quickJoin; // set once, rotatable by executor
-        address electionContract; // set once, rotatable by executor
         address executor; // authoritative DAO / timelock
     }
 
@@ -59,7 +58,6 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
     event MemberRemoved(address indexed member);
     event ExecutiveDowngraded(address indexed exec, address indexed by);
     event QuickJoinSet(address indexed quickJoin);
-    event ElectionSet(address indexed election);
     event VotingRoleUpdated(bytes32 indexed role, bool canVote);
     event RoleImageSet(bytes32 indexed role, string uri);
 
@@ -146,13 +144,7 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
         emit QuickJoinSet(qj);
     }
 
-    function setElectionContract(address el) external {
-        Layout storage l = _layout();
-        if (el == address(0)) revert ZeroAddress();
-        if (l.electionContract != address(0) && msg.sender != l.executor) revert Unauthorized();
-        l.electionContract = el;
-        emit ElectionSet(el);
-    }
+
 
     function setRoleImage(bytes32 role, string calldata uri) external onlyExecutor {
         _layout().roleImage[role] = uri;
@@ -182,7 +174,7 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
 
     function mintOrChange(address member, bytes32 role) external {
         Layout storage l = _layout();
-        if (msg.sender != l.executor && !l.isExecutiveRole[l.roleOf[msg.sender]] && msg.sender != l.electionContract) {
+        if (msg.sender != l.executor && !l.isExecutiveRole[l.roleOf[msg.sender]]) {
             revert NotExecutive();
         }
 
@@ -262,9 +254,7 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
         return _layout().quickJoin;
     }
 
-    function electionContract() external view returns (address) {
-        return _layout().electionContract;
-    }
+
 
     function executor() external view returns (address) {
         return _layout().executor;
