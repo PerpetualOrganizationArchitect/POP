@@ -217,6 +217,12 @@ contract HybridVotingTest is Test {
         return 0;
     }
 
+    function _createHatPoll(uint8 opts, uint256[] memory hatIds) internal returns (uint256) {
+        vm.prank(alice);
+        hv.createHatPoll(bytes("ipfs://test"), 15, opts, hatIds);
+        return hv.proposalsCount() - 1;
+    }
+
     function _voteYES(address voter) internal {
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
@@ -502,5 +508,58 @@ contract HybridVotingTest is Test {
 
         // 7. Should be invalid due to perfect tie (50-50 split)
         assertFalse(valid, "Should be invalid due to perfect tie");
+    }
+
+    function testCreateHatPoll() public {
+        uint256[] memory hatIds = new uint256[](1);
+        hatIds[0] = EXECUTIVE_HAT_ID;
+        
+        // Expect the NewHatProposal event to be emitted
+        vm.expectEmit(true, true, true, true);
+        emit HybridVoting.NewHatProposal(0, bytes("ipfs://test"), 2, uint64(block.timestamp + 15 minutes), uint64(block.timestamp), hatIds);
+        
+        uint256 id = _createHatPoll(2, hatIds);
+        assertTrue(hv.pollRestricted(id));
+        assertTrue(hv.pollHatAllowed(id, EXECUTIVE_HAT_ID));
+        assertFalse(hv.pollHatAllowed(id, DEFAULT_HAT_ID));
+    }
+
+    function testHatPollRestrictions() public {
+        // Create a different hat for the poll
+        uint256 POLL_HAT_ID = 99;
+        hats.createHat(POLL_HAT_ID, "Poll Hat", type(uint32).max, address(0), address(0), true, "");
+        
+        uint256[] memory hatIds = new uint256[](1);
+        hatIds[0] = POLL_HAT_ID;
+        uint256 id = _createHatPoll(2, hatIds);
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 0;
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+
+        // First test: voter with valid hat but not the specific poll hat should get RoleNotAllowed
+        vm.prank(alice);
+        vm.expectRevert(HybridVoting.RoleNotAllowed.selector);
+        hv.vote(id, idx, w);
+
+        // Second test: voter with correct hat should succeed
+        hats.mintHat(POLL_HAT_ID, alice);
+        vm.prank(alice);
+        hv.vote(id, idx, w);
+    }
+
+    function testHatPollUnrestricted() public {
+        // Empty hat IDs should create unrestricted poll
+        uint256[] memory hatIds = new uint256[](0);
+        uint256 id = _createHatPoll(1, hatIds);
+        assertFalse(hv.pollRestricted(id));
+        
+        // Anyone with voting hat should be able to vote
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 0;
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+        vm.prank(alice);
+        hv.vote(id, idx, w);
     }
 }

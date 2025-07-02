@@ -83,6 +83,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     event HatSet(uint256 hat, bool allowed);
     event CreatorHatSet(uint256 hat, bool allowed);
     event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created);
+    event NewHatProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created, uint256[] hatIds);
     event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
     event ExecutorUpdated(address newExecutor);
@@ -314,7 +315,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
                 ++i;
             }
         }
-        emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
+        emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
     }
 
     /* ─────────── Voting ─────────── */
