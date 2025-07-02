@@ -223,8 +223,25 @@ contract Deployer is Initializable, OwnableUpgradeable {
         bool autoUp,
         address customImpl
     ) internal returns (address ptProxy) {
-        bytes memory init =
-            abi.encodeWithSignature("initialize(address,string,string,address)", executorAddr, name, symbol, membership);
+        Layout storage l = _layout();
+        
+        // Get the role hat IDs for member and approver permissions
+        // DEFAULT role (index 0) = members, EXECUTIVE role (index 1) = approvers
+        uint256[] memory memberHats = new uint256[](1);
+        memberHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
+        
+        uint256[] memory approverHats = new uint256[](1);
+        approverHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
+        
+        bytes memory init = abi.encodeWithSignature(
+            "initialize(address,string,string,address,uint256[],uint256[])",
+            executorAddr,
+            name,
+            symbol,
+            address(hats),
+            memberHats,
+            approverHats
+        );
         ptProxy = _deploy(orgId, "ParticipationToken", executorAddr, autoUp, customImpl, init, false);
     }
 

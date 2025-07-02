@@ -514,17 +514,25 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     /* ───────────── Internal Helper Functions ───────────── */
     /// @dev Returns true if `user` wears *any* hat of the requested type.
-    ///      Iterates over the small enumeration arrays instead of scanning bitmap
-    ///      buckets so it works for arbitrarily large hat IDs.
     function _hasHat(address user, HatType hatType) internal view returns (bool) {
         Layout storage l = _layout();
         uint256[] storage ids =
             hatType == HatType.VOTING ? l.votingHatIds : l.creatorHatIds;
 
-        for (uint256 i = 0; i < ids.length; ++i) {
-            if (l.hats.isWearerOfHat(user, ids[i])) {
-                return true;
-            }
+        uint256 len = ids.length;
+        if (len == 0) return false;
+        if (len == 1) return l.hats.isWearerOfHat(user, ids[0]); // micro-optimise 1-ID case
+
+        // Build calldata in memory (cheap because ≤ 3)
+        address[] memory wearers = new address[](len);
+        uint256[] memory hatIds = new uint256[](len);
+        for (uint256 i; i < len; ++i) {
+            wearers[i] = user;
+            hatIds[i] = ids[i];
+        }
+        uint256[] memory balances = l.hats.balanceOfBatch(wearers, hatIds);
+        for (uint256 i; i < balances.length; ++i) {
+            if (balances[i] > 0) return true;
         }
         return false;
     }
