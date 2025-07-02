@@ -109,13 +109,13 @@ contract HybridVotingTest is Test {
         uint256[] memory votingHats = new uint256[](2);
         votingHats[0] = DEFAULT_HAT_ID;
         votingHats[1] = EXECUTIVE_HAT_ID;
-        
+
         uint256[] memory democracyHats = new uint256[](1);
         democracyHats[0] = EXECUTIVE_HAT_ID; // Only EXECUTIVE hat gets DD power
-        
+
         uint256[] memory creatorHats = new uint256[](1);
         creatorHats[0] = CREATOR_HAT_ID;
-        
+
         address[] memory targets = new address[](1);
         targets[0] = address(0xCA11); // random allowed call target
 
@@ -241,21 +241,21 @@ contract HybridVotingTest is Test {
         w[0] = 100;
         vm.prank(bob);
         hv.vote(0, idx, w); // should succeed because bob has voting hat, but no DD power
-        /* bob contributes only PT power (400e18 tokens), no DD power */
+            /* bob contributes only PT power (400e18 tokens), no DD power */
     }
 
     function testVoteUnauthorized() public {
         _create();
-        
+
         // Create a voter with no hats and insufficient tokens
         address poorVoter = vm.addr(10);
         token.mint(poorVoter, 0.5 ether); // Below minimum balance
-        
+
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
-        
+
         vm.prank(poorVoter);
         vm.expectRevert(HybridVoting.Unauthorized.selector);
         hv.vote(0, idx, w);
@@ -308,30 +308,30 @@ contract HybridVotingTest is Test {
         // Test that executor can modify voting hat permissions
         vm.prank(address(exec));
         hv.setHatAllowed(DEFAULT_HAT_ID, false);
-        
+
         // Alice should still be able to vote with EXECUTIVE_HAT_ID (DD power)
         _create();
         _voteYES(alice);
-        
+
         // Create a new voter with only the disabled DEFAULT_HAT_ID and insufficient tokens
         address hatOnlyVoter = vm.addr(15);
         hats.mintHat(DEFAULT_HAT_ID, hatOnlyVoter);
         token.mint(hatOnlyVoter, 0.5 ether); // Below minimum balance
-        
+
         uint8[] memory idx = new uint8[](1);
         idx[0] = 1;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
-        
+
         // This voter should not be able to vote (no valid DD hat, insufficient PT tokens)
         vm.prank(hatOnlyVoter);
         vm.expectRevert(HybridVoting.Unauthorized.selector);
         hv.vote(0, idx, w);
-        
+
         // Re-enable the hat and the same voter should now be able to vote
         vm.prank(address(exec));
         hv.setHatAllowed(DEFAULT_HAT_ID, true);
-        
+
         vm.prank(hatOnlyVoter);
         hv.vote(0, idx, w); // Should work now with DD power from hat
     }
@@ -340,27 +340,27 @@ contract HybridVotingTest is Test {
         // Test that executor can modify creator hat permissions
         uint256 newCreatorHat = 99;
         address newCreator = vm.addr(20);
-        
+
         // Give new creator the new hat
         hats.mintHat(newCreatorHat, newCreator);
-        
+
         // Enable new hat as creator hat
         vm.prank(address(exec));
         hv.setCreatorHatAllowed(newCreatorHat, true);
-        
+
         // New creator should be able to create proposal
         IExecutor.Call[][] memory batches = new IExecutor.Call[][](2);
         batches[0] = new IExecutor.Call[](0);
         batches[1] = new IExecutor.Call[](0);
-        
+
         vm.prank(newCreator);
         hv.createProposal(bytes("ipfs://test"), 15, 2, batches);
         assertEq(hv.proposalsCount(), 1);
-        
+
         // Disable new hat
         vm.prank(address(exec));
         hv.setCreatorHatAllowed(newCreatorHat, false);
-        
+
         // Should now fail
         vm.prank(newCreator);
         vm.expectRevert(HybridVoting.Unauthorized.selector);
@@ -513,11 +513,13 @@ contract HybridVotingTest is Test {
     function testCreateHatPoll() public {
         uint256[] memory hatIds = new uint256[](1);
         hatIds[0] = EXECUTIVE_HAT_ID;
-        
+
         // Expect the NewHatProposal event to be emitted
         vm.expectEmit(true, true, true, true);
-        emit HybridVoting.NewHatProposal(0, bytes("ipfs://test"), 2, uint64(block.timestamp + 15 minutes), uint64(block.timestamp), hatIds);
-        
+        emit HybridVoting.NewHatProposal(
+            0, bytes("ipfs://test"), 2, uint64(block.timestamp + 15 minutes), uint64(block.timestamp), hatIds
+        );
+
         uint256 id = _createHatPoll(2, hatIds);
         assertTrue(hv.pollRestricted(id));
         assertTrue(hv.pollHatAllowed(id, EXECUTIVE_HAT_ID));
@@ -528,7 +530,7 @@ contract HybridVotingTest is Test {
         // Create a different hat for the poll
         uint256 POLL_HAT_ID = 99;
         hats.createHat(POLL_HAT_ID, "Poll Hat", type(uint32).max, address(0), address(0), true, "");
-        
+
         uint256[] memory hatIds = new uint256[](1);
         hatIds[0] = POLL_HAT_ID;
         uint256 id = _createHatPoll(2, hatIds);
@@ -553,7 +555,7 @@ contract HybridVotingTest is Test {
         uint256[] memory hatIds = new uint256[](0);
         uint256 id = _createHatPoll(1, hatIds);
         assertFalse(hv.pollRestricted(id));
-        
+
         // Anyone with voting hat should be able to vote
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;

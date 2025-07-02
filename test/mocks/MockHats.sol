@@ -52,7 +52,11 @@ contract MockHats is IHats {
         return true;
     }
 
-    function sameTippyTopHatDomain(uint32 _topHatDomain, uint256 _newAdminHat) external pure returns (bool sameDomain) {
+    function sameTippyTopHatDomain(uint32 _topHatDomain, uint256 _newAdminHat)
+        external
+        pure
+        returns (bool sameDomain)
+    {
         return true;
     }
 
@@ -102,10 +106,7 @@ contract MockHats is IHats {
         return true;
     }
 
-    function batchMintHats(uint256[] calldata _hatIds, address[] calldata _wearers)
-        external
-        returns (bool success)
-    {
+    function batchMintHats(uint256[] calldata _hatIds, address[] calldata _wearers) external returns (bool success) {
         return true;
     }
 
@@ -237,4 +238,4 @@ contract MockHats is IHats {
     function uri(uint256 id) external view returns (string memory _uri) {
         return "";
     }
-} 
+}

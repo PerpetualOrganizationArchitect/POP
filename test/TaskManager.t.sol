@@ -42,8 +42,6 @@ contract MockToken is Test, IERC20 {
     }
 }
 
-
-
 /*──────────────────── Test Suite ────────────────────*/
 contract TaskManagerTest is Test {
     /* test actors */
@@ -130,8 +128,7 @@ contract TaskManagerTest is Test {
         assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
-        UNLIM_ID =
-            tm.createProject(bytes("UNLIM"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats);
+        UNLIM_ID = tm.createProject(bytes("UNLIM"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         // creator2 creates a task (should succeed, cap == 0)
         vm.prank(creator2);
@@ -156,8 +153,7 @@ contract TaskManagerTest is Test {
         assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
-        CAPPED_ID =
-            tm.createProject(bytes("CAPPED"), 3 ether, managers, createHats, claimHats, reviewHats, assignHats);
+        CAPPED_ID = tm.createProject(bytes("CAPPED"), 3 ether, managers, createHats, claimHats, reviewHats, assignHats);
 
         // pm1 can create tasks until cap reached
         vm.prank(pm1);
@@ -295,9 +291,8 @@ contract TaskManagerTest is Test {
         assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
-        FLOW_ID = tm.createProject(
-            bytes("FLOW"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
-        );
+        FLOW_ID =
+            tm.createProject(bytes("FLOW"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         address[] memory mgr = new address[](1);
         mgr[0] = pm1;
@@ -630,9 +625,7 @@ contract TaskManagerTest is Test {
         // Verify the hat can no longer create projects
         vm.prank(newCreator);
         vm.expectRevert(TaskManager.NotCreator.selector);
-        tm.createProject(
-            bytes("SHOULD_FAIL"), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
-        );
+        tm.createProject(bytes("SHOULD_FAIL"), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
     }
 
     function test_ProjectManagerHierarchy() public {
@@ -711,9 +704,8 @@ contract TaskManagerTest is Test {
         assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
-        EDGE_ID = tm.createProject(
-            bytes("EDGE"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
-        );
+        EDGE_ID =
+            tm.createProject(bytes("EDGE"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         // Create and immediately cancel a task
         vm.startPrank(creator1);
@@ -777,8 +769,7 @@ contract TaskManagerTest is Test {
 
         // Create a large unlimited project
         vm.prank(creator1);
-        MEGA_ID =
-            tm.createProject(bytes("MEGA"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats);
+        MEGA_ID = tm.createProject(bytes("MEGA"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         // Add multiple project managers
         address[] memory pms = new address[](3);
@@ -1012,9 +1003,7 @@ contract TaskManagerTest is Test {
         // Hat should no longer work
         vm.prank(testCreator);
         vm.expectRevert(TaskManager.NotCreator.selector);
-        tm.createProject(
-            bytes("SHOULD_FAIL"), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
-        );
+        tm.createProject(bytes("SHOULD_FAIL"), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
     }
 
     function test_ExecutorBypassMemberCheck() public {

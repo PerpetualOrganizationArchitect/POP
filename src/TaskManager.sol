@@ -50,17 +50,17 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     struct Task {
-        bytes32 projectId;          // slot 1: full 32 bytes
-        uint96 payout;              // slot 2: 12 bytes (supports up to 7e28, well over 1e24 cap)
-        address claimer;            // slot 2: 20 bytes (total 32 bytes in slot 2)
-        Status status;              // packed into previous slot's remaining space
+        bytes32 projectId; // slot 1: full 32 bytes
+        uint96 payout; // slot 2: 12 bytes (supports up to 7e28, well over 1e24 cap)
+        address claimer; // slot 2: 20 bytes (total 32 bytes in slot 2)
+        Status status; // packed into previous slot's remaining space
     }
 
     struct Project {
-        mapping(address => bool) managers;  // slot 0: mapping (full slot)
-        uint128 cap;                        // slot 1: 16 bytes
-        uint128 spent;                      // slot 1: 16 bytes (total 32 bytes)
-        bool exists;                        // slot 2: 1 byte (separate slot for cleaner access)
+        mapping(address => bool) managers; // slot 0: mapping (full slot)
+        uint128 cap; // slot 1: 16 bytes
+        uint128 spent; // slot 1: 16 bytes (total 32 bytes)
+        bool exists; // slot 2: 1 byte (separate slot for cleaner access)
     }
 
     /*──────── Storage (ERC-7201) ───────*/
@@ -129,7 +129,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         for (uint256 i; i < creatorHats.length;) {
             _toggleCreatorHat(creatorHats[i], true);
             emit CreatorHatSet(creatorHats[i], true);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         emit ExecutorSet(executorAddress);
@@ -143,14 +145,16 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     function _toggleCreatorHat(uint256 h, bool ok) internal {
         Layout storage l = _layout();
-        if (ok && l.idxCreator[h] == 0) {          // add
+        if (ok && l.idxCreator[h] == 0) {
+            // add
             l.idxCreator[h] = l.creatorHatIds.length + 1;
             l.creatorHatIds.push(h);
         }
-        if (!ok && l.idxCreator[h] > 0) {          // remove
+        if (!ok && l.idxCreator[h] > 0) {
+            // remove
             uint256 i = l.idxCreator[h] - 1;
             uint256 last = l.creatorHatIds[l.creatorHatIds.length - 1];
-            l.creatorHatIds[i] = last;               // swap-pop
+            l.creatorHatIds[i] = last; // swap-pop
             l.idxCreator[last] = i + 1;
             l.creatorHatIds.pop();
             delete l.idxCreator[h];
@@ -159,14 +163,16 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     function _togglePermissionHat(uint256 h, bool ok) internal {
         Layout storage l = _layout();
-        if (ok && l.idxPerm[h] == 0) {          // add
+        if (ok && l.idxPerm[h] == 0) {
+            // add
             l.idxPerm[h] = l.permissionHatIds.length + 1;
             l.permissionHatIds.push(h);
         }
-        if (!ok && l.idxPerm[h] > 0) {          // remove
+        if (!ok && l.idxPerm[h] > 0) {
+            // remove
             uint256 i = l.idxPerm[h] - 1;
             uint256 last = l.permissionHatIds[l.permissionHatIds.length - 1];
-            l.permissionHatIds[i] = last;               // swap-pop
+            l.permissionHatIds[i] = last; // swap-pop
             l.idxPerm[last] = i + 1;
             l.permissionHatIds.pop();
             delete l.idxPerm[h];
@@ -245,7 +251,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
             if (managers[i] == address(0)) revert ZeroAddress();
             p.managers[managers[i]] = true;
             emit ProjectManagerAdded(projectId, managers[i]);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         /* hat-permission matrix */
@@ -412,7 +420,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     function setRolePerm(uint256 hatId, uint8 mask) external onlyExecutor {
         Layout storage l = _layout();
         l.rolePermGlobal[hatId] = mask;
-        
+
         // Track that this hat has permissions
         _togglePermissionHat(hatId, mask != 0);
     }
@@ -420,10 +428,10 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     function setProjectRolePerm(bytes32 pid, uint256 hatId, uint8 mask) external onlyCreator projectExists(pid) {
         Layout storage l = _layout();
         l.rolePermProj[pid][hatId] = mask;
-        
+
         // Track that this hat has permissions (project-specific permissions count too)
         _togglePermissionHat(hatId, mask != 0);
-        
+
         emit ProjectRolePermSet(pid, hatId, mask);
     }
 
@@ -458,19 +466,25 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         for (uint256 i; i < len;) {
             wearers[i] = user;
             hats_[i] = l.permissionHatIds[i];
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
         uint256[] memory bal = l.hats.balanceOfBatch(wearers, hats_);
 
         for (uint256 i; i < len;) {
             if (bal[i] == 0) {
-                unchecked { ++i; }
+                unchecked {
+                    ++i;
+                }
                 continue; // user doesn't wear it
             }
             uint256 h = hats_[i];
             uint8 mask = l.rolePermProj[pid][h];
             m |= mask == 0 ? l.rolePermGlobal[h] : mask; // project overrides global
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -490,12 +504,14 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
             uint256 hatId = hatIds[i];
             uint8 newMask = l.rolePermProj[pid][hatId] | flag;
             l.rolePermProj[pid][hatId] = newMask;
-            
+
             // Track that this hat has permissions
             _togglePermissionHat(hatId, newMask != 0);
-            
+
             emit ProjectRolePermSet(pid, hatId, newMask);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -513,12 +529,16 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         for (uint256 i; i < len;) {
             wearers[i] = user;
             hatIds[i] = l.creatorHatIds[i];
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
         uint256[] memory balances = l.hats.balanceOfBatch(wearers, hatIds);
         for (uint256 i; i < balances.length;) {
             if (balances[i] > 0) return true;
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
         return false;
     }

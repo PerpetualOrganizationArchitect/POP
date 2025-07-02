@@ -21,10 +21,10 @@ contract ParticipationTokenTest is Test {
 
     function setUp() public {
         hats = new MockHats();
-        
+
         // Mint member hat to member
         hats.mintHat(MEMBER_HAT_ID, member);
-        
+
         // Mint approver hat to approver
         hats.mintHat(APPROVER_HAT_ID, approver);
 
@@ -33,7 +33,7 @@ contract ParticipationTokenTest is Test {
         initialMemberHats[0] = MEMBER_HAT_ID;
         uint256[] memory initialApproverHats = new uint256[](1);
         initialApproverHats[0] = APPROVER_HAT_ID;
-        
+
         bytes memory data = abi.encodeCall(
             ParticipationToken.initialize,
             (executor, "PToken", "PTK", address(hats), initialMemberHats, initialApproverHats)
@@ -106,7 +106,7 @@ contract ParticipationTokenTest is Test {
     function testApproveRequiresApproverHat() public {
         vm.prank(member);
         token.requestTokens(1 ether, "ipfs://req");
-        
+
         address nonApprover = address(0x6);
         vm.prank(nonApprover);
         vm.expectRevert(ParticipationToken.NotApprover.selector);
@@ -116,16 +116,16 @@ contract ParticipationTokenTest is Test {
     function testSetMemberHatAllowed() public {
         uint256 newHatId = 123;
         address newMember = address(0xbeef);
-        
+
         // Create and assign new hat
         hats.createHat(newHatId, "New Member Hat", 1, address(0), address(0), true, "");
         hats.mintHat(newHatId, newMember);
-        
+
         // Should fail without hat permission
         vm.prank(newMember);
         vm.expectRevert(ParticipationToken.NotMember.selector);
         token.requestTokens(1 ether, "ipfs://req");
-        
+
         // Enable new hat as member hat
         vm.prank(executor);
         token.setMemberHatAllowed(newHatId, true);
@@ -133,11 +133,11 @@ contract ParticipationTokenTest is Test {
         // Should now succeed
         vm.prank(newMember);
         token.requestTokens(1 ether, "ipfs://req");
-        
+
         // Disable new hat
         vm.prank(executor);
         token.setMemberHatAllowed(newHatId, false);
-        
+
         // Should now fail again
         vm.prank(newMember);
         vm.expectRevert(ParticipationToken.NotMember.selector);
@@ -147,20 +147,20 @@ contract ParticipationTokenTest is Test {
     function testSetApproverHatAllowed() public {
         uint256 newHatId = 456;
         address newApprover = address(0xcafe);
-        
+
         // Create and assign new hat
         hats.createHat(newHatId, "New Approver Hat", 1, address(0), address(0), true, "");
         hats.mintHat(newHatId, newApprover);
-        
+
         // Create a request first
         vm.prank(member);
         token.requestTokens(1 ether, "ipfs://req");
-        
+
         // Should fail without hat permission
         vm.prank(newApprover);
         vm.expectRevert(ParticipationToken.NotApprover.selector);
         token.approveRequest(1);
-        
+
         // Enable new hat as approver hat
         vm.prank(executor);
         token.setApproverHatAllowed(newHatId, true);
@@ -175,17 +175,17 @@ contract ParticipationTokenTest is Test {
         // Test 1: Executor can request tokens without member hat
         vm.prank(executor);
         token.requestTokens(1 ether, "ipfs://exec-req");
-        
+
         // Test 2: Executor can approve someone else's request without approver hat
         // First, have the member make a request
         vm.prank(member);
         token.requestTokens(2 ether, "ipfs://member-req");
-        
+
         // Now executor can approve the member's request (ID 2)
         vm.prank(executor);
         token.approveRequest(2);
         assertEq(token.balanceOf(member), 2 ether);
-        
+
         // Test 3: Someone with approver hat can approve the executor's request
         vm.prank(approver);
         token.approveRequest(1);

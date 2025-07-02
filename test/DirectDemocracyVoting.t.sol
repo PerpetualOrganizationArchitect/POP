@@ -31,11 +31,11 @@ contract DDVotingTest is Test {
     function setUp() public {
         hats = new MockHats();
         exec = new MockExecutor();
-        
+
         // Mint voting hat to both creator and voter
         hats.mintHat(HAT_ID, creator);
         hats.mintHat(HAT_ID, voter);
-        
+
         // Mint creator hat only to creator
         hats.mintHat(CREATOR_HAT_ID, creator);
 
@@ -74,10 +74,8 @@ contract DDVotingTest is Test {
         h[0] = HAT_ID;
         uint256[] memory ch = new uint256[](1);
         ch[0] = CREATOR_HAT_ID;
-        bytes memory data = abi.encodeCall(
-            DirectDemocracyVoting.initialize,
-            (address(0), address(exec), h, ch, new address[](0), 50)
-        );
+        bytes memory data =
+            abi.encodeCall(DirectDemocracyVoting.initialize, (address(0), address(exec), h, ch, new address[](0), 50));
         vm.expectRevert(DirectDemocracyVoting.ZeroAddress.selector);
         new ERC1967Proxy(address(impl), data);
     }
@@ -133,7 +131,7 @@ contract DDVotingTest is Test {
         vm.prank(creator);
         dd.createProposal("m", 10, 1, b);
         assertEq(dd.proposalsCount(), 1);
-        
+
         // But voting should fail
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
@@ -142,7 +140,7 @@ contract DDVotingTest is Test {
         vm.prank(voter);
         vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
         dd.vote(0, idx, w);
-        
+
         // Re-enable voting
         vm.prank(address(exec));
         dd.setHatAllowed(HAT_ID, true);
@@ -153,11 +151,11 @@ contract DDVotingTest is Test {
     function testSetCreatorHatAllowed() public {
         uint256 newHatId = 123;
         address newCreator = address(0xbeef);
-        
+
         // Create and assign new hat
         hats.createHat(newHatId, "New Creator Hat", 1, address(0), address(0), true, "");
         hats.mintHat(newHatId, newCreator);
-        
+
         // Enable new hat as creator hat
         vm.prank(address(exec));
         dd.setCreatorHatAllowed(newHatId, true);
@@ -172,7 +170,7 @@ contract DDVotingTest is Test {
         // Disable new hat
         vm.prank(address(exec));
         dd.setCreatorHatAllowed(newHatId, false);
-        
+
         // Should now fail
         vm.prank(newCreator);
         vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
@@ -356,9 +354,9 @@ contract DDVotingTest is Test {
         // Create a different hat for the poll
         uint256 POLL_HAT_ID = 2;
         hats.createHat(1, "Poll Hat", type(uint32).max, address(0), address(0), true, "");
-        
+
         uint256[] memory hatIds = new uint256[](1);
-        hatIds[0] = POLL_HAT_ID;  // Use the new hat ID for the poll
+        hatIds[0] = POLL_HAT_ID; // Use the new hat ID for the poll
         uint256 id = _createHatPoll(2, hatIds);
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
@@ -389,11 +387,13 @@ contract DDVotingTest is Test {
     function testPollRestrictedViews() public {
         uint256[] memory hatIds = new uint256[](1);
         hatIds[0] = HAT_ID;
-        
+
         // Expect the NewHatProposal event to be emitted
         vm.expectEmit(true, true, true, true);
-        emit DirectDemocracyVoting.NewHatProposal(0, "meta", 1, uint64(block.timestamp + 10 minutes), uint64(block.timestamp), hatIds);
-        
+        emit DirectDemocracyVoting.NewHatProposal(
+            0, "meta", 1, uint64(block.timestamp + 10 minutes), uint64(block.timestamp), hatIds
+        );
+
         uint256 id = _createHatPoll(1, hatIds);
         assertTrue(dd.pollRestricted(id));
         assertTrue(dd.pollHatAllowed(id, HAT_ID));

@@ -224,15 +224,15 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address customImpl
     ) internal returns (address ptProxy) {
         Layout storage l = _layout();
-        
+
         // Get the role hat IDs for member and approver permissions
         // DEFAULT role (index 0) = members, EXECUTIVE role (index 1) = approvers
         uint256[] memory memberHats = new uint256[](1);
         memberHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
-        
+
         uint256[] memory approverHats = new uint256[](1);
         approverHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
-        
+
         bytes memory init = abi.encodeWithSignature(
             "initialize(address,string,string,address,uint256[],uint256[])",
             executorAddr,
@@ -255,12 +255,12 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address customImpl
     ) internal returns (address tmProxy) {
         Layout storage l = _layout();
-        
+
         // Get the role hat IDs for creator permissions
         // EXECUTIVE role (index 1) = creators
         uint256[] memory creatorHats = new uint256[](1);
         creatorHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
-        
+
         bytes memory init = abi.encodeWithSignature(
             "initialize(address,address,uint256[],address)", token, address(hats), creatorHats, executorAddr
         );
@@ -301,16 +301,16 @@ contract Deployer is Initializable, OwnableUpgradeable {
         uint256 minBal
     ) internal returns (address hvProxy) {
         Layout storage l = _layout();
-        
+
         // Get the role hat IDs (we know there are at least 2: DEFAULT and EXECUTIVE)
         uint256[] memory votingHats = new uint256[](2);
         votingHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
         votingHats[1] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
-        
+
         // For democracy hats, use only the EXECUTIVE role hat (gives DD voting power)
         uint256[] memory democracyHats = new uint256[](1);
         democracyHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
-        
+
         // For creator hats, use the EXECUTIVE role hat
         uint256[] memory creatorHats = new uint256[](1);
         creatorHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
