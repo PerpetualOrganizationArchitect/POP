@@ -57,6 +57,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         IExecutor.Call[][] batches;
         uint256[] pollHatIds; // array of specific hat IDs for this poll
         bool restricted; // if true only pollHatIds can vote
+        mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
     }
 
     /* ─────── ERC-7201 Storage ─────── */
@@ -67,9 +68,9 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         IHats hats;
         IExecutor executor;
         mapping(address => bool) allowedTarget; // execution allow‑list
-        uint256[] _votingHatIds; // array of allowed voting hat IDs (permission to vote)
-        uint256[] _democracyHatIds; // array of democracy power hat IDs (DD voting power)
-        uint256[] _creatorHatIds; // array of allowed creator hat IDs
+        uint256[] votingHatIds; // enumeration array for voting hats
+        uint256[] democracyHatIds; // enumeration array for democracy hats
+        uint256[] creatorHatIds; // enumeration array for creator hats
         uint8 quorumPct; // 1‑100
         uint8 ddSharePct; // e.g. 50 = 50 %
         bool quadraticVoting;
@@ -158,16 +159,13 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         Layout storage l = _layout();
         
         for (uint256 i; i < votingHats.length; ++i) {
-            l._votingHatIds.push(votingHats[i]);
-            emit HatSet(votingHats[i], true);
+            _setHatAllowed(votingHats[i], true, HatType.VOTING);
         }
         for (uint256 i; i < democracyHats.length; ++i) {
-            l._democracyHatIds.push(democracyHats[i]);
-            emit DemocracyHatSet(democracyHats[i], true);
+            _setHatAllowed(democracyHats[i], true, HatType.DEMOCRACY);
         }
         for (uint256 i; i < creatorHats.length; ++i) {
-            l._creatorHatIds.push(creatorHats[i]);
-            emit CreatorHatSet(creatorHats[i], true);
+            _setHatAllowed(creatorHats[i], true, HatType.CREATOR);
         }
     }
 
@@ -202,12 +200,14 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     /* ─────── Consolidated Hat Management ─────── */
     function setHatAllowed(uint256 h, bool ok) external onlyExecutor {
         _setHatAllowed(h, ok, HatType.VOTING);
-        emit HatSet(h, ok);
     }
 
     function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
         _setHatAllowed(h, ok, HatType.CREATOR);
-        emit CreatorHatSet(h, ok);
+    }
+
+    function setDemocracyHatAllowed(uint256 h, bool ok) external onlyExecutor {
+        _setHatAllowed(h, ok, HatType.DEMOCRACY);
     }
 
     function setTargetAllowed(address t, bool ok) external onlyExecutor {
@@ -238,41 +238,70 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         emit MinBalanceSet(n);
     }
 
-    function setDemocracyHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        _setHatAllowed(h, ok, HatType.DEMOCRACY);
-        emit DemocracyHatSet(h, ok);
-    }
-
     function _setHatAllowed(uint256 h, bool ok, HatType hatType) internal {
         Layout storage l = _layout();
         
         if (hatType == HatType.VOTING) {
-            _updateHatArray(l._votingHatIds, h, ok);
+            // Find if hat already exists
+            uint256 existingIndex = type(uint256).max;
+            for (uint256 i = 0; i < l.votingHatIds.length; i++) {
+                if (l.votingHatIds[i] == h) {
+                    existingIndex = i;
+                    break;
+                }
+            }
+            
+            if (ok && existingIndex == type(uint256).max) {
+                // Adding new hat (not found)
+                l.votingHatIds.push(h);
+                emit HatSet(h, true);
+            } else if (!ok && existingIndex != type(uint256).max) {
+                // Removing hat (found at existingIndex)
+                l.votingHatIds[existingIndex] = l.votingHatIds[l.votingHatIds.length - 1];
+                l.votingHatIds.pop();
+                emit HatSet(h, false);
+            }
         } else if (hatType == HatType.DEMOCRACY) {
-            _updateHatArray(l._democracyHatIds, h, ok);
+            // Find if hat already exists
+            uint256 existingIndex = type(uint256).max;
+            for (uint256 i = 0; i < l.democracyHatIds.length; i++) {
+                if (l.democracyHatIds[i] == h) {
+                    existingIndex = i;
+                    break;
+                }
+            }
+            
+            if (ok && existingIndex == type(uint256).max) {
+                // Adding new hat (not found)
+                l.democracyHatIds.push(h);
+                emit DemocracyHatSet(h, true);
+            } else if (!ok && existingIndex != type(uint256).max) {
+                // Removing hat (found at existingIndex)
+                l.democracyHatIds[existingIndex] = l.democracyHatIds[l.democracyHatIds.length - 1];
+                l.democracyHatIds.pop();
+                emit DemocracyHatSet(h, false);
+            }
         } else {
-            _updateHatArray(l._creatorHatIds, h, ok);
-        }
-    }
-
-    function _updateHatArray(uint256[] storage hatArray, uint256 h, bool ok) internal {
-        (bool wasAllowed, uint256 existingIndex) = _findHatIndex(hatArray, h);
-        
-        if (ok && !wasAllowed) {
-            hatArray.push(h);
-        } else if (!ok && wasAllowed) {
-            hatArray[existingIndex] = hatArray[hatArray.length - 1];
-            hatArray.pop();
-        }
-    }
-
-    function _findHatIndex(uint256[] storage hatArray, uint256 h) internal view returns (bool found, uint256 index) {
-        for (uint256 i = 0; i < hatArray.length; i++) {
-            if (hatArray[i] == h) {
-                return (true, i);
+            // Find if hat already exists
+            uint256 existingIndex = type(uint256).max;
+            for (uint256 i = 0; i < l.creatorHatIds.length; i++) {
+                if (l.creatorHatIds[i] == h) {
+                    existingIndex = i;
+                    break;
+                }
+            }
+            
+            if (ok && existingIndex == type(uint256).max) {
+                // Adding new hat (not found)
+                l.creatorHatIds.push(h);
+                emit CreatorHatSet(h, true);
+            } else if (!ok && existingIndex != type(uint256).max) {
+                // Removing hat (found at existingIndex)
+                l.creatorHatIds[existingIndex] = l.creatorHatIds[l.creatorHatIds.length - 1];
+                l.creatorHatIds.pop();
+                emit CreatorHatSet(h, false);
             }
         }
-        return (false, 0);
     }
 
     /* ─────── Helpers & modifiers ─────── */
@@ -321,7 +350,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert DurationOutOfRange();
 
         Layout storage l = _layout();
-        uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
+        uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
         Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
 
@@ -352,7 +381,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert DurationOutOfRange();
 
         Layout storage l = _layout();
-        uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
+        uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
         Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
         p.restricted = hatIds.length > 0;
@@ -364,6 +393,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         }
         for (uint256 i; i < hatIds.length; ++i) {
             p.pollHatIds.push(hatIds[i]);
+            p.pollHatAllowed[hatIds[i]] = true;
         }
         emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
     }
@@ -555,12 +585,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     function pollHatAllowed(uint256 id, uint256 hat) external view returns (bool) {
         Layout storage l = _layout();
         if (id >= l._proposals.length) revert InvalidProposal();
-        for (uint256 i = 0; i < l._proposals[id].pollHatIds.length; i++) {
-            if (l._proposals[id].pollHatIds[i] == hat) {
-                return true;
-            }
-        }
-        return false;
+        return l._proposals[id].pollHatAllowed[hat];
     }
 
     function pollRestricted(uint256 id) external view returns (bool) {
@@ -570,37 +595,26 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     }
 
     /* ─────── Consolidated Hat Checking ─────── */
+    /// @dev Returns true if `user` wears *any* hat of the requested type.
+    ///      Iterates over the small enumeration arrays instead of scanning bitmap
+    ///      buckets so it works for arbitrarily large hat IDs.
     function _hasHat(address user, HatType hatType) internal view returns (bool) {
         Layout storage l = _layout();
+        uint256[] storage ids;
         
         if (hatType == HatType.VOTING) {
-            return _checkHatArray(l._votingHatIds, user, l.hats);
+            ids = l.votingHatIds;
         } else if (hatType == HatType.DEMOCRACY) {
-            return _checkHatArray(l._democracyHatIds, user, l.hats);
+            ids = l.democracyHatIds;
         } else {
-            return _checkHatArray(l._creatorHatIds, user, l.hats);
+            ids = l.creatorHatIds;
         }
-    }
-
-    function _checkHatArray(uint256[] storage hatArray, address user, IHats hatsContract) internal view returns (bool) {
-        for (uint256 i = 0; i < hatArray.length; i++) {
-            if (hatsContract.isWearerOfHat(user, hatArray[i])) {
+        
+        for (uint256 i = 0; i < ids.length; ++i) {
+            if (l.hats.isWearerOfHat(user, ids[i])) {
                 return true;
             }
         }
         return false;
-    }
-
-    /* ─────── Legacy Helper Functions (for compatibility) ─────── */
-    function _hasVotingHat(address user) internal view returns (bool) {
-        return _hasHat(user, HatType.VOTING);
-    }
-
-    function _hasCreatorHat(address user) internal view returns (bool) {
-        return _hasHat(user, HatType.CREATOR);
-    }
-
-    function _hasDemocracyHat(address user) internal view returns (bool) {
-        return _hasHat(user, HatType.DEMOCRACY);
     }
 }
