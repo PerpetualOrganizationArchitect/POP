@@ -144,8 +144,6 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
         emit QuickJoinSet(qj);
     }
 
-
-
     function setRoleImage(bytes32 role, string calldata uri) external onlyExecutor {
         _layout().roleImage[role] = uri;
         emit RoleImageSet(role, uri);
@@ -253,8 +251,6 @@ contract Membership is Initializable, ERC721Upgradeable, ReentrancyGuardUpgradea
     function quickJoin() external view returns (address) {
         return _layout().quickJoin;
     }
-
-
 
     function executor() external view returns (address) {
         return _layout().executor;

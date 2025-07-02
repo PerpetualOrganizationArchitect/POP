@@ -43,8 +43,6 @@ contract MockPT is Test, IParticipationToken {
     }
 }
 
-
-
 contract EducationHubTest is Test {
     EducationHub hub;
     MockPT token;
@@ -113,14 +111,14 @@ contract EducationHubTest is Test {
     function testSetCreatorHatAllowed() public {
         uint256 newHat = 99;
         address newCreator = address(0xbeef);
-        
+
         // Mint the new hat to the new creator
         hats.mintHat(newHat, newCreator);
-        
+
         // Add the new hat as a creator hat
         vm.prank(executor);
         hub.setCreatorHatAllowed(newHat, true);
-        
+
         // Verify the hat was added
         uint256[] memory creatorHats = hub.creatorHatIds();
         assertEq(creatorHats.length, 2);
@@ -132,19 +130,19 @@ contract EducationHubTest is Test {
             }
         }
         assertTrue(found, "New creator hat should be in the array");
-        
+
         // New creator should be able to create modules
         vm.prank(newCreator);
         hub.createModule(bytes("test"), 5, 1);
-        
+
         // Remove the hat
         vm.prank(executor);
         hub.setCreatorHatAllowed(newHat, false);
-        
+
         // Verify the hat was removed
         creatorHats = hub.creatorHatIds();
         assertEq(creatorHats.length, 1);
-        
+
         // New creator should no longer be able to create modules
         vm.prank(newCreator);
         vm.expectRevert(EducationHub.NotCreator.selector);
@@ -154,14 +152,14 @@ contract EducationHubTest is Test {
     function testSetMemberHatAllowed() public {
         uint256 newHat = 88;
         address newMember = address(0xcafe);
-        
+
         // Mint the new hat to the new member
         hats.mintHat(newHat, newMember);
-        
+
         // Add the new hat as a member hat
         vm.prank(executor);
         hub.setMemberHatAllowed(newHat, true);
-        
+
         // Verify the hat was added
         uint256[] memory memberHats = hub.memberHatIds();
         assertEq(memberHats.length, 2);
@@ -173,11 +171,11 @@ contract EducationHubTest is Test {
             }
         }
         assertTrue(found, "New member hat should be in the array");
-        
+
         // First create a module for testing
         vm.prank(creator);
         hub.createModule(bytes("data"), 5, 2);
-        
+
         // New member should be able to complete modules
         vm.prank(newMember);
         hub.completeModule(0, 2);
@@ -267,7 +265,7 @@ contract EducationHubTest is Test {
         address nonCreator = address(0xbad);
         // Give them member hat but not creator hat
         hats.mintHat(MEMBER_HAT, nonCreator);
-        
+
         vm.prank(nonCreator);
         vm.expectRevert(EducationHub.NotCreator.selector);
         hub.createModule(bytes("test"), 5, 1);
@@ -276,11 +274,11 @@ contract EducationHubTest is Test {
     function testNonMemberCannotCompleteModule() public {
         address nonMember = address(0xbad);
         // Don't give them any hat
-        
+
         // First create a module
         vm.prank(creator);
         hub.createModule(bytes("data"), 5, 2);
-        
+
         vm.prank(nonMember);
         vm.expectRevert(EducationHub.NotMember.selector);
         hub.completeModule(0, 2);
@@ -290,7 +288,7 @@ contract EducationHubTest is Test {
         // Executor should be able to create modules even without creator hat
         vm.prank(executor);
         hub.createModule(bytes("executor module"), 10, 3);
-        
+
         // Executor should be able to complete modules even without member hat
         vm.prank(executor);
         hub.completeModule(0, 3);
