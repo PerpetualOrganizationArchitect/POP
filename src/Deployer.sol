@@ -277,11 +277,23 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address customImpl,
         bool lastRegister // <<< flag propagated to registry
     ) internal returns (address ehProxy) {
-        bytes32[] memory execOnly = new bytes32[](1);
-        execOnly[0] = keccak256("EXECUTIVE");
+        Layout storage l = _layout();
+
+        // Get the role hat IDs for creator and member permissions
+        // EXECUTIVE role (index 1) = creators, DEFAULT role (index 0) = members
+        uint256[] memory creatorHats = new uint256[](1);
+        creatorHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
+
+        uint256[] memory memberHats = new uint256[](1);
+        memberHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
 
         bytes memory init = abi.encodeWithSignature(
-            "initialize(address,address,address,bytes32[])", token, membership, executorAddr, execOnly
+            "initialize(address,address,address,uint256[],uint256[])", 
+            token, 
+            address(hats), 
+            executorAddr, 
+            creatorHats,
+            memberHats
         );
         ehProxy = _deploy(orgId, "EducationHub", executorAddr, autoUp, customImpl, init, lastRegister);
     }

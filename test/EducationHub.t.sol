@@ -3,7 +3,9 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 
-import {EducationHub, IParticipationToken, IMembership} from "../src/EducationHub.sol";
+import {EducationHub, IParticipationToken} from "../src/EducationHub.sol";
+import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {MockHats} from "./mocks/MockHats.sol";
 
 /*////////////////////////////////////////////////////////////
 Mock contracts to satisfy external dependencies of EducationHub
@@ -41,43 +43,33 @@ contract MockPT is Test, IParticipationToken {
     }
 }
 
-contract MockMembership is IMembership {
-    mapping(address => bool) public members;
-    mapping(address => bytes32) public roles;
 
-    function setMember(address user, bytes32 role) external {
-        members[user] = true;
-        roles[user] = role;
-    }
-
-    function isMember(address user) external view returns (bool) {
-        return members[user];
-    }
-
-    function roleOf(address user) external view returns (bytes32) {
-        return roles[user];
-    }
-}
 
 contract EducationHubTest is Test {
     EducationHub hub;
     MockPT token;
-    MockMembership membership;
+    MockHats hats;
     address executor = address(0xEF);
-    bytes32 constant CREATOR_ROLE = keccak256("CREATOR");
+    uint256 constant CREATOR_HAT = 1;
+    uint256 constant MEMBER_HAT = 2;
     address creator = address(0xCA);
     address learner = address(0x1);
 
     function setUp() public {
         token = new MockPT();
-        membership = new MockMembership();
-        membership.setMember(creator, CREATOR_ROLE);
-        membership.setMember(learner, bytes32(uint256(1))); // any non-zero role marks member
+        hats = new MockHats();
+
+        // Mint hats to users
+        hats.mintHat(CREATOR_HAT, creator);
+        hats.mintHat(MEMBER_HAT, creator); // creator is also a member
+        hats.mintHat(MEMBER_HAT, learner);
 
         hub = new EducationHub();
-        bytes32[] memory roles = new bytes32[](1);
-        roles[0] = CREATOR_ROLE;
-        hub.initialize(address(token), address(membership), executor, roles);
+        uint256[] memory creatorHats = new uint256[](1);
+        creatorHats[0] = CREATOR_HAT;
+        uint256[] memory memberHats = new uint256[](1);
+        memberHats[0] = MEMBER_HAT;
+        hub.initialize(address(token), address(hats), executor, creatorHats, memberHats);
     }
 
     /*////////////////////////////////////////////////////////////
@@ -85,16 +77,22 @@ contract EducationHubTest is Test {
     ////////////////////////////////////////////////////////////*/
     function testInitializeStoresArgs() public {
         assertEq(address(hub.token()), address(token));
-        assertEq(address(hub.membership()), address(membership));
+        assertEq(address(hub.hats()), address(hats));
         assertEq(hub.executor(), executor);
-        assertTrue(hub.isCreatorRole(CREATOR_ROLE));
+        uint256[] memory creatorHats = hub.creatorHatIds();
+        assertEq(creatorHats.length, 1);
+        assertEq(creatorHats[0], CREATOR_HAT);
+        uint256[] memory memberHats = hub.memberHatIds();
+        assertEq(memberHats.length, 1);
+        assertEq(memberHats[0], MEMBER_HAT);
     }
 
     function testInitializeZeroAddressReverts() public {
         EducationHub tmp = new EducationHub();
-        bytes32[] memory roles = new bytes32[](0);
+        uint256[] memory creatorHats = new uint256[](0);
+        uint256[] memory memberHats = new uint256[](0);
         vm.expectRevert(EducationHub.ZeroAddress.selector);
-        tmp.initialize(address(0), address(membership), executor, roles);
+        tmp.initialize(address(0), address(hats), executor, creatorHats, memberHats);
     }
 
     /*////////////////////////////////////////////////////////////
@@ -110,6 +108,80 @@ contract EducationHubTest is Test {
     function testSetExecutorUnauthorized() public {
         vm.expectRevert(EducationHub.NotExecutor.selector);
         hub.setExecutor(address(0xAB));
+    }
+
+    function testSetCreatorHatAllowed() public {
+        uint256 newHat = 99;
+        address newCreator = address(0xbeef);
+        
+        // Mint the new hat to the new creator
+        hats.mintHat(newHat, newCreator);
+        
+        // Add the new hat as a creator hat
+        vm.prank(executor);
+        hub.setCreatorHatAllowed(newHat, true);
+        
+        // Verify the hat was added
+        uint256[] memory creatorHats = hub.creatorHatIds();
+        assertEq(creatorHats.length, 2);
+        bool found = false;
+        for (uint256 i = 0; i < creatorHats.length; i++) {
+            if (creatorHats[i] == newHat) {
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found, "New creator hat should be in the array");
+        
+        // New creator should be able to create modules
+        vm.prank(newCreator);
+        hub.createModule(bytes("test"), 5, 1);
+        
+        // Remove the hat
+        vm.prank(executor);
+        hub.setCreatorHatAllowed(newHat, false);
+        
+        // Verify the hat was removed
+        creatorHats = hub.creatorHatIds();
+        assertEq(creatorHats.length, 1);
+        
+        // New creator should no longer be able to create modules
+        vm.prank(newCreator);
+        vm.expectRevert(EducationHub.NotCreator.selector);
+        hub.createModule(bytes("test2"), 5, 1);
+    }
+
+    function testSetMemberHatAllowed() public {
+        uint256 newHat = 88;
+        address newMember = address(0xcafe);
+        
+        // Mint the new hat to the new member
+        hats.mintHat(newHat, newMember);
+        
+        // Add the new hat as a member hat
+        vm.prank(executor);
+        hub.setMemberHatAllowed(newHat, true);
+        
+        // Verify the hat was added
+        uint256[] memory memberHats = hub.memberHatIds();
+        assertEq(memberHats.length, 2);
+        bool found = false;
+        for (uint256 i = 0; i < memberHats.length; i++) {
+            if (memberHats[i] == newHat) {
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found, "New member hat should be in the array");
+        
+        // First create a module for testing
+        vm.prank(creator);
+        hub.createModule(bytes("data"), 5, 2);
+        
+        // New member should be able to complete modules
+        vm.prank(newMember);
+        hub.completeModule(0, 2);
+        assertEq(token.balanceOf(newMember), 5);
     }
 
     /*////////////////////////////////////////////////////////////
@@ -186,5 +258,42 @@ contract EducationHubTest is Test {
         vm.prank(learner);
         vm.expectRevert(EducationHub.AlreadyCompleted.selector);
         hub.completeModule(0, 2);
+    }
+
+    /*////////////////////////////////////////////////////////////
+                            PERMISSION TESTS
+    ////////////////////////////////////////////////////////////*/
+    function testNonCreatorCannotCreateModule() public {
+        address nonCreator = address(0xbad);
+        // Give them member hat but not creator hat
+        hats.mintHat(MEMBER_HAT, nonCreator);
+        
+        vm.prank(nonCreator);
+        vm.expectRevert(EducationHub.NotCreator.selector);
+        hub.createModule(bytes("test"), 5, 1);
+    }
+
+    function testNonMemberCannotCompleteModule() public {
+        address nonMember = address(0xbad);
+        // Don't give them any hat
+        
+        // First create a module
+        vm.prank(creator);
+        hub.createModule(bytes("data"), 5, 2);
+        
+        vm.prank(nonMember);
+        vm.expectRevert(EducationHub.NotMember.selector);
+        hub.completeModule(0, 2);
+    }
+
+    function testExecutorBypassesHatChecks() public {
+        // Executor should be able to create modules even without creator hat
+        vm.prank(executor);
+        hub.createModule(bytes("executor module"), 10, 3);
+        
+        // Executor should be able to complete modules even without member hat
+        vm.prank(executor);
+        hub.completeModule(0, 3);
+        assertEq(token.balanceOf(executor), 10);
     }
 }
