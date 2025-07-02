@@ -254,11 +254,15 @@ contract Deployer is Initializable, OwnableUpgradeable {
         bool autoUp,
         address customImpl
     ) internal returns (address tmProxy) {
-        bytes32[] memory execOnly = new bytes32[](1);
-        execOnly[0] = keccak256("EXECUTIVE");
-
+        Layout storage l = _layout();
+        
+        // Get the role hat IDs for creator permissions
+        // EXECUTIVE role (index 1) = creators
+        uint256[] memory creatorHats = new uint256[](1);
+        creatorHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
+        
         bytes memory init = abi.encodeWithSignature(
-            "initialize(address,address,bytes32[],address)", token, membership, execOnly, executorAddr
+            "initialize(address,address,uint256[],address)", token, address(hats), creatorHats, executorAddr
         );
         tmProxy = _deploy(orgId, "TaskManager", executorAddr, autoUp, customImpl, init, false);
     }
