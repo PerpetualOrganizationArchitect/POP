@@ -9,6 +9,7 @@ import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgra
 
 import {IExecutor} from "./Executor.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {HatManager} from "./libs/HatManager.sol";
 
 /* ──────────────────  Direct‑democracy governor  ─────────────────────── */
 contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
@@ -40,12 +41,6 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     uint32 public constant MAX_DURATION_MIN = 43_200; /* 30 days */
     uint32 public constant MIN_DURATION_MIN = 10; /* spam guard */
 
-    /* ─────────── Hat Type Enum ─────────── */
-    enum HatType {
-        VOTING,
-        CREATOR
-    }
-
     /* ─────────── Data Structures ─────────── */
     struct PollOption {
         uint96 votes;
@@ -68,8 +63,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         IHats hats;
         IExecutor executor;
         mapping(address => bool) allowedTarget; // execution allow‑list
-        uint256[] votingHatIds; // enumeration array for voting hats
-        uint256[] creatorHatIds; // enumeration array for creator hats
+        uint256[] votingHatIds; // Array of voting hat IDs
+        uint256[] creatorHatIds; // Array of creator hat IDs
         uint8 quorumPercentage; // 1‑100
         Proposal[] _proposals;
     }
@@ -122,13 +117,13 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         emit QuorumPercentageSet(quorumPct);
 
         for (uint256 i; i < initialHats.length;) {
-            _setHatAllowed(initialHats[i], true, HatType.VOTING);
+            HatManager.setHatInArray(l.votingHatIds, initialHats[i], true);
             unchecked {
                 ++i;
             }
         }
         for (uint256 i; i < initialCreatorHats.length;) {
-            _setHatAllowed(initialCreatorHats[i], true, HatType.CREATOR);
+            HatManager.setHatInArray(l.creatorHatIds, initialCreatorHats[i], true);
             unchecked {
                 ++i;
             }
@@ -163,57 +158,15 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     }
 
     function setHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        _setHatAllowed(h, ok, HatType.VOTING);
+        Layout storage l = _layout();
+        HatManager.setHatInArray(l.votingHatIds, h, ok);
+        emit HatSet(h, ok);
     }
 
     function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        _setHatAllowed(h, ok, HatType.CREATOR);
-    }
-
-    function _setHatAllowed(uint256 h, bool ok, HatType hatType) internal {
         Layout storage l = _layout();
-
-        if (hatType == HatType.VOTING) {
-            // Find if hat already exists
-            uint256 existingIndex = type(uint256).max;
-            for (uint256 i = 0; i < l.votingHatIds.length; i++) {
-                if (l.votingHatIds[i] == h) {
-                    existingIndex = i;
-                    break;
-                }
-            }
-
-            if (ok && existingIndex == type(uint256).max) {
-                // Adding new hat (not found)
-                l.votingHatIds.push(h);
-                emit HatSet(h, true);
-            } else if (!ok && existingIndex != type(uint256).max) {
-                // Removing hat (found at existingIndex)
-                l.votingHatIds[existingIndex] = l.votingHatIds[l.votingHatIds.length - 1];
-                l.votingHatIds.pop();
-                emit HatSet(h, false);
-            }
-        } else {
-            // Find if hat already exists
-            uint256 existingIndex = type(uint256).max;
-            for (uint256 i = 0; i < l.creatorHatIds.length; i++) {
-                if (l.creatorHatIds[i] == h) {
-                    existingIndex = i;
-                    break;
-                }
-            }
-
-            if (ok && existingIndex == type(uint256).max) {
-                // Adding new hat (not found)
-                l.creatorHatIds.push(h);
-                emit CreatorHatSet(h, true);
-            } else if (!ok && existingIndex != type(uint256).max) {
-                // Removing hat (found at existingIndex)
-                l.creatorHatIds[existingIndex] = l.creatorHatIds[l.creatorHatIds.length - 1];
-                l.creatorHatIds.pop();
-                emit CreatorHatSet(h, false);
-            }
-        }
+        HatManager.setHatInArray(l.creatorHatIds, h, ok);
+        emit CreatorHatSet(h, ok);
     }
 
     function setTargetAllowed(address t, bool ok) external onlyExecutor {
@@ -231,7 +184,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     modifier onlyCreator() {
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
-            bool canCreate = _hasHat(_msgSender(), HatType.CREATOR);
+            bool canCreate = HatManager.hasAnyHat(l.hats, l.creatorHatIds, _msgSender());
             if (!canCreate) revert Unauthorized();
         }
         _;
@@ -240,7 +193,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     modifier onlyVoter() {
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
-            bool canVote = _hasHat(_msgSender(), HatType.VOTING);
+            bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
             if (!canVote) revert Unauthorized();
         }
         _;
@@ -504,27 +457,28 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         return l._proposals[id].restricted;
     }
 
-    /* ─────────── Internal Helper Functions ─────────── */
-    /// @dev Returns true if `user` wears *any* hat of the requested type.
-    function _hasHat(address user, HatType hatType) internal view returns (bool) {
-        Layout storage l = _layout();
-        uint256[] storage ids = hatType == HatType.VOTING ? l.votingHatIds : l.creatorHatIds;
+    /* ─────────── Hat Management View Functions ─────────── */
+    function getVotingHats() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().votingHatIds);
+    }
 
-        uint256 len = ids.length;
-        if (len == 0) return false;
-        if (len == 1) return l.hats.isWearerOfHat(user, ids[0]); // micro-optimise 1-ID case
+    function getCreatorHats() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().creatorHatIds);
+    }
 
-        // Build calldata in memory (cheap because ≤ 3)
-        address[] memory wearers = new address[](len);
-        uint256[] memory hatIds = new uint256[](len);
-        for (uint256 i; i < len; ++i) {
-            wearers[i] = user;
-            hatIds[i] = ids[i];
-        }
-        uint256[] memory balances = l.hats.balanceOfBatch(wearers, hatIds);
-        for (uint256 i; i < balances.length; ++i) {
-            if (balances[i] > 0) return true;
-        }
-        return false;
+    function votingHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().votingHatIds);
+    }
+
+    function creatorHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().creatorHatIds);
+    }
+
+    function isVotingHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().votingHatIds, hatId);
+    }
+
+    function isCreatorHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().creatorHatIds, hatId);
     }
 }
