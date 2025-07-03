@@ -9,6 +9,7 @@ import {ReentrancyGuardUpgradeable} from
 
 /*───────────────────────── Interface minimal stubs ───────────────────────*/
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
+import {HatManager} from "./libs/HatManager.sol";
 
 interface IUniversalAccountRegistry {
     function getUsername(address account) external view returns (string memory);
@@ -81,9 +82,9 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         l.accountRegistry = IUniversalAccountRegistry(accountRegistry_);
         l.masterDeployAddress = masterDeploy_;
 
-        // Set member hat IDs
+        // Set member hat IDs using HatManager
         for (uint256 i = 0; i < memberHatIds_.length; i++) {
-            l.memberHatIds.push(memberHatIds_[i]);
+            HatManager.setHatInArray(l.memberHatIds, memberHatIds_[i], true);
         }
 
         emit AddressesUpdated(hats_, accountRegistry_, masterDeploy_);
@@ -120,12 +121,12 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     function updateMemberHatIds(uint256[] calldata memberHatIds_) external onlyExecutor {
         Layout storage l = _layout();
 
-        // Clear existing hat IDs
-        delete l.memberHatIds;
+        // Clear existing hat IDs using HatManager
+        HatManager.clearHatArray(l.memberHatIds);
 
-        // Set new hat IDs
+        // Set new hat IDs using HatManager
         for (uint256 i = 0; i < memberHatIds_.length; i++) {
-            l.memberHatIds.push(memberHatIds_[i]);
+            HatManager.setHatInArray(l.memberHatIds, memberHatIds_[i], true);
         }
 
         emit MemberHatIdsUpdated(memberHatIds_);
@@ -161,7 +162,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
 
     /* ───────── Public user paths ─────── */
 
-    /// 1) caller supplies username if they don’t have one yet
+    /// 1) caller supplies username if they don't have one yet
     function quickJoinNoUser(string calldata username) external {
         _quickJoin(_msgSender(), username);
     }
@@ -203,7 +204,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
 
     /* ───────── Misc view helpers ─────── */
     function memberHatIds() external view returns (uint256[] memory) {
-        return _layout().memberHatIds;
+        return HatManager.getHatArray(_layout().memberHatIds);
     }
 
     function hats() external view returns (IHats) {
@@ -220,6 +221,15 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
 
     function masterDeployAddress() external view returns (address) {
         return _layout().masterDeployAddress;
+    }
+
+    /* ───────── Hat Management View Functions ─────────── */
+    function memberHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().memberHatIds);
+    }
+
+    function isMemberHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().memberHatIds, hatId);
     }
 
     function version() external pure returns (string memory) {

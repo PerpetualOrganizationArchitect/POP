@@ -11,6 +11,7 @@ import {TaskPerm} from "./libs/TaskPerm.sol";
 
 /*────────── External Hats interface ──────────*/
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {HatManager} from "./libs/HatManager.sol";
 
 /*────────── External Interfaces ──────────*/
 interface IParticipationToken is IERC20 {
@@ -70,14 +71,12 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         IHats hats;
         IParticipationToken token;
         uint256[] creatorHatIds; // enumeration array for creator hats
-        mapping(uint256 => uint256) idxCreator; // hatId -> index+1 for creator hats
         uint48 nextTaskId;
         uint48 nextProjectId;
         address executor; // 20 bytes + 2*6 bytes = 32 bytes (one slot)
         mapping(uint256 => uint8) rolePermGlobal; // hat ID => permission mask
         mapping(bytes32 => mapping(uint256 => uint8)) rolePermProj; // project => hat ID => permission mask
         uint256[] permissionHatIds; // enumeration array for hats with permissions
-        mapping(uint256 => uint256) idxPerm; // hatId -> index+1 for permission hats
     }
 
     bytes32 private constant _STORAGE_SLOT = 0x30bc214cbc65463577eb5b42c88d60986e26fc81ad89a2eb74550fb255f1e712;
@@ -125,9 +124,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         l.hats = IHats(hatsAddress);
         l.executor = executorAddress;
 
-        // Initialize creator hat arrays
+        // Initialize creator hat arrays using HatManager
         for (uint256 i; i < creatorHats.length;) {
-            _toggleCreatorHat(creatorHats[i], true);
+            HatManager.setHatInArray(l.creatorHatIds, creatorHats[i], true);
             emit CreatorHatSet(creatorHats[i], true);
             unchecked {
                 ++i;
@@ -139,44 +138,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     /*──────── Hat Management ─────*/
     function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        _toggleCreatorHat(h, ok);
+        Layout storage l = _layout();
+        HatManager.setHatInArray(l.creatorHatIds, h, ok);
         emit CreatorHatSet(h, ok);
-    }
-
-    function _toggleCreatorHat(uint256 h, bool ok) internal {
-        Layout storage l = _layout();
-        if (ok && l.idxCreator[h] == 0) {
-            // add
-            l.idxCreator[h] = l.creatorHatIds.length + 1;
-            l.creatorHatIds.push(h);
-        }
-        if (!ok && l.idxCreator[h] > 0) {
-            // remove
-            uint256 i = l.idxCreator[h] - 1;
-            uint256 last = l.creatorHatIds[l.creatorHatIds.length - 1];
-            l.creatorHatIds[i] = last; // swap-pop
-            l.idxCreator[last] = i + 1;
-            l.creatorHatIds.pop();
-            delete l.idxCreator[h];
-        }
-    }
-
-    function _togglePermissionHat(uint256 h, bool ok) internal {
-        Layout storage l = _layout();
-        if (ok && l.idxPerm[h] == 0) {
-            // add
-            l.idxPerm[h] = l.permissionHatIds.length + 1;
-            l.permissionHatIds.push(h);
-        }
-        if (!ok && l.idxPerm[h] > 0) {
-            // remove
-            uint256 i = l.idxPerm[h] - 1;
-            uint256 last = l.permissionHatIds[l.permissionHatIds.length - 1];
-            l.permissionHatIds[i] = last; // swap-pop
-            l.idxPerm[last] = i + 1;
-            l.permissionHatIds.pop();
-            delete l.idxPerm[h];
-        }
     }
 
     /*──────── Modifiers ─────*/
@@ -422,7 +386,11 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         l.rolePermGlobal[hatId] = mask;
 
         // Track that this hat has permissions
-        _togglePermissionHat(hatId, mask != 0);
+        if (mask != 0) {
+            HatManager.setHatInArray(l.permissionHatIds, hatId, true);
+        } else {
+            HatManager.setHatInArray(l.permissionHatIds, hatId, false);
+        }
     }
 
     function setProjectRolePerm(bytes32 pid, uint256 hatId, uint8 mask) external onlyCreator projectExists(pid) {
@@ -430,7 +398,11 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         l.rolePermProj[pid][hatId] = mask;
 
         // Track that this hat has permissions (project-specific permissions count too)
-        _togglePermissionHat(hatId, mask != 0);
+        if (mask != 0) {
+            HatManager.setHatInArray(l.permissionHatIds, hatId, true);
+        } else {
+            HatManager.setHatInArray(l.permissionHatIds, hatId, false);
+        }
 
         emit ProjectRolePermSet(pid, hatId, mask);
     }
@@ -451,7 +423,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     function creatorHatIds() external view returns (uint256[] memory) {
-        return _layout().creatorHatIds;
+        return HatManager.getHatArray(_layout().creatorHatIds);
     }
 
     /*──────── Internal Perm helpers ─────*/
@@ -506,7 +478,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
             l.rolePermProj[pid][hatId] = newMask;
 
             // Track that this hat has permissions
-            _togglePermissionHat(hatId, newMask != 0);
+            HatManager.setHatInArray(l.permissionHatIds, hatId, true);
 
             emit ProjectRolePermSet(pid, hatId, newMask);
             unchecked {
@@ -519,34 +491,30 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     /// @dev Returns true if `user` wears *any* creator hat.
     function _hasCreatorHat(address user) internal view returns (bool) {
         Layout storage l = _layout();
-        uint256 len = l.creatorHatIds.length;
-        if (len == 0) return false;
-        if (len == 1) return l.hats.isWearerOfHat(user, l.creatorHatIds[0]); // micro-optimise 1-ID case
-
-        // Build calldata in memory (cheap because ≤ 3)
-        address[] memory wearers = new address[](len);
-        uint256[] memory hatIds = new uint256[](len);
-        for (uint256 i; i < len;) {
-            wearers[i] = user;
-            hatIds[i] = l.creatorHatIds[i];
-            unchecked {
-                ++i;
-            }
-        }
-        uint256[] memory balances = l.hats.balanceOfBatch(wearers, hatIds);
-        for (uint256 i; i < balances.length;) {
-            if (balances[i] > 0) return true;
-            unchecked {
-                ++i;
-            }
-        }
-        return false;
+        return HatManager.hasAnyHat(l.hats, l.creatorHatIds, user);
     }
 
     /*──────── Utils / View ────*/
     function _task(Layout storage l, uint256 id) private view returns (Task storage t) {
         if (id >= l.nextTaskId) revert UnknownTask();
         t = l._tasks[id];
+    }
+
+    /*──────── Hat Management View Functions ─────────── */
+    function creatorHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().creatorHatIds);
+    }
+
+    function permissionHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().permissionHatIds);
+    }
+
+    function isCreatorHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().creatorHatIds, hatId);
+    }
+
+    function isPermissionHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().permissionHatIds, hatId);
     }
 
     function version() external pure returns (string memory) {

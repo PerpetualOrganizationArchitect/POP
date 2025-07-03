@@ -8,6 +8,7 @@ import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgra
 
 /*────────────── External Hats interface ─────────────*/
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {HatManager} from "./libs/HatManager.sol";
 
 /*──────────────────  Participation Token  ──────────────────*/
 contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardUpgradeable {
@@ -87,17 +88,19 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
         l.hats = IHats(hatsAddr);
         l.executor = executor_;
 
-        // Set initial member hats
+        // Set initial member hats using HatManager
         for (uint256 i; i < initialMemberHats.length;) {
-            _setHatAllowed(initialMemberHats[i], true, HatType.MEMBER);
+            HatManager.setHatInArray(l.memberHatIds, initialMemberHats[i], true);
+            emit MemberHatSet(initialMemberHats[i], true);
             unchecked {
                 ++i;
             }
         }
 
-        // Set initial approver hats
+        // Set initial approver hats using HatManager
         for (uint256 i; i < initialApproverHats.length;) {
-            _setHatAllowed(initialApproverHats[i], true, HatType.APPROVER);
+            HatManager.setHatInArray(l.approverHatIds, initialApproverHats[i], true);
+            emit ApproverHatSet(initialApproverHats[i], true);
             unchecked {
                 ++i;
             }
@@ -162,57 +165,15 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
     }
 
     function setMemberHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        _setHatAllowed(h, ok, HatType.MEMBER);
+        Layout storage l = _layout();
+        HatManager.setHatInArray(l.memberHatIds, h, ok);
+        emit MemberHatSet(h, ok);
     }
 
     function setApproverHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        _setHatAllowed(h, ok, HatType.APPROVER);
-    }
-
-    function _setHatAllowed(uint256 h, bool ok, HatType hatType) internal {
         Layout storage l = _layout();
-
-        if (hatType == HatType.MEMBER) {
-            // Find if hat already exists
-            uint256 existingIndex = type(uint256).max;
-            for (uint256 i = 0; i < l.memberHatIds.length; i++) {
-                if (l.memberHatIds[i] == h) {
-                    existingIndex = i;
-                    break;
-                }
-            }
-
-            if (ok && existingIndex == type(uint256).max) {
-                // Adding new hat (not found)
-                l.memberHatIds.push(h);
-                emit MemberHatSet(h, true);
-            } else if (!ok && existingIndex != type(uint256).max) {
-                // Removing hat (found at existingIndex)
-                l.memberHatIds[existingIndex] = l.memberHatIds[l.memberHatIds.length - 1];
-                l.memberHatIds.pop();
-                emit MemberHatSet(h, false);
-            }
-        } else {
-            // Find if hat already exists
-            uint256 existingIndex = type(uint256).max;
-            for (uint256 i = 0; i < l.approverHatIds.length; i++) {
-                if (l.approverHatIds[i] == h) {
-                    existingIndex = i;
-                    break;
-                }
-            }
-
-            if (ok && existingIndex == type(uint256).max) {
-                // Adding new hat (not found)
-                l.approverHatIds.push(h);
-                emit ApproverHatSet(h, true);
-            } else if (!ok && existingIndex != type(uint256).max) {
-                // Removing hat (found at existingIndex)
-                l.approverHatIds[existingIndex] = l.approverHatIds[l.approverHatIds.length - 1];
-                l.approverHatIds.pop();
-                emit ApproverHatSet(h, false);
-            }
-        }
+        HatManager.setHatInArray(l.approverHatIds, h, ok);
+        emit ApproverHatSet(h, ok);
     }
 
     /*────── Mint by authorised modules ─────*/
@@ -286,23 +247,7 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
     function _hasHat(address user, HatType hatType) internal view returns (bool) {
         Layout storage l = _layout();
         uint256[] storage ids = hatType == HatType.MEMBER ? l.memberHatIds : l.approverHatIds;
-
-        uint256 len = ids.length;
-        if (len == 0) return false;
-        if (len == 1) return l.hats.isWearerOfHat(user, ids[0]); // micro-optimise 1-ID case
-
-        // Build calldata in memory (cheap because ≤ 3)
-        address[] memory wearers = new address[](len);
-        uint256[] memory hatIds = new uint256[](len);
-        for (uint256 i; i < len; ++i) {
-            wearers[i] = user;
-            hatIds[i] = ids[i];
-        }
-        uint256[] memory balances = l.hats.balanceOfBatch(wearers, hatIds);
-        for (uint256 i; i < balances.length; ++i) {
-            if (balances[i] > 0) return true;
-        }
-        return false;
+        return HatManager.hasAnyHat(l.hats, ids, user);
     }
 
     /*───────── View helpers ─────────*/
@@ -337,11 +282,28 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
     }
 
     function memberHatIds() external view returns (uint256[] memory) {
-        return _layout().memberHatIds;
+        return HatManager.getHatArray(_layout().memberHatIds);
     }
 
     function approverHatIds() external view returns (uint256[] memory) {
-        return _layout().approverHatIds;
+        return HatManager.getHatArray(_layout().approverHatIds);
+    }
+
+    /*───────── Hat Management View Functions ─────────*/
+    function memberHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().memberHatIds);
+    }
+
+    function approverHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().approverHatIds);
+    }
+
+    function isMemberHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().memberHatIds, hatId);
+    }
+
+    function isApproverHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().approverHatIds, hatId);
     }
 
     /*───────── Version helper ─────────*/
