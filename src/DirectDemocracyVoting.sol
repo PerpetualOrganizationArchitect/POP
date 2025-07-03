@@ -3,16 +3,14 @@ pragma solidity ^0.8.20;
 
 /* ──────────────────  OpenZeppelin v5.3 Upgradeables  ────────────────── */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 import {IExecutor} from "./Executor.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {HatManager} from "./libs/HatManager.sol";
+import {VotingMath} from "./libs/VotingMath.sol";
 
 /* ──────────────────  Direct‑democracy governor  ─────────────────────── */
-contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
+contract DirectDemocracyVoting is Initializable {
     /* ─────────── Errors ─────────── */
     error Unauthorized();
     error AlreadyVoted();
@@ -33,6 +31,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     error ZeroAddress();
     error InvalidMetadata();
     error RoleNotAllowed();
+    error InvalidQuorum();
 
     /* ─────────── Constants ─────────── */
     bytes4 public constant MODULE_ID = 0x6464766f; /* "ddvo"  */
@@ -67,6 +66,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         uint256[] creatorHatIds; // Array of creator hat IDs
         uint8 quorumPercentage; // 1‑100
         Proposal[] _proposals;
+        bool _paused; // Inline pausable state
+        uint256 _lock; // Inline reentrancy guard state
     }
 
     // keccak256("poa.directdemocracy.storage") → unique, collision-free slot
@@ -76,6 +77,39 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         assembly {
             s.slot := _STORAGE_SLOT
         }
+    }
+
+    /* ─────────── Inline Context Implementation ─────────── */
+    function _msgSender() internal view returns (address addr) {
+        assembly {
+            addr := caller()
+        }
+    }
+
+    /* ─────────── Inline Pausable Implementation ─────────── */
+    modifier whenNotPaused() {
+        require(!_layout()._paused, "Pausable: paused");
+        _;
+    }
+
+    function paused() external view returns (bool) {
+        return _layout()._paused;
+    }
+
+    function _pause() internal {
+        _layout()._paused = true;
+    }
+
+    function _unpause() internal {
+        _layout()._paused = false;
+    }
+
+    /* ─────────── Inline ReentrancyGuard Implementation ─────────── */
+    modifier nonReentrant() {
+        require(_layout()._lock == 0, "ReentrancyGuard: reentrant call");
+        _layout()._lock = 1;
+        _;
+        _layout()._lock = 0;
     }
 
     /* ─────────── Events ─────────── */
@@ -104,31 +138,32 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         if (hats_ == address(0) || executor_ == address(0)) {
             revert ZeroAddress();
         }
-        require(quorumPct > 0 && quorumPct <= 100, "quorum");
-
-        __Context_init();
-        __Pausable_init();
-        __ReentrancyGuard_init();
+        VotingMath.validateQuorum(quorumPct);
 
         Layout storage l = _layout();
         l.hats = IHats(hats_);
         l.executor = IExecutor(executor_);
         l.quorumPercentage = quorumPct;
+        l._paused = false; // Initialize paused state
+        l._lock = 0; // Initialize reentrancy guard state
         emit QuorumPercentageSet(quorumPct);
 
-        for (uint256 i; i < initialHats.length;) {
+        uint256 len = initialHats.length;
+        for (uint256 i; i < len;) {
             HatManager.setHatInArray(l.votingHatIds, initialHats[i], true);
             unchecked {
                 ++i;
             }
         }
-        for (uint256 i; i < initialCreatorHats.length;) {
+        len = initialCreatorHats.length;
+        for (uint256 i; i < len;) {
             HatManager.setHatInArray(l.creatorHatIds, initialCreatorHats[i], true);
             unchecked {
                 ++i;
             }
         }
-        for (uint256 i; i < initialTargets.length;) {
+        len = initialTargets.length;
+        for (uint256 i; i < len;) {
             l.allowedTarget[initialTargets[i]] = true;
             emit TargetAllowed(initialTargets[i], true);
             unchecked {
@@ -175,7 +210,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     }
 
     function setQuorumPercentage(uint8 q) external onlyExecutor {
-        require(q > 0 && q <= 100, "quorum");
+        VotingMath.validateQuorum(q);
         _layout().quorumPercentage = q;
         emit QuorumPercentageSet(q);
     }
@@ -233,10 +268,10 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
 
         uint256 id = l._proposals.length - 1;
         for (uint256 i; i < numOptions;) {
-            uint256 len = batches[i].length;
-            if (len > 0) {
-                if (len > MAX_CALLS) revert TooManyCalls();
-                for (uint256 j; j < len;) {
+            uint256 batchLen = batches[i].length;
+            if (batchLen > 0) {
+                if (batchLen > MAX_CALLS) revert TooManyCalls();
+                for (uint256 j; j < batchLen;) {
                     if (!l.allowedTarget[batches[i][j].target]) revert TargetNotAllowed();
                     if (batches[i][j].target == address(this)) revert TargetSelf();
                     unchecked {
@@ -278,7 +313,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
                 ++i;
             }
         }
-        for (uint256 i; i < hatIds.length;) {
+        uint256 len = hatIds.length;
+        for (uint256 i; i < len;) {
             p.pollHatIds.push(hatIds[i]);
             p.pollHatAllowed[hatIds[i]] = true;
             unchecked {
@@ -303,41 +339,29 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         if (p.restricted) {
             bool hasAllowedHat = false;
             // Check if user has any of the poll-specific hats
-            for (uint256 i = 0; i < p.pollHatIds.length; i++) {
+            uint256 len = p.pollHatIds.length;
+            for (uint256 i = 0; i < len;) {
                 if (l.hats.isWearerOfHat(_msgSender(), p.pollHatIds[i])) {
                     hasAllowedHat = true;
                     break;
+                }
+                unchecked {
+                    ++i;
                 }
             }
             if (!hasAllowedHat) revert RoleNotAllowed();
         }
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
-        uint256 seen;
-        uint256 sum;
-        for (uint256 i; i < idxs.length;) {
-            uint8 ix = idxs[i];
-            if (ix >= p.options.length) revert InvalidIndex();
-            if ((seen >> ix) & 1 == 1) revert DuplicateIndex();
-            seen |= 1 << ix;
-
-            uint8 w = weights[i];
-            if (w > 100) revert InvalidWeight();
-            unchecked {
-                sum += w;
-            }
-            unchecked {
-                ++i;
-            }
-        }
-        if (sum != 100) revert WeightSumNot100(sum);
+        VotingMath.validateWeights(weights, idxs, p.options.length);
 
         p.hasVoted[_msgSender()] = true;
         unchecked {
             p.totalWeight += 100;
         }
 
-        for (uint256 i; i < idxs.length;) {
+        uint256 len = idxs.length;
+        for (uint256 i; i < len;) {
             unchecked {
                 p.options[idxs[i]].votes += uint96(weights[i]);
                 ++i;
@@ -360,7 +384,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         IExecutor.Call[] storage batch = l._proposals[id].batches[winner];
 
         if (valid && batch.length > 0) {
-            for (uint256 i; i < batch.length;) {
+            uint256 len = batch.length;
+            for (uint256 i; i < len;) {
                 if (batch[i].target == address(this)) revert TargetSelf();
                 if (!l.allowedTarget[batch[i].target]) revert TargetNotAllowed();
                 unchecked {
@@ -378,7 +403,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         Proposal storage p = l._proposals[id];
         require(p.batches.length > 0 || voters.length > 0, "nothing");
         uint256 cleaned;
-        for (uint256 i; i < voters.length && i < 4_000;) {
+        uint256 len = voters.length;
+        for (uint256 i; i < len && i < 4_000;) {
             if (p.hasVoted[voters[i]]) {
                 delete p.hasVoted[voters[i]];
                 unchecked {
@@ -399,7 +425,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         Proposal storage p = l._proposals[id];
         uint96 hi;
         uint96 second;
-        for (uint256 i; i < p.options.length;) {
+        uint256 len = p.options.length;
+        for (uint256 i; i < len;) {
             uint96 v = p.options[i].votes;
             if (v > hi) {
                 second = hi;
@@ -412,7 +439,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
                 ++i;
             }
         }
-        ok = (uint256(hi) * 100 > uint256(p.totalWeight) * l.quorumPercentage) && (hi > second);
+        ok = VotingMath.meetsQuorum(hi, second, p.totalWeight, l.quorumPercentage);
     }
 
     function proposalsCount() external view returns (uint256) {

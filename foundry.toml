@@ -4,7 +4,7 @@ out = "out"
 libs = ["lib"]
 via_ir = true
 optimize = true
-optimize_runs = 1000
+optimize_runs = 4000
 
 [rpc_endpoints]
 sepolia = "https://sepolia.drpc.org"
