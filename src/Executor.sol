@@ -6,6 +6,7 @@ import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.
 import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 
 interface IExecutor {
     struct Call {
@@ -38,6 +39,8 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     /// @custom:storage-location erc7201:poa.executor.storage
     struct Layout {
         address allowedCaller; // sole authorised governor
+        IHats hats; // Hats Protocol interface
+        mapping(address => bool) authorizedHatMinters; // contracts authorized to request hat minting
     }
 
     // keccak256("poa.executor.storage") → unique, collision-free slot
@@ -54,13 +57,20 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     event BatchExecuted(uint256 indexed proposalId, uint256 calls);
     event CallExecuted(uint256 indexed proposalId, uint256 indexed index, address target, uint256 value);
     event Swept(address indexed to, uint256 amount);
+    event HatsSet(address indexed hats);
+    event HatMinterAuthorized(address indexed minter, bool authorized);
+    event HatsMinted(address indexed user, uint256[] hatIds);
 
     /* ─────────── Initialiser ─────────── */
-    function initialize(address owner_) external initializer {
-        if (owner_ == address(0)) revert ZeroAddress();
+    function initialize(address owner_, address hats_) external initializer {
+        if (owner_ == address(0) || hats_ == address(0)) revert ZeroAddress();
         __Ownable_init(owner_);
         __Pausable_init();
         __ReentrancyGuard_init();
+
+        Layout storage l = _layout();
+        l.hats = IHats(hats_);
+        emit HatsSet(hats_);
     }
 
     /* ─────────── Governor management ─────────── */
@@ -68,11 +78,34 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
         if (newCaller == address(0)) revert ZeroAddress();
         Layout storage l = _layout();
         if (l.allowedCaller != address(0)) {
-            // After first set, only current caller can change
-            if (msg.sender != l.allowedCaller) revert UnauthorizedCaller();
+            // After first set, only current caller or owner can change
+            if (msg.sender != l.allowedCaller && msg.sender != owner()) revert UnauthorizedCaller();
         }
         l.allowedCaller = newCaller;
         emit CallerSet(newCaller);
+    }
+
+    /* ─────────── Hat minting management ─────────── */
+    function setHatMinterAuthorization(address minter, bool authorized) external {
+        if (minter == address(0)) revert ZeroAddress();
+        Layout storage l = _layout();
+        // Only owner or allowed caller can set authorizations
+        if (msg.sender != owner() && msg.sender != l.allowedCaller) revert UnauthorizedCaller();
+        l.authorizedHatMinters[minter] = authorized;
+        emit HatMinterAuthorized(minter, authorized);
+    }
+
+    function mintHatsForUser(address user, uint256[] calldata hatIds) external {
+        Layout storage l = _layout();
+        if (!l.authorizedHatMinters[msg.sender]) revert UnauthorizedCaller();
+        if (user == address(0)) revert ZeroAddress();
+
+        // Mint each hat to the user
+        for (uint256 i = 0; i < hatIds.length; i++) {
+            l.hats.mintHat(hatIds[i], user);
+        }
+
+        emit HatsMinted(user, hatIds);
     }
 
     /* ─────────── Batch execution ─────────── */

@@ -99,6 +99,44 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         emit OrgRegistered(orgId, executorAddr, metaData);
     }
 
+    /**
+     * @dev Creates an org in bootstrap mode without an executor (for deployment scenarios)
+     * @param orgId The org identifier
+     * @param metaData Metadata for the org
+     */
+    function createOrgBootstrap(bytes32 orgId, bytes calldata metaData) external onlyOwner {
+        if (orgId == bytes32(0)) revert InvalidParam();
+
+        Layout storage l = _layout();
+        if (l.orgOf[orgId].exists) revert OrgExists();
+
+        l.orgOf[orgId] = OrgInfo({
+            executor: address(0), // no executor yet
+            contractCount: 0,
+            bootstrap: true, // in bootstrap mode
+            exists: true
+        });
+        l.orgIds.push(orgId);
+        emit OrgRegistered(orgId, address(0), metaData);
+    }
+
+    /**
+     * @dev Sets the executor for an org (only during bootstrap)
+     * @param orgId The org identifier
+     * @param executorAddr The executor address
+     */
+    function setOrgExecutor(bytes32 orgId, address executorAddr) external onlyOwner {
+        if (orgId == bytes32(0) || executorAddr == address(0)) revert InvalidParam();
+
+        Layout storage l = _layout();
+        OrgInfo storage o = l.orgOf[orgId];
+        if (!o.exists) revert OrgUnknown();
+        if (!o.bootstrap) revert OwnerOnlyDuringBootstrap();
+
+        o.executor = executorAddr;
+        emit OrgRegistered(orgId, executorAddr, ""); // emit update event
+    }
+
     function updateOrgMeta(bytes32 orgId, bytes calldata newMetaData) external {
         Layout storage l = _layout();
         OrgInfo storage o = l.orgOf[orgId];
@@ -132,7 +170,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         if (!o.exists) revert OrgUnknown();
 
         bool callerIsOwner = (msg.sender == owner());
-        bool callerIsExecutor = (msg.sender == o.executor);
+        bool callerIsExecutor = (o.executor != address(0) && msg.sender == o.executor);
 
         if (callerIsOwner) {
             // owner path allowed only during bootstrap, _and_ must opt‑in to auto‑upgrade
@@ -159,7 +197,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         emit ContractRegistered(contractId, orgId, typeId, proxy, beacon, autoUp, moduleOwner);
 
         // Finish bootstrap if executor registered OR deployer signalled completion
-        if (callerIsExecutor || (callerIsOwner && lastRegister)) {
+        if ((o.executor != address(0) && callerIsExecutor) || (callerIsOwner && lastRegister)) {
             o.bootstrap = false;
         }
     }
@@ -247,7 +285,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         if (!o.exists) revert OrgUnknown();
 
         bool callerIsOwner = (msg.sender == owner());
-        bool callerIsExecutor = (msg.sender == o.executor);
+        bool callerIsExecutor = (o.executor != address(0) && msg.sender == o.executor);
 
         if (callerIsOwner) {
             // owner path allowed only during bootstrap
