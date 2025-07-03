@@ -363,6 +363,49 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit TaskCancelled(id, _msgSender());
     }
 
+    /**
+     * @dev Creates a task and immediately assigns it to the specified assignee in a single transaction.
+     * @param payout The payout amount for the task
+     * @param meta Task metadata
+     * @param pid Project ID
+     * @param assignee Address to assign the task to
+     * @return taskId The ID of the created task
+     */
+    function createAndAssignTask(uint256 payout, bytes calldata meta, bytes32 pid, address assignee)
+        external
+        returns (uint256 taskId)
+    {
+        if (assignee == address(0)) revert ZeroAddress();
+
+        Layout storage l = _layout();
+        address sender = _msgSender();
+
+        // Check permissions - user must have both CREATE and ASSIGN permissions, or be a project manager
+        uint8 userPerms = _permMask(sender, pid);
+        bool hasCreateAndAssign = TaskPerm.has(userPerms, TaskPerm.CREATE) && TaskPerm.has(userPerms, TaskPerm.ASSIGN);
+        if (!hasCreateAndAssign && !_isPM(pid, sender)) {
+            revert Unauthorized();
+        }
+
+        // Validation (similar to createTask)
+        if (payout == 0 || payout > MAX_PAYOUT_96) revert InvalidPayout();
+        if (meta.length == 0) revert InvalidString();
+        Project storage p = l._projects[pid];
+        if (!p.exists) revert UnknownProject();
+
+        uint256 newSpent = p.spent + payout;
+        if (p.cap != 0 && newSpent > p.cap) revert BudgetExceeded();
+        p.spent = uint128(newSpent);
+
+        // Create and assign task in one go
+        taskId = l.nextTaskId++;
+        l._tasks[taskId] = Task(pid, uint96(payout), assignee, Status.CLAIMED);
+
+        // Emit events
+        emit TaskCreated(taskId, pid, payout, meta);
+        emit TaskAssigned(taskId, assignee, sender);
+    }
+
     /*────────── View Helpers ─────────────*/
     function getTask(uint256 id)
         external
