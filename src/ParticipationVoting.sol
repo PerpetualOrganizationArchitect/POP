@@ -3,17 +3,14 @@ pragma solidity ^0.8.20;
 
 /*  OpenZeppelin v5.3 Upgradeables  */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IExecutor} from "./Executor.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {HatManager} from "./libs/HatManager.sol";
+import {VotingMath} from "./libs/VotingMath.sol";
 
 /// Participation‑weighted governor (power = balance or √balance)
-contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
+contract ParticipationVoting is Initializable {
     /* ─────────────── Errors ─────────────── */
     error Unauthorized();
     error AlreadyVoted();
@@ -31,7 +28,6 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     error TargetNotAllowed();
     error TargetSelf();
     error ZeroAddress();
-    error MinBalance();
     error Overflow();
     error InvalidMetadata();
     error RoleNotAllowed();
@@ -72,6 +68,8 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         bool quadraticVoting; // toggle
         uint256 MIN_BAL; /* sybil floor */
         Proposal[] _proposals;
+        bool _paused; // Inline pausable state
+        uint256 _lock; // Inline reentrancy guard state
     }
 
     // keccak256("poa.participationvoting.storage") → unique, collision-free slot
@@ -81,6 +79,39 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         assembly {
             s.slot := _STORAGE_SLOT
         }
+    }
+
+    /* ─────────── Inline Context Implementation ─────────── */
+    function _msgSender() internal view returns (address addr) {
+        assembly {
+            addr := caller()
+        }
+    }
+
+    /* ─────────── Inline Pausable Implementation ─────────── */
+    modifier whenNotPaused() {
+        require(!_layout()._paused, "Pausable: paused");
+        _;
+    }
+
+    function paused() external view returns (bool) {
+        return _layout()._paused;
+    }
+
+    function _pause() internal {
+        _layout()._paused = true;
+    }
+
+    function _unpause() internal {
+        _layout()._paused = false;
+    }
+
+    /* ─────────── Inline ReentrancyGuard Implementation ─────────── */
+    modifier nonReentrant() {
+        require(_layout()._lock == 0, "ReentrancyGuard: reentrant call");
+        _layout()._lock = 1;
+        _;
+        _layout()._lock = 0;
     }
 
     /* ───────────── Events ───────────── */
@@ -121,12 +152,8 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         if (hats_ == address(0) || token_ == address(0) || executor_ == address(0)) {
             revert ZeroAddress();
         }
-        require(quorumPct > 0 && quorumPct <= 100, "quorum");
-        require(minBalance_ > 0, "minBalance");
-
-        __Context_init();
-        __Pausable_init();
-        __ReentrancyGuard_init();
+        VotingMath.validateQuorum(quorumPct);
+        VotingMath.validateMinBalance(minBalance_);
 
         Layout storage l = _layout();
         l.hats = IHats(hats_);
@@ -135,20 +162,34 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         l.quorumPercentage = quorumPct;
         l.quadraticVoting = quadratic_;
         l.MIN_BAL = minBalance_;
+        l._paused = false; // Initialize paused state
+        l._lock = 0; // Initialize reentrancy guard state
 
         emit QuorumPercentageSet(quorumPct);
         emit QuadraticToggled(quadratic_);
         emit MinBalanceSet(minBalance_);
 
-        for (uint256 i; i < initialHats.length; ++i) {
+        uint256 len = initialHats.length;
+        for (uint256 i; i < len;) {
             HatManager.setHatInArray(l.votingHatIds, initialHats[i], true);
+            unchecked {
+                ++i;
+            }
         }
-        for (uint256 i; i < initialCreatorHats.length; ++i) {
+        len = initialCreatorHats.length;
+        for (uint256 i; i < len;) {
             HatManager.setHatInArray(l.creatorHatIds, initialCreatorHats[i], true);
+            unchecked {
+                ++i;
+            }
         }
-        for (uint256 i; i < initialTargets.length; ++i) {
+        len = initialTargets.length;
+        for (uint256 i; i < len;) {
             l.allowedTarget[initialTargets[i]] = true;
             emit TargetAllowed(initialTargets[i], true);
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -184,7 +225,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     }
 
     function setQuorumPercentage(uint8 q) external onlyExecutor {
-        require(q > 0 && q <= 100, "quorum");
+        VotingMath.validateQuorum(q);
         _layout().quorumPercentage = q;
         emit QuorumPercentageSet(q);
     }
@@ -196,6 +237,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     }
 
     function setMinBalance(uint256 n) external onlyExecutor {
+        VotingMath.validateMinBalance(n);
         _layout().MIN_BAL = n;
         emit MinBalanceSet(n);
     }
@@ -252,16 +294,23 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         p.endTimestamp = endTs;
 
         uint256 id = l._proposals.length - 1;
-        for (uint256 i; i < numOptions; ++i) {
-            if (optionBatches[i].length > 0) {
-                if (optionBatches[i].length > MAX_CALLS) revert TooManyCalls();
-                for (uint256 j; j < optionBatches[i].length; ++j) {
+        for (uint256 i; i < numOptions;) {
+            uint256 batchLen = optionBatches[i].length;
+            if (batchLen > 0) {
+                if (batchLen > MAX_CALLS) revert TooManyCalls();
+                for (uint256 j; j < batchLen;) {
                     if (!l.allowedTarget[optionBatches[i][j].target]) revert TargetNotAllowed();
                     if (optionBatches[i][j].target == address(this)) revert TargetSelf();
+                    unchecked {
+                        ++j;
+                    }
                 }
             }
             p.options.push(PollOption(0));
             p.batches.push(optionBatches[i]);
+            unchecked {
+                ++i;
+            }
         }
         emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
     }
@@ -284,13 +333,20 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         p.restricted = hatIds.length > 0;
 
         uint256 id = l._proposals.length - 1;
-        for (uint256 i; i < numOptions; ++i) {
+        for (uint256 i; i < numOptions;) {
             p.options.push(PollOption(0));
             p.batches.push();
+            unchecked {
+                ++i;
+            }
         }
-        for (uint256 i; i < hatIds.length; ++i) {
+        uint256 len = hatIds.length;
+        for (uint256 i; i < len;) {
             p.pollHatIds.push(hatIds[i]);
             p.pollHatAllowed[hatIds[i]] = true;
+            unchecked {
+                ++i;
+            }
         }
         emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
     }
@@ -308,18 +364,22 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         Layout storage l = _layout();
 
         uint256 bal = l.participationToken.balanceOf(_msgSender());
-        if (bal < l.MIN_BAL) revert MinBalance();
-        uint256 power = l.quadraticVoting ? Math.sqrt(bal) : bal;
+        VotingMath.checkMinBalance(bal, l.MIN_BAL);
+        uint256 power = VotingMath.calculateVotingPower(bal, l.quadraticVoting);
         require(power > 0, "power=0");
 
         Proposal storage p = l._proposals[id];
         if (p.restricted) {
             bool hasAllowedHat = false;
             // Check if user has any of the poll-specific hats
-            for (uint256 i = 0; i < p.pollHatIds.length; i++) {
+            uint256 hatLen = p.pollHatIds.length;
+            for (uint256 i = 0; i < hatLen;) {
                 if (l.hats.isWearerOfHat(_msgSender(), p.pollHatIds[i])) {
                     hasAllowedHat = true;
                     break;
+                }
+                unchecked {
+                    ++i;
                 }
             }
             if (!hasAllowedHat) revert RoleNotAllowed();
@@ -328,7 +388,8 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
         uint256 seen;
         uint256 sum;
-        for (uint256 i; i < idxs.length; ++i) {
+        uint256 idxLen = idxs.length;
+        for (uint256 i; i < idxLen;) {
             uint8 ix = idxs[i];
             if (ix >= p.options.length) revert InvalidIndex();
             if ((seen >> ix) & 1 == 1) revert DuplicateIndex();
@@ -339,19 +400,25 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
             unchecked {
                 sum += w;
             }
+            unchecked {
+                ++i;
+            }
         }
         if (sum != 100) revert WeightSumNot100(sum);
 
         uint256 newTW = uint256(p.totalWeight) + power;
-        if (newTW > type(uint128).max) revert Overflow();
+        VotingMath.checkOverflow(newTW);
         p.totalWeight = uint128(newTW);
         p.hasVoted[_msgSender()] = true;
 
-        for (uint256 i; i < idxs.length; ++i) {
+        for (uint256 i; i < idxLen;) {
             uint256 add = power * weights[i];
             uint256 newVotes = uint256(p.options[idxs[i]].votes) + add;
-            if (newVotes > type(uint128).max) revert Overflow();
+            VotingMath.checkOverflow(newVotes);
             p.options[idxs[i]].votes = uint128(newVotes);
+            unchecked {
+                ++i;
+            }
         }
         emit VoteCast(id, _msgSender(), idxs, weights);
     }
@@ -370,9 +437,13 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         IExecutor.Call[] storage batch = l._proposals[id].batches[winner];
 
         if (valid && batch.length > 0) {
-            for (uint256 i; i < batch.length; ++i) {
+            uint256 len = batch.length;
+            for (uint256 i; i < len;) {
                 if (batch[i].target == address(this)) revert TargetSelf();
                 if (!l.allowedTarget[batch[i].target]) revert TargetNotAllowed();
+                unchecked {
+                    ++i;
+                }
             }
             l.executor.execute(id, batch);
         }
@@ -385,10 +456,16 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         Proposal storage p = l._proposals[id];
         require(p.batches.length > 0 || voters.length > 0, "nothing");
         uint256 cleaned;
-        for (uint256 i; i < voters.length && i < 4_000; ++i) {
+        uint256 len = voters.length;
+        for (uint256 i; i < len && i < 4_000;) {
             if (p.hasVoted[voters[i]]) {
                 delete p.hasVoted[voters[i]];
-                ++cleaned;
+                unchecked {
+                    ++cleaned;
+                }
+            }
+            unchecked {
+                ++i;
             }
         }
         if (cleaned == 0 && p.batches.length > 0) delete p.batches;
@@ -401,7 +478,8 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         Proposal storage p = l._proposals[id];
         uint128 high;
         uint128 second;
-        for (uint256 i; i < p.options.length; ++i) {
+        uint256 len = p.options.length;
+        for (uint256 i; i < len;) {
             uint128 v = p.options[i].votes;
             if (v > high) {
                 second = high;
@@ -409,6 +487,9 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
                 win = i;
             } else if (v > second) {
                 second = v;
+            }
+            unchecked {
+                ++i;
             }
         }
         ok = (uint256(high) * 100 > uint256(p.totalWeight) * l.quorumPercentage) && (high > second);

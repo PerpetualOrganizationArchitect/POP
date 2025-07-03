@@ -1,19 +1,16 @@
 // SPDX‑License‑Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.30;
 
 /*  OpenZeppelin v5.3 Upgradeables  */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {IExecutor} from "./Executor.sol";
 import {HatManager} from "./libs/HatManager.sol";
+import {VotingMath} from "./libs/VotingMath.sol";
 
 /* ─────────────────── HybridVoting ─────────────────── */
-contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
+contract HybridVoting is Initializable {
     /* ─────── Errors ─────── */
     error Unauthorized();
     error AlreadyVoted();
@@ -77,6 +74,9 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         uint256 MIN_BAL; // min PT balance to participate
         /* Vote Bookkeeping */
         Proposal[] _proposals;
+        /* Inline State */
+        bool _paused; // Inline pausable state
+        uint256 _lock; // Inline reentrancy guard state
     }
 
     // keccak256("poa.hybridvoting.storage") → unique, collision-free slot
@@ -86,6 +86,39 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         assembly {
             s.slot := _STORAGE_SLOT
         }
+    }
+
+    /* ─────────── Inline Context Implementation ─────────── */
+    function _msgSender() internal view returns (address addr) {
+        assembly {
+            addr := caller()
+        }
+    }
+
+    /* ─────────── Inline Pausable Implementation ─────────── */
+    modifier whenNotPaused() {
+        require(!_layout()._paused, "Pausable: paused");
+        _;
+    }
+
+    function paused() external view returns (bool) {
+        return _layout()._paused;
+    }
+
+    function _pause() internal {
+        _layout()._paused = true;
+    }
+
+    function _unpause() internal {
+        _layout()._paused = false;
+    }
+
+    /* ─────────── Inline ReentrancyGuard Implementation ─────────── */
+    modifier nonReentrant() {
+        require(_layout()._lock == 0, "ReentrancyGuard: reentrant call");
+        _layout()._lock = 1;
+        _;
+        _layout()._lock = 0;
     }
 
     /* ─────── Events ─────── */
@@ -124,18 +157,16 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
             revert ZeroAddress();
         }
 
-        require(quorum_ > 0 && quorum_ <= 100, "quorum");
-        require(ddShare_ <= 100, "split");
-        require(minBalance_ > 0, "minBalance");
-
-        __Context_init();
-        __Pausable_init();
-        __ReentrancyGuard_init();
+        VotingMath.validateQuorum(quorum_);
+        VotingMath.validateSplit(ddShare_);
+        VotingMath.validateMinBalance(minBalance_);
 
         Layout storage l = _layout();
         l.hats = IHats(hats_);
         l.participationToken = IERC20(token_);
         l.executor = IExecutor(executor_);
+        l._paused = false; // Initialize paused state
+        l._lock = 0; // Initialize reentrancy guard state
 
         l.quorumPct = quorum_;
         emit QuorumSet(quorum_);
@@ -158,22 +189,38 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     ) internal {
         Layout storage l = _layout();
 
-        for (uint256 i; i < votingHats.length; ++i) {
+        uint256 len = votingHats.length;
+        for (uint256 i; i < len;) {
             HatManager.setHatInArray(l.votingHatIds, votingHats[i], true);
+            unchecked {
+                ++i;
+            }
         }
-        for (uint256 i; i < democracyHats.length; ++i) {
+        len = democracyHats.length;
+        for (uint256 i; i < len;) {
             HatManager.setHatInArray(l.democracyHatIds, democracyHats[i], true);
+            unchecked {
+                ++i;
+            }
         }
-        for (uint256 i; i < creatorHats.length; ++i) {
+        len = creatorHats.length;
+        for (uint256 i; i < len;) {
             HatManager.setHatInArray(l.creatorHatIds, creatorHats[i], true);
+            unchecked {
+                ++i;
+            }
         }
     }
 
     function _initializeTargets(address[] calldata targets) internal {
         Layout storage l = _layout();
-        for (uint256 i; i < targets.length; ++i) {
+        uint256 len = targets.length;
+        for (uint256 i; i < len;) {
             l.allowedTarget[targets[i]] = true;
             emit TargetAllowed(targets[i], true);
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -219,13 +266,13 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     }
 
     function setQuorum(uint8 q) external onlyExecutor {
-        require(q > 0 && q <= 100, "quorum");
+        VotingMath.validateQuorum(q);
         _layout().quorumPct = q;
         emit QuorumSet(q);
     }
 
     function setSplit(uint8 s) external onlyExecutor {
-        require(s <= 100, "split");
+        VotingMath.validateSplit(s);
         _layout().ddSharePct = s;
         emit SplitSet(s);
     }
@@ -237,6 +284,7 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
     }
 
     function setMinBalance(uint256 n) external onlyExecutor {
+        VotingMath.validateMinBalance(n);
         _layout().MIN_BAL = n;
         emit MinBalanceSet(n);
     }
@@ -293,16 +341,23 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         p.endTimestamp = endTs;
 
         uint256 id = l._proposals.length - 1;
-        for (uint256 i; i < numOptions; ++i) {
-            if (batches[i].length > 0) {
-                if (batches[i].length > MAX_CALLS) revert TooManyCalls();
-                for (uint256 j; j < batches[i].length; ++j) {
+        for (uint256 i; i < numOptions;) {
+            uint256 batchLen = batches[i].length;
+            if (batchLen > 0) {
+                if (batchLen > MAX_CALLS) revert TooManyCalls();
+                for (uint256 j; j < batchLen;) {
                     if (!l.allowedTarget[batches[i][j].target]) revert TargetNotAllowed();
                     if (batches[i][j].target == address(this)) revert TargetSelf();
+                    unchecked {
+                        ++j;
+                    }
                 }
             }
             p.options.push(PollOption(0, 0));
             p.batches.push(batches[i]);
+            unchecked {
+                ++i;
+            }
         }
         emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
     }
@@ -325,13 +380,20 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         p.restricted = hatIds.length > 0;
 
         uint256 id = l._proposals.length - 1;
-        for (uint256 i; i < numOptions; ++i) {
+        for (uint256 i; i < numOptions;) {
             p.options.push(PollOption(0, 0));
             p.batches.push();
+            unchecked {
+                ++i;
+            }
         }
-        for (uint256 i; i < hatIds.length; ++i) {
+        uint256 len = hatIds.length;
+        for (uint256 i; i < len;) {
             p.pollHatIds.push(hatIds[i]);
             p.pollHatAllowed[hatIds[i]] = true;
+            unchecked {
+                ++i;
+            }
         }
         emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
     }
@@ -350,10 +412,14 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         Proposal storage p = l._proposals[id];
         if (p.restricted) {
             bool hasAllowedHat = false;
-            for (uint256 i = 0; i < p.pollHatIds.length; i++) {
+            uint256 len = p.pollHatIds.length;
+            for (uint256 i = 0; i < len;) {
                 if (l.hats.isWearerOfHat(_msgSender(), p.pollHatIds[i])) {
                     hasAllowedHat = true;
                     break;
+                }
+                unchecked {
+                    ++i;
                 }
             }
             if (!hasAllowedHat) revert RoleNotAllowed();
@@ -364,31 +430,23 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
         bool hasDemocracyHat =
             (_msgSender() == address(l.executor)) || HatManager.hasAnyHat(l.hats, l.democracyHatIds, _msgSender());
 
-        uint256 ddRawVoter = hasDemocracyHat ? 100 : 0; // DD power only if has democracy hat
         uint256 bal = l.participationToken.balanceOf(_msgSender());
-        if (bal < l.MIN_BAL) bal = 0;
-        uint256 ptPower = (bal == 0) ? 0 : (l.quadraticVoting ? Math.sqrt(bal) : bal);
-        uint256 ptRawVoter = ptPower * 100; // raw numerator
+        (uint256 ddRawVoter, uint256 ptRawVoter) =
+            VotingMath.calculateRawPowers(hasDemocracyHat, bal, l.MIN_BAL, l.quadraticVoting);
 
         /* weight sanity */
-        uint256 sum;
-        uint256 seen;
-        for (uint256 i; i < weights.length; ++i) {
-            uint8 ix = idxs[i];
-            if (ix >= p.options.length) revert InvalidIndex();
-            if ((seen >> ix) & 1 == 1) revert DuplicateIndex();
-            seen |= 1 << ix;
-            if (weights[i] > 100) revert InvalidWeight();
-            sum += weights[i];
-        }
-        if (sum != 100) revert WeightSumNot100(sum);
+        VotingMath.validateWeights(weights, idxs, p.options.length);
 
         /* store raws */
-        for (uint256 i; i < weights.length; ++i) {
+        uint256 len = weights.length;
+        for (uint256 i; i < len;) {
             uint8 ix = idxs[i];
             uint8 w = weights[i];
             if (ddRawVoter > 0) p.options[ix].ddRaw += uint128(ddRawVoter * w / 100);
             if (ptRawVoter > 0) p.options[ix].ptRaw += uint128(ptRawVoter * w / 100);
+            unchecked {
+                ++i;
+            }
         }
         p.ddTotalRaw += ddRawVoter;
         p.ptTotalRaw += ptRawVoter;
@@ -414,18 +472,16 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
             return (0, false);
         }
 
-        uint256 sliceDD = l.ddSharePct;
-        uint256 slicePT = 100 - l.ddSharePct;
+        (uint256 sliceDD, uint256 slicePT) = VotingMath.calculateSlicePercentages(l.ddSharePct);
         uint256 hi;
         uint256 second;
 
-        for (uint256 i; i < p.options.length; ++i) {
+        uint256 len = p.options.length;
+        for (uint256 i; i < len;) {
             /* scale each slice to its fixed share */
-            uint256 scaledDD = (p.ddTotalRaw == 0) ? 0 : (uint256(p.options[i].ddRaw) * sliceDD) / p.ddTotalRaw;
-
-            uint256 scaledPT = (p.ptTotalRaw == 0) ? 0 : (uint256(p.options[i].ptRaw) * slicePT) / p.ptTotalRaw;
-
-            uint256 totalScaled = scaledDD + scaledPT; // ∈ [0,100]
+            uint256 scaledDD = VotingMath.calculateScaledPower(p.options[i].ddRaw, p.ddTotalRaw, sliceDD);
+            uint256 scaledPT = VotingMath.calculateScaledPower(p.options[i].ptRaw, p.ptTotalRaw, slicePT);
+            uint256 totalScaled = VotingMath.calculateTotalScaledPower(scaledDD, scaledPT);
 
             if (totalScaled > hi) {
                 second = hi;
@@ -434,14 +490,21 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
             } else if (totalScaled > second) {
                 second = totalScaled;
             }
+            unchecked {
+                ++i;
+            }
         }
 
-        valid = (hi * 100 >= uint256(sliceDD + slicePT) * l.quorumPct) && (hi > second);
+        valid = VotingMath.meetsQuorum(hi, second, sliceDD + slicePT, l.quorumPct);
 
         IExecutor.Call[] storage batch = p.batches[winner];
         if (valid && batch.length > 0) {
-            for (uint256 i; i < batch.length; ++i) {
+            uint256 len = batch.length;
+            for (uint256 i; i < len;) {
                 if (!l.allowedTarget[batch[i].target]) revert TargetNotAllowed();
+                unchecked {
+                    ++i;
+                }
             }
             l.executor.execute(id, batch);
         }
@@ -458,12 +521,16 @@ contract HybridVoting is Initializable, ContextUpgradeable, PausableUpgradeable,
 
         uint256 cleaned;
         // cap loop to stay well below the 4 million refund limit
-        for (uint256 i; i < voters.length && i < 4_000; ++i) {
+        uint256 len = voters.length;
+        for (uint256 i; i < len && i < 4_000;) {
             if (p.hasVoted[voters[i]]) {
                 delete p.hasVoted[voters[i]];
                 unchecked {
                     ++cleaned;
                 }
+            }
+            unchecked {
+                ++i;
             }
         }
 

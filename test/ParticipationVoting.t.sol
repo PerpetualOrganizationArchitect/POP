@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../src/ParticipationVoting.sol";
+import "../src/libs/VotingMath.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {MockHats} from "./mocks/MockHats.sol";
@@ -139,7 +140,7 @@ contract PVotingTest is Test {
                 1 ether
             )
         );
-        vm.expectRevert("quorum");
+        vm.expectRevert(VotingMath.InvalidQuorum.selector);
         new ERC1967Proxy(address(impl), data);
     }
 
@@ -254,7 +255,7 @@ contract PVotingTest is Test {
 
     function testSetQuorumBad() public {
         vm.prank(address(exec));
-        vm.expectRevert("quorum");
+        vm.expectRevert(VotingMath.InvalidQuorum.selector);
         pv.setQuorumPercentage(0);
     }
 
@@ -367,7 +368,7 @@ contract PVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
         vm.prank(poorVoter);
-        vm.expectRevert(ParticipationVoting.MinBalance.selector);
+        vm.expectRevert(abi.encodeWithSelector(VotingMath.MinBalanceNotMet.selector, 1 ether));
         pv.vote(id, idx, w);
     }
 
@@ -391,7 +392,7 @@ contract PVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
         vm.prank(voter);
-        vm.expectRevert(ParticipationVoting.InvalidIndex.selector);
+        vm.expectRevert(VotingMath.InvalidIndex.selector);
         pv.vote(id, idx, w);
     }
 

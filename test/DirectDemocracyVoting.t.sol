@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../src/DirectDemocracyVoting.sol";
+import "../src/libs/VotingMath.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {MockHats} from "./mocks/MockHats.sol";
@@ -89,7 +90,7 @@ contract DDVotingTest is Test {
             DirectDemocracyVoting.initialize,
             (address(hats), address(exec), new uint256[](0), new uint256[](0), new address[](0), 0)
         );
-        vm.expectRevert("quorum");
+        vm.expectRevert(VotingMath.InvalidQuorum.selector);
         new ERC1967Proxy(address(impl), data);
     }
 
@@ -204,7 +205,7 @@ contract DDVotingTest is Test {
 
     function testSetQuorumBad() public {
         vm.prank(address(exec));
-        vm.expectRevert("quorum");
+        vm.expectRevert(VotingMath.InvalidQuorum.selector);
         dd.setQuorumPercentage(0);
     }
 
@@ -314,7 +315,7 @@ contract DDVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
         vm.prank(voter);
-        vm.expectRevert(DirectDemocracyVoting.InvalidIndex.selector);
+        vm.expectRevert(VotingMath.InvalidIndex.selector);
         dd.vote(id, idx, w);
     }
 
