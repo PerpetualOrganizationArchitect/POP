@@ -6,6 +6,9 @@ import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
+import {EligibilityModule} from "./EligibilityModule.sol";
+import {ToggleModule} from "./ToggleModule.sol";
 
 /*────────────────────────────── Core deps ──────────────────────────────*/
 import "./OrgRegistry.sol";
@@ -17,10 +20,6 @@ interface IPoaManager {
 }
 
 /*────────────────────── Module‑specific hooks ──────────────────────────*/
-interface IMembership {
-    function setQuickJoin(address) external;
-}
-
 interface IParticipationToken {
     function setTaskManager(address) external;
     function setEducationHub(address) external;
@@ -28,15 +27,18 @@ interface IParticipationToken {
 
 interface IExecutorAdmin {
     function setCaller(address) external;
+    function setHatMinterAuthorization(address minter, bool authorized) external;
 }
 
 /*── init‑selector helpers (reduce bytecode & safety) ────────────────────*/
 interface IHybridVotingInit {
     function initialize(
-        address membership_,
+        address hats_,
         address token_,
         address executor_,
-        bytes32[] calldata roles,
+        uint256[] calldata initialVotingHats,
+        uint256[] calldata initialDemocracyHats,
+        uint256[] calldata initialCreatorHats,
         address[] calldata targets,
         uint8 quorumPct,
         uint8 ddSplit,
@@ -48,7 +50,6 @@ interface IHybridVotingInit {
 interface IParticipationVotingInit {
     function initialize(
         address executor_,
-        address membership_,
         address token_,
         bytes32[] calldata roles,
         address[] calldata targets,
@@ -74,6 +75,10 @@ contract Deployer is Initializable, OwnableUpgradeable {
         IPoaManager poaManager;
         OrgRegistry orgRegistry;
     }
+
+    IHats public hats;
+    EligibilityModule public eligibilityModule;
+    ToggleModule public toggleModule;
 
     // keccak256("poa.deployer.storage") to get a unique, collision-free slot
     bytes32 private constant _STORAGE_SLOT = 0x4f6cf4b446a382b8bde8d35e8ca59cc30d80d9a326b56d1a5212b27a0198fc7f;
@@ -101,13 +106,14 @@ contract Deployer is Initializable, OwnableUpgradeable {
     /* initializer */
     constructor() initializer {}
 
-    function initialize(address _poaManager, address _orgRegistry) public initializer {
-        if (_poaManager == address(0) || _orgRegistry == address(0)) revert InvalidAddress();
+    function initialize(address _poaManager, address _orgRegistry, address _hats) public initializer {
+        if (_poaManager == address(0) || _orgRegistry == address(0) || _hats == address(0)) revert InvalidAddress();
         __Ownable_init(msg.sender);
 
         Layout storage l = _layout();
         l.poaManager = IPoaManager(_poaManager);
         l.orgRegistry = OrgRegistry(_orgRegistry);
+        hats = IHats(_hats);
     }
 
     /*──────────────────────── INTERNAL CORE ───────────────────────*/
@@ -151,56 +157,36 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
     /*══════════════  MODULE‑SPECIFIC DEPLOY HELPERS  ═════════════=*/
     /*---------  Executor  (first, we need its address everywhere) ---------*/
-    function _deployExecutor(bytes32 orgId, address executorEOA, bool autoUp, address customImpl)
-        internal
-        returns (address execProxy)
-    {
-        bytes memory init = abi.encodeWithSignature("initialize(address)", executorEOA);
-        execProxy = _deploy(orgId, "Executor", executorEOA, autoUp, customImpl, init, false);
-    }
-
-    /*---------  Membership NFT  ---------*/
-    function _deployMembership(
-        bytes32 orgId,
-        address executorAddr,
-        string memory orgName,
-        bool autoUp,
-        address customImpl,
-        string[] memory roleNames,
-        string[] memory roleImages,
-        bool[] memory roleCanVote
-    ) internal returns (address membershipProxy) {
-        bytes32[] memory execRoles = new bytes32[](1);
-        execRoles[0] = keccak256("EXECUTIVE");
-
-        bytes memory init = abi.encodeWithSignature(
-            "initialize(address,string,string[],string[],bool[],bytes32[])",
-            executorAddr,
-            orgName,
-            roleNames,
-            roleImages,
-            roleCanVote,
-            execRoles
-        );
-
-        membershipProxy = _deploy(orgId, "Membership", executorAddr, autoUp, customImpl, init, false);
+    function _deployExecutor(bytes32 orgId, bool autoUp, address customImpl) internal returns (address execProxy) {
+        // Initialize with Deployer as owner so we can set up governance
+        bytes memory init = abi.encodeWithSignature("initialize(address,address)", address(this), address(hats));
+        execProxy = _deploy(orgId, "Executor", address(this), autoUp, customImpl, init, false);
     }
 
     /*---------  QuickJoin  ---------*/
     function _deployQuickJoin(
         bytes32 orgId,
         address executorAddr,
-        address membership,
         address registry,
         address masterDeploy,
         bool autoUp,
         address customImpl
     ) internal returns (address qjProxy) {
+        Layout storage l = _layout();
+
+        // Get the DEFAULT role hat ID for new members
+        uint256[] memory memberHats = new uint256[](1);
+        memberHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
+
         bytes memory init = abi.encodeWithSignature(
-            "initialize(address,address,address,address)", executorAddr, membership, registry, masterDeploy
+            "initialize(address,address,address,address,uint256[])",
+            executorAddr,
+            address(hats),
+            registry,
+            masterDeploy,
+            memberHats
         );
         qjProxy = _deploy(orgId, "QuickJoin", executorAddr, autoUp, customImpl, init, false);
-        IMembership(membership).setQuickJoin(qjProxy);
     }
 
     /*---------  ParticipationToken  ---------*/
@@ -209,29 +195,45 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address executorAddr,
         string memory name,
         string memory symbol,
-        address membership,
         bool autoUp,
         address customImpl
     ) internal returns (address ptProxy) {
-        bytes memory init =
-            abi.encodeWithSignature("initialize(address,string,string,address)", executorAddr, name, symbol, membership);
+        Layout storage l = _layout();
+
+        // Get the role hat IDs for member and approver permissions
+        // DEFAULT role (index 0) = members, EXECUTIVE role (index 1) = approvers
+        uint256[] memory memberHats = new uint256[](1);
+        memberHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
+
+        uint256[] memory approverHats = new uint256[](1);
+        approverHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
+
+        bytes memory init = abi.encodeWithSignature(
+            "initialize(address,string,string,address,uint256[],uint256[])",
+            executorAddr,
+            name,
+            symbol,
+            address(hats),
+            memberHats,
+            approverHats
+        );
         ptProxy = _deploy(orgId, "ParticipationToken", executorAddr, autoUp, customImpl, init, false);
     }
 
     /*---------  TaskManager  ---------*/
-    function _deployTaskManager(
-        bytes32 orgId,
-        address executorAddr,
-        address token,
-        address membership,
-        bool autoUp,
-        address customImpl
-    ) internal returns (address tmProxy) {
-        bytes32[] memory execOnly = new bytes32[](1);
-        execOnly[0] = keccak256("EXECUTIVE");
+    function _deployTaskManager(bytes32 orgId, address executorAddr, address token, bool autoUp, address customImpl)
+        internal
+        returns (address tmProxy)
+    {
+        Layout storage l = _layout();
+
+        // Get the role hat IDs for creator permissions
+        // EXECUTIVE role (index 1) = creators
+        uint256[] memory creatorHats = new uint256[](1);
+        creatorHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
 
         bytes memory init = abi.encodeWithSignature(
-            "initialize(address,address,bytes32[],address)", token, membership, execOnly, executorAddr
+            "initialize(address,address,uint256[],address)", token, address(hats), creatorHats, executorAddr
         );
         tmProxy = _deploy(orgId, "TaskManager", executorAddr, autoUp, customImpl, init, false);
     }
@@ -240,17 +242,28 @@ contract Deployer is Initializable, OwnableUpgradeable {
     function _deployEducationHub(
         bytes32 orgId,
         address executorAddr,
-        address membership,
         address token,
         bool autoUp,
         address customImpl,
         bool lastRegister // <<< flag propagated to registry
     ) internal returns (address ehProxy) {
-        bytes32[] memory execOnly = new bytes32[](1);
-        execOnly[0] = keccak256("EXECUTIVE");
+        Layout storage l = _layout();
+
+        // Get the role hat IDs for creator and member permissions
+        // EXECUTIVE role (index 1) = creators, DEFAULT role (index 0) = members
+        uint256[] memory creatorHats = new uint256[](1);
+        creatorHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
+
+        uint256[] memory memberHats = new uint256[](1);
+        memberHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
 
         bytes memory init = abi.encodeWithSignature(
-            "initialize(address,address,address,bytes32[])", token, membership, executorAddr, execOnly
+            "initialize(address,address,address,uint256[],uint256[])",
+            token,
+            address(hats),
+            executorAddr,
+            creatorHats,
+            memberHats
         );
         ehProxy = _deploy(orgId, "EducationHub", executorAddr, autoUp, customImpl, init, lastRegister);
     }
@@ -259,7 +272,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
     function _deployHybridVoting(
         bytes32 orgId,
         address executorAddr,
-        address membership,
         address token,
         bool autoUp,
         address customImpl,
@@ -269,21 +281,32 @@ contract Deployer is Initializable, OwnableUpgradeable {
         bool quadratic,
         uint256 minBal
     ) internal returns (address hvProxy) {
-        bytes32[] memory roles = new bytes32[](3);
-        roles[0] = keccak256("DEFAULT");
-        roles[1] = keccak256("EXECUTIVE");
-        roles[2] = keccak256("Member");
+        Layout storage l = _layout();
 
-        address[] memory targets = new address[](2);
-        targets[0] = membership;
-        targets[1] = executorAddr;
+        // Get the role hat IDs (we know there are at least 2: DEFAULT and EXECUTIVE)
+        uint256[] memory votingHats = new uint256[](2);
+        votingHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
+        votingHats[1] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
+
+        // For democracy hats, use only the EXECUTIVE role hat (gives DD voting power)
+        uint256[] memory democracyHats = new uint256[](1);
+        democracyHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
+
+        // For creator hats, use the EXECUTIVE role hat
+        uint256[] memory creatorHats = new uint256[](1);
+        creatorHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
+
+        address[] memory targets = new address[](1);
+        targets[0] = executorAddr;
 
         bytes memory init = abi.encodeWithSelector(
             IHybridVotingInit.initialize.selector,
-            membership,
+            address(hats),
             token,
             executorAddr,
-            roles,
+            votingHats,
+            democracyHats,
+            creatorHats,
             targets,
             quorumPct,
             ddSplit,
@@ -293,12 +316,104 @@ contract Deployer is Initializable, OwnableUpgradeable {
         hvProxy = _deploy(orgId, "HybridVoting", executorAddr, autoUp, customImpl, init, lastRegister);
     }
 
+    function _setupHatsTree(
+        bytes32 orgId,
+        address executorAddr,
+        string memory orgName,
+        string[] memory roleNames,
+        bool[] memory roleCanVote
+    ) internal returns (uint256 topHatId, uint256[] memory roleHatIds) {
+        require(roleNames.length == roleCanVote.length, "HATS_SETUP: array mismatch");
+
+        // ─────────────────────────────────────────────────────────────
+        //  Deploy EligibilityModule with Deployer as initial admin
+        // ─────────────────────────────────────────────────────────────
+        eligibilityModule = new EligibilityModule(address(this));
+        address eligibilityModuleAddress = address(eligibilityModule);
+
+        // ─────────────────────────────────────────────────────────────
+        //  Deploy ToggleModule with Deployer as initial admin
+        // ─────────────────────────────────────────────────────────────
+        toggleModule = new ToggleModule(address(this));
+        address toggleModuleAddress = address(toggleModule);
+
+        // ─────────────────────────────────────────────────────────────
+        //  Mint the Top Hat *to this deployer* so we can configure
+        // ─────────────────────────────────────────────────────────────
+        topHatId = hats.mintTopHat(
+            address(this), // wearer for now
+            string(abi.encodePacked("ipfs://", orgName)),
+            "" //image uri
+        );
+
+        // Configure Top Hat eligibility and toggle
+        eligibilityModule.setHatRules(topHatId, true, true);
+        toggleModule.setHatStatus(topHatId, true);
+
+        // ─────────────────────────────────────────────────────────────
+        //  Create & (optionally) mint child hats for each role
+        // ─────────────────────────────────────────────────────────────
+        uint256 len = roleNames.length;
+        roleHatIds = new uint256[](len);
+
+        // Create hats one at a time instead of using batchCreateHats
+        for (uint256 i; i < len; ++i) {
+            roleHatIds[i] = hats.createHat(
+                topHatId, // admin = parent Top Hat
+                roleNames[i], // details + placeholder URI
+                type(uint32).max, // unlimited supply
+                eligibilityModuleAddress, // eligibility module
+                toggleModuleAddress, // toggle module
+                true, // mutable
+                roleNames[i] // data blob (optional)
+            );
+
+            // Configure role hat eligibility and toggle
+            eligibilityModule.setHatRules(roleHatIds[i], true, true);
+            toggleModule.setHatStatus(roleHatIds[i], true);
+
+            // Give the role hat to the Executor right away if flagged
+            if (roleCanVote[i]) {
+                hats.mintHat(roleHatIds[i], executorAddr);
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  Pass Top Hat ownership to the Executor
+        hats.transferHat(topHatId, address(this), executorAddr);
+
+        // ─────────────────────────────────────────────────────────────
+        //  Transfer module admin rights to the Executor
+        // ─────────────────────────────────────────────────────────────
+        eligibilityModule.transferAdmin(executorAddr);
+        toggleModule.transferAdmin(executorAddr);
+
+        // ─────────────────────────────────────────────────────────────
+        //  Book-keep in OrgRegistry so other modules can
+        //     fetch the hat IDs later.  Delete if you don't need it.
+        // ─────────────────────────────────────────────────────────────
+        _layout().orgRegistry.registerHatsTree(orgId, topHatId, roleHatIds);
+    }
+
     /*════════════════  FULL ORG  DEPLOYMENT  ════════════════*/
+    struct DeploymentParams {
+        bytes32 orgId;
+        string orgName;
+        address registryAddr;
+        bool autoUpgrade;
+        uint8 quorumPct;
+        uint8 ddSplit;
+        bool quadratic;
+        uint256 minBal;
+        string[] roleNames;
+        string[] roleImages;
+        bool[] roleCanVote;
+    }
+
     function deployFullOrg(
         bytes32 orgId,
-        address executorEOA, // multisig / DAO address
         string calldata orgName,
-        address registryAddr, // external username registry
+        address registryAddr,
         bool autoUpgrade,
         uint8 quorumPct,
         uint8 ddSplit,
@@ -312,7 +427,34 @@ contract Deployer is Initializable, OwnableUpgradeable {
         returns (
             address hybridVoting,
             address executorAddr,
-            address membership,
+            address quickJoin,
+            address participationToken,
+            address taskManager,
+            address educationHub
+        )
+    {
+        DeploymentParams memory params = DeploymentParams({
+            orgId: orgId,
+            orgName: orgName,
+            registryAddr: registryAddr,
+            autoUpgrade: autoUpgrade,
+            quorumPct: quorumPct,
+            ddSplit: ddSplit,
+            quadratic: quadratic,
+            minBal: minBal,
+            roleNames: roleNames,
+            roleImages: roleImages,
+            roleCanVote: roleCanVote
+        });
+
+        return _deployFullOrgInternal(params);
+    }
+
+    function _deployFullOrgInternal(DeploymentParams memory params)
+        internal
+        returns (
+            address hybridVoting,
+            address executorAddr,
             address quickJoin,
             address participationToken,
             address taskManager,
@@ -321,64 +463,65 @@ contract Deployer is Initializable, OwnableUpgradeable {
     {
         Layout storage l = _layout();
 
-        /* 0. ensure Org exists (or create) */
-        if (l.orgRegistry.orgCount() == 0 || !_orgExists(orgId)) {
-            l.orgRegistry.registerOrg(orgId, executorEOA, bytes(orgName));
+        /* 1. Create Org in bootstrap mode */
+        if (!_orgExists(params.orgId)) {
+            l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName));
         } else {
-            // Destructure the tuple returned by orgOf
-            (address currentExec,,,) = l.orgRegistry.orgOf(orgId);
-            if (currentExec != executorEOA) revert OrgExistsMismatch();
+            // Org already exists - this should not happen in normal deployment
+            revert OrgExistsMismatch();
         }
 
-        /* 1. Executor  */
-        executorAddr = _deployExecutor(orgId, executorEOA, autoUpgrade, address(0));
+        /* 2. Deploy Executor */
+        executorAddr = _deployExecutor(params.orgId, params.autoUpgrade, address(0));
 
-        /* 2. Membership NFT */
-        membership =
-            _deployMembership(orgId, executorAddr, orgName, autoUpgrade, address(0), roleNames, roleImages, roleCanVote);
+        /* 3. Set the executor for the org */
+        l.orgRegistry.setOrgExecutor(params.orgId, executorAddr);
 
-        /* 3. QuickJoin */
-        quickJoin =
-            _deployQuickJoin(orgId, executorAddr, membership, registryAddr, address(this), autoUpgrade, address(0));
+        /* 4. Setup Hats Tree */
+        (uint256 topHatId, uint256[] memory roleHatIds) =
+            _setupHatsTree(params.orgId, executorAddr, params.orgName, params.roleNames, params.roleCanVote);
 
-        /* 4. Participation token */
-        string memory tName = string(abi.encodePacked(orgName, " Token"));
+        /* 5. QuickJoin */
+        quickJoin = _deployQuickJoin(
+            params.orgId, executorAddr, params.registryAddr, address(this), params.autoUpgrade, address(0)
+        );
+
+        /* 6. Participation token */
+        string memory tName = string(abi.encodePacked(params.orgName, " Token"));
         string memory tSymbol = "PT";
-        participationToken = _deployPT(orgId, executorAddr, tName, tSymbol, membership, autoUpgrade, address(0));
+        participationToken = _deployPT(params.orgId, executorAddr, tName, tSymbol, params.autoUpgrade, address(0));
 
-        /* 5. TaskManager */
-        taskManager = _deployTaskManager(orgId, executorAddr, participationToken, membership, autoUpgrade, address(0));
+        /* 7. TaskManager */
+        taskManager = _deployTaskManager(params.orgId, executorAddr, participationToken, params.autoUpgrade, address(0));
         IParticipationToken(participationToken).setTaskManager(taskManager);
 
-        /* 6. EducationHub (no longer the final registration) */
-        educationHub = _deployEducationHub(
-            orgId,
-            executorAddr,
-            membership,
-            participationToken,
-            autoUpgrade,
-            address(0),
-            false // <--- Changed from true to false
-        );
+        /* 8. EducationHub */
+        educationHub =
+            _deployEducationHub(params.orgId, executorAddr, participationToken, params.autoUpgrade, address(0), false);
         IParticipationToken(participationToken).setEducationHub(educationHub);
 
-        /* 7. HybridVoting governor (LAST owner-side registration → flips bootstrap) */
+        /* 9. HybridVoting governor */
         hybridVoting = _deployHybridVoting(
-            orgId,
+            params.orgId,
             executorAddr,
-            membership,
             participationToken,
-            autoUpgrade,
+            params.autoUpgrade,
             address(0),
             true,
-            quorumPct,
-            ddSplit,
-            quadratic,
-            minBal
+            params.quorumPct,
+            params.ddSplit,
+            params.quadratic,
+            params.minBal
         );
+
+        /* authorize QuickJoin to mint hats (before setting voting contract as caller) */
+        IExecutorAdmin(executorAddr).setHatMinterAuthorization(quickJoin, true);
 
         /* link executor to governor */
         IExecutorAdmin(executorAddr).setCaller(hybridVoting);
+
+        /* renounce executor ownership - now only governed by voting */
+        OwnableUpgradeable(executorAddr).renounceOwnership();
     }
 
     /*══════════════  UTILITIES  ═════════════=*/

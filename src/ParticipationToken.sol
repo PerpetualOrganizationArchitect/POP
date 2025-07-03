@@ -6,17 +6,15 @@ import "@openzeppelin-contracts-upgradeable/contracts/token/ERC20/ERC20Upgradeab
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
-/*────────────── External membership interface ─────────────*/
-interface IMembership {
-    function roleOf(address user) external view returns (bytes32);
-    function isExecutiveRole(bytes32 roleId) external view returns (bool);
-}
+/*────────────── External Hats interface ─────────────*/
+import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {HatManager} from "./libs/HatManager.sol";
 
 /*──────────────────  Participation Token  ──────────────────*/
 contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardUpgradeable {
     /*──────────── Errors ───────────*/
     error NotTaskOrEdu();
-    error NotExecutive();
+    error NotApprover();
     error NotMember();
     error NotRequester();
     error RequestUnknown();
@@ -35,15 +33,23 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
         string ipfsHash;
     }
 
+    /*──────────── Hat Type Enum ───────────*/
+    enum HatType {
+        MEMBER,
+        APPROVER
+    }
+
     /*──────────── ERC-7201 Storage ───────────*/
     /// @custom:storage-location erc7201:poa.participationtoken.storage
     struct Layout {
         address taskManager;
         address educationHub;
-        IMembership membership;
+        IHats hats;
         address executor;
         uint256 requestCounter;
         mapping(uint256 => Request) requests;
+        uint256[] memberHatIds; // enumeration array for member hats
+        uint256[] approverHatIds; // enumeration array for approver hats
     }
 
     // keccak256("poa.participationtoken.storage") → unique, collision-free slot
@@ -61,20 +67,44 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
     event Requested(uint256 indexed id, address indexed requester, uint96 amount, string ipfsHash);
     event RequestApproved(uint256 indexed id, address indexed approver);
     event RequestCancelled(uint256 indexed id, address indexed caller);
+    event MemberHatSet(uint256 hat, bool allowed);
+    event ApproverHatSet(uint256 hat, bool allowed);
 
     /*─────────── Initialiser ──────*/
-    function initialize(address executor_, string calldata name_, string calldata symbol_, address membershipAddr)
-        external
-        initializer
-    {
-        if (membershipAddr == address(0) || executor_ == address(0)) revert InvalidAddress();
+    function initialize(
+        address executor_,
+        string calldata name_,
+        string calldata symbol_,
+        address hatsAddr,
+        uint256[] calldata initialMemberHats,
+        uint256[] calldata initialApproverHats
+    ) external initializer {
+        if (hatsAddr == address(0) || executor_ == address(0)) revert InvalidAddress();
 
         __ERC20_init(name_, symbol_);
         __ReentrancyGuard_init();
 
         Layout storage l = _layout();
-        l.membership = IMembership(membershipAddr);
+        l.hats = IHats(hatsAddr);
         l.executor = executor_;
+
+        // Set initial member hats using HatManager
+        for (uint256 i; i < initialMemberHats.length;) {
+            HatManager.setHatInArray(l.memberHatIds, initialMemberHats[i], true);
+            emit MemberHatSet(initialMemberHats[i], true);
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Set initial approver hats using HatManager
+        for (uint256 i; i < initialApproverHats.length;) {
+            HatManager.setHatInArray(l.approverHatIds, initialApproverHats[i], true);
+            emit ApproverHatSet(initialApproverHats[i], true);
+            unchecked {
+                ++i;
+            }
+        }
     }
 
     /*────────── Modifiers ─────────*/
@@ -86,20 +116,19 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
         _;
     }
 
-    modifier onlyExec() {
+    modifier onlyApprover() {
         Layout storage l = _layout();
         if (_msgSender() == l.executor) {
             _;
             return;
         }
-        bytes32 role = l.membership.roleOf(_msgSender());
-        if (role == bytes32(0) || !l.membership.isExecutiveRole(role)) revert NotExecutive();
+        if (!_hasHat(_msgSender(), HatType.APPROVER)) revert NotApprover();
         _;
     }
 
     modifier isMember() {
         Layout storage l = _layout();
-        if (_msgSender() != l.executor && l.membership.roleOf(_msgSender()) == bytes32(0)) revert NotMember();
+        if (_msgSender() != l.executor && !_hasHat(_msgSender(), HatType.MEMBER)) revert NotMember();
         _;
     }
 
@@ -135,6 +164,18 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
         }
     }
 
+    function setMemberHatAllowed(uint256 h, bool ok) external onlyExecutor {
+        Layout storage l = _layout();
+        HatManager.setHatInArray(l.memberHatIds, h, ok);
+        emit MemberHatSet(h, ok);
+    }
+
+    function setApproverHatAllowed(uint256 h, bool ok) external onlyExecutor {
+        Layout storage l = _layout();
+        HatManager.setHatInArray(l.approverHatIds, h, ok);
+        emit ApproverHatSet(h, ok);
+    }
+
     /*────── Mint by authorised modules ─────*/
     function mint(address to, uint256 amount) external nonReentrant onlyTaskOrEdu {
         if (to == address(0)) revert InvalidAddress();
@@ -154,8 +195,8 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
         emit Requested(requestId, _msgSender(), amount, ipfsHash);
     }
 
-    /// Execs approve – state change *after* successful mint
-    function approveRequest(uint256 id) external nonReentrant onlyExec {
+    /// Approvers approve – state change *after* successful mint
+    function approveRequest(uint256 id) external nonReentrant onlyApprover {
         Layout storage l = _layout();
         Request storage r = l.requests[id];
         if (r.requester == address(0)) revert RequestUnknown();
@@ -168,15 +209,15 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
         emit RequestApproved(id, _msgSender());
     }
 
-    /// Cancel unapproved request – requester **or** exec
+    /// Cancel unapproved request – requester **or** approver
     function cancelRequest(uint256 id) external nonReentrant {
         Layout storage l = _layout();
         Request storage r = l.requests[id];
         if (r.requester == address(0)) revert RequestUnknown();
         if (r.approved) revert AlreadyApproved();
 
-        bool isExec = (_msgSender() == l.executor) || l.membership.isExecutiveRole(l.membership.roleOf(_msgSender()));
-        if (_msgSender() != r.requester && !isExec) revert NotExecutive();
+        bool isApprover = (_msgSender() == l.executor) || _hasHat(_msgSender(), HatType.APPROVER);
+        if (_msgSender() != r.requester && !isApprover) revert NotApprover();
 
         delete l.requests[id];
         emit RequestCancelled(id, _msgSender());
@@ -201,6 +242,14 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
         super._update(from, to, value);
     }
 
+    /*───────── Internal Helper Functions ─────────*/
+    /// @dev Returns true if `user` wears *any* hat of the requested type.
+    function _hasHat(address user, HatType hatType) internal view returns (bool) {
+        Layout storage l = _layout();
+        uint256[] storage ids = hatType == HatType.MEMBER ? l.memberHatIds : l.approverHatIds;
+        return HatManager.hasAnyHat(l.hats, ids, user);
+    }
+
     /*───────── View helpers ─────────*/
     function requests(uint256 id)
         external
@@ -220,8 +269,8 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
         return _layout().educationHub;
     }
 
-    function membership() external view returns (IMembership) {
-        return _layout().membership;
+    function hats() external view returns (IHats) {
+        return _layout().hats;
     }
 
     function executor() external view returns (address) {
@@ -230,6 +279,31 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
 
     function requestCounter() external view returns (uint256) {
         return _layout().requestCounter;
+    }
+
+    function memberHatIds() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().memberHatIds);
+    }
+
+    function approverHatIds() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().approverHatIds);
+    }
+
+    /*───────── Hat Management View Functions ─────────*/
+    function memberHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().memberHatIds);
+    }
+
+    function approverHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().approverHatIds);
+    }
+
+    function isMemberHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().memberHatIds, hatId);
+    }
+
+    function isApproverHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().approverHatIds, hatId);
     }
 
     /*───────── Version helper ─────────*/

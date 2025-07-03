@@ -12,7 +12,6 @@ import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 /*──────────── Local contracts ───────────*/
 import {HybridVoting} from "../src/HybridVoting.sol";
 import {Executor} from "../src/Executor.sol";
-import {Membership} from "../src/Membership.sol";
 import {ParticipationToken} from "../src/ParticipationToken.sol";
 import {QuickJoin} from "../src/QuickJoin.sol";
 import {TaskManager} from "../src/TaskManager.sol";
@@ -24,13 +23,13 @@ import "../src/PoaManager.sol";
 import "../src/OrgRegistry.sol";
 import {Deployer} from "../src/Deployer.sol";
 import {IExecutor} from "../src/Executor.sol";
+import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 
 /*────────────── Test contract ───────────*/
 contract DeployerTest is Test {
     /*–––– implementations ––––*/
     HybridVoting hybridImpl;
     Executor execImpl;
-    Membership membershipImpl;
     UniversalAccountRegistry accountRegImpl;
     QuickJoin quickJoinImpl;
     ParticipationToken pTokenImpl;
@@ -47,13 +46,13 @@ contract DeployerTest is Test {
     address public constant orgOwner = address(2);
     address public constant voter1 = address(3);
     address public constant voter2 = address(4);
+    address public constant SEPOLIA_HATS = 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137;
 
     /*–––– ids ––––*/
     bytes32 public constant ORG_ID = keccak256("AUTO-UPGRADE-ORG");
     bytes32 public constant GLOBAL_REG_ID = keccak256("POA-GLOBAL-ACCOUNT-REGISTRY");
 
     /*–––– deployed proxies ––––*/
-    address membershipProxy;
     address quickJoinProxy;
     address pTokenProxy;
     address payable executorProxy;
@@ -64,7 +63,7 @@ contract DeployerTest is Test {
 
     function _deployFullOrg()
         internal
-        returns (address hybrid, address exec, address member, address qj, address token, address tm, address hub)
+        returns (address hybrid, address exec, address qj, address token, address tm, address hub)
     {
         vm.startPrank(orgOwner);
         string[] memory names = new string[](2);
@@ -76,18 +75,20 @@ contract DeployerTest is Test {
         bool[] memory voting = new bool[](2);
         voting[0] = true;
         voting[1] = true;
-        (hybrid, exec, member, qj, token, tm, hub) = deployer.deployFullOrg(
-            ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        (hybrid, exec, qj, token, tm, hub) = deployer.deployFullOrg(
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
         vm.stopPrank();
     }
 
     /*══════════════════════════════════════════ SET‑UP ══════════════════════════════════════════*/
     function setUp() public {
+        // Fork Sepolia using the RPC URL from foundry.toml
+        vm.createSelectFork("sepolia");
+
         /*–– deploy bare implementations ––*/
         hybridImpl = new HybridVoting();
         execImpl = new Executor();
-        membershipImpl = new Membership();
         accountRegImpl = new UniversalAccountRegistry();
         quickJoinImpl = new QuickJoin();
         pTokenImpl = new ParticipationToken();
@@ -144,8 +145,9 @@ contract DeployerTest is Test {
         console.log("OrgRegistry owner after init:", orgRegistry.owner());
 
         // Create Deployer proxy - initialize with msg.sender (poaAdmin) for proper ownership
-        bytes memory deployerInit =
-            abi.encodeWithSignature("initialize(address,address)", address(poaManager), address(orgRegistry));
+        bytes memory deployerInit = abi.encodeWithSignature(
+            "initialize(address,address,address)", address(poaManager), address(orgRegistry), SEPOLIA_HATS
+        );
         deployer = Deployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
 
         // Debug to verify Deployer owner
@@ -160,7 +162,6 @@ contract DeployerTest is Test {
         /*–– register implementation types ––*/
         poaManager.addContractType("HybridVoting", address(hybridImpl));
         poaManager.addContractType("Executor", address(execImpl));
-        poaManager.addContractType("Membership", address(membershipImpl));
         poaManager.addContractType("QuickJoin", address(quickJoinImpl));
         poaManager.addContractType("ParticipationToken", address(pTokenImpl));
         poaManager.addContractType("TaskManager", address(taskMgrImpl));
@@ -193,16 +194,9 @@ contract DeployerTest is Test {
         voting[0] = true;
         voting[1] = true;
 
-        (
-            address _hybrid,
-            address _executor,
-            address _membership,
-            address _quickJoin,
-            address _token,
-            address _taskMgr,
-            address _eduHub
-        ) = deployer.deployFullOrg(
-            ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        (address _hybrid, address _executor, address _quickJoin, address _token, address _taskMgr, address _eduHub) =
+        deployer.deployFullOrg(
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
         vm.stopPrank();
@@ -210,7 +204,6 @@ contract DeployerTest is Test {
         /* store for later checks */
         hybridProxy = _hybrid;
         executorProxy = payable(_executor);
-        membershipProxy = _membership;
         quickJoinProxy = _quickJoin;
         pTokenProxy = _token;
         taskMgrProxy = _taskMgr;
@@ -225,6 +218,14 @@ contract DeployerTest is Test {
         QuickJoin(quickJoinProxy).quickJoinNoUser("v1");
         vm.prank(voter2);
         QuickJoin(quickJoinProxy).quickJoinNoUser("v2");
+
+        // Give voter1 the EXECUTIVE role hat for creating proposals
+        // (voter1 already has DEFAULT hat from QuickJoin, but needs EXECUTIVE for creating)
+        uint256 executiveRoleHat = orgRegistry.getRoleHat(ORG_ID, 1); // EXECUTIVE role hat
+        vm.prank(executorProxy);
+        IHats(SEPOLIA_HATS).mintHat(executiveRoleHat, voter1);
+
+        // voter2 already has DEFAULT hat from QuickJoin, which is sufficient for voting
 
         /* create proposal */
         uint8 optNumber = 2;
@@ -254,24 +255,23 @@ contract DeployerTest is Test {
     }
 
     function testFullOrgDeploymentRegistersContracts() public {
-        (address hybrid, address exec, address member, address qj, address token, address tm, address hub) =
-            _deployFullOrg();
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = _deployFullOrg();
 
         (address executorAddr, uint32 count, bool boot, bool exists) = orgRegistry.orgOf(ORG_ID);
-        assertEq(executorAddr, orgOwner);
-        assertEq(count, 7);
+        assertEq(executorAddr, exec); // Should be the Executor contract address, not orgOwner
+        assertEq(count, 6); // Reduced from 7 since we removed Membership
         assertFalse(boot);
         assertTrue(exists);
 
-        bytes32 typeId = keccak256("Membership");
+        bytes32 typeId = keccak256("QuickJoin");
         bytes32 contractId = keccak256(abi.encodePacked(ORG_ID, typeId));
         (address proxy, address beacon, bool autoUp, address owner) = orgRegistry.contractOf(contractId);
-        assertEq(proxy, member);
+        assertEq(proxy, qj);
         assertTrue(autoUp);
         assertEq(owner, exec);
 
         address impl = deployer.getBeaconImplementation(beacon);
-        assertEq(impl, poaManager.getCurrentImplementation("Membership"));
+        assertEq(impl, poaManager.getCurrentImplementation("QuickJoin"));
         assertEq(deployer.poaManager(), address(poaManager));
         assertEq(deployer.orgRegistry(), address(orgRegistry));
     }
@@ -291,8 +291,61 @@ contract DeployerTest is Test {
         voting[0] = true;
         voting[1] = true;
         deployer.deployFullOrg(
-            ORG_ID, other, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
+        vm.stopPrank();
+    }
+
+    function testHatsTreeDeployment() public {
+        vm.startPrank(orgOwner);
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        );
+
+        // Verify Hats tree registration
+        uint256 topHatId = orgRegistry.getTopHat(ORG_ID);
+        assertTrue(topHatId != 0, "Top hat should be registered");
+
+        uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
+        uint256 executiveRoleHat = orgRegistry.getRoleHat(ORG_ID, 1);
+        assertTrue(defaultRoleHat != 0, "Default role hat should be registered");
+        assertTrue(executiveRoleHat != 0, "Executive role hat should be registered");
+
+        // Test creating a new role as executor
+        vm.stopPrank();
+        vm.startPrank(exec); // Switch to executor
+
+        // Create a new role hat
+        uint256 newRoleHatId = IHats(SEPOLIA_HATS).createHat(
+            topHatId, // admin = parent Top Hat
+            "NEW_ROLE", // details
+            type(uint32).max, // unlimited supply
+            address(deployer.eligibilityModule()), // eligibility module
+            address(deployer.toggleModule()), // toggle module
+            true, // mutable
+            "NEW_ROLE" // data blob
+        );
+
+        // Configure the new role hat
+        deployer.eligibilityModule().setHatRules(newRoleHatId, true, true);
+        deployer.toggleModule().setHatStatus(newRoleHatId, true);
+
+        // Mint the new role hat to the executor
+        IHats(SEPOLIA_HATS).mintHat(newRoleHatId, exec);
+
+        // Verify the new role hat was created and minted
+        assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(exec, newRoleHatId), "Executor should wear the new role hat");
+
         vm.stopPrank();
     }
 }

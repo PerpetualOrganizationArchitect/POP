@@ -7,6 +7,8 @@ import "forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {TaskManager} from "../src/TaskManager.sol";
 import {TaskPerm} from "../src/libs/TaskPerm.sol";
+import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {MockHats} from "./mocks/MockHats.sol";
 
 /*────────────────── Mock Contracts ──────────────────*/
 contract MockToken is Test, IERC20 {
@@ -40,22 +42,6 @@ contract MockToken is Test, IERC20 {
     }
 }
 
-interface IMembership {
-    function roleOf(address user) external view returns (bytes32);
-}
-
-contract MockMembership is IMembership {
-    mapping(address => bytes32) public roles;
-
-    function setRole(address who, bytes32 r) external {
-        roles[who] = r;
-    }
-
-    function roleOf(address user) external view override returns (bytes32) {
-        return roles[user];
-    }
-}
-
 /*──────────────────── Test Suite ────────────────────*/
 contract TaskManagerTest is Test {
     /* test actors */
@@ -66,9 +52,9 @@ contract TaskManagerTest is Test {
     address outsider = makeAddr("outsider");
     address executor = makeAddr("executor");
 
-    bytes32 constant CREATOR_ROLE = keccak256("CREATOR");
-    bytes32 constant PM_ROLE = keccak256("PM");
-    bytes32 constant MEMBER_ROLE = keccak256("MEMBER");
+    uint256 constant CREATOR_HAT = 1;
+    uint256 constant PM_HAT = 2;
+    uint256 constant MEMBER_HAT = 3;
 
     /* project IDs - will be populated at runtime */
     bytes32 UNLIM_ID;
@@ -96,54 +82,53 @@ contract TaskManagerTest is Test {
     /* deployed contracts */
     TaskManager tm;
     MockToken token;
-    MockMembership membership;
+    MockHats hats;
 
     /* helpers */
-    function setRole(address who, bytes32 r) internal {
-        membership.setRole(who, r);
+    function setHat(address who, uint256 hatId) internal {
+        hats.mintHat(hatId, who);
     }
 
     function setUp() public {
         token = new MockToken();
-        membership = new MockMembership();
+        hats = new MockHats();
 
-        // give creator role to two addresses, membership role to pm1 / member1
-        setRole(creator1, CREATOR_ROLE);
-        setRole(creator2, CREATOR_ROLE);
-        setRole(pm1, PM_ROLE);
-        setRole(member1, MEMBER_ROLE);
+        // give creator hat to two addresses, other hats to pm1 / member1
+        setHat(creator1, CREATOR_HAT);
+        setHat(creator2, CREATOR_HAT);
+        setHat(pm1, PM_HAT);
+        setHat(member1, MEMBER_HAT);
 
         // initialize TaskManager
         tm = new TaskManager();
-        bytes32[] memory creatorRoles = new bytes32[](1);
-        creatorRoles[0] = CREATOR_ROLE;
+        uint256[] memory creatorHats = new uint256[](1);
+        creatorHats[0] = CREATOR_HAT;
 
         vm.prank(creator1);
-        tm.initialize(address(token), address(membership), creatorRoles, executor);
+        tm.initialize(address(token), address(hats), creatorHats, executor);
 
         // Set up default global permissions
         vm.prank(executor);
-        tm.setRolePerm(PM_ROLE, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN);
+        tm.setRolePerm(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN);
         vm.prank(executor);
-        tm.setRolePerm(MEMBER_ROLE, TaskPerm.CLAIM);
+        tm.setRolePerm(MEMBER_HAT, TaskPerm.CLAIM);
     }
 
     /*───────────────── PROJECT SCENARIOS ───────────────*/
 
     function test_CreateUnlimitedProjectAndTaskByAnotherCreator() public {
-        // Create project with specific role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Create project with specific hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
-        UNLIM_ID =
-            tm.createProject(bytes("UNLIM"), 0, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
+        UNLIM_ID = tm.createProject(bytes("UNLIM"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         // creator2 creates a task (should succeed, cap == 0)
         vm.prank(creator2);
@@ -157,19 +142,18 @@ contract TaskManagerTest is Test {
         address[] memory managers = new address[](1);
         managers[0] = pm1;
 
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = PM_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = PM_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
-        CAPPED_ID =
-            tm.createProject(bytes("CAPPED"), 3 ether, managers, createRoles, claimRoles, reviewRoles, assignRoles);
+        CAPPED_ID = tm.createProject(bytes("CAPPED"), 3 ether, managers, createHats, claimHats, reviewHats, assignHats);
 
         // pm1 can create tasks until cap reached
         vm.prank(pm1);
@@ -185,27 +169,27 @@ contract TaskManagerTest is Test {
     }
 
     function test_ProjectSpecificRolePermissions() public {
-        // Create custom roles
-        bytes32 customCreateRole = keccak256("CUSTOM_CREATE");
-        bytes32 customReviewRole = keccak256("CUSTOM_REVIEW");
+        // Create custom hats
+        uint256 customCreateHat = 10;
+        uint256 customReviewHat = 11;
         address customCreator = makeAddr("customCreator");
         address customReviewer = makeAddr("customReviewer");
-        setRole(customCreator, customCreateRole);
-        setRole(customReviewer, customReviewRole);
+        setHat(customCreator, customCreateHat);
+        setHat(customReviewer, customReviewHat);
 
-        // Set up project with custom role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = customCreateRole;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = customReviewRole;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up project with custom hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = customCreateHat;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = customReviewHat;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
-            bytes("CUSTOM_ROLES"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+            bytes("CUSTOM_HATS"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
         );
 
         // Custom creator should be able to create tasks
@@ -229,28 +213,28 @@ contract TaskManagerTest is Test {
     }
 
     function test_ProjectRolePermissionOverrides() public {
-        // Create a role with global permissions
-        bytes32 globalRole = keccak256("GLOBAL");
+        // Create a hat with global permissions
+        uint256 globalHat = 20;
         address globalUser = makeAddr("globalUser");
-        setRole(globalUser, globalRole);
+        setHat(globalUser, globalHat);
 
         // Set global permissions
         vm.prank(executor);
-        tm.setRolePerm(globalRole, TaskPerm.CREATE | TaskPerm.REVIEW);
+        tm.setRolePerm(globalHat, TaskPerm.CREATE | TaskPerm.REVIEW);
 
-        // Create project with different permissions for the same role
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = globalRole;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE; // Note: globalRole not included here
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Create project with different permissions for the same hat
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = globalHat;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT; // Note: globalHat not included here
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
-            bytes("OVERRIDE"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+            bytes("OVERRIDE"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
         );
 
         // Global user should be able to create (global permission)
@@ -270,19 +254,19 @@ contract TaskManagerTest is Test {
     }
 
     function test_UpdateProjectCapLowerThanSpentShouldRevert() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
         BUD_ID =
-            tm.createProject(bytes("BUD"), 2 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
+            tm.createProject(bytes("BUD"), 2 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         vm.prank(creator1);
         tm.createTask(2 ether, bytes("foo"), BUD_ID);
@@ -296,20 +280,19 @@ contract TaskManagerTest is Test {
     /*───────────────── TASK LIFECYCLE ───────────────────*/
 
     function _prepareFlow() internal returns (uint256 id) {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
-        FLOW_ID = tm.createProject(
-            bytes("FLOW"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
-        );
+        FLOW_ID =
+            tm.createProject(bytes("FLOW"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         address[] memory mgr = new address[](1);
         mgr[0] = pm1;
@@ -346,19 +329,19 @@ contract TaskManagerTest is Test {
     }
 
     function test_UpdateTaskBeforeClaimAdjustsBudget() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
         UPD_ID =
-            tm.createProject(bytes("UPD"), 3 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
+            tm.createProject(bytes("UPD"), 3 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("foo"), UPD_ID);
@@ -388,19 +371,19 @@ contract TaskManagerTest is Test {
     }
 
     function test_CancelTaskRefundsSpent() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
         CAN_ID =
-            tm.createProject(bytes("CAN"), 2 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
+            tm.createProject(bytes("CAN"), 2 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("foo"), CAN_ID);
@@ -418,18 +401,18 @@ contract TaskManagerTest is Test {
     /*───────────────── ACCESS CONTROL ───────────────────*/
 
     function test_CreateTaskByNonMemberReverts() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
-        ACC_ID = tm.createProject(bytes("ACC"), 0, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
+        ACC_ID = tm.createProject(bytes("ACC"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         // outsider has no role and no permissions
         vm.prank(outsider);
@@ -451,29 +434,29 @@ contract TaskManagerTest is Test {
     }
 
     function test_ProjectSpecificPermissions() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
-            bytes("PERM_TEST"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+            bytes("PERM_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
         );
 
-        // Set up a custom role with specific permissions
-        bytes32 customRole = keccak256("CUSTOM");
+        // Set up a custom hat with specific permissions
+        uint256 customHat = 70;
         address customUser = makeAddr("customUser");
-        setRole(customUser, customRole);
+        setHat(customUser, customHat);
 
         // Set project-specific permissions
         vm.prank(creator1);
-        tm.setProjectRolePerm(projectId, customRole, TaskPerm.CREATE | TaskPerm.REVIEW);
+        tm.setProjectRolePerm(projectId, customHat, TaskPerm.CREATE | TaskPerm.REVIEW);
 
         // Custom user should be able to create tasks
         vm.prank(customUser);
@@ -490,33 +473,33 @@ contract TaskManagerTest is Test {
     }
 
     function test_GlobalVsProjectPermissions() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
-            bytes("PERM_TEST"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+            bytes("PERM_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
         );
 
-        // Set up a role with global permissions
-        bytes32 globalRole = keccak256("GLOBAL");
+        // Set up a hat with global permissions
+        uint256 globalHat = 50;
         address globalUser = makeAddr("globalUser");
-        setRole(globalUser, globalRole);
+        setHat(globalUser, globalHat);
 
         // Set global permissions
         vm.prank(executor);
-        tm.setRolePerm(globalRole, TaskPerm.CREATE | TaskPerm.REVIEW);
+        tm.setRolePerm(globalHat, TaskPerm.CREATE | TaskPerm.REVIEW);
 
         // Override in project
         vm.prank(creator1);
-        tm.setProjectRolePerm(projectId, globalRole, TaskPerm.CREATE);
+        tm.setProjectRolePerm(projectId, globalHat, TaskPerm.CREATE);
 
         // User should only have CREATE permission in this project
         vm.prank(globalUser);
@@ -537,26 +520,26 @@ contract TaskManagerTest is Test {
     /*───────────────── COMPLEX SCENARIOS ───────────────────*/
 
     function test_MultiProjectTaskManagement() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         // Create three projects with different caps
         vm.startPrank(creator1);
         PROJECT_A_ID = tm.createProject(
-            bytes("PROJECT_A"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+            bytes("PROJECT_A"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
         );
         PROJECT_B_ID = tm.createProject(
-            bytes("PROJECT_B"), 3 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+            bytes("PROJECT_B"), 3 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
         );
         PROJECT_C_ID =
-            tm.createProject(bytes("PROJECT_C"), 0, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
+            tm.createProject(bytes("PROJECT_C"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats);
         vm.stopPrank();
 
         // Create multiple tasks across projects
@@ -600,74 +583,72 @@ contract TaskManagerTest is Test {
     }
 
     function test_GovernanceAndRoleChanges() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         // Initial setup
         vm.prank(creator1);
         GOV_TEST_ID = tm.createProject(
-            bytes("GOV_TEST"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+            bytes("GOV_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
         );
 
-        // Add new role to the creator roles using the executor
-        bytes32 NEW_ROLE = keccak256("NEW_CREATOR");
+        // Add new hat to the creator hats using the executor
+        uint256 NEW_HAT = 100;
         vm.prank(executor);
-        tm.setCreatorRole(NEW_ROLE, true);
+        tm.setCreatorHatAllowed(NEW_HAT, true);
 
-        // Assign new role to an address
+        // Assign new hat to an address
         address newCreator = makeAddr("newCreator");
-        setRole(newCreator, NEW_ROLE);
+        setHat(newCreator, NEW_HAT);
 
-        // Test that new role can create projects
+        // Test that new hat can create projects
         vm.prank(newCreator);
         NEW_PROJECT_ID = tm.createProject(
-            bytes("NEW_PROJECT"), 1 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+            bytes("NEW_PROJECT"), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
         );
 
         // Verify new project exists by creating a task
         vm.prank(newCreator);
         tm.createTask(0.5 ether, bytes("new_task"), NEW_PROJECT_ID);
 
-        // Disable the role using the executor
+        // Disable the hat using the executor
         vm.prank(executor);
-        tm.setCreatorRole(NEW_ROLE, false);
+        tm.setCreatorHatAllowed(NEW_HAT, false);
 
-        // Verify the role can no longer create projects
+        // Verify the hat can no longer create projects
         vm.prank(newCreator);
         vm.expectRevert(TaskManager.NotCreator.selector);
-        tm.createProject(
-            bytes("SHOULD_FAIL"), 1 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
-        );
+        tm.createProject(bytes("SHOULD_FAIL"), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
     }
 
     function test_ProjectManagerHierarchy() public {
-        // Create a project with multiple managers and specific role permissions
+        // Create a project with multiple managers and specific hat permissions
         address[] memory managers = new address[](2);
         managers[0] = pm1;
         address pm2 = makeAddr("pm2");
-        // Note: pm2 has no role initially
+        // Note: pm2 has no hat initially
         managers[1] = pm2;
 
-        // Set up role permissions - only PM_ROLE has permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = PM_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions - only PM_HAT has permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = PM_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
         MULTI_PM_ID =
-            tm.createProject(bytes("MULTI_PM"), 10 ether, managers, createRoles, claimRoles, reviewRoles, assignRoles);
+            tm.createProject(bytes("MULTI_PM"), 10 ether, managers, createHats, claimHats, reviewHats, assignHats);
 
         // Both PMs should be able to create tasks (as project managers)
         vm.prank(pm1);
@@ -699,12 +680,12 @@ contract TaskManagerTest is Test {
         vm.prank(pm1);
         tm.createTask(1 ether, bytes("still_works"), MULTI_PM_ID);
 
-        // Now give PM2 the PM_ROLE
-        setRole(pm2, PM_ROLE);
+        // Now give PM2 the PM_HAT
+        setHat(pm2, PM_HAT);
 
-        // PM2 should now be able to create tasks again (has PM_ROLE with CREATE permission)
+        // PM2 should now be able to create tasks again (has PM_HAT with CREATE permission)
         vm.prank(pm2);
-        tm.createTask(1 ether, bytes("pm2_with_role"), MULTI_PM_ID);
+        tm.createTask(1 ether, bytes("pm2_with_hat"), MULTI_PM_ID);
 
         // Verify overall budget tracking
         (, uint256 spent,) = tm.getProjectInfo(MULTI_PM_ID);
@@ -712,20 +693,19 @@ contract TaskManagerTest is Test {
     }
 
     function test_TaskLifecycleEdgeCases() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         vm.prank(creator1);
-        EDGE_ID = tm.createProject(
-            bytes("EDGE"), 10 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
-        );
+        EDGE_ID =
+            tm.createProject(bytes("EDGE"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         // Create and immediately cancel a task
         vm.startPrank(creator1);
@@ -751,7 +731,7 @@ contract TaskManagerTest is Test {
 
         // Try to submit without claiming
         address nonClaimer = makeAddr("nonClaimer");
-        setRole(nonClaimer, bytes32("MEMBER"));
+        setHat(nonClaimer, MEMBER_HAT);
 
         vm.prank(nonClaimer);
         vm.expectRevert(TaskManager.NotClaimer.selector);
@@ -777,20 +757,19 @@ contract TaskManagerTest is Test {
     }
 
     function test_ProjectStress() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         // Create a large unlimited project
         vm.prank(creator1);
-        MEGA_ID =
-            tm.createProject(bytes("MEGA"), 0, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
+        MEGA_ID = tm.createProject(bytes("MEGA"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         // Add multiple project managers
         address[] memory pms = new address[](3);
@@ -798,8 +777,8 @@ contract TaskManagerTest is Test {
 
         address pm2 = makeAddr("pm2");
         address pm3 = makeAddr("pm3");
-        setRole(pm2, bytes32("PM"));
-        setRole(pm3, bytes32("PM"));
+        setHat(pm2, PM_HAT);
+        setHat(pm3, PM_HAT);
         pms[1] = pm2;
         pms[2] = pm3;
 
@@ -812,7 +791,7 @@ contract TaskManagerTest is Test {
         address[] memory members = new address[](5);
         for (uint256 i = 0; i < members.length; i++) {
             members[i] = makeAddr(string(abi.encodePacked("member", i)));
-            setRole(members[i], bytes32("MEMBER"));
+            setHat(members[i], MEMBER_HAT);
         }
 
         // Create multiple tasks
@@ -865,7 +844,7 @@ contract TaskManagerTest is Test {
         // Create a second project with a hard cap
         vm.prank(creator1);
         CAPPED_BIG_ID =
-            tm.createProject(bytes("CAPPED_BIG"), 10 ether, pms, createRoles, claimRoles, reviewRoles, assignRoles);
+            tm.createProject(bytes("CAPPED_BIG"), 10 ether, pms, createHats, claimHats, reviewHats, assignHats);
 
         // Create tasks up to the cap
         uint256 cappedTaskCount = 0;
@@ -902,20 +881,20 @@ contract TaskManagerTest is Test {
     }
 
     function test_ProjectDeletionAndUpdating() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         // Create a project that will be deleted
         vm.prank(creator1);
         TO_DELETE_ID = tm.createProject(
-            bytes("TO_DELETE"), 3 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+            bytes("TO_DELETE"), 3 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
         );
 
         // Create a task, complete it, then verify project can be deleted
@@ -963,7 +942,7 @@ contract TaskManagerTest is Test {
         // Create a zero-cap project
         vm.prank(creator1);
         ZERO_CAP_ID =
-            tm.createProject(bytes("ZERO_CAP"), 0, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles);
+            tm.createProject(bytes("ZERO_CAP"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         // Add tasks, verify we can still delete with non-zero spent
         vm.prank(creator1);
@@ -975,15 +954,15 @@ contract TaskManagerTest is Test {
     }
 
     function test_ExecutorRoleManagement() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         // Create new executor
         address executor2 = makeAddr("executor2");
@@ -997,53 +976,51 @@ contract TaskManagerTest is Test {
         vm.prank(executor);
         tm.setExecutor(executor2);
 
-        // Old executor can no longer set creator roles
-        bytes32 TEST_ROLE = keccak256("TEST_ROLE");
+        // Old executor can no longer set creator hats
+        uint256 TEST_HAT = 123;
         vm.prank(executor);
         vm.expectRevert(TaskManager.NotExecutor.selector);
-        tm.setCreatorRole(TEST_ROLE, true);
+        tm.setCreatorHatAllowed(TEST_HAT, true);
 
-        // New executor can set creator roles
+        // New executor can set creator hats
         vm.prank(executor2);
-        tm.setCreatorRole(TEST_ROLE, true);
+        tm.setCreatorHatAllowed(TEST_HAT, true);
 
-        // Assign the new role to a user
+        // Assign the new hat to a user
         address testCreator = makeAddr("testCreator");
-        setRole(testCreator, TEST_ROLE);
+        setHat(testCreator, TEST_HAT);
 
-        // Verify the new role works for creating projects
+        // Verify the new hat works for creating projects
         vm.prank(testCreator);
         EXECUTOR_TEST_ID = tm.createProject(
-            bytes("EXECUTOR_TEST"), 1 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+            bytes("EXECUTOR_TEST"), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
         );
 
-        // New executor can revoke the role
+        // New executor can revoke the hat
         vm.prank(executor2);
-        tm.setCreatorRole(TEST_ROLE, false);
+        tm.setCreatorHatAllowed(TEST_HAT, false);
 
-        // Role should no longer work
+        // Hat should no longer work
         vm.prank(testCreator);
         vm.expectRevert(TaskManager.NotCreator.selector);
-        tm.createProject(
-            bytes("SHOULD_FAIL"), 1 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
-        );
+        tm.createProject(bytes("SHOULD_FAIL"), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
     }
 
     function test_ExecutorBypassMemberCheck() public {
-        // Set up role permissions
-        bytes32[] memory createRoles = new bytes32[](1);
-        createRoles[0] = CREATOR_ROLE;
-        bytes32[] memory claimRoles = new bytes32[](1);
-        claimRoles[0] = MEMBER_ROLE;
-        bytes32[] memory reviewRoles = new bytes32[](1);
-        reviewRoles[0] = PM_ROLE;
-        bytes32[] memory assignRoles = new bytes32[](1);
-        assignRoles[0] = PM_ROLE;
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
 
         // Create project
         vm.prank(creator1);
         EXECUTOR_BYPASS_ID = tm.createProject(
-            bytes("EXECUTOR_BYPASS"), 5 ether, new address[](0), createRoles, claimRoles, reviewRoles, assignRoles
+            bytes("EXECUTOR_BYPASS"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
         );
 
         // Executor should be able to create tasks even without member role
@@ -1067,20 +1044,20 @@ contract TaskManagerTest is Test {
     /*───────────────── GRANULAR PERMISSION TESTS ────────────────────*/
 
     function test_CombinedPermissions() public {
-        // Create a new role with combined permissions
-        bytes32 MULTI_ROLE = keccak256("MULTI_ROLE");
+        // Create a new hat with combined permissions
+        uint256 MULTI_HAT = 150;
         address multiUser = makeAddr("multiUser");
-        setRole(multiUser, MULTI_ROLE);
+        setHat(multiUser, MULTI_HAT);
 
         // Set global permissions (CREATE | CLAIM)
         vm.prank(executor);
-        tm.setRolePerm(MULTI_ROLE, TaskPerm.CREATE | TaskPerm.CLAIM);
+        tm.setRolePerm(MULTI_HAT, TaskPerm.CREATE | TaskPerm.CLAIM);
 
-        // Create project
-        bytes32[] memory emptyRoles = new bytes32[](0);
+        // Create project (use creator1 who has creator hat)
+        uint256[] memory emptyHats = new uint256[](0);
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
-            bytes("COMBINED_TEST"), 5 ether, new address[](0), emptyRoles, emptyRoles, emptyRoles, emptyRoles
+            bytes("COMBINED_TEST"), 5 ether, new address[](0), emptyHats, emptyHats, emptyHats, emptyHats
         );
 
         // User should be able to create tasks with CREATE permission
@@ -1101,18 +1078,18 @@ contract TaskManagerTest is Test {
     }
 
     function test_PermissionChangesAfterCreation() public {
-        // Create new role and user
-        bytes32 DYNAMIC_ROLE = keccak256("DYNAMIC_ROLE");
+        // Create new hat and user
+        uint256 DYNAMIC_HAT = 160;
         address dynamicUser = makeAddr("dynamicUser");
-        setRole(dynamicUser, DYNAMIC_ROLE);
+        setHat(dynamicUser, DYNAMIC_HAT);
 
-        // Initially no permissions for this role
+        // Initially no permissions for this hat
 
         // Create project
-        bytes32[] memory emptyRoles = new bytes32[](0);
+        uint256[] memory emptyHats = new uint256[](0);
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
-            bytes("DYNAMIC_TEST"), 5 ether, new address[](0), emptyRoles, emptyRoles, emptyRoles, emptyRoles
+            bytes("DYNAMIC_TEST"), 5 ether, new address[](0), emptyHats, emptyHats, emptyHats, emptyHats
         );
 
         // User can't create tasks (no permissions)
@@ -1122,7 +1099,7 @@ contract TaskManagerTest is Test {
 
         // Grant CREATE permission at project level
         vm.prank(creator1);
-        tm.setProjectRolePerm(projectId, DYNAMIC_ROLE, TaskPerm.CREATE);
+        tm.setProjectRolePerm(projectId, DYNAMIC_HAT, TaskPerm.CREATE);
 
         // Now user can create tasks
         vm.prank(dynamicUser);
@@ -1142,7 +1119,7 @@ contract TaskManagerTest is Test {
 
         // Add REVIEW permission
         vm.prank(creator1);
-        tm.setProjectRolePerm(projectId, DYNAMIC_ROLE, TaskPerm.CREATE | TaskPerm.REVIEW);
+        tm.setProjectRolePerm(projectId, DYNAMIC_HAT, TaskPerm.CREATE | TaskPerm.REVIEW);
 
         // Now user can complete tasks
         vm.prank(dynamicUser);
@@ -1150,31 +1127,31 @@ contract TaskManagerTest is Test {
     }
 
     function test_GlobalVsProjectPermissionOverrides() public {
-        // Create a role with global permissions
-        bytes32 OVERRIDE_ROLE = keccak256("OVERRIDE_ROLE");
+        // Create a hat with global permissions
+        uint256 OVERRIDE_HAT = 170;
         address overrideUser = makeAddr("overrideUser");
-        setRole(overrideUser, OVERRIDE_ROLE);
+        setHat(overrideUser, OVERRIDE_HAT);
 
         // Set full permissions globally
         vm.prank(executor);
-        tm.setRolePerm(OVERRIDE_ROLE, TaskPerm.CREATE | TaskPerm.CLAIM | TaskPerm.REVIEW | TaskPerm.ASSIGN);
+        tm.setRolePerm(OVERRIDE_HAT, TaskPerm.CREATE | TaskPerm.CLAIM | TaskPerm.REVIEW | TaskPerm.ASSIGN);
 
         // Create project
-        bytes32[] memory emptyRoles = new bytes32[](0);
+        uint256[] memory emptyHats = new uint256[](0);
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
-            bytes("OVERRIDE_TEST"), 5 ether, new address[](0), emptyRoles, emptyRoles, emptyRoles, emptyRoles
+            bytes("OVERRIDE_TEST"), 5 ether, new address[](0), emptyHats, emptyHats, emptyHats, emptyHats
         );
 
         // Create a second project to verify global perms still work there
         vm.prank(creator1);
         bytes32 projectId2 = tm.createProject(
-            bytes("GLOBAL_TEST"), 5 ether, new address[](0), emptyRoles, emptyRoles, emptyRoles, emptyRoles
+            bytes("GLOBAL_TEST"), 5 ether, new address[](0), emptyHats, emptyHats, emptyHats, emptyHats
         );
 
         // Restrict permissions on the first project (only CREATE)
         vm.prank(creator1);
-        tm.setProjectRolePerm(projectId, OVERRIDE_ROLE, TaskPerm.CREATE);
+        tm.setProjectRolePerm(projectId, OVERRIDE_HAT, TaskPerm.CREATE);
 
         // User can create tasks in both projects
         vm.prank(overrideUser);
@@ -1213,14 +1190,14 @@ contract TaskManagerTest is Test {
     }
 
     function test_RevokePermissions() public {
-        // Create role and user
-        bytes32 TEMP_ROLE = keccak256("TEMP_ROLE");
+        // Create hat and user
+        uint256 TEMP_HAT = 180;
         address tempUser = makeAddr("tempUser");
-        setRole(tempUser, TEMP_ROLE);
+        setHat(tempUser, TEMP_HAT);
 
         // Give CREATE permission
         vm.prank(executor);
-        tm.setRolePerm(TEMP_ROLE, TaskPerm.CREATE);
+        tm.setRolePerm(TEMP_HAT, TaskPerm.CREATE);
 
         // Create project
         vm.prank(creator1);
@@ -1228,10 +1205,10 @@ contract TaskManagerTest is Test {
             bytes("TEMP"),
             5 ether,
             new address[](0),
-            new bytes32[](0),
-            new bytes32[](0),
-            new bytes32[](0),
-            new bytes32[](0)
+            new uint256[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new uint256[](0)
         );
 
         // User can create tasks
@@ -1240,7 +1217,7 @@ contract TaskManagerTest is Test {
 
         // Revoke permission
         vm.prank(executor);
-        tm.setRolePerm(TEMP_ROLE, 0);
+        tm.setRolePerm(TEMP_HAT, 0);
 
         // User can't create tasks anymore
         vm.prank(tempUser);
@@ -1249,29 +1226,29 @@ contract TaskManagerTest is Test {
     }
 
     function test_IndividualPermissionFlags() public {
-        // Create 4 roles, each with a single permission flag
-        bytes32 CREATE_ROLE = keccak256("CREATE_ONLY");
-        bytes32 CLAIM_ROLE = keccak256("CLAIM_ONLY");
-        bytes32 REVIEW_ROLE = keccak256("REVIEW_ONLY");
-        bytes32 ASSIGN_ROLE = keccak256("ASSIGN_ONLY");
+        // Create 4 hats, each with a single permission flag
+        uint256 CREATE_HAT = 200;
+        uint256 CLAIM_HAT = 201;
+        uint256 REVIEW_HAT = 202;
+        uint256 ASSIGN_HAT = 203;
 
-        // Create 4 users with respective roles
+        // Create 4 users with respective hats
         address createUser = makeAddr("createUser");
         address claimUser = makeAddr("claimUser");
         address reviewUser = makeAddr("reviewUser");
         address assignUser = makeAddr("assignUser");
 
-        setRole(createUser, CREATE_ROLE);
-        setRole(claimUser, CLAIM_ROLE);
-        setRole(reviewUser, REVIEW_ROLE);
-        setRole(assignUser, ASSIGN_ROLE);
+        setHat(createUser, CREATE_HAT);
+        setHat(claimUser, CLAIM_HAT);
+        setHat(reviewUser, REVIEW_HAT);
+        setHat(assignUser, ASSIGN_HAT);
 
         // Set permissions
         vm.startPrank(executor);
-        tm.setRolePerm(CREATE_ROLE, TaskPerm.CREATE);
-        tm.setRolePerm(CLAIM_ROLE, TaskPerm.CLAIM);
-        tm.setRolePerm(REVIEW_ROLE, TaskPerm.REVIEW);
-        tm.setRolePerm(ASSIGN_ROLE, TaskPerm.ASSIGN);
+        tm.setRolePerm(CREATE_HAT, TaskPerm.CREATE);
+        tm.setRolePerm(CLAIM_HAT, TaskPerm.CLAIM);
+        tm.setRolePerm(REVIEW_HAT, TaskPerm.REVIEW);
+        tm.setRolePerm(ASSIGN_HAT, TaskPerm.ASSIGN);
         vm.stopPrank();
 
         // Create project
@@ -1280,10 +1257,10 @@ contract TaskManagerTest is Test {
             bytes("PERM_FLAGS"),
             5 ether,
             new address[](0),
-            new bytes32[](0),
-            new bytes32[](0),
-            new bytes32[](0),
-            new bytes32[](0)
+            new uint256[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new uint256[](0)
         );
 
         // Test CREATE permission - should succeed

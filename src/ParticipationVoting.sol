@@ -3,21 +3,14 @@ pragma solidity ^0.8.20;
 
 /*  OpenZeppelin v5.3 Upgradeables  */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IExecutor} from "./Executor.sol";
-
-/* ─────────── External Interfaces ─────────── */
-interface IMembership {
-    function roleOf(address) external view returns (bytes32);
-    function canVote(address) external view returns (bool);
-}
+import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {HatManager} from "./libs/HatManager.sol";
+import {VotingMath} from "./libs/VotingMath.sol";
 
 /// Participation‑weighted governor (power = balance or √balance)
-contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
+contract ParticipationVoting is Initializable {
     /* ─────────────── Errors ─────────────── */
     error Unauthorized();
     error AlreadyVoted();
@@ -35,9 +28,9 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     error TargetNotAllowed();
     error TargetSelf();
     error ZeroAddress();
-    error MinBalance();
     error Overflow();
     error InvalidMetadata();
+    error RoleNotAllowed();
 
     /* ───────────── Constants ───────────── */
     bytes4 public constant MODULE_ID = 0x70766F74; /* "pvot" */
@@ -57,20 +50,26 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         PollOption[] options;
         mapping(address => bool) hasVoted;
         IExecutor.Call[][] batches; // can be empty
+        uint256[] pollHatIds; // array of specific hat IDs for this poll
+        bool restricted; // if true only pollHatIds can vote
+        mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
     }
 
     /* ─────────── ERC-7201 Storage ─────────── */
     /// @custom:storage-location erc7201:poa.participationvoting.storage
     struct Layout {
         IERC20 participationToken;
-        IMembership membership;
+        IHats hats;
         IExecutor executor;
         mapping(address => bool) allowedTarget;
-        mapping(bytes32 => bool) _allowedRoles;
+        uint256[] votingHatIds; // Array of voting hat IDs
+        uint256[] creatorHatIds; // Array of creator hat IDs
         uint8 quorumPercentage; // 1‑100
         bool quadraticVoting; // toggle
         uint256 MIN_BAL; /* sybil floor */
         Proposal[] _proposals;
+        bool _paused; // Inline pausable state
+        uint256 _lock; // Inline reentrancy guard state
     }
 
     // keccak256("poa.participationvoting.storage") → unique, collision-free slot
@@ -82,9 +81,46 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         }
     }
 
+    /* ─────────── Inline Context Implementation ─────────── */
+    function _msgSender() internal view returns (address addr) {
+        assembly {
+            addr := caller()
+        }
+    }
+
+    /* ─────────── Inline Pausable Implementation ─────────── */
+    modifier whenNotPaused() {
+        require(!_layout()._paused, "Pausable: paused");
+        _;
+    }
+
+    function paused() external view returns (bool) {
+        return _layout()._paused;
+    }
+
+    function _pause() internal {
+        _layout()._paused = true;
+    }
+
+    function _unpause() internal {
+        _layout()._paused = false;
+    }
+
+    /* ─────────── Inline ReentrancyGuard Implementation ─────────── */
+    modifier nonReentrant() {
+        require(_layout()._lock == 0, "ReentrancyGuard: reentrant call");
+        _layout()._lock = 1;
+        _;
+        _layout()._lock = 0;
+    }
+
     /* ───────────── Events ───────────── */
-    event RoleSet(bytes32 role, bool allowed);
+    event HatSet(uint256 hat, bool allowed);
+    event CreatorHatSet(uint256 hat, bool allowed);
     event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 createdAt);
+    event NewHatProposal(
+        uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 createdAt, uint256[] hatIds
+    );
     event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
     event ExecutorUpdated(address newExecutor);
@@ -104,43 +140,56 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     function initialize(
         address executor_,
-        address membership_,
+        address hats_,
         address token_,
-        bytes32[] calldata initialRoles,
+        uint256[] calldata initialHats,
+        uint256[] calldata initialCreatorHats,
         address[] calldata initialTargets,
         uint8 quorumPct,
         bool quadratic_,
         uint256 minBalance_
     ) external initializer {
-        if (membership_ == address(0) || token_ == address(0) || executor_ == address(0)) {
+        if (hats_ == address(0) || token_ == address(0) || executor_ == address(0)) {
             revert ZeroAddress();
         }
-        require(quorumPct > 0 && quorumPct <= 100, "quorum");
-        require(minBalance_ > 0, "minBalance");
-
-        __Context_init();
-        __Pausable_init();
-        __ReentrancyGuard_init();
+        VotingMath.validateQuorum(quorumPct);
+        VotingMath.validateMinBalance(minBalance_);
 
         Layout storage l = _layout();
-        l.membership = IMembership(membership_);
+        l.hats = IHats(hats_);
         l.participationToken = IERC20(token_);
         l.executor = IExecutor(executor_);
         l.quorumPercentage = quorumPct;
         l.quadraticVoting = quadratic_;
         l.MIN_BAL = minBalance_;
+        l._paused = false; // Initialize paused state
+        l._lock = 0; // Initialize reentrancy guard state
 
         emit QuorumPercentageSet(quorumPct);
         emit QuadraticToggled(quadratic_);
         emit MinBalanceSet(minBalance_);
 
-        for (uint256 i; i < initialRoles.length; ++i) {
-            l._allowedRoles[initialRoles[i]] = true;
-            emit RoleSet(initialRoles[i], true);
+        uint256 len = initialHats.length;
+        for (uint256 i; i < len;) {
+            HatManager.setHatInArray(l.votingHatIds, initialHats[i], true);
+            unchecked {
+                ++i;
+            }
         }
-        for (uint256 i; i < initialTargets.length; ++i) {
+        len = initialCreatorHats.length;
+        for (uint256 i; i < len;) {
+            HatManager.setHatInArray(l.creatorHatIds, initialCreatorHats[i], true);
+            unchecked {
+                ++i;
+            }
+        }
+        len = initialTargets.length;
+        for (uint256 i; i < len;) {
             l.allowedTarget[initialTargets[i]] = true;
             emit TargetAllowed(initialTargets[i], true);
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -159,9 +208,14 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         emit ExecutorUpdated(a);
     }
 
-    function setRoleAllowed(bytes32 r, bool ok) external onlyExecutor {
-        _layout()._allowedRoles[r] = ok;
-        emit RoleSet(r, ok);
+    function setHatAllowed(uint256 h, bool ok) external onlyExecutor {
+        HatManager.setHatInArray(_layout().votingHatIds, h, ok);
+        emit HatSet(h, ok);
+    }
+
+    function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
+        HatManager.setHatInArray(_layout().creatorHatIds, h, ok);
+        emit CreatorHatSet(h, ok);
     }
 
     function setTargetAllowed(address t, bool ok) external onlyExecutor {
@@ -171,7 +225,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     }
 
     function setQuorumPercentage(uint8 q) external onlyExecutor {
-        require(q > 0 && q <= 100, "quorum");
+        VotingMath.validateQuorum(q);
         _layout().quorumPercentage = q;
         emit QuorumPercentageSet(q);
     }
@@ -183,6 +237,7 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     }
 
     function setMinBalance(uint256 n) external onlyExecutor {
+        VotingMath.validateMinBalance(n);
         _layout().MIN_BAL = n;
         emit MinBalanceSet(n);
     }
@@ -190,8 +245,18 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
     /* ───────────── Modifiers ───────────── */
     modifier onlyCreator() {
         Layout storage l = _layout();
-        if (_msgSender() != address(l.executor) && !l._allowedRoles[l.membership.roleOf(_msgSender())]) {
-            revert Unauthorized();
+        if (_msgSender() != address(l.executor)) {
+            bool canCreate = HatManager.hasAnyHat(l.hats, l.creatorHatIds, _msgSender());
+            if (!canCreate) revert Unauthorized();
+        }
+        _;
+    }
+
+    modifier onlyVoter() {
+        Layout storage l = _layout();
+        if (_msgSender() != address(l.executor)) {
+            bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
+            if (!canVote) revert Unauthorized();
         }
         _;
     }
@@ -224,23 +289,66 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
 
         Layout storage l = _layout();
-        uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
+        uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
         Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
 
         uint256 id = l._proposals.length - 1;
-        for (uint256 i; i < numOptions; ++i) {
-            if (optionBatches[i].length > 0) {
-                if (optionBatches[i].length > MAX_CALLS) revert TooManyCalls();
-                for (uint256 j; j < optionBatches[i].length; ++j) {
+        for (uint256 i; i < numOptions;) {
+            uint256 batchLen = optionBatches[i].length;
+            if (batchLen > 0) {
+                if (batchLen > MAX_CALLS) revert TooManyCalls();
+                for (uint256 j; j < batchLen;) {
                     if (!l.allowedTarget[optionBatches[i][j].target]) revert TargetNotAllowed();
                     if (optionBatches[i][j].target == address(this)) revert TargetSelf();
+                    unchecked {
+                        ++j;
+                    }
                 }
             }
             p.options.push(PollOption(0));
             p.batches.push(optionBatches[i]);
+            unchecked {
+                ++i;
+            }
         }
         emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
+    }
+
+    /// @notice Create a poll restricted to certain hats. Execution is disabled.
+    function createHatPoll(bytes calldata metadata, uint32 minutesDuration, uint8 numOptions, uint256[] calldata hatIds)
+        external
+        onlyCreator
+        whenNotPaused
+    {
+        if (metadata.length == 0) revert InvalidMetadata();
+        if (numOptions == 0) revert LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
+        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
+
+        Layout storage l = _layout();
+        uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
+        Proposal storage p = l._proposals.push();
+        p.endTimestamp = endTs;
+        p.restricted = hatIds.length > 0;
+
+        uint256 id = l._proposals.length - 1;
+        for (uint256 i; i < numOptions;) {
+            p.options.push(PollOption(0));
+            p.batches.push();
+            unchecked {
+                ++i;
+            }
+        }
+        uint256 len = hatIds.length;
+        for (uint256 i; i < len;) {
+            p.pollHatIds.push(hatIds[i]);
+            p.pollHatAllowed[hatIds[i]] = true;
+            unchecked {
+                ++i;
+            }
+        }
+        emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
     }
 
     /* ───────────── Voting ───────────── */
@@ -248,22 +356,40 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         external
         exists(id)
         notExpired(id)
+        onlyVoter
         whenNotPaused
     {
         if (idxs.length != weights.length) revert LengthMismatch();
 
         Layout storage l = _layout();
+
         uint256 bal = l.participationToken.balanceOf(_msgSender());
-        if (bal < l.MIN_BAL) revert MinBalance();
-        uint256 power = l.quadraticVoting ? Math.sqrt(bal) : bal;
+        VotingMath.checkMinBalance(bal, l.MIN_BAL);
+        uint256 power = VotingMath.calculateVotingPower(bal, l.quadraticVoting);
         require(power > 0, "power=0");
 
         Proposal storage p = l._proposals[id];
+        if (p.restricted) {
+            bool hasAllowedHat = false;
+            // Check if user has any of the poll-specific hats
+            uint256 hatLen = p.pollHatIds.length;
+            for (uint256 i = 0; i < hatLen;) {
+                if (l.hats.isWearerOfHat(_msgSender(), p.pollHatIds[i])) {
+                    hasAllowedHat = true;
+                    break;
+                }
+                unchecked {
+                    ++i;
+                }
+            }
+            if (!hasAllowedHat) revert RoleNotAllowed();
+        }
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
         uint256 seen;
         uint256 sum;
-        for (uint256 i; i < idxs.length; ++i) {
+        uint256 idxLen = idxs.length;
+        for (uint256 i; i < idxLen;) {
             uint8 ix = idxs[i];
             if (ix >= p.options.length) revert InvalidIndex();
             if ((seen >> ix) & 1 == 1) revert DuplicateIndex();
@@ -274,19 +400,25 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
             unchecked {
                 sum += w;
             }
+            unchecked {
+                ++i;
+            }
         }
         if (sum != 100) revert WeightSumNot100(sum);
 
         uint256 newTW = uint256(p.totalWeight) + power;
-        if (newTW > type(uint128).max) revert Overflow();
+        VotingMath.checkOverflow(newTW);
         p.totalWeight = uint128(newTW);
         p.hasVoted[_msgSender()] = true;
 
-        for (uint256 i; i < idxs.length; ++i) {
+        for (uint256 i; i < idxLen;) {
             uint256 add = power * weights[i];
             uint256 newVotes = uint256(p.options[idxs[i]].votes) + add;
-            if (newVotes > type(uint128).max) revert Overflow();
+            VotingMath.checkOverflow(newVotes);
             p.options[idxs[i]].votes = uint128(newVotes);
+            unchecked {
+                ++i;
+            }
         }
         emit VoteCast(id, _msgSender(), idxs, weights);
     }
@@ -305,9 +437,13 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         IExecutor.Call[] storage batch = l._proposals[id].batches[winner];
 
         if (valid && batch.length > 0) {
-            for (uint256 i; i < batch.length; ++i) {
+            uint256 len = batch.length;
+            for (uint256 i; i < len;) {
                 if (batch[i].target == address(this)) revert TargetSelf();
                 if (!l.allowedTarget[batch[i].target]) revert TargetNotAllowed();
+                unchecked {
+                    ++i;
+                }
             }
             l.executor.execute(id, batch);
         }
@@ -320,10 +456,16 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         Proposal storage p = l._proposals[id];
         require(p.batches.length > 0 || voters.length > 0, "nothing");
         uint256 cleaned;
-        for (uint256 i; i < voters.length && i < 4_000; ++i) {
+        uint256 len = voters.length;
+        for (uint256 i; i < len && i < 4_000;) {
             if (p.hasVoted[voters[i]]) {
                 delete p.hasVoted[voters[i]];
-                ++cleaned;
+                unchecked {
+                    ++cleaned;
+                }
+            }
+            unchecked {
+                ++i;
             }
         }
         if (cleaned == 0 && p.batches.length > 0) delete p.batches;
@@ -336,7 +478,8 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         Proposal storage p = l._proposals[id];
         uint128 high;
         uint128 second;
-        for (uint256 i; i < p.options.length; ++i) {
+        uint256 len = p.options.length;
+        for (uint256 i; i < len;) {
             uint128 v = p.options[i].votes;
             if (v > high) {
                 second = high;
@@ -344,6 +487,9 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
                 win = i;
             } else if (v > second) {
                 second = v;
+            }
+            unchecked {
+                ++i;
             }
         }
         ok = (uint256(high) * 100 > uint256(p.totalWeight) * l.quorumPercentage) && (high > second);
@@ -370,8 +516,8 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
         return _layout().participationToken;
     }
 
-    function membership() external view returns (IMembership) {
-        return _layout().membership;
+    function hats() external view returns (IHats) {
+        return _layout().hats;
     }
 
     function executor() external view returns (IExecutor) {
@@ -388,5 +534,42 @@ contract ParticipationVoting is Initializable, ContextUpgradeable, PausableUpgra
 
     function quadraticVoting() external view returns (bool) {
         return _layout().quadraticVoting;
+    }
+
+    function pollHatAllowed(uint256 id, uint256 hat) external view returns (bool) {
+        Layout storage l = _layout();
+        if (id >= l._proposals.length) revert InvalidProposal();
+        return l._proposals[id].pollHatAllowed[hat];
+    }
+
+    function pollRestricted(uint256 id) external view returns (bool) {
+        Layout storage l = _layout();
+        if (id >= l._proposals.length) revert InvalidProposal();
+        return l._proposals[id].restricted;
+    }
+
+    /* ───────────── Hat Management View Functions ───────────── */
+    function getVotingHats() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().votingHatIds);
+    }
+
+    function getCreatorHats() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().creatorHatIds);
+    }
+
+    function votingHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().votingHatIds);
+    }
+
+    function creatorHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().creatorHatIds);
+    }
+
+    function isVotingHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().votingHatIds, hatId);
+    }
+
+    function isCreatorHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().creatorHatIds, hatId);
     }
 }
