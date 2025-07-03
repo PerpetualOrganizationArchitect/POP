@@ -1315,4 +1315,432 @@ contract TaskManagerTest is Test {
         vm.expectRevert(TaskManager.Unauthorized.selector);
         tm.assignTask(0, claimUser);
     }
+
+    /*───────────────── CREATE AND ASSIGN TASK TESTS ────────────────────*/
+
+    function test_CreateAndAssignTaskBasic() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("CREATE_ASSIGN_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Test basic create and assign functionality
+        vm.prank(creator1);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("test_task"), projectId, member1);
+
+        // Verify task was created and assigned correctly
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId) = tm.getTask(taskId);
+        assertEq(payout, 1 ether, "Payout should be correct");
+        assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Status should be CLAIMED");
+        assertEq(claimer, member1, "Task should be assigned to member1");
+        assertEq(taskProjectId, projectId, "Project ID should match");
+
+        // Verify project budget was updated
+        (uint256 cap, uint256 spent,) = tm.getProjectInfo(projectId);
+        assertEq(spent, 1 ether, "Project spent should be updated");
+    }
+
+    function test_CreateAndAssignTaskPermissions() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("PERM_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Test that user with only CREATE permission cannot use createAndAssignTask
+        uint256 CREATE_ONLY_HAT = 300;
+        address createOnlyUser = makeAddr("createOnlyUser");
+        setHat(createOnlyUser, CREATE_ONLY_HAT);
+
+        vm.prank(executor);
+        tm.setRolePerm(CREATE_ONLY_HAT, TaskPerm.CREATE);
+
+        vm.prank(createOnlyUser);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1);
+
+        // Test that user with only ASSIGN permission cannot use createAndAssignTask
+        uint256 ASSIGN_ONLY_HAT = 301;
+        address assignOnlyUser = makeAddr("assignOnlyUser");
+        setHat(assignOnlyUser, ASSIGN_ONLY_HAT);
+
+        vm.prank(executor);
+        tm.setRolePerm(ASSIGN_ONLY_HAT, TaskPerm.ASSIGN);
+
+        vm.prank(assignOnlyUser);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1);
+
+        // Test that user with both CREATE and ASSIGN permissions can use createAndAssignTask
+        uint256 CREATE_ASSIGN_HAT = 302;
+        address createAssignUser = makeAddr("createAssignUser");
+        setHat(createAssignUser, CREATE_ASSIGN_HAT);
+
+        vm.prank(executor);
+        tm.setRolePerm(CREATE_ASSIGN_HAT, TaskPerm.CREATE | TaskPerm.ASSIGN);
+
+        vm.prank(createAssignUser);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("should_work"), projectId, member1);
+
+        // Verify task was created successfully
+        (,, address claimer,) = tm.getTask(taskId);
+        assertEq(claimer, member1, "Task should be assigned to member1");
+    }
+
+    function test_CreateAndAssignTaskProjectManager() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        address[] memory managers = new address[](1);
+        managers[0] = pm1;
+
+        vm.prank(creator1);
+        bytes32 projectId =
+            tm.createProject(bytes("PM_TEST"), 5 ether, managers, createHats, claimHats, reviewHats, assignHats);
+
+        // Test that project manager can use createAndAssignTask
+        vm.prank(pm1);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("pm_task"), projectId, member1);
+
+        // Verify task was created and assigned
+        (,, address claimer,) = tm.getTask(taskId);
+        assertEq(claimer, member1, "Task should be assigned to member1");
+
+        // Test that non-project manager cannot use createAndAssignTask
+        vm.prank(outsider);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1);
+    }
+
+    function test_CreateAndAssignTaskValidation() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("VALIDATION_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Test zero address assignee
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.ZeroAddress.selector);
+        tm.createAndAssignTask(1 ether, bytes("test"), projectId, address(0));
+
+        // Test zero payout
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.InvalidPayout.selector);
+        tm.createAndAssignTask(0, bytes("test"), projectId, member1);
+
+        // Test excessive payout
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.InvalidPayout.selector);
+        tm.createAndAssignTask(1e25, bytes("test"), projectId, member1); // Over MAX_PAYOUT
+
+        // Test empty metadata
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.InvalidString.selector);
+        tm.createAndAssignTask(1 ether, bytes(""), projectId, member1);
+
+        // Test non-existent project - this will fail with Unauthorized because permission check happens first
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.createAndAssignTask(1 ether, bytes("test"), bytes32(uint256(999)), member1);
+    }
+
+    function test_CreateAndAssignTaskBudgetEnforcement() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("BUDGET_TEST"), 2 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Create first task within budget
+        vm.prank(creator1);
+        uint256 taskId1 = tm.createAndAssignTask(1 ether, bytes("task1"), projectId, member1);
+
+        // Create second task within budget
+        vm.prank(creator1);
+        uint256 taskId2 = tm.createAndAssignTask(1 ether, bytes("task2"), projectId, member1);
+
+        // Try to create third task that would exceed budget
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        tm.createAndAssignTask(1 ether, bytes("task3"), projectId, member1);
+
+        // Verify project budget tracking
+        (uint256 cap, uint256 spent,) = tm.getProjectInfo(projectId);
+        assertEq(spent, 2 ether, "Project should have spent 2 ether");
+        assertEq(cap, 2 ether, "Project cap should be 2 ether");
+    }
+
+    function test_CreateAndAssignTaskEvents() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("EVENT_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Test that both TaskCreated and TaskAssigned events are emitted
+        vm.prank(creator1);
+        vm.expectEmit(true, true, true, true);
+        emit TaskManager.TaskCreated(0, projectId, 1 ether, bytes("event_test"));
+        vm.expectEmit(true, true, true, true);
+        emit TaskManager.TaskAssigned(0, member1, creator1);
+        tm.createAndAssignTask(1 ether, bytes("event_test"), projectId, member1);
+    }
+
+    function test_CreateAndAssignTaskLifecycle() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("LIFECYCLE_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Create and assign task
+        vm.prank(creator1);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("lifecycle_test"), projectId, member1);
+
+        // Verify task is in CLAIMED status
+        (, TaskManager.Status status,,) = tm.getTask(taskId);
+        assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Task should be CLAIMED");
+
+        // Assigned user should be able to submit
+        vm.prank(member1);
+        tm.submitTask(taskId, bytes("submission"));
+
+        // Verify task is now SUBMITTED
+        (, status,,) = tm.getTask(taskId);
+        assertEq(uint8(status), uint8(TaskManager.Status.SUBMITTED), "Task should be SUBMITTED");
+
+        // Reviewer should be able to complete
+        vm.prank(creator1);
+        tm.completeTask(taskId);
+
+        // Verify task is completed and tokens minted
+        (, status,,) = tm.getTask(taskId);
+        assertEq(uint8(status), uint8(TaskManager.Status.COMPLETED), "Task should be COMPLETED");
+        assertEq(token.balanceOf(member1), 1 ether, "Member should receive tokens");
+    }
+
+    function test_CreateAndAssignTaskGasEfficiency() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("GAS_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Measure gas for createAndAssignTask
+        vm.prank(creator1);
+        uint256 gasBefore = gasleft();
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("gas_test"), projectId, member1);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        console.log("Gas used for createAndAssignTask:", gasUsed);
+
+        // Verify task was created and assigned correctly
+        (,, address claimer,) = tm.getTask(taskId);
+        assertEq(claimer, member1, "Task should be assigned to member1");
+
+        // For comparison, measure gas for separate create + assign operations
+        vm.prank(creator1);
+        gasBefore = gasleft();
+        tm.createTask(1 ether, bytes("gas_test2"), projectId);
+        uint256 gasCreate = gasBefore - gasleft();
+
+        vm.prank(creator1);
+        gasBefore = gasleft();
+        tm.assignTask(1, member1);
+        uint256 gasAssign = gasBefore - gasleft();
+
+        uint256 gasTotal = gasCreate + gasAssign;
+        console.log("Gas used for createTask:", gasCreate);
+        console.log("Gas used for assignTask:", gasAssign);
+        console.log("Total gas for separate operations:", gasTotal);
+        console.log("Gas savings:", gasTotal - gasUsed);
+    }
+
+    function test_CreateAndAssignTaskMultipleUsers() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("MULTI_USER_TEST"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Create multiple users
+        address[] memory users = new address[](3);
+        for (uint256 i = 0; i < users.length; i++) {
+            users[i] = makeAddr(string(abi.encodePacked("user", i)));
+            setHat(users[i], MEMBER_HAT);
+        }
+
+        // Create and assign tasks to different users
+        for (uint256 i = 0; i < users.length; i++) {
+            vm.prank(creator1);
+            uint256 taskId = tm.createAndAssignTask(1 ether, bytes("multi_user_task"), projectId, users[i]);
+
+            // Verify each task is assigned to the correct user
+            (,, address claimer,) = tm.getTask(taskId);
+            assertEq(claimer, users[i], "Task should be assigned to correct user");
+        }
+
+        // Verify project budget tracking
+        (uint256 cap, uint256 spent,) = tm.getProjectInfo(projectId);
+        assertEq(spent, 3 ether, "Project should have spent 3 ether");
+    }
+
+    function test_CreateAndAssignTaskEdgeCases() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("EDGE_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Test assigning to self
+        vm.prank(creator1);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("self_assign"), projectId, creator1);
+
+        (,, address claimer,) = tm.getTask(taskId);
+        assertEq(claimer, creator1, "Task should be assigned to creator1");
+
+        // Test assigning to executor
+        vm.prank(creator1);
+        taskId = tm.createAndAssignTask(1 ether, bytes("executor_assign"), projectId, executor);
+
+        (,, claimer,) = tm.getTask(taskId);
+        assertEq(claimer, executor, "Task should be assigned to executor");
+
+        // Test maximum payout - need to create a new project with higher cap
+        vm.prank(creator1);
+        bytes32 maxProjectId = tm.createProject(
+            bytes("MAX_PAYOUT_TEST"), 1e24, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        taskId = tm.createAndAssignTask(1e24, bytes("max_payout"), maxProjectId, member1); // MAX_PAYOUT
+
+        (uint256 payout,,,) = tm.getTask(taskId);
+        assertEq(payout, 1e24, "Task should have maximum payout");
+    }
+
+    function test_CreateAndAssignTaskProjectSpecificPermissions() public {
+        // Create a hat with global permissions
+        uint256 GLOBAL_HAT = 400;
+        address globalUser = makeAddr("globalUser");
+        setHat(globalUser, GLOBAL_HAT);
+
+        // Set global permissions (CREATE only)
+        vm.prank(executor);
+        tm.setRolePerm(GLOBAL_HAT, TaskPerm.CREATE);
+
+        // Create project
+        uint256[] memory emptyHats = new uint256[](0);
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("PROJECT_SPECIFIC"), 5 ether, new address[](0), emptyHats, emptyHats, emptyHats, emptyHats
+        );
+
+        // User should not be able to createAndAssignTask (no ASSIGN permission)
+        vm.prank(globalUser);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1);
+
+        // Add ASSIGN permission at project level
+        vm.prank(creator1);
+        tm.setProjectRolePerm(projectId, GLOBAL_HAT, TaskPerm.CREATE | TaskPerm.ASSIGN);
+
+        // Now user should be able to createAndAssignTask
+        vm.prank(globalUser);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("should_work"), projectId, member1);
+
+        // Verify task was created and assigned
+        (,, address claimer,) = tm.getTask(taskId);
+        assertEq(claimer, member1, "Task should be assigned to member1");
+    }
 }
