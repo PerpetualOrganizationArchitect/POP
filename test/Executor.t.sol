@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../src/Executor.sol";
+import "./mocks/MockHats.sol";
 
 contract Target {
     uint256 public val;
@@ -14,13 +15,15 @@ contract Target {
 
 contract ExecutorTest is Test {
     Executor exec;
+    MockHats hats;
     address owner = address(this);
     address caller = address(0x1);
     Target target;
 
     function setUp() public {
+        hats = new MockHats();
         exec = new Executor();
-        exec.initialize(owner);
+        exec.initialize(owner, address(hats));
         target = new Target();
         exec.setCaller(caller);
     }
@@ -39,5 +42,32 @@ contract ExecutorTest is Test {
         vm.expectRevert(Executor.EmptyBatch.selector);
         vm.prank(caller);
         exec.execute(1, batch);
+    }
+
+    function testHatMintingAuthorization() public {
+        address minter = address(0x2);
+        address user = address(0x3);
+        uint256 hatId = 1;
+
+        // Test unauthorized minting fails
+        uint256[] memory hatIds = new uint256[](1);
+        hatIds[0] = hatId;
+        vm.prank(minter);
+        vm.expectRevert(Executor.UnauthorizedCaller.selector);
+        exec.mintHatsForUser(user, hatIds);
+
+        // Authorize minter
+        exec.setHatMinterAuthorization(minter, true);
+
+        // Test authorized minting succeeds
+        vm.prank(minter);
+        exec.mintHatsForUser(user, hatIds);
+        assertTrue(hats.isWearerOfHat(user, hatId));
+
+        // Test deauthorization
+        exec.setHatMinterAuthorization(minter, false);
+        vm.prank(minter);
+        vm.expectRevert(Executor.UnauthorizedCaller.selector);
+        exec.mintHatsForUser(user, hatIds);
     }
 }

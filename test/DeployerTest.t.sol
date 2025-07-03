@@ -79,7 +79,7 @@ contract DeployerTest is Test {
         voting[0] = true;
         voting[1] = true;
         (hybrid, exec, member, qj, token, tm, hub) = deployer.deployFullOrg(
-            ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
         vm.stopPrank();
     }
@@ -208,7 +208,7 @@ contract DeployerTest is Test {
             address _taskMgr,
             address _eduHub
         ) = deployer.deployFullOrg(
-            ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
         vm.stopPrank();
@@ -232,16 +232,13 @@ contract DeployerTest is Test {
         vm.prank(voter2);
         QuickJoin(quickJoinProxy).quickJoinNoUser("v2");
 
-        // Give voter1 the actual hats they need from the Hats Protocol
-        // voter1 gets EXECUTIVE role in Membership, so give them the Executive hat for voting/creating
+        // Give voter1 the EXECUTIVE role hat for creating proposals
+        // (voter1 already has DEFAULT hat from QuickJoin, but needs EXECUTIVE for creating)
         uint256 executiveRoleHat = orgRegistry.getRoleHat(ORG_ID, 1); // EXECUTIVE role hat
         vm.prank(executorProxy);
         IHats(SEPOLIA_HATS).mintHat(executiveRoleHat, voter1);
 
-        // Give voter2 the default hat for voting
-        uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0); // DEFAULT role hat
-        vm.prank(executorProxy);
-        IHats(SEPOLIA_HATS).mintHat(defaultRoleHat, voter2);
+        // voter2 already has DEFAULT hat from QuickJoin, which is sufficient for voting
 
         /* create proposal */
         uint8 optNumber = 2;
@@ -275,7 +272,7 @@ contract DeployerTest is Test {
             _deployFullOrg();
 
         (address executorAddr, uint32 count, bool boot, bool exists) = orgRegistry.orgOf(ORG_ID);
-        assertEq(executorAddr, orgOwner);
+        assertEq(executorAddr, exec); // Should be the Executor contract address, not orgOwner
         assertEq(count, 7);
         assertFalse(boot);
         assertTrue(exists);
@@ -308,7 +305,7 @@ contract DeployerTest is Test {
         voting[0] = true;
         voting[1] = true;
         deployer.deployFullOrg(
-            ORG_ID, other, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
         vm.stopPrank();
     }
@@ -326,9 +323,7 @@ contract DeployerTest is Test {
         voting[1] = true;
 
         (address hybrid, address exec, address member, address qj, address token, address tm, address hub) = deployer
-            .deployFullOrg(
-            ORG_ID, orgOwner, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
-        );
+            .deployFullOrg(ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting);
 
         // Verify Hats tree registration
         uint256 topHatId = orgRegistry.getTopHat(ORG_ID);

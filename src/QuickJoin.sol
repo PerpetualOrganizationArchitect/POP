@@ -8,13 +8,15 @@ import {ReentrancyGuardUpgradeable} from
     "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 /*───────────────────────── Interface minimal stubs ───────────────────────*/
-interface IMembership {
-    function quickJoinMint(address newUser) external;
-}
+import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 
 interface IUniversalAccountRegistry {
     function getUsername(address account) external view returns (string memory);
     function registerAccountQuickJoin(string memory username, address newUser) external;
+}
+
+interface IExecutorHatMinter {
+    function mintHatsForUser(address user, uint256[] calldata hatIds) external;
 }
 
 /*──────────────────────────────  Contract  ───────────────────────────────*/
@@ -34,10 +36,11 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     /* ───────── ERC-7201 Storage ──────── */
     /// @custom:storage-location erc7201:poa.quickjoin.storage
     struct Layout {
-        IMembership membership;
+        IHats hats;
         IUniversalAccountRegistry accountRegistry;
         address masterDeployAddress;
         address executor;
+        uint256[] memberHatIds; // hat IDs to mint when users join
     }
 
     // keccak256("poa.quickjoin.storage")
@@ -50,18 +53,22 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     }
 
     /* ───────── Events ───────── */
-    event AddressesUpdated(address membership, address registry, address master);
+    event AddressesUpdated(address hats, address registry, address master);
     event ExecutorUpdated(address newExecutor);
-    event QuickJoined(address indexed user, bool usernameCreated);
-    event QuickJoinedByMaster(address indexed master, address indexed user, bool usernameCreated);
+    event MemberHatIdsUpdated(uint256[] hatIds);
+    event QuickJoined(address indexed user, bool usernameCreated, uint256[] hatIds);
+    event QuickJoinedByMaster(address indexed master, address indexed user, bool usernameCreated, uint256[] hatIds);
 
     /* ───────── Initialiser ───── */
-    function initialize(address executor_, address membership_, address accountRegistry_, address masterDeploy_)
-        external
-        initializer
-    {
+    function initialize(
+        address executor_,
+        address hats_,
+        address accountRegistry_,
+        address masterDeploy_,
+        uint256[] calldata memberHatIds_
+    ) external initializer {
         if (
-            executor_ == address(0) || membership_ == address(0) || accountRegistry_ == address(0)
+            executor_ == address(0) || hats_ == address(0) || accountRegistry_ == address(0)
                 || masterDeploy_ == address(0)
         ) revert InvalidAddress();
 
@@ -70,12 +77,18 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
 
         Layout storage l = _layout();
         l.executor = executor_;
-        l.membership = IMembership(membership_);
+        l.hats = IHats(hats_);
         l.accountRegistry = IUniversalAccountRegistry(accountRegistry_);
         l.masterDeployAddress = masterDeploy_;
 
-        emit AddressesUpdated(membership_, accountRegistry_, masterDeploy_);
+        // Set member hat IDs
+        for (uint256 i = 0; i < memberHatIds_.length; i++) {
+            l.memberHatIds.push(memberHatIds_[i]);
+        }
+
+        emit AddressesUpdated(hats_, accountRegistry_, masterDeploy_);
         emit ExecutorUpdated(executor_);
+        emit MemberHatIdsUpdated(memberHatIds_);
     }
 
     /* ───────── Modifiers ─────── */
@@ -91,20 +104,31 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     }
 
     /* ─────── Admin / DAO setters (executor-gated) ─────── */
-    function updateAddresses(address membership_, address accountRegistry_, address masterDeploy_)
-        external
-        onlyExecutor
-    {
-        if (membership_ == address(0) || accountRegistry_ == address(0) || masterDeploy_ == address(0)) {
+    function updateAddresses(address hats_, address accountRegistry_, address masterDeploy_) external onlyExecutor {
+        if (hats_ == address(0) || accountRegistry_ == address(0) || masterDeploy_ == address(0)) {
             revert InvalidAddress();
         }
 
         Layout storage l = _layout();
-        l.membership = IMembership(membership_);
+        l.hats = IHats(hats_);
         l.accountRegistry = IUniversalAccountRegistry(accountRegistry_);
         l.masterDeployAddress = masterDeploy_;
 
-        emit AddressesUpdated(membership_, accountRegistry_, masterDeploy_);
+        emit AddressesUpdated(hats_, accountRegistry_, masterDeploy_);
+    }
+
+    function updateMemberHatIds(uint256[] calldata memberHatIds_) external onlyExecutor {
+        Layout storage l = _layout();
+
+        // Clear existing hat IDs
+        delete l.memberHatIds;
+
+        // Set new hat IDs
+        for (uint256 i = 0; i < memberHatIds_.length; i++) {
+            l.memberHatIds.push(memberHatIds_[i]);
+        }
+
+        emit MemberHatIdsUpdated(memberHatIds_);
     }
 
     function setExecutor(address newExec) external onlyExecutor {
@@ -127,8 +151,12 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
             created = true;
         }
 
-        l.membership.quickJoinMint(user);
-        emit QuickJoined(user, created);
+        // Request executor to mint all configured member hats to the user
+        if (l.memberHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(user, l.memberHatIds);
+        }
+
+        emit QuickJoined(user, created, l.memberHatIds);
     }
 
     /* ───────── Public user paths ─────── */
@@ -143,15 +171,20 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         Layout storage l = _layout();
         string memory existing = l.accountRegistry.getUsername(_msgSender());
         if (bytes(existing).length == 0) revert NoUsername();
-        l.membership.quickJoinMint(_msgSender());
-        emit QuickJoined(_msgSender(), false);
+
+        // Request executor to mint all configured member hats to the user
+        if (l.memberHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(_msgSender(), l.memberHatIds);
+        }
+
+        emit QuickJoined(_msgSender(), false, l.memberHatIds);
     }
 
     /* ───────── Master-deploy helper paths ─────── */
 
     function quickJoinNoUserMasterDeploy(string calldata username, address newUser) external onlyMasterDeploy {
         _quickJoin(newUser, username);
-        emit QuickJoinedByMaster(_msgSender(), newUser, bytes(username).length > 0);
+        emit QuickJoinedByMaster(_msgSender(), newUser, bytes(username).length > 0, _layout().memberHatIds);
     }
 
     function quickJoinWithUserMasterDeploy(address newUser) external onlyMasterDeploy nonReentrant {
@@ -159,11 +192,36 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         Layout storage l = _layout();
         string memory existing = l.accountRegistry.getUsername(newUser);
         if (bytes(existing).length == 0) revert NoUsername();
-        l.membership.quickJoinMint(newUser);
-        emit QuickJoinedByMaster(_msgSender(), newUser, false);
+
+        // Request executor to mint all configured member hats to the user
+        if (l.memberHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(newUser, l.memberHatIds);
+        }
+
+        emit QuickJoinedByMaster(_msgSender(), newUser, false, l.memberHatIds);
     }
 
     /* ───────── Misc view helpers ─────── */
+    function memberHatIds() external view returns (uint256[] memory) {
+        return _layout().memberHatIds;
+    }
+
+    function hats() external view returns (IHats) {
+        return _layout().hats;
+    }
+
+    function accountRegistry() external view returns (IUniversalAccountRegistry) {
+        return _layout().accountRegistry;
+    }
+
+    function executor() external view returns (address) {
+        return _layout().executor;
+    }
+
+    function masterDeployAddress() external view returns (address) {
+        return _layout().masterDeployAddress;
+    }
+
     function version() external pure returns (string memory) {
         return "v1";
     }

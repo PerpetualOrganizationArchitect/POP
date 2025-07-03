@@ -31,6 +31,7 @@ interface IParticipationToken {
 
 interface IExecutorAdmin {
     function setCaller(address) external;
+    function setHatMinterAuthorization(address minter, bool authorized) external;
 }
 
 /*── init‑selector helpers (reduce bytecode & safety) ────────────────────*/
@@ -161,12 +162,10 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
     /*══════════════  MODULE‑SPECIFIC DEPLOY HELPERS  ═════════════=*/
     /*---------  Executor  (first, we need its address everywhere) ---------*/
-    function _deployExecutor(bytes32 orgId, address executorEOA, bool autoUp, address customImpl)
-        internal
-        returns (address execProxy)
-    {
-        bytes memory init = abi.encodeWithSignature("initialize(address)", executorEOA);
-        execProxy = _deploy(orgId, "Executor", executorEOA, autoUp, customImpl, init, false);
+    function _deployExecutor(bytes32 orgId, bool autoUp, address customImpl) internal returns (address execProxy) {
+        // Initialize with Deployer as owner so we can set up governance
+        bytes memory init = abi.encodeWithSignature("initialize(address,address)", address(this), address(hats));
+        execProxy = _deploy(orgId, "Executor", address(this), autoUp, customImpl, init, false);
     }
 
     /*---------  Membership NFT  ---------*/
@@ -206,8 +205,19 @@ contract Deployer is Initializable, OwnableUpgradeable {
         bool autoUp,
         address customImpl
     ) internal returns (address qjProxy) {
+        Layout storage l = _layout();
+
+        // Get the DEFAULT role hat ID for new members
+        uint256[] memory memberHats = new uint256[](1);
+        memberHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
+
         bytes memory init = abi.encodeWithSignature(
-            "initialize(address,address,address,address)", executorAddr, membership, registry, masterDeploy
+            "initialize(address,address,address,address,uint256[])",
+            executorAddr,
+            address(hats),
+            registry,
+            masterDeploy,
+            memberHats
         );
         qjProxy = _deploy(orgId, "QuickJoin", executorAddr, autoUp, customImpl, init, false);
         IMembership(membership).setQuickJoin(qjProxy);
@@ -430,7 +440,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
     /*════════════════  FULL ORG  DEPLOYMENT  ════════════════*/
     struct DeploymentParams {
         bytes32 orgId;
-        address executorEOA;
         string orgName;
         address registryAddr;
         bool autoUpgrade;
@@ -445,7 +454,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
     function deployFullOrg(
         bytes32 orgId,
-        address executorEOA,
         string calldata orgName,
         address registryAddr,
         bool autoUpgrade,
@@ -470,7 +478,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
     {
         DeploymentParams memory params = DeploymentParams({
             orgId: orgId,
-            executorEOA: executorEOA,
             orgName: orgName,
             registryAddr: registryAddr,
             autoUpgrade: autoUpgrade,
@@ -500,22 +507,25 @@ contract Deployer is Initializable, OwnableUpgradeable {
     {
         Layout storage l = _layout();
 
-        /* 0. ensure Org exists (or create) */
-        if (l.orgRegistry.orgCount() == 0 || !_orgExists(params.orgId)) {
-            l.orgRegistry.registerOrg(params.orgId, params.executorEOA, bytes(params.orgName));
+        /* 1. Create Org in bootstrap mode */
+        if (!_orgExists(params.orgId)) {
+            l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName));
         } else {
-            (address currentExec,,,) = l.orgRegistry.orgOf(params.orgId);
-            if (currentExec != params.executorEOA) revert OrgExistsMismatch();
+            // Org already exists - this should not happen in normal deployment
+            revert OrgExistsMismatch();
         }
 
-        /* 1. Executor  */
-        executorAddr = _deployExecutor(params.orgId, params.executorEOA, params.autoUpgrade, address(0));
+        /* 2. Deploy Executor */
+        executorAddr = _deployExecutor(params.orgId, params.autoUpgrade, address(0));
 
-        /* 2. Setup Hats Tree */
+        /* 3. Set the executor for the org */
+        l.orgRegistry.setOrgExecutor(params.orgId, executorAddr);
+
+        /* 4. Setup Hats Tree */
         (uint256 topHatId, uint256[] memory roleHatIds) =
             _setupHatsTree(params.orgId, executorAddr, params.orgName, params.roleNames, params.roleCanVote);
 
-        /* 3. Membership NFT */
+        /* 5. Membership NFT */
         membership = _deployMembership(
             params.orgId,
             executorAddr,
@@ -527,30 +537,30 @@ contract Deployer is Initializable, OwnableUpgradeable {
             params.roleCanVote
         );
 
-        /* 4. QuickJoin */
+        /* 6. QuickJoin */
         quickJoin = _deployQuickJoin(
             params.orgId, executorAddr, membership, params.registryAddr, address(this), params.autoUpgrade, address(0)
         );
 
-        /* 5. Participation token */
+        /* 7. Participation token */
         string memory tName = string(abi.encodePacked(params.orgName, " Token"));
         string memory tSymbol = "PT";
         participationToken =
             _deployPT(params.orgId, executorAddr, tName, tSymbol, membership, params.autoUpgrade, address(0));
 
-        /* 6. TaskManager */
+        /* 8. TaskManager */
         taskManager = _deployTaskManager(
             params.orgId, executorAddr, participationToken, membership, params.autoUpgrade, address(0)
         );
         IParticipationToken(participationToken).setTaskManager(taskManager);
 
-        /* 7. EducationHub */
+        /* 9. EducationHub */
         educationHub = _deployEducationHub(
             params.orgId, executorAddr, membership, participationToken, params.autoUpgrade, address(0), false
         );
         IParticipationToken(participationToken).setEducationHub(educationHub);
 
-        /* 8. HybridVoting governor */
+        /* 10. HybridVoting governor */
         hybridVoting = _deployHybridVoting(
             params.orgId,
             executorAddr,
@@ -565,8 +575,14 @@ contract Deployer is Initializable, OwnableUpgradeable {
             params.minBal
         );
 
+        /* authorize QuickJoin to mint hats (before setting voting contract as caller) */
+        IExecutorAdmin(executorAddr).setHatMinterAuthorization(quickJoin, true);
+
         /* link executor to governor */
         IExecutorAdmin(executorAddr).setCaller(hybridVoting);
+
+        /* renounce executor ownership - now only governed by voting */
+        OwnableUpgradeable(executorAddr).renounceOwnership();
     }
 
     /*══════════════  UTILITIES  ═════════════=*/
