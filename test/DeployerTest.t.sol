@@ -12,7 +12,6 @@ import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 /*──────────── Local contracts ───────────*/
 import {HybridVoting} from "../src/HybridVoting.sol";
 import {Executor} from "../src/Executor.sol";
-import {Membership} from "../src/Membership.sol";
 import {ParticipationToken} from "../src/ParticipationToken.sol";
 import {QuickJoin} from "../src/QuickJoin.sol";
 import {TaskManager} from "../src/TaskManager.sol";
@@ -31,7 +30,6 @@ contract DeployerTest is Test {
     /*–––– implementations ––––*/
     HybridVoting hybridImpl;
     Executor execImpl;
-    Membership membershipImpl;
     UniversalAccountRegistry accountRegImpl;
     QuickJoin quickJoinImpl;
     ParticipationToken pTokenImpl;
@@ -55,7 +53,6 @@ contract DeployerTest is Test {
     bytes32 public constant GLOBAL_REG_ID = keccak256("POA-GLOBAL-ACCOUNT-REGISTRY");
 
     /*–––– deployed proxies ––––*/
-    address membershipProxy;
     address quickJoinProxy;
     address pTokenProxy;
     address payable executorProxy;
@@ -66,7 +63,7 @@ contract DeployerTest is Test {
 
     function _deployFullOrg()
         internal
-        returns (address hybrid, address exec, address member, address qj, address token, address tm, address hub)
+        returns (address hybrid, address exec, address qj, address token, address tm, address hub)
     {
         vm.startPrank(orgOwner);
         string[] memory names = new string[](2);
@@ -78,7 +75,7 @@ contract DeployerTest is Test {
         bool[] memory voting = new bool[](2);
         voting[0] = true;
         voting[1] = true;
-        (hybrid, exec, member, qj, token, tm, hub) = deployer.deployFullOrg(
+        (hybrid, exec, qj, token, tm, hub) = deployer.deployFullOrg(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
         vm.stopPrank();
@@ -92,7 +89,6 @@ contract DeployerTest is Test {
         /*–– deploy bare implementations ––*/
         hybridImpl = new HybridVoting();
         execImpl = new Executor();
-        membershipImpl = new Membership();
         accountRegImpl = new UniversalAccountRegistry();
         quickJoinImpl = new QuickJoin();
         pTokenImpl = new ParticipationToken();
@@ -166,7 +162,6 @@ contract DeployerTest is Test {
         /*–– register implementation types ––*/
         poaManager.addContractType("HybridVoting", address(hybridImpl));
         poaManager.addContractType("Executor", address(execImpl));
-        poaManager.addContractType("Membership", address(membershipImpl));
         poaManager.addContractType("QuickJoin", address(quickJoinImpl));
         poaManager.addContractType("ParticipationToken", address(pTokenImpl));
         poaManager.addContractType("TaskManager", address(taskMgrImpl));
@@ -199,15 +194,8 @@ contract DeployerTest is Test {
         voting[0] = true;
         voting[1] = true;
 
-        (
-            address _hybrid,
-            address _executor,
-            address _membership,
-            address _quickJoin,
-            address _token,
-            address _taskMgr,
-            address _eduHub
-        ) = deployer.deployFullOrg(
+        (address _hybrid, address _executor, address _quickJoin, address _token, address _taskMgr, address _eduHub) =
+        deployer.deployFullOrg(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
@@ -216,7 +204,6 @@ contract DeployerTest is Test {
         /* store for later checks */
         hybridProxy = _hybrid;
         executorProxy = payable(_executor);
-        membershipProxy = _membership;
         quickJoinProxy = _quickJoin;
         pTokenProxy = _token;
         taskMgrProxy = _taskMgr;
@@ -268,24 +255,23 @@ contract DeployerTest is Test {
     }
 
     function testFullOrgDeploymentRegistersContracts() public {
-        (address hybrid, address exec, address member, address qj, address token, address tm, address hub) =
-            _deployFullOrg();
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = _deployFullOrg();
 
         (address executorAddr, uint32 count, bool boot, bool exists) = orgRegistry.orgOf(ORG_ID);
         assertEq(executorAddr, exec); // Should be the Executor contract address, not orgOwner
-        assertEq(count, 7);
+        assertEq(count, 6); // Reduced from 7 since we removed Membership
         assertFalse(boot);
         assertTrue(exists);
 
-        bytes32 typeId = keccak256("Membership");
+        bytes32 typeId = keccak256("QuickJoin");
         bytes32 contractId = keccak256(abi.encodePacked(ORG_ID, typeId));
         (address proxy, address beacon, bool autoUp, address owner) = orgRegistry.contractOf(contractId);
-        assertEq(proxy, member);
+        assertEq(proxy, qj);
         assertTrue(autoUp);
         assertEq(owner, exec);
 
         address impl = deployer.getBeaconImplementation(beacon);
-        assertEq(impl, poaManager.getCurrentImplementation("Membership"));
+        assertEq(impl, poaManager.getCurrentImplementation("QuickJoin"));
         assertEq(deployer.poaManager(), address(poaManager));
         assertEq(deployer.orgRegistry(), address(orgRegistry));
     }
@@ -322,8 +308,9 @@ contract DeployerTest is Test {
         voting[0] = true;
         voting[1] = true;
 
-        (address hybrid, address exec, address member, address qj, address token, address tm, address hub) = deployer
-            .deployFullOrg(ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting);
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        );
 
         // Verify Hats tree registration
         uint256 topHatId = orgRegistry.getTopHat(ORG_ID);

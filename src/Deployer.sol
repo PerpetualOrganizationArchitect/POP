@@ -20,10 +20,6 @@ interface IPoaManager {
 }
 
 /*────────────────────── Module‑specific hooks ──────────────────────────*/
-interface IMembership {
-    function setQuickJoin(address) external;
-}
-
 interface IParticipationToken {
     function setTaskManager(address) external;
     function setEducationHub(address) external;
@@ -54,7 +50,6 @@ interface IHybridVotingInit {
 interface IParticipationVotingInit {
     function initialize(
         address executor_,
-        address membership_,
         address token_,
         bytes32[] calldata roles,
         address[] calldata targets,
@@ -168,38 +163,10 @@ contract Deployer is Initializable, OwnableUpgradeable {
         execProxy = _deploy(orgId, "Executor", address(this), autoUp, customImpl, init, false);
     }
 
-    /*---------  Membership NFT  ---------*/
-    function _deployMembership(
-        bytes32 orgId,
-        address executorAddr,
-        string memory orgName,
-        bool autoUp,
-        address customImpl,
-        string[] memory roleNames,
-        string[] memory roleImages,
-        bool[] memory roleCanVote
-    ) internal returns (address membershipProxy) {
-        bytes32[] memory execRoles = new bytes32[](1);
-        execRoles[0] = keccak256("EXECUTIVE");
-
-        bytes memory init = abi.encodeWithSignature(
-            "initialize(address,string,string[],string[],bool[],bytes32[])",
-            executorAddr,
-            orgName,
-            roleNames,
-            roleImages,
-            roleCanVote,
-            execRoles
-        );
-
-        membershipProxy = _deploy(orgId, "Membership", executorAddr, autoUp, customImpl, init, false);
-    }
-
     /*---------  QuickJoin  ---------*/
     function _deployQuickJoin(
         bytes32 orgId,
         address executorAddr,
-        address membership,
         address registry,
         address masterDeploy,
         bool autoUp,
@@ -220,7 +187,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
             memberHats
         );
         qjProxy = _deploy(orgId, "QuickJoin", executorAddr, autoUp, customImpl, init, false);
-        IMembership(membership).setQuickJoin(qjProxy);
     }
 
     /*---------  ParticipationToken  ---------*/
@@ -229,7 +195,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address executorAddr,
         string memory name,
         string memory symbol,
-        address membership,
         bool autoUp,
         address customImpl
     ) internal returns (address ptProxy) {
@@ -256,14 +221,10 @@ contract Deployer is Initializable, OwnableUpgradeable {
     }
 
     /*---------  TaskManager  ---------*/
-    function _deployTaskManager(
-        bytes32 orgId,
-        address executorAddr,
-        address token,
-        address membership,
-        bool autoUp,
-        address customImpl
-    ) internal returns (address tmProxy) {
+    function _deployTaskManager(bytes32 orgId, address executorAddr, address token, bool autoUp, address customImpl)
+        internal
+        returns (address tmProxy)
+    {
         Layout storage l = _layout();
 
         // Get the role hat IDs for creator permissions
@@ -281,7 +242,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
     function _deployEducationHub(
         bytes32 orgId,
         address executorAddr,
-        address membership,
         address token,
         bool autoUp,
         address customImpl,
@@ -312,7 +272,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
     function _deployHybridVoting(
         bytes32 orgId,
         address executorAddr,
-        address membership,
         address token,
         bool autoUp,
         address customImpl,
@@ -337,9 +296,8 @@ contract Deployer is Initializable, OwnableUpgradeable {
         uint256[] memory creatorHats = new uint256[](1);
         creatorHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
 
-        address[] memory targets = new address[](2);
-        targets[0] = membership;
-        targets[1] = executorAddr;
+        address[] memory targets = new address[](1);
+        targets[0] = executorAddr;
 
         bytes memory init = abi.encodeWithSelector(
             IHybridVotingInit.initialize.selector,
@@ -469,7 +427,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
         returns (
             address hybridVoting,
             address executorAddr,
-            address membership,
             address quickJoin,
             address participationToken,
             address taskManager,
@@ -498,7 +455,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
         returns (
             address hybridVoting,
             address executorAddr,
-            address membership,
             address quickJoin,
             address participationToken,
             address taskManager,
@@ -525,46 +481,29 @@ contract Deployer is Initializable, OwnableUpgradeable {
         (uint256 topHatId, uint256[] memory roleHatIds) =
             _setupHatsTree(params.orgId, executorAddr, params.orgName, params.roleNames, params.roleCanVote);
 
-        /* 5. Membership NFT */
-        membership = _deployMembership(
-            params.orgId,
-            executorAddr,
-            params.orgName,
-            params.autoUpgrade,
-            address(0),
-            params.roleNames,
-            params.roleImages,
-            params.roleCanVote
-        );
-
-        /* 6. QuickJoin */
+        /* 5. QuickJoin */
         quickJoin = _deployQuickJoin(
-            params.orgId, executorAddr, membership, params.registryAddr, address(this), params.autoUpgrade, address(0)
+            params.orgId, executorAddr, params.registryAddr, address(this), params.autoUpgrade, address(0)
         );
 
-        /* 7. Participation token */
+        /* 6. Participation token */
         string memory tName = string(abi.encodePacked(params.orgName, " Token"));
         string memory tSymbol = "PT";
-        participationToken =
-            _deployPT(params.orgId, executorAddr, tName, tSymbol, membership, params.autoUpgrade, address(0));
+        participationToken = _deployPT(params.orgId, executorAddr, tName, tSymbol, params.autoUpgrade, address(0));
 
-        /* 8. TaskManager */
-        taskManager = _deployTaskManager(
-            params.orgId, executorAddr, participationToken, membership, params.autoUpgrade, address(0)
-        );
+        /* 7. TaskManager */
+        taskManager = _deployTaskManager(params.orgId, executorAddr, participationToken, params.autoUpgrade, address(0));
         IParticipationToken(participationToken).setTaskManager(taskManager);
 
-        /* 9. EducationHub */
-        educationHub = _deployEducationHub(
-            params.orgId, executorAddr, membership, participationToken, params.autoUpgrade, address(0), false
-        );
+        /* 8. EducationHub */
+        educationHub =
+            _deployEducationHub(params.orgId, executorAddr, participationToken, params.autoUpgrade, address(0), false);
         IParticipationToken(participationToken).setEducationHub(educationHub);
 
-        /* 10. HybridVoting governor */
+        /* 9. HybridVoting governor */
         hybridVoting = _deployHybridVoting(
             params.orgId,
             executorAddr,
-            membership,
             participationToken,
             params.autoUpgrade,
             address(0),
