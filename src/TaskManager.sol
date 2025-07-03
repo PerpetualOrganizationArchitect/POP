@@ -35,6 +35,11 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     error CapBelowCommitted();
     error NotExecutor();
     error Unauthorized();
+    error NoApplication();
+    error NotApplicant();
+    error AlreadyApplied();
+    error RequiresApplication();
+    error NoApplicationRequired();
 
     /*──────── Constants ─────*/
     uint256 public constant MAX_PAYOUT = 1e24; // 1 000 000 tokens (18 dec)
@@ -47,7 +52,8 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         CLAIMED,
         SUBMITTED,
         COMPLETED,
-        CANCELLED
+        CANCELLED,
+        APPLICATION_SUBMITTED
     }
 
     struct Task {
@@ -55,6 +61,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         uint96 payout; // slot 2: 12 bytes (supports up to 7e28, well over 1e24 cap)
         address claimer; // slot 2: 20 bytes (total 32 bytes in slot 2)
         Status status; // packed into previous slot's remaining space
+        bool requiresApplication; // packed into previous slot's remaining space
     }
 
     struct Project {
@@ -103,6 +110,8 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     event TaskAssigned(uint256 id, address assignee, address assigner);
     event TaskCompleted(uint256 id, address completer);
     event TaskCancelled(uint256 id, address canceller);
+    event TaskApplicationSubmitted(uint256 id, address applicant, bytes32 applicationHash);
+    event TaskApplicationApproved(uint256 id, address applicant, address approver);
     event ExecutorSet(address newExecutor);
 
     /*──────── Initialiser ───────*/
@@ -267,6 +276,14 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     /*──────── Task Logic ───────*/
     function createTask(uint256 payout, bytes calldata meta, bytes32 pid) external canCreate(pid) {
+        _createTask(payout, meta, pid, false);
+    }
+
+    function createApplicationTask(uint256 payout, bytes calldata meta, bytes32 pid) external canCreate(pid) {
+        _createTask(payout, meta, pid, true);
+    }
+
+    function _createTask(uint256 payout, bytes calldata meta, bytes32 pid, bool requiresApplication) internal {
         Layout storage l = _layout();
         if (payout == 0 || payout > MAX_PAYOUT_96) revert InvalidPayout();
         if (meta.length == 0) revert InvalidString();
@@ -278,7 +295,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         p.spent = uint128(newSpent);
 
         uint48 id = l.nextTaskId++;
-        l._tasks[id] = Task(pid, uint96(payout), address(0), Status.UNCLAIMED);
+        l._tasks[id] = Task(pid, uint96(payout), address(0), Status.UNCLAIMED, requiresApplication);
         emit TaskCreated(id, pid, payout, meta);
     }
 
@@ -311,6 +328,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Layout storage l = _layout();
         Task storage t = _task(l, id);
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+        if (t.requiresApplication) revert RequiresApplication();
 
         t.status = Status.CLAIMED;
         t.claimer = _msgSender();
@@ -353,14 +371,49 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     function cancelTask(uint256 id) external canCreate(_layout()._tasks[id].projectId) {
         Layout storage l = _layout();
         Task storage t = _task(l, id);
-        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+        if (t.status != Status.UNCLAIMED && t.status != Status.APPLICATION_SUBMITTED) revert AlreadyClaimed();
 
         Project storage p = l._projects[t.projectId];
         unchecked {
             p.spent -= t.payout; // safe: payout was added to spent when task created
         }
         t.status = Status.CANCELLED;
+        t.claimer = address(0); // Clear any applicant
         emit TaskCancelled(id, _msgSender());
+    }
+
+    /*──────── Application System ─────*/
+    /**
+     * @dev Submit application for a task with IPFS hash containing submission
+     * @param id Task ID to apply for
+     * @param applicationHash IPFS hash of the application/submission
+     */
+    function applyForTask(uint256 id, bytes32 applicationHash) external canClaim(id) {
+        Layout storage l = _layout();
+        Task storage t = _task(l, id);
+        if (t.status != Status.UNCLAIMED) revert AlreadyApplied();
+        if (applicationHash == bytes32(0)) revert InvalidString();
+        if (!t.requiresApplication) revert NoApplicationRequired();
+
+        t.status = Status.APPLICATION_SUBMITTED;
+        t.claimer = _msgSender(); // Store applicant in claimer field
+        emit TaskApplicationSubmitted(id, _msgSender(), applicationHash);
+    }
+
+    /**
+     * @dev Approve an application, moving task to CLAIMED status
+     * @param id Task ID
+     * @param applicant Address of the applicant to approve
+     */
+    function approveApplication(uint256 id, address applicant) external canAssign(_layout()._tasks[id].projectId) {
+        Layout storage l = _layout();
+        Task storage t = _task(l, id);
+        if (t.status != Status.APPLICATION_SUBMITTED) revert NoApplication();
+        if (t.claimer != applicant) revert NotApplicant();
+
+        t.status = Status.CLAIMED;
+        // claimer remains the same (applicant)
+        emit TaskApplicationApproved(id, applicant, _msgSender());
     }
 
     /**
@@ -375,6 +428,31 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         external
         returns (uint256 taskId)
     {
+        return _createAndAssignTask(payout, meta, pid, assignee, false);
+    }
+
+    /**
+     * @dev Creates an application-required task and immediately assigns it to the specified assignee.
+     * @param payout The payout amount for the task
+     * @param meta Task metadata
+     * @param pid Project ID
+     * @param assignee Address to assign the task to
+     * @return taskId The ID of the created task
+     */
+    function createAndAssignApplicationTask(uint256 payout, bytes calldata meta, bytes32 pid, address assignee)
+        external
+        returns (uint256 taskId)
+    {
+        return _createAndAssignTask(payout, meta, pid, assignee, true);
+    }
+
+    function _createAndAssignTask(
+        uint256 payout,
+        bytes calldata meta,
+        bytes32 pid,
+        address assignee,
+        bool requiresApplication
+    ) internal returns (uint256 taskId) {
         if (assignee == address(0)) revert ZeroAddress();
 
         Layout storage l = _layout();
@@ -399,7 +477,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
         // Create and assign task in one go
         taskId = l.nextTaskId++;
-        l._tasks[taskId] = Task(pid, uint96(payout), assignee, Status.CLAIMED);
+        l._tasks[taskId] = Task(pid, uint96(payout), assignee, Status.CLAIMED, requiresApplication);
 
         // Emit events
         emit TaskCreated(taskId, pid, payout, meta);
@@ -410,10 +488,10 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     function getTask(uint256 id)
         external
         view
-        returns (uint256 payout, Status status, address claimer, bytes32 projectId)
+        returns (uint256 payout, Status status, address claimer, bytes32 projectId, bool requiresApplication)
     {
         Task storage t = _task(_layout(), id);
-        return (t.payout, t.status, t.claimer, t.projectId);
+        return (t.payout, t.status, t.claimer, t.projectId, t.requiresApplication);
     }
 
     function getProjectInfo(bytes32 pid) external view returns (uint256 cap, uint256 spent, bool isManager) {
