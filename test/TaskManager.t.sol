@@ -134,7 +134,7 @@ contract TaskManagerTest is Test {
         vm.prank(creator2);
         tm.createTask(1 ether, bytes("ipfs://meta"), UNLIM_ID);
 
-        (,, address claimer,) = tm.getTask(0);
+        (,, address claimer,,) = tm.getTask(0);
         assertEq(claimer, address(0), "should be unclaimed");
     }
 
@@ -324,7 +324,7 @@ contract TaskManagerTest is Test {
         tm.completeTask(id);
 
         assertEq(token.balanceOf(member1), balBefore + 1 ether, "minted payout");
-        (, TaskManager.Status st,,) = tm.getTask(id);
+        (, TaskManager.Status st,,,) = tm.getTask(id);
         assertEq(uint8(st), uint8(TaskManager.Status.COMPLETED));
     }
 
@@ -366,7 +366,7 @@ contract TaskManagerTest is Test {
         vm.prank(pm1);
         tm.updateTask(id, 5 ether, bytes("newhash"));
 
-        (uint256 payout,,,) = tm.getTask(id);
+        (uint256 payout,,,,) = tm.getTask(id);
         assertEq(payout, 1 ether, "payout unchanged");
     }
 
@@ -834,7 +834,7 @@ contract TaskManagerTest is Test {
         uint256 completedValue = 0;
 
         for (uint256 i = 0; i < completedTasks; i++) {
-            (uint256 payout,,,) = tm.getTask(i);
+            (uint256 payout,,,,) = tm.getTask(i);
             completedValue += payout;
 
             vm.prank(pms[0]);
@@ -1037,7 +1037,7 @@ contract TaskManagerTest is Test {
         tm.submitTask(0, bytes("executor_submission"));
 
         // Verify task status and submission
-        (, TaskManager.Status status,,) = tm.getTask(0);
+        (, TaskManager.Status status,,,) = tm.getTask(0);
         assertEq(uint8(status), uint8(TaskManager.Status.SUBMITTED));
     }
 
@@ -1339,7 +1339,7 @@ contract TaskManagerTest is Test {
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("test_task"), projectId, member1);
 
         // Verify task was created and assigned correctly
-        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId) = tm.getTask(taskId);
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId,) = tm.getTask(taskId);
         assertEq(payout, 1 ether, "Payout should be correct");
         assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Status should be CLAIMED");
         assertEq(claimer, member1, "Task should be assigned to member1");
@@ -1402,7 +1402,7 @@ contract TaskManagerTest is Test {
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("should_work"), projectId, member1);
 
         // Verify task was created successfully
-        (,, address claimer,) = tm.getTask(taskId);
+        (,, address claimer,,) = tm.getTask(taskId);
         assertEq(claimer, member1, "Task should be assigned to member1");
     }
 
@@ -1429,7 +1429,7 @@ contract TaskManagerTest is Test {
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("pm_task"), projectId, member1);
 
         // Verify task was created and assigned
-        (,, address claimer,) = tm.getTask(taskId);
+        (,, address claimer,,) = tm.getTask(taskId);
         assertEq(claimer, member1, "Task should be assigned to member1");
 
         // Test that non-project manager cannot use createAndAssignTask
@@ -1561,7 +1561,7 @@ contract TaskManagerTest is Test {
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("lifecycle_test"), projectId, member1);
 
         // Verify task is in CLAIMED status
-        (, TaskManager.Status status,,) = tm.getTask(taskId);
+        (, TaskManager.Status status,,,) = tm.getTask(taskId);
         assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Task should be CLAIMED");
 
         // Assigned user should be able to submit
@@ -1569,7 +1569,7 @@ contract TaskManagerTest is Test {
         tm.submitTask(taskId, bytes("submission"));
 
         // Verify task is now SUBMITTED
-        (, status,,) = tm.getTask(taskId);
+        (, status,,,) = tm.getTask(taskId);
         assertEq(uint8(status), uint8(TaskManager.Status.SUBMITTED), "Task should be SUBMITTED");
 
         // Reviewer should be able to complete
@@ -1577,7 +1577,7 @@ contract TaskManagerTest is Test {
         tm.completeTask(taskId);
 
         // Verify task is completed and tokens minted
-        (, status,,) = tm.getTask(taskId);
+        (, status,,,) = tm.getTask(taskId);
         assertEq(uint8(status), uint8(TaskManager.Status.COMPLETED), "Task should be COMPLETED");
         assertEq(token.balanceOf(member1), 1 ether, "Member should receive tokens");
     }
@@ -1607,7 +1607,7 @@ contract TaskManagerTest is Test {
         console.log("Gas used for createAndAssignTask:", gasUsed);
 
         // Verify task was created and assigned correctly
-        (,, address claimer,) = tm.getTask(taskId);
+        (,, address claimer,,) = tm.getTask(taskId);
         assertEq(claimer, member1, "Task should be assigned to member1");
 
         // For comparison, measure gas for separate create + assign operations
@@ -1657,7 +1657,7 @@ contract TaskManagerTest is Test {
             uint256 taskId = tm.createAndAssignTask(1 ether, bytes("multi_user_task"), projectId, users[i]);
 
             // Verify each task is assigned to the correct user
-            (,, address claimer,) = tm.getTask(taskId);
+            (,, address claimer,,) = tm.getTask(taskId);
             assertEq(claimer, users[i], "Task should be assigned to correct user");
         }
 
@@ -1686,14 +1686,14 @@ contract TaskManagerTest is Test {
         vm.prank(creator1);
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("self_assign"), projectId, creator1);
 
-        (,, address claimer,) = tm.getTask(taskId);
+        (,, address claimer,,) = tm.getTask(taskId);
         assertEq(claimer, creator1, "Task should be assigned to creator1");
 
         // Test assigning to executor
         vm.prank(creator1);
         taskId = tm.createAndAssignTask(1 ether, bytes("executor_assign"), projectId, executor);
 
-        (,, claimer,) = tm.getTask(taskId);
+        (,, claimer,,) = tm.getTask(taskId);
         assertEq(claimer, executor, "Task should be assigned to executor");
 
         // Test maximum payout - need to create a new project with higher cap
@@ -1705,7 +1705,7 @@ contract TaskManagerTest is Test {
         vm.prank(creator1);
         taskId = tm.createAndAssignTask(1e24, bytes("max_payout"), maxProjectId, member1); // MAX_PAYOUT
 
-        (uint256 payout,,,) = tm.getTask(taskId);
+        (uint256 payout,,,,) = tm.getTask(taskId);
         assertEq(payout, 1e24, "Task should have maximum payout");
     }
 
@@ -1740,7 +1740,529 @@ contract TaskManagerTest is Test {
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("should_work"), projectId, member1);
 
         // Verify task was created and assigned
-        (,, address claimer,) = tm.getTask(taskId);
+        (,, address claimer,,) = tm.getTask(taskId);
         assertEq(claimer, member1, "Task should be assigned to member1");
+    }
+
+    /*───────────────── APPLICATION SYSTEM TESTS ────────────────────*/
+
+    function test_ApplyForTaskBasic() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("APPLICATION_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Create a task that requires applications
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+
+        // Member applies for task
+        bytes32 applicationHash = keccak256("application_content");
+        vm.prank(member1);
+        tm.applyForTask(0, applicationHash);
+
+        // Verify task status and applicant
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId,) = tm.getTask(0);
+        assertEq(
+            uint8(status), uint8(TaskManager.Status.APPLICATION_SUBMITTED), "Status should be APPLICATION_SUBMITTED"
+        );
+        assertEq(claimer, member1, "Claimer should be the applicant");
+        assertEq(payout, 1 ether, "Payout should remain unchanged");
+        assertEq(taskProjectId, projectId, "Project ID should be correct");
+    }
+
+    function test_ApplyForTaskPermissions() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("PERM_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+
+        // Test that only users with CLAIM permission can apply
+        vm.prank(outsider);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.applyForTask(0, keccak256("application"));
+
+        // Member with CLAIM permission can apply
+        vm.prank(member1);
+        tm.applyForTask(0, keccak256("application"));
+
+        // Verify status changed
+        (, TaskManager.Status status,,,) = tm.getTask(0);
+        assertEq(uint8(status), uint8(TaskManager.Status.APPLICATION_SUBMITTED));
+    }
+
+    function test_ApplyForTaskValidation() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("VALIDATION_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+
+        // Test empty application hash
+        vm.prank(member1);
+        vm.expectRevert(TaskManager.InvalidString.selector);
+        tm.applyForTask(0, bytes32(0));
+
+        // Test applying to already applied task
+        vm.prank(member1);
+        tm.applyForTask(0, keccak256("application"));
+
+        vm.prank(member1);
+        vm.expectRevert(TaskManager.AlreadyApplied.selector);
+        tm.applyForTask(0, keccak256("another_application"));
+
+        // Test applying to non-existent task
+        vm.prank(member1);
+        vm.expectRevert(TaskManager.UnknownTask.selector);
+        tm.applyForTask(999, keccak256("application"));
+    }
+
+    function test_ApproveApplicationBasic() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("APPROVAL_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+
+        // Member applies
+        vm.prank(member1);
+        tm.applyForTask(0, keccak256("application"));
+
+        // PM approves application
+        vm.prank(pm1);
+        tm.approveApplication(0, member1);
+
+        // Verify task is now claimed
+        (, TaskManager.Status status, address claimer,,) = tm.getTask(0);
+        assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Status should be CLAIMED");
+        assertEq(claimer, member1, "Claimer should remain the applicant");
+    }
+
+    function test_ApproveApplicationPermissions() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("PERM_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+
+        vm.prank(member1);
+        tm.applyForTask(0, keccak256("application"));
+
+        // Test that only users with ASSIGN permission can approve
+        vm.prank(outsider);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.approveApplication(0, member1);
+
+        vm.prank(member1);
+        vm.expectRevert(TaskManager.Unauthorized.selector);
+        tm.approveApplication(0, member1);
+
+        // PM with ASSIGN permission can approve
+        vm.prank(pm1);
+        tm.approveApplication(0, member1);
+
+        (, TaskManager.Status status,,,) = tm.getTask(0);
+        assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED));
+    }
+
+    function test_ApproveApplicationValidation() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("VALIDATION_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+
+        // Test approving task without application
+        vm.prank(pm1);
+        vm.expectRevert(TaskManager.NoApplication.selector);
+        tm.approveApplication(0, member1);
+
+        vm.prank(member1);
+        tm.applyForTask(0, keccak256("application"));
+
+        // Test approving wrong applicant
+        address member2 = makeAddr("member2");
+        vm.prank(pm1);
+        vm.expectRevert(TaskManager.NotApplicant.selector);
+        tm.approveApplication(0, member2);
+
+        // Test approving after task is already claimed
+        vm.prank(pm1);
+        tm.approveApplication(0, member1);
+
+        vm.prank(pm1);
+        vm.expectRevert(TaskManager.NoApplication.selector);
+        tm.approveApplication(0, member1);
+    }
+
+    function test_ApplicationEvents() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("EVENT_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+
+        bytes32 applicationHash = keccak256("application_content");
+
+        // Test application submitted event
+        vm.prank(member1);
+        vm.expectEmit(true, true, true, true);
+        emit TaskManager.TaskApplicationSubmitted(0, member1, applicationHash);
+        tm.applyForTask(0, applicationHash);
+
+        // Test application approved event
+        vm.prank(pm1);
+        vm.expectEmit(true, true, true, true);
+        emit TaskManager.TaskApplicationApproved(0, member1, pm1);
+        tm.approveApplication(0, member1);
+    }
+
+    function test_ApplicationLifecycleComplete() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("LIFECYCLE_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+
+        // 1. Apply for task
+        vm.prank(member1);
+        tm.applyForTask(0, keccak256("application"));
+
+        // 2. Approve application
+        vm.prank(pm1);
+        tm.approveApplication(0, member1);
+
+        // 3. Submit task
+        vm.prank(member1);
+        tm.submitTask(0, bytes("submission"));
+
+        // 4. Complete task
+        vm.prank(pm1);
+        tm.completeTask(0);
+
+        // Verify final state
+        (, TaskManager.Status status,,,) = tm.getTask(0);
+        assertEq(uint8(status), uint8(TaskManager.Status.COMPLETED));
+        assertEq(token.balanceOf(member1), 1 ether, "Member should receive tokens");
+    }
+
+    function test_CancelTaskWithApplication() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("CANCEL_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+
+        // Apply for task
+        vm.prank(member1);
+        tm.applyForTask(0, keccak256("application"));
+
+        // Creator can cancel task with application
+        vm.prank(creator1);
+        tm.cancelTask(0);
+
+        // Verify task is cancelled and budget refunded
+        (, TaskManager.Status status, address claimer,,) = tm.getTask(0);
+        assertEq(uint8(status), uint8(TaskManager.Status.CANCELLED));
+        assertEq(claimer, address(0), "Claimer should be cleared");
+
+        (uint256 cap, uint256 spent,) = tm.getProjectInfo(projectId);
+        assertEq(spent, 0, "Budget should be refunded");
+    }
+
+    function test_MultipleApplicationsFlow() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("MULTI_APP_TEST"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Create multiple tasks
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("task1"), projectId);
+        vm.prank(creator1);
+        tm.createApplicationTask(2 ether, bytes("task2"), projectId);
+
+        // Create multiple members
+        address member2 = makeAddr("member2");
+        setHat(member2, MEMBER_HAT);
+
+        // Both members apply for different tasks
+        vm.prank(member1);
+        tm.applyForTask(0, keccak256("application1"));
+
+        vm.prank(member2);
+        tm.applyForTask(1, keccak256("application2"));
+
+        // Approve first application
+        vm.prank(pm1);
+        tm.approveApplication(0, member1);
+
+        // Verify first task is claimed
+        (, TaskManager.Status status1, address claimer1,,) = tm.getTask(0);
+        assertEq(uint8(status1), uint8(TaskManager.Status.CLAIMED));
+        assertEq(claimer1, member1);
+
+        // Second task should still be in application state
+        (, TaskManager.Status status2, address claimer2,,) = tm.getTask(1);
+        assertEq(uint8(status2), uint8(TaskManager.Status.APPLICATION_SUBMITTED));
+        assertEq(claimer2, member2);
+    }
+
+    function test_ApplicationSystemPreventsClaiming() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("PREVENT_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+
+        // Apply for task
+        vm.prank(member1);
+        tm.applyForTask(0, keccak256("application"));
+
+        // Test that direct claiming is prevented
+        address member2 = makeAddr("member2");
+        setHat(member2, MEMBER_HAT);
+
+        vm.prank(member2);
+        vm.expectRevert(TaskManager.AlreadyClaimed.selector);
+        tm.claimTask(0);
+
+        // Test that assignment is prevented
+        vm.prank(pm1);
+        vm.expectRevert(TaskManager.AlreadyClaimed.selector);
+        tm.assignTask(0, member2);
+    }
+
+    /*───────────────── APPLICATION REQUIREMENT TESTS ────────────────────*/
+
+    function test_CreateApplicationTaskBasic() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("APP_REQ_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Create application-required task
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("app_required_task"), projectId);
+
+        // Verify task requires applications
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId, bool requiresApplication) =
+            tm.getTask(0);
+        assertEq(requiresApplication, true, "Task should require applications");
+        assertEq(uint8(status), uint8(TaskManager.Status.UNCLAIMED), "Status should be UNCLAIMED");
+        assertEq(claimer, address(0), "Claimer should be empty");
+    }
+
+    function test_ApplicationRequiredTaskPreventsClaiming() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("CLAIM_PREVENT_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Create application-required task
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("app_required_task"), projectId);
+
+        // Test that direct claiming is prevented
+        vm.prank(member1);
+        vm.expectRevert(TaskManager.RequiresApplication.selector);
+        tm.claimTask(0);
+
+        // But assignment should still work (bypass application requirement)
+        vm.prank(pm1);
+        tm.assignTask(0, member1);
+
+        // Verify task is now claimed
+        (, TaskManager.Status status, address claimer,,) = tm.getTask(0);
+        assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED));
+        assertEq(claimer, member1);
+    }
+
+    function test_RegularTaskPreventsApplications() public {
+        // Set up hat permissions
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        bytes32 projectId = tm.createProject(
+            bytes("REGULAR_TEST"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Create regular task (doesn't require applications)
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("regular_task"), projectId);
+
+        // Verify task doesn't require applications
+        (,,,, bool requiresApplication) = tm.getTask(0);
+        assertEq(requiresApplication, false, "Task should not require applications");
+
+        // Test that applications are prevented
+        vm.prank(member1);
+        vm.expectRevert(TaskManager.NoApplicationRequired.selector);
+        tm.applyForTask(0, keccak256("application"));
+
+        // But direct claiming should work
+        vm.prank(member1);
+        tm.claimTask(0);
+
+        // Verify task is claimed
+        (, TaskManager.Status status, address claimer,,) = tm.getTask(0);
+        assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED));
+        assertEq(claimer, member1);
     }
 }
