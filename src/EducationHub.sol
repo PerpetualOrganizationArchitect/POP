@@ -10,6 +10,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /*──────── External interfaces ────────*/
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {HatManager} from "./libs/HatManager.sol";
 
 interface IParticipationToken is IERC20 {
     function mint(address to, uint256 amount) external;
@@ -52,9 +53,7 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         IHats hats;
         IParticipationToken token;
         uint256[] creatorHatIds; // enumeration array for creator hats
-        mapping(uint256 => uint256) idxCreator; // hatId -> index+1 for creator hats
         uint256[] memberHatIds; // enumeration array for member hats
-        mapping(uint256 => uint256) idxMember; // hatId -> index+1 for member hats
     }
 
     // keccak256("poa.educationhub.storage") → unique, collision-free slot
@@ -101,18 +100,18 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         emit HatsSet(hatsAddr);
         emit ExecutorSet(executorAddr);
 
-        // Initialize creator hats
+        // Initialize creator hats using HatManager
         for (uint256 i; i < creatorHatIds.length;) {
-            _toggleCreatorHat(creatorHatIds[i], true);
+            HatManager.setHatInArray(l.creatorHatIds, creatorHatIds[i], true);
             emit CreatorHatSet(creatorHatIds[i], true);
             unchecked {
                 ++i;
             }
         }
 
-        // Initialize member hats
+        // Initialize member hats using HatManager
         for (uint256 i; i < memberHatIds.length;) {
-            _toggleMemberHat(memberHatIds[i], true);
+            HatManager.setHatInArray(l.memberHatIds, memberHatIds[i], true);
             emit MemberHatSet(memberHatIds[i], true);
             unchecked {
                 ++i;
@@ -122,49 +121,15 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
 
     /*────────── Hat Management ─────*/
     function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        _toggleCreatorHat(h, ok);
+        Layout storage l = _layout();
+        HatManager.setHatInArray(l.creatorHatIds, h, ok);
         emit CreatorHatSet(h, ok);
     }
 
     function setMemberHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        _toggleMemberHat(h, ok);
+        Layout storage l = _layout();
+        HatManager.setHatInArray(l.memberHatIds, h, ok);
         emit MemberHatSet(h, ok);
-    }
-
-    function _toggleCreatorHat(uint256 h, bool ok) internal {
-        Layout storage l = _layout();
-        if (ok && l.idxCreator[h] == 0) {
-            // add
-            l.idxCreator[h] = l.creatorHatIds.length + 1;
-            l.creatorHatIds.push(h);
-        }
-        if (!ok && l.idxCreator[h] > 0) {
-            // remove
-            uint256 i = l.idxCreator[h] - 1;
-            uint256 last = l.creatorHatIds[l.creatorHatIds.length - 1];
-            l.creatorHatIds[i] = last; // swap-pop
-            l.idxCreator[last] = i + 1;
-            l.creatorHatIds.pop();
-            delete l.idxCreator[h];
-        }
-    }
-
-    function _toggleMemberHat(uint256 h, bool ok) internal {
-        Layout storage l = _layout();
-        if (ok && l.idxMember[h] == 0) {
-            // add
-            l.idxMember[h] = l.memberHatIds.length + 1;
-            l.memberHatIds.push(h);
-        }
-        if (!ok && l.idxMember[h] > 0) {
-            // remove
-            uint256 i = l.idxMember[h] - 1;
-            uint256 last = l.memberHatIds[l.memberHatIds.length - 1];
-            l.memberHatIds[i] = last; // swap-pop
-            l.idxMember[last] = i + 1;
-            l.memberHatIds.pop();
-            delete l.idxMember[h];
-        }
     }
 
     /*────────── Modifiers ─────────*/
@@ -308,55 +273,13 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     /// @dev Returns true if `user` wears *any* creator hat.
     function _hasCreatorHat(address user) internal view returns (bool) {
         Layout storage l = _layout();
-        uint256 len = l.creatorHatIds.length;
-        if (len == 0) return false;
-        if (len == 1) return l.hats.isWearerOfHat(user, l.creatorHatIds[0]); // micro-optimise 1-ID case
-
-        // Build calldata in memory (cheap because ≤ 3)
-        address[] memory wearers = new address[](len);
-        uint256[] memory hatIds = new uint256[](len);
-        for (uint256 i; i < len;) {
-            wearers[i] = user;
-            hatIds[i] = l.creatorHatIds[i];
-            unchecked {
-                ++i;
-            }
-        }
-        uint256[] memory balances = l.hats.balanceOfBatch(wearers, hatIds);
-        for (uint256 i; i < balances.length;) {
-            if (balances[i] > 0) return true;
-            unchecked {
-                ++i;
-            }
-        }
-        return false;
+        return HatManager.hasAnyHat(l.hats, l.creatorHatIds, user);
     }
 
     /// @dev Returns true if `user` wears *any* member hat.
     function _hasMemberHat(address user) internal view returns (bool) {
         Layout storage l = _layout();
-        uint256 len = l.memberHatIds.length;
-        if (len == 0) return false;
-        if (len == 1) return l.hats.isWearerOfHat(user, l.memberHatIds[0]); // micro-optimise 1-ID case
-
-        // Build calldata in memory (cheap because ≤ 3)
-        address[] memory wearers = new address[](len);
-        uint256[] memory hatIds = new uint256[](len);
-        for (uint256 i; i < len;) {
-            wearers[i] = user;
-            hatIds[i] = l.memberHatIds[i];
-            unchecked {
-                ++i;
-            }
-        }
-        uint256[] memory balances = l.hats.balanceOfBatch(wearers, hatIds);
-        for (uint256 i; i < balances.length;) {
-            if (balances[i] > 0) return true;
-            unchecked {
-                ++i;
-            }
-        }
-        return false;
+        return HatManager.hasAnyHat(l.hats, l.memberHatIds, user);
     }
 
     /*────────── Public getters for storage variables ─────────*/
@@ -365,11 +288,11 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     }
 
     function creatorHatIds() external view returns (uint256[] memory) {
-        return _layout().creatorHatIds;
+        return HatManager.getHatArray(_layout().creatorHatIds);
     }
 
     function memberHatIds() external view returns (uint256[] memory) {
-        return _layout().memberHatIds;
+        return HatManager.getHatArray(_layout().memberHatIds);
     }
 
     function token() external view returns (IParticipationToken) {
@@ -382,6 +305,23 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
 
     function executor() external view returns (address) {
         return _layout().executor;
+    }
+
+    /*────────── Hat Management View Functions ─────────── */
+    function creatorHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().creatorHatIds);
+    }
+
+    function memberHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().memberHatIds);
+    }
+
+    function isCreatorHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().creatorHatIds, hatId);
+    }
+
+    function isMemberHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().memberHatIds, hatId);
     }
 
     /*────────── Version ───────*/
