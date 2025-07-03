@@ -9,11 +9,11 @@ import {ContextUpgradeable} from "@openzeppelin-contracts-upgradeable/contracts/
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {TaskPerm} from "./libs/TaskPerm.sol";
 
-/*────────── External Interfaces ──────────*/
-interface IMembership {
-    function roleOf(address) external view returns (bytes32);
-}
+/*────────── External Hats interface ──────────*/
+import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {HatManager} from "./libs/HatManager.sol";
 
+/*────────── External Interfaces ──────────*/
 interface IParticipationToken is IERC20 {
     function mint(address, uint256) external;
 }
@@ -38,6 +38,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     /*──────── Constants ─────*/
     uint256 public constant MAX_PAYOUT = 1e24; // 1 000 000 tokens (18 dec)
+    uint96 public constant MAX_PAYOUT_96 = 1e24; // same as above, but as uint96
     bytes4 public constant MODULE_ID = 0x54534b32; // "TSK2"
 
     /*──────── Data Types ────*/
@@ -50,31 +51,32 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     struct Task {
-        uint128 payout;
-        Status status;
-        address claimer;
-        bytes32 projectId;
+        bytes32 projectId; // slot 1: full 32 bytes
+        uint96 payout; // slot 2: 12 bytes (supports up to 7e28, well over 1e24 cap)
+        address claimer; // slot 2: 20 bytes (total 32 bytes in slot 2)
+        Status status; // packed into previous slot's remaining space
     }
 
     struct Project {
-        uint128 cap;
-        uint128 spent;
-        bool exists;
-        mapping(address => bool) managers;
+        mapping(address => bool) managers; // slot 0: mapping (full slot)
+        uint128 cap; // slot 1: 16 bytes
+        uint128 spent; // slot 1: 16 bytes (total 32 bytes)
+        bool exists; // slot 2: 1 byte (separate slot for cleaner access)
     }
 
     /*──────── Storage (ERC-7201) ───────*/
     struct Layout {
         mapping(bytes32 => Project) _projects;
         mapping(uint256 => Task) _tasks;
-        IMembership membership;
+        IHats hats;
         IParticipationToken token;
-        mapping(bytes32 => bool) isCreatorRole;
-        uint256 nextTaskId;
-        uint256 nextProjectId;
-        address executor;
-        mapping(bytes32 => uint8) rolePermGlobal;
-        mapping(bytes32 => mapping(bytes32 => uint8)) rolePermProj; // project ⇒ role ⇒ mask
+        uint256[] creatorHatIds; // enumeration array for creator hats
+        uint48 nextTaskId;
+        uint48 nextProjectId;
+        address executor; // 20 bytes + 2*6 bytes = 32 bytes (one slot)
+        mapping(uint256 => uint8) rolePermGlobal; // hat ID => permission mask
+        mapping(bytes32 => mapping(uint256 => uint8)) rolePermProj; // project => hat ID => permission mask
+        uint256[] permissionHatIds; // enumeration array for hats with permissions
     }
 
     bytes32 private constant _STORAGE_SLOT = 0x30bc214cbc65463577eb5b42c88d60986e26fc81ad89a2eb74550fb255f1e712;
@@ -86,13 +88,13 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     /*──────── Events ───────*/
-    event CreatorRoleUpdated(bytes32 role, bool enabled);
+    event CreatorHatSet(uint256 hat, bool allowed);
     event ProjectCreated(bytes32 id, bytes metadata, uint256 cap);
     event ProjectCapUpdated(bytes32 id, uint256 oldCap, uint256 newCap);
     event ProjectManagerAdded(bytes32 id, address manager);
     event ProjectManagerRemoved(bytes32 id, address manager);
     event ProjectDeleted(bytes32 id, bytes metadata);
-    event ProjectRolePermSet(bytes32 id, bytes32 role, uint8 mask);
+    event ProjectRolePermSet(bytes32 id, uint256 hatId, uint8 mask);
 
     event TaskCreated(uint256 id, bytes32 project, uint256 payout, bytes metadata);
     event TaskUpdated(uint256 id, uint256 payout, bytes metadata);
@@ -106,11 +108,11 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     /*──────── Initialiser ───────*/
     function initialize(
         address tokenAddress,
-        address membershipAddress,
-        bytes32[] calldata creatorRoles,
+        address hatsAddress,
+        uint256[] calldata creatorHats,
         address executorAddress
     ) external initializer {
-        if (tokenAddress == address(0) || membershipAddress == address(0) || executorAddress == address(0)) {
+        if (tokenAddress == address(0) || hatsAddress == address(0) || executorAddress == address(0)) {
             revert ZeroAddress();
         }
 
@@ -119,21 +121,33 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
         Layout storage l = _layout();
         l.token = IParticipationToken(tokenAddress);
-        l.membership = IMembership(membershipAddress);
+        l.hats = IHats(hatsAddress);
         l.executor = executorAddress;
 
-        for (uint256 i; i < creatorRoles.length; ++i) {
-            l.isCreatorRole[creatorRoles[i]] = true;
-            emit CreatorRoleUpdated(creatorRoles[i], true);
+        // Initialize creator hat arrays using HatManager
+        for (uint256 i; i < creatorHats.length;) {
+            HatManager.setHatInArray(l.creatorHatIds, creatorHats[i], true);
+            emit CreatorHatSet(creatorHats[i], true);
+            unchecked {
+                ++i;
+            }
         }
+
         emit ExecutorSet(executorAddress);
+    }
+
+    /*──────── Hat Management ─────*/
+    function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
+        Layout storage l = _layout();
+        HatManager.setHatInArray(l.creatorHatIds, h, ok);
+        emit CreatorHatSet(h, ok);
     }
 
     /*──────── Modifiers ─────*/
     modifier onlyCreator() {
         Layout storage l = _layout();
         address s = _msgSender();
-        if (!l.isCreatorRole[l.membership.roleOf(s)] && s != l.executor) revert NotCreator();
+        if (!_hasCreatorHat(s) && s != l.executor) revert NotCreator();
         _;
     }
 
@@ -171,25 +185,25 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     /*──────── Project Logic ─────*/
     /**
      * @param managers        initial manager addresses (auto-adds msg.sender)
-     * @param createRoles     roles allowed to CREATE tasks in this project
-     * @param claimRoles      roles allowed to CLAIM
-     * @param reviewRoles     roles allowed to REVIEW / COMPLETE / UPDATE
-     * @param assignRoles     roles allowed to ASSIGN tasks
+     * @param createHats      hat IDs allowed to CREATE tasks in this project
+     * @param claimHats       hat IDs allowed to CLAIM
+     * @param reviewHats      hat IDs allowed to REVIEW / COMPLETE / UPDATE
+     * @param assignHats      hat IDs allowed to ASSIGN tasks
      */
     function createProject(
         bytes calldata metadata,
         uint256 cap,
         address[] calldata managers,
-        bytes32[] calldata createRoles,
-        bytes32[] calldata claimRoles,
-        bytes32[] calldata reviewRoles,
-        bytes32[] calldata assignRoles
+        uint256[] calldata createHats,
+        uint256[] calldata claimHats,
+        uint256[] calldata reviewHats,
+        uint256[] calldata assignHats
     ) external onlyCreator returns (bytes32 projectId) {
         if (metadata.length == 0) revert InvalidString();
         if (cap > MAX_PAYOUT) revert InvalidPayout();
 
         Layout storage l = _layout();
-        projectId = bytes32(l.nextProjectId++);
+        projectId = bytes32(uint256(l.nextProjectId++));
         Project storage p = l._projects[projectId];
         p.cap = uint128(cap);
         p.exists = true;
@@ -197,17 +211,20 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         /* managers */
         p.managers[_msgSender()] = true;
         emit ProjectManagerAdded(projectId, _msgSender());
-        for (uint256 i; i < managers.length; ++i) {
+        for (uint256 i; i < managers.length;) {
             if (managers[i] == address(0)) revert ZeroAddress();
             p.managers[managers[i]] = true;
             emit ProjectManagerAdded(projectId, managers[i]);
+            unchecked {
+                ++i;
+            }
         }
 
-        /* role-permission matrix */
-        _setBatchRolePerm(projectId, createRoles, TaskPerm.CREATE);
-        _setBatchRolePerm(projectId, claimRoles, TaskPerm.CLAIM);
-        _setBatchRolePerm(projectId, reviewRoles, TaskPerm.REVIEW);
-        _setBatchRolePerm(projectId, assignRoles, TaskPerm.ASSIGN);
+        /* hat-permission matrix */
+        _setBatchHatPerm(projectId, createHats, TaskPerm.CREATE);
+        _setBatchHatPerm(projectId, claimHats, TaskPerm.CLAIM);
+        _setBatchHatPerm(projectId, reviewHats, TaskPerm.REVIEW);
+        _setBatchHatPerm(projectId, assignHats, TaskPerm.ASSIGN);
 
         emit ProjectCreated(projectId, metadata, cap);
     }
@@ -226,12 +243,14 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     function addProjectManager(bytes32 pid, address mgr) external onlyExecutor projectExists(pid) {
         if (mgr == address(0)) revert ZeroAddress();
-        _layout()._projects[pid].managers[mgr] = true;
+        Layout storage l = _layout();
+        l._projects[pid].managers[mgr] = true;
         emit ProjectManagerAdded(pid, mgr);
     }
 
     function removeProjectManager(bytes32 pid, address mgr) external onlyExecutor projectExists(pid) {
-        _layout()._projects[pid].managers[mgr] = false;
+        Layout storage l = _layout();
+        l._projects[pid].managers[mgr] = false;
         emit ProjectManagerRemoved(pid, mgr);
     }
 
@@ -246,10 +265,10 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit ProjectDeleted(pid, metadata);
     }
 
-    /*──────── Task Logic (unchanged except old PM checks removed) ───────*/
+    /*──────── Task Logic ───────*/
     function createTask(uint256 payout, bytes calldata meta, bytes32 pid) external canCreate(pid) {
         Layout storage l = _layout();
-        if (payout == 0 || payout > MAX_PAYOUT || payout > type(uint128).max) revert InvalidPayout();
+        if (payout == 0 || payout > MAX_PAYOUT_96) revert InvalidPayout();
         if (meta.length == 0) revert InvalidString();
         Project storage p = l._projects[pid];
         if (!p.exists) revert UnknownProject();
@@ -258,8 +277,8 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         if (p.cap != 0 && newSpent > p.cap) revert BudgetExceeded();
         p.spent = uint128(newSpent);
 
-        uint256 id = l.nextTaskId++;
-        l._tasks[id] = Task(uint128(payout), Status.UNCLAIMED, address(0), pid);
+        uint48 id = l.nextTaskId++;
+        l._tasks[id] = Task(pid, uint96(payout), address(0), Status.UNCLAIMED);
         emit TaskCreated(id, pid, payout, meta);
     }
 
@@ -268,7 +287,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         canCreate(_layout()._tasks[id].projectId)
     {
         Layout storage l = _layout();
-        if (newPayout > type(uint128).max) revert InvalidPayout();
+        if (newPayout > MAX_PAYOUT_96) revert InvalidPayout();
 
         Task storage t = _task(l, id);
         Project storage p = l._projects[t.projectId];
@@ -276,11 +295,11 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         if (t.status == Status.CLAIMED || t.status == Status.SUBMITTED) {
             if (newMetadata.length == 0) revert InvalidString();
         } else if (t.status == Status.UNCLAIMED) {
-            if (newPayout == 0 || newPayout > MAX_PAYOUT) revert InvalidPayout();
+            if (newPayout == 0 || newPayout > MAX_PAYOUT_96) revert InvalidPayout();
             uint256 tentative = p.spent - t.payout + newPayout;
             if (p.cap != 0 && tentative > p.cap) revert BudgetExceeded();
             p.spent = uint128(tentative);
-            t.payout = uint128(newPayout);
+            t.payout = uint96(newPayout);
         } else {
             revert AlreadyCompleted();
         }
@@ -305,12 +324,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Task storage t = _task(l, id);
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
 
-        Project storage p = l._projects[t.projectId];
-        address sender = _msgSender();
-
         t.status = Status.CLAIMED;
         t.claimer = assignee;
-        emit TaskAssigned(id, assignee, sender);
+        emit TaskAssigned(id, assignee, _msgSender());
     }
 
     function submitTask(uint256 id, bytes calldata metadata) external {
@@ -329,12 +345,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Task storage t = _task(l, id);
         if (t.status != Status.SUBMITTED) revert AlreadyCompleted();
 
-        Project storage p = l._projects[t.projectId];
-        address sender = _msgSender();
-
         t.status = Status.COMPLETED;
         l.token.mint(t.claimer, uint256(t.payout));
-        emit TaskCompleted(id, sender);
+        emit TaskCompleted(id, _msgSender());
     }
 
     function cancelTask(uint256 id) external canCreate(_layout()._tasks[id].projectId) {
@@ -343,11 +356,11 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
 
         Project storage p = l._projects[t.projectId];
-        address sender = _msgSender();
-
-        p.spent -= t.payout;
+        unchecked {
+            p.spent -= t.payout; // safe: payout was added to spent when task created
+        }
         t.status = Status.CANCELLED;
-        emit TaskCancelled(id, sender);
+        emit TaskCancelled(id, _msgSender());
     }
 
     /*────────── View Helpers ─────────────*/
@@ -368,18 +381,30 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     /*──────── Governance / Admin ─────*/
-    function setRolePerm(bytes32 role, uint8 mask) external onlyExecutor {
-        _layout().rolePermGlobal[role] = mask;
+    function setRolePerm(uint256 hatId, uint8 mask) external onlyExecutor {
+        Layout storage l = _layout();
+        l.rolePermGlobal[hatId] = mask;
+
+        // Track that this hat has permissions
+        if (mask != 0) {
+            HatManager.setHatInArray(l.permissionHatIds, hatId, true);
+        } else {
+            HatManager.setHatInArray(l.permissionHatIds, hatId, false);
+        }
     }
 
-    function setProjectRolePerm(bytes32 pid, bytes32 role, uint8 mask) external onlyCreator projectExists(pid) {
-        _layout().rolePermProj[pid][role] = mask;
-        emit ProjectRolePermSet(pid, role, mask);
-    }
+    function setProjectRolePerm(bytes32 pid, uint256 hatId, uint8 mask) external onlyCreator projectExists(pid) {
+        Layout storage l = _layout();
+        l.rolePermProj[pid][hatId] = mask;
 
-    function setCreatorRole(bytes32 role, bool enable) external onlyExecutor {
-        _layout().isCreatorRole[role] = enable;
-        emit CreatorRoleUpdated(role, enable);
+        // Track that this hat has permissions (project-specific permissions count too)
+        if (mask != 0) {
+            HatManager.setHatInArray(l.permissionHatIds, hatId, true);
+        } else {
+            HatManager.setHatInArray(l.permissionHatIds, hatId, false);
+        }
+
+        emit ProjectRolePermSet(pid, hatId, mask);
     }
 
     function setExecutor(address newExec) external onlyExecutor {
@@ -388,12 +413,51 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit ExecutorSet(newExec);
     }
 
+    /*──────── Public getters for storage variables ─────────── */
+    function hats() external view returns (IHats) {
+        return _layout().hats;
+    }
+
+    function executor() external view returns (address) {
+        return _layout().executor;
+    }
+
+    function creatorHatIds() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().creatorHatIds);
+    }
+
     /*──────── Internal Perm helpers ─────*/
     function _permMask(address user, bytes32 pid) internal view returns (uint8 m) {
         Layout storage l = _layout();
-        bytes32 r = l.membership.roleOf(user);
-        m = l.rolePermProj[pid][r];
-        if (m == 0) m = l.rolePermGlobal[r];
+        uint256 len = l.permissionHatIds.length;
+        if (len == 0) return 0;
+
+        // one call instead of N
+        address[] memory wearers = new address[](len);
+        uint256[] memory hats_ = new uint256[](len);
+        for (uint256 i; i < len;) {
+            wearers[i] = user;
+            hats_[i] = l.permissionHatIds[i];
+            unchecked {
+                ++i;
+            }
+        }
+        uint256[] memory bal = l.hats.balanceOfBatch(wearers, hats_);
+
+        for (uint256 i; i < len;) {
+            if (bal[i] == 0) {
+                unchecked {
+                    ++i;
+                }
+                continue; // user doesn't wear it
+            }
+            uint256 h = hats_[i];
+            uint8 mask = l.rolePermProj[pid][h];
+            m |= mask == 0 ? l.rolePermGlobal[h] : mask; // project overrides global
+            unchecked {
+                ++i;
+            }
+        }
     }
 
     function _isPM(bytes32 pid, address who) internal view returns (bool) {
@@ -406,20 +470,51 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         if (!TaskPerm.has(_permMask(s, pid), flag) && !_isPM(pid, s)) revert Unauthorized();
     }
 
-    function _setBatchRolePerm(bytes32 pid, bytes32[] calldata roles, uint8 flag) internal {
+    function _setBatchHatPerm(bytes32 pid, uint256[] calldata hatIds, uint8 flag) internal {
         Layout storage l = _layout();
-        for (uint256 i; i < roles.length; ++i) {
-            bytes32 r = roles[i];
-            uint8 newMask = l.rolePermProj[pid][r] | flag;
-            l.rolePermProj[pid][r] = newMask;
-            emit ProjectRolePermSet(pid, r, newMask);
+        for (uint256 i; i < hatIds.length;) {
+            uint256 hatId = hatIds[i];
+            uint8 newMask = l.rolePermProj[pid][hatId] | flag;
+            l.rolePermProj[pid][hatId] = newMask;
+
+            // Track that this hat has permissions
+            HatManager.setHatInArray(l.permissionHatIds, hatId, true);
+
+            emit ProjectRolePermSet(pid, hatId, newMask);
+            unchecked {
+                ++i;
+            }
         }
     }
 
-    /*──────── Utils / View (unchanged) ────*/
+    /*──────── Internal Helper Functions ─────────── */
+    /// @dev Returns true if `user` wears *any* creator hat.
+    function _hasCreatorHat(address user) internal view returns (bool) {
+        Layout storage l = _layout();
+        return HatManager.hasAnyHat(l.hats, l.creatorHatIds, user);
+    }
+
+    /*──────── Utils / View ────*/
     function _task(Layout storage l, uint256 id) private view returns (Task storage t) {
         if (id >= l.nextTaskId) revert UnknownTask();
         t = l._tasks[id];
+    }
+
+    /*──────── Hat Management View Functions ─────────── */
+    function creatorHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().creatorHatIds);
+    }
+
+    function permissionHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().permissionHatIds);
+    }
+
+    function isCreatorHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().creatorHatIds, hatId);
+    }
+
+    function isPermissionHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().permissionHatIds, hatId);
     }
 
     function version() external pure returns (string memory) {

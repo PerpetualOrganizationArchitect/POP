@@ -3,21 +3,15 @@ pragma solidity ^0.8.20;
 
 /* ──────────────────  OpenZeppelin v5.3 Upgradeables  ────────────────── */
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 import {IExecutor} from "./Executor.sol";
-
-/* ─────────────────────  External interface  ─────────────────────────── */
-interface IMembership {
-    function roleOf(address) external view returns (bytes32);
-    function canVote(address) external view returns (bool);
-}
+import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
+import {HatManager} from "./libs/HatManager.sol";
+import {VotingMath} from "./libs/VotingMath.sol";
 
 /* ──────────────────  Direct‑democracy governor  ─────────────────────── */
-contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
-    /* ─────────── Errors (same id set) ─────────── */
+contract DirectDemocracyVoting is Initializable {
+    /* ─────────── Errors ─────────── */
     error Unauthorized();
     error AlreadyVoted();
     error InvalidProposal();
@@ -33,10 +27,11 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     error TooManyCalls();
     error TargetNotAllowed();
     error TargetSelf();
-    error EmptyBatch(); // no longer used, kept for layout
+    error EmptyBatch();
     error ZeroAddress();
     error InvalidMetadata();
     error RoleNotAllowed();
+    error InvalidQuorum();
 
     /* ─────────── Constants ─────────── */
     bytes4 public constant MODULE_ID = 0x6464766f; /* "ddvo"  */
@@ -56,19 +51,23 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         PollOption[] options;
         mapping(address => bool) hasVoted;
         IExecutor.Call[][] batches; // per‑option execution
-        mapping(bytes32 => bool) allowedRoles; // who may vote
-        bool restricted; // if true only allowedRoles can vote
+        uint256[] pollHatIds; // array of specific hat IDs for this poll
+        bool restricted; // if true only allowedHats can vote
+        mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
     }
 
     /* ─────────── ERC-7201 Storage ─────────── */
     /// @custom:storage-location erc7201:poa.directdemocracy.storage
     struct Layout {
-        IMembership membership;
+        IHats hats;
         IExecutor executor;
         mapping(address => bool) allowedTarget; // execution allow‑list
-        mapping(bytes32 => bool) _allowedRoles; // who can create proposals
+        uint256[] votingHatIds; // Array of voting hat IDs
+        uint256[] creatorHatIds; // Array of creator hat IDs
         uint8 quorumPercentage; // 1‑100
         Proposal[] _proposals;
+        bool _paused; // Inline pausable state
+        uint256 _lock; // Inline reentrancy guard state
     }
 
     // keccak256("poa.directdemocracy.storage") → unique, collision-free slot
@@ -80,9 +79,44 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         }
     }
 
+    /* ─────────── Inline Context Implementation ─────────── */
+    function _msgSender() internal view returns (address addr) {
+        assembly {
+            addr := caller()
+        }
+    }
+
+    /* ─────────── Inline Pausable Implementation ─────────── */
+    modifier whenNotPaused() {
+        require(!_layout()._paused, "Pausable: paused");
+        _;
+    }
+
+    function paused() external view returns (bool) {
+        return _layout()._paused;
+    }
+
+    function _pause() internal {
+        _layout()._paused = true;
+    }
+
+    function _unpause() internal {
+        _layout()._paused = false;
+    }
+
+    /* ─────────── Inline ReentrancyGuard Implementation ─────────── */
+    modifier nonReentrant() {
+        require(_layout()._lock == 0, "ReentrancyGuard: reentrant call");
+        _layout()._lock = 1;
+        _;
+        _layout()._lock = 0;
+    }
+
     /* ─────────── Events ─────────── */
-    event RoleSet(bytes32 role, bool allowed);
+    event HatSet(uint256 hat, bool allowed);
+    event CreatorHatSet(uint256 hat, bool allowed);
     event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created);
+    event NewHatProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created, uint256[] hatIds);
     event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
     event ExecutorUpdated(address newExecutor);
@@ -94,35 +128,42 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     constructor() initializer {}
 
     function initialize(
-        address membership_,
+        address hats_,
         address executor_,
-        bytes32[] calldata initialRoles,
+        uint256[] calldata initialHats,
+        uint256[] calldata initialCreatorHats,
         address[] calldata initialTargets,
         uint8 quorumPct
     ) external initializer {
-        if (membership_ == address(0) || executor_ == address(0)) {
+        if (hats_ == address(0) || executor_ == address(0)) {
             revert ZeroAddress();
         }
-        require(quorumPct > 0 && quorumPct <= 100, "quorum");
-
-        __Context_init();
-        __Pausable_init();
-        __ReentrancyGuard_init();
+        VotingMath.validateQuorum(quorumPct);
 
         Layout storage l = _layout();
-        l.membership = IMembership(membership_);
+        l.hats = IHats(hats_);
         l.executor = IExecutor(executor_);
         l.quorumPercentage = quorumPct;
+        l._paused = false; // Initialize paused state
+        l._lock = 0; // Initialize reentrancy guard state
         emit QuorumPercentageSet(quorumPct);
 
-        for (uint256 i; i < initialRoles.length;) {
-            l._allowedRoles[initialRoles[i]] = true;
-            emit RoleSet(initialRoles[i], true);
+        uint256 len = initialHats.length;
+        for (uint256 i; i < len;) {
+            HatManager.setHatInArray(l.votingHatIds, initialHats[i], true);
             unchecked {
                 ++i;
             }
         }
-        for (uint256 i; i < initialTargets.length;) {
+        len = initialCreatorHats.length;
+        for (uint256 i; i < len;) {
+            HatManager.setHatInArray(l.creatorHatIds, initialCreatorHats[i], true);
+            unchecked {
+                ++i;
+            }
+        }
+        len = initialTargets.length;
+        for (uint256 i; i < len;) {
             l.allowedTarget[initialTargets[i]] = true;
             emit TargetAllowed(initialTargets[i], true);
             unchecked {
@@ -151,9 +192,16 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         emit ExecutorUpdated(a);
     }
 
-    function setRoleAllowed(bytes32 r, bool ok) external onlyExecutor {
-        _layout()._allowedRoles[r] = ok;
-        emit RoleSet(r, ok);
+    function setHatAllowed(uint256 h, bool ok) external onlyExecutor {
+        Layout storage l = _layout();
+        HatManager.setHatInArray(l.votingHatIds, h, ok);
+        emit HatSet(h, ok);
+    }
+
+    function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
+        Layout storage l = _layout();
+        HatManager.setHatInArray(l.creatorHatIds, h, ok);
+        emit CreatorHatSet(h, ok);
     }
 
     function setTargetAllowed(address t, bool ok) external onlyExecutor {
@@ -162,7 +210,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     }
 
     function setQuorumPercentage(uint8 q) external onlyExecutor {
-        require(q > 0 && q <= 100, "quorum");
+        VotingMath.validateQuorum(q);
         _layout().quorumPercentage = q;
         emit QuorumPercentageSet(q);
     }
@@ -170,8 +218,18 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     /* ─────────── Modifiers ─────────── */
     modifier onlyCreator() {
         Layout storage l = _layout();
-        if (_msgSender() != address(l.executor) && !l._allowedRoles[l.membership.roleOf(_msgSender())]) {
-            revert Unauthorized();
+        if (_msgSender() != address(l.executor)) {
+            bool canCreate = HatManager.hasAnyHat(l.hats, l.creatorHatIds, _msgSender());
+            if (!canCreate) revert Unauthorized();
+        }
+        _;
+    }
+
+    modifier onlyVoter() {
+        Layout storage l = _layout();
+        if (_msgSender() != address(l.executor)) {
+            bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
+            if (!canVote) revert Unauthorized();
         }
         _;
     }
@@ -204,16 +262,16 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
 
         Layout storage l = _layout();
-        uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
+        uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
         Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
 
         uint256 id = l._proposals.length - 1;
         for (uint256 i; i < numOptions;) {
-            uint256 len = batches[i].length;
-            if (len > 0) {
-                if (len > MAX_CALLS) revert TooManyCalls();
-                for (uint256 j; j < len;) {
+            uint256 batchLen = batches[i].length;
+            if (batchLen > 0) {
+                if (batchLen > MAX_CALLS) revert TooManyCalls();
+                for (uint256 j; j < batchLen;) {
                     if (!l.allowedTarget[batches[i][j].target]) revert TargetNotAllowed();
                     if (batches[i][j].target == address(this)) revert TargetSelf();
                     unchecked {
@@ -230,8 +288,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
     }
 
-    /// @notice Create a poll restricted to certain roles. Execution is disabled.
-    function createRolePoll(bytes calldata metadata, uint32 minutesDuration, uint8 numOptions, bytes32[] calldata roles)
+    /// @notice Create a poll restricted to certain hats. Execution is disabled.
+    function createHatPoll(bytes calldata metadata, uint32 minutesDuration, uint8 numOptions, uint256[] calldata hatIds)
         external
         onlyCreator
         whenNotPaused
@@ -242,10 +300,10 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
 
         Layout storage l = _layout();
-        uint64 endTs = uint64(block.timestamp + minutesDuration * 1 minutes);
+        uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
         Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
-        p.restricted = roles.length > 0;
+        p.restricted = hatIds.length > 0;
 
         uint256 id = l._proposals.length - 1;
         for (uint256 i; i < numOptions;) {
@@ -255,13 +313,15 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
                 ++i;
             }
         }
-        for (uint256 i; i < roles.length;) {
-            p.allowedRoles[roles[i]] = true;
+        uint256 len = hatIds.length;
+        for (uint256 i; i < len;) {
+            p.pollHatIds.push(hatIds[i]);
+            p.pollHatAllowed[hatIds[i]] = true;
             unchecked {
                 ++i;
             }
         }
-        emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
+        emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
     }
 
     /* ─────────── Voting ─────────── */
@@ -269,44 +329,39 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         external
         exists(id)
         notExpired(id)
+        onlyVoter
         whenNotPaused
     {
         if (idxs.length != weights.length) revert LengthMismatch();
         Layout storage l = _layout();
-        if (_msgSender() != address(l.executor) && !l.membership.canVote(_msgSender())) revert Unauthorized();
 
         Proposal storage p = l._proposals[id];
         if (p.restricted) {
-            bytes32 r = l.membership.roleOf(_msgSender());
-            if (!p.allowedRoles[r]) revert RoleNotAllowed();
+            bool hasAllowedHat = false;
+            // Check if user has any of the poll-specific hats
+            uint256 len = p.pollHatIds.length;
+            for (uint256 i = 0; i < len;) {
+                if (l.hats.isWearerOfHat(_msgSender(), p.pollHatIds[i])) {
+                    hasAllowedHat = true;
+                    break;
+                }
+                unchecked {
+                    ++i;
+                }
+            }
+            if (!hasAllowedHat) revert RoleNotAllowed();
         }
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
-        uint256 seen;
-        uint256 sum;
-        for (uint256 i; i < idxs.length;) {
-            uint8 ix = idxs[i];
-            if (ix >= p.options.length) revert InvalidIndex();
-            if ((seen >> ix) & 1 == 1) revert DuplicateIndex();
-            seen |= 1 << ix;
-
-            uint8 w = weights[i];
-            if (w > 100) revert InvalidWeight();
-            unchecked {
-                sum += w;
-            }
-            unchecked {
-                ++i;
-            }
-        }
-        if (sum != 100) revert WeightSumNot100(sum);
+        VotingMath.validateWeights(weights, idxs, p.options.length);
 
         p.hasVoted[_msgSender()] = true;
         unchecked {
             p.totalWeight += 100;
         }
 
-        for (uint256 i; i < idxs.length;) {
+        uint256 len = idxs.length;
+        for (uint256 i; i < len;) {
             unchecked {
                 p.options[idxs[i]].votes += uint96(weights[i]);
                 ++i;
@@ -329,7 +384,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         IExecutor.Call[] storage batch = l._proposals[id].batches[winner];
 
         if (valid && batch.length > 0) {
-            for (uint256 i; i < batch.length;) {
+            uint256 len = batch.length;
+            for (uint256 i; i < len;) {
                 if (batch[i].target == address(this)) revert TargetSelf();
                 if (!l.allowedTarget[batch[i].target]) revert TargetNotAllowed();
                 unchecked {
@@ -347,7 +403,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         Proposal storage p = l._proposals[id];
         require(p.batches.length > 0 || voters.length > 0, "nothing");
         uint256 cleaned;
-        for (uint256 i; i < voters.length && i < 4_000;) {
+        uint256 len = voters.length;
+        for (uint256 i; i < len && i < 4_000;) {
             if (p.hasVoted[voters[i]]) {
                 delete p.hasVoted[voters[i]];
                 unchecked {
@@ -368,7 +425,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         Proposal storage p = l._proposals[id];
         uint96 hi;
         uint96 second;
-        for (uint256 i; i < p.options.length;) {
+        uint256 len = p.options.length;
+        for (uint256 i; i < len;) {
             uint96 v = p.options[i].votes;
             if (v > hi) {
                 second = hi;
@@ -381,7 +439,7 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
                 ++i;
             }
         }
-        ok = (uint256(hi) * 100 > uint256(p.totalWeight) * l.quorumPercentage) && (hi > second);
+        ok = VotingMath.meetsQuorum(hi, second, p.totalWeight, l.quorumPercentage);
     }
 
     function proposalsCount() external view returns (uint256) {
@@ -398,8 +456,8 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
     }
 
     /* ─────────── Public getters for storage variables ─────────── */
-    function membership() external view returns (IMembership) {
-        return _layout().membership;
+    function hats() external view returns (IHats) {
+        return _layout().hats;
     }
 
     function executor() external view returns (IExecutor) {
@@ -414,15 +472,40 @@ contract DirectDemocracyVoting is Initializable, ContextUpgradeable, PausableUpg
         return _layout().quorumPercentage;
     }
 
-    function pollRoleAllowed(uint256 id, bytes32 role) external view returns (bool) {
+    function pollHatAllowed(uint256 id, uint256 hat) external view returns (bool) {
         Layout storage l = _layout();
         if (id >= l._proposals.length) revert InvalidProposal();
-        return l._proposals[id].allowedRoles[role];
+        return l._proposals[id].pollHatAllowed[hat];
     }
 
     function pollRestricted(uint256 id) external view returns (bool) {
         Layout storage l = _layout();
         if (id >= l._proposals.length) revert InvalidProposal();
         return l._proposals[id].restricted;
+    }
+
+    /* ─────────── Hat Management View Functions ─────────── */
+    function getVotingHats() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().votingHatIds);
+    }
+
+    function getCreatorHats() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().creatorHatIds);
+    }
+
+    function votingHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().votingHatIds);
+    }
+
+    function creatorHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().creatorHatIds);
+    }
+
+    function isVotingHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().votingHatIds, hatId);
+    }
+
+    function isCreatorHat(uint256 hatId) external view returns (bool) {
+        return HatManager.isHatInArray(_layout().creatorHatIds, hatId);
     }
 }

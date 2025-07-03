@@ -1,2 +1,7 @@
 @openzeppelin/=lib/openzeppelin-contracts/
 @openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/
+@hats-protocol/=lib/hats-protocol/
+solady/=lib/hats-protocol/lib/solady/src/
+ERC1155/=lib/hats-protocol/lib/ERC1155/src/
+solbase/=lib/hats-protocol/lib/solbase/src/
+forge-std/=lib/hats-protocol/lib/forge-std/src/

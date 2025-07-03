@@ -3,12 +3,19 @@ pragma solidity ^0.8.21;
 
 import "forge-std/Test.sol";
 import "../src/QuickJoin.sol";
+import "./mocks/MockHats.sol";
 
-contract MockMembership is IMembership {
-    mapping(address => bool) public minted;
+contract MockExecutorHatMinter {
+    MockHats public hats;
 
-    function quickJoinMint(address newUser) external {
-        minted[newUser] = true;
+    constructor() {
+        hats = new MockHats();
+    }
+
+    function mintHatsForUser(address user, uint256[] calldata hatIds) external {
+        for (uint256 i = 0; i < hatIds.length; i++) {
+            hats.mintHat(hatIds[i], user);
+        }
     }
 }
 
@@ -30,24 +37,31 @@ contract MockRegistry is IUniversalAccountRegistry {
 
 contract QuickJoinTest is Test {
     QuickJoin qj;
-    MockMembership membership;
+    MockHats hats;
     MockRegistry registry;
+    MockExecutorHatMinter mockExecutor;
 
-    event QuickJoined(address indexed user, bool usernameCreated);
-    event QuickJoinedByMaster(address indexed master, address indexed user, bool usernameCreated);
+    event QuickJoined(address indexed user, bool usernameCreated, uint256[] hatIds);
+    event QuickJoinedByMaster(address indexed master, address indexed user, bool usernameCreated, uint256[] hatIds);
 
     address executor = address(0x1);
     address master = address(0x2);
     address user1 = address(0x100);
     address user2 = address(0x200);
 
+    uint256 constant DEFAULT_HAT_ID = 1;
     bytes32 constant SLOT = 0x566f0545117c69d7a3001f74fa210927792975a5c779e9cbf2876fbc68ef7fa2;
 
     function setUp() public {
-        membership = new MockMembership();
+        hats = new MockHats();
         registry = new MockRegistry();
+        mockExecutor = new MockExecutorHatMinter();
         qj = new QuickJoin();
-        qj.initialize(executor, address(membership), address(registry), master);
+
+        uint256[] memory memberHats = new uint256[](1);
+        memberHats[0] = DEFAULT_HAT_ID;
+
+        qj.initialize(address(mockExecutor), address(hats), address(registry), master, memberHats);
     }
 
     function _storedAddr(uint256 index) internal view returns (address) {
@@ -55,50 +69,54 @@ contract QuickJoinTest is Test {
     }
 
     function testInitializeStoresAddresses() public {
-        assertEq(_storedAddr(0), address(membership));
+        assertEq(_storedAddr(0), address(hats));
         assertEq(_storedAddr(1), address(registry));
         assertEq(_storedAddr(2), master);
-        assertEq(_storedAddr(3), executor);
+        assertEq(_storedAddr(3), address(mockExecutor));
     }
 
     function testInitializeZeroAddressReverts() public {
         QuickJoin tmp = new QuickJoin();
+        uint256[] memory memberHats = new uint256[](1);
+        memberHats[0] = DEFAULT_HAT_ID;
         vm.expectRevert(QuickJoin.InvalidAddress.selector);
-        tmp.initialize(address(0), address(membership), address(registry), master);
+        tmp.initialize(address(0), address(hats), address(registry), master, memberHats);
     }
 
     function testInitializeCannotRunTwice() public {
+        uint256[] memory memberHats = new uint256[](1);
+        memberHats[0] = DEFAULT_HAT_ID;
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        qj.initialize(executor, address(membership), address(registry), master);
+        qj.initialize(address(mockExecutor), address(hats), address(registry), master, memberHats);
     }
 
     function testUpdateAddresses() public {
-        MockMembership m2 = new MockMembership();
+        MockHats h2 = new MockHats();
         MockRegistry r2 = new MockRegistry();
         address master2 = address(0x3);
 
-        vm.prank(executor);
-        qj.updateAddresses(address(m2), address(r2), master2);
+        vm.prank(address(mockExecutor));
+        qj.updateAddresses(address(h2), address(r2), master2);
 
-        assertEq(_storedAddr(0), address(m2));
+        assertEq(_storedAddr(0), address(h2));
         assertEq(_storedAddr(1), address(r2));
         assertEq(_storedAddr(2), master2);
     }
 
     function testUpdateAddressesUnauthorized() public {
         vm.expectRevert(QuickJoin.Unauthorized.selector);
-        qj.updateAddresses(address(membership), address(registry), master);
+        qj.updateAddresses(address(hats), address(registry), master);
     }
 
     function testUpdateAddressesZeroReverts() public {
-        vm.prank(executor);
+        vm.prank(address(mockExecutor));
         vm.expectRevert(QuickJoin.InvalidAddress.selector);
         qj.updateAddresses(address(0), address(registry), master);
     }
 
     function testSetExecutor() public {
         address newExec = address(0x9);
-        vm.prank(executor);
+        vm.prank(address(mockExecutor));
         qj.setExecutor(newExec);
         assertEq(_storedAddr(3), newExec);
     }
@@ -109,7 +127,7 @@ contract QuickJoinTest is Test {
     }
 
     function testSetExecutorZeroReverts() public {
-        vm.prank(executor);
+        vm.prank(address(mockExecutor));
         vm.expectRevert(QuickJoin.InvalidAddress.selector);
         qj.setExecutor(address(0));
     }
@@ -118,13 +136,15 @@ contract QuickJoinTest is Test {
         vm.prank(user1);
         qj.quickJoinNoUser("alice");
         assertEq(registry.usernames(user1), "alice");
-        assertTrue(membership.minted(user1));
+        assertTrue(mockExecutor.hats().isWearerOfHat(user1, DEFAULT_HAT_ID));
     }
 
     function testQuickJoinNoUserEmitsEvent() public {
         vm.prank(user1);
         vm.expectEmit(true, true, true, true);
-        emit QuickJoined(user1, true);
+        uint256[] memory expectedHats = new uint256[](1);
+        expectedHats[0] = DEFAULT_HAT_ID;
+        emit QuickJoined(user1, true, expectedHats);
         qj.quickJoinNoUser("alice");
     }
 
@@ -133,7 +153,7 @@ contract QuickJoinTest is Test {
         vm.prank(user1);
         qj.quickJoinNoUser("");
         assertEq(registry.usernames(user1), "old");
-        assertTrue(membership.minted(user1));
+        assertTrue(mockExecutor.hats().isWearerOfHat(user1, DEFAULT_HAT_ID));
     }
 
     function testQuickJoinNoUserEmptyReverts() public {
@@ -160,14 +180,16 @@ contract QuickJoinTest is Test {
         registry.setUsername(user1, "bob");
         vm.prank(user1);
         qj.quickJoinWithUser();
-        assertTrue(membership.minted(user1));
+        assertTrue(mockExecutor.hats().isWearerOfHat(user1, DEFAULT_HAT_ID));
     }
 
     function testQuickJoinWithUserEmitsEvent() public {
         registry.setUsername(user1, "bob");
         vm.prank(user1);
         vm.expectEmit(true, true, true, true);
-        emit QuickJoined(user1, false);
+        uint256[] memory expectedHats = new uint256[](1);
+        expectedHats[0] = DEFAULT_HAT_ID;
+        emit QuickJoined(user1, false, expectedHats);
         qj.quickJoinWithUser();
     }
 
@@ -181,18 +203,20 @@ contract QuickJoinTest is Test {
         vm.prank(master);
         qj.quickJoinNoUserMasterDeploy("carol", user1);
         assertEq(registry.usernames(user1), "carol");
-        assertTrue(membership.minted(user1));
+        assertTrue(mockExecutor.hats().isWearerOfHat(user1, DEFAULT_HAT_ID));
     }
 
     function testQuickJoinNoUserMasterDeployEmitsEvent() public {
         vm.prank(master);
         vm.expectEmit(true, true, true, true);
-        emit QuickJoinedByMaster(master, user1, true);
+        uint256[] memory expectedHats = new uint256[](1);
+        expectedHats[0] = DEFAULT_HAT_ID;
+        emit QuickJoinedByMaster(master, user1, true, expectedHats);
         qj.quickJoinNoUserMasterDeploy("carol", user1);
     }
 
     function testQuickJoinNoUserMasterDeployByExecutor() public {
-        vm.prank(executor);
+        vm.prank(address(mockExecutor));
         qj.quickJoinNoUserMasterDeploy("dave", user1);
         assertEq(registry.usernames(user1), "dave");
     }
@@ -212,14 +236,16 @@ contract QuickJoinTest is Test {
         registry.setUsername(user2, "bob");
         vm.prank(master);
         qj.quickJoinWithUserMasterDeploy(user2);
-        assertTrue(membership.minted(user2));
+        assertTrue(mockExecutor.hats().isWearerOfHat(user2, DEFAULT_HAT_ID));
     }
 
     function testQuickJoinWithUserMasterDeployEmitsEvent() public {
         registry.setUsername(user2, "bob");
-        vm.prank(executor);
+        vm.prank(address(mockExecutor));
         vm.expectEmit(true, true, true, true);
-        emit QuickJoinedByMaster(executor, user2, false);
+        uint256[] memory expectedHats = new uint256[](1);
+        expectedHats[0] = DEFAULT_HAT_ID;
+        emit QuickJoinedByMaster(address(mockExecutor), user2, false, expectedHats);
         qj.quickJoinWithUserMasterDeploy(user2);
     }
 
