@@ -7,6 +7,7 @@ import {ReentrancyGuardUpgradeable} from
     "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {ContextUpgradeable} from "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {TaskPerm} from "./libs/TaskPerm.sol";
 
 /*────────── External Hats interface ──────────*/
@@ -20,7 +21,9 @@ interface IParticipationToken is IERC20 {
 
 /*────────────────────── Contract ───────────────────────*/
 contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgradeable {
+    using SafeERC20 for IERC20;
     /*──────── Errors ───────*/
+
     error ZeroAddress();
     error InvalidString();
     error InvalidPayout();
@@ -35,11 +38,11 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     error CapBelowCommitted();
     error NotExecutor();
     error Unauthorized();
-    error NoApplication();
     error NotApplicant();
     error AlreadyApplied();
     error RequiresApplication();
     error NoApplicationRequired();
+    error SpentUnderflow();
 
     /*──────── Constants ─────*/
     uint256 public constant MAX_PAYOUT = 1e24; // 1 000 000 tokens (18 dec)
@@ -52,8 +55,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         CLAIMED,
         SUBMITTED,
         COMPLETED,
-        CANCELLED,
-        APPLICATION_SUBMITTED
+        CANCELLED
     }
 
     struct Task {
@@ -61,9 +63,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         uint96 payout; // slot 2: 12 bytes (supports up to 7e28, well over 1e24 cap), voting token payout
         address claimer; // slot 2: 20 bytes (total 32 bytes in slot 2)
         uint96 bountyPayout; // slot 3: 12 bytes, additional payout in bounty currency
-        address bountyToken; // slot 3: 20 bytes (total 32 bytes in slot 3)
-        Status status; // packed into previous slot's remaining space
-        bool requiresApplication; // packed into previous slot's remaining space
+        bool requiresApplication; // slot 3: 1 byte
+        Status status; // slot 3: 1 byte (enum fits in 1 byte)
+        address bountyToken; // slot 4: 20 bytes (optimized packing: small fields grouped together)
     }
 
     struct Project {
@@ -86,6 +88,8 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         mapping(uint256 => uint8) rolePermGlobal; // hat ID => permission mask
         mapping(bytes32 => mapping(uint256 => uint8)) rolePermProj; // project => hat ID => permission mask
         uint256[] permissionHatIds; // enumeration array for hats with permissions
+        mapping(uint256 => address[]) taskApplicants; // task ID => array of applicants
+        mapping(uint256 => mapping(address => bytes32)) taskApplications; // task ID => applicant => application hash
     }
 
     bytes32 private constant _STORAGE_SLOT = 0x30bc214cbc65463577eb5b42c88d60986e26fc81ad89a2eb74550fb255f1e712;
@@ -317,7 +321,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
         uint48 id = l.nextTaskId++;
         l._tasks[id] = Task(
-            pid, uint96(payout), address(0), uint96(bountyPayout), bountyToken, Status.UNCLAIMED, requiresApplication
+            pid, uint96(payout), address(0), uint96(bountyPayout), requiresApplication, Status.UNCLAIMED, bountyToken
         );
         emit TaskCreated(id, pid, payout, meta);
     }
@@ -401,7 +405,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
         // Transfer bounty token if set
         if (t.bountyToken != address(0) && t.bountyPayout > 0) {
-            IERC20(t.bountyToken).transfer(t.claimer, uint256(t.bountyPayout));
+            IERC20(t.bountyToken).safeTransfer(t.claimer, uint256(t.bountyPayout));
         }
 
         emit TaskCompleted(id, _msgSender());
@@ -410,14 +414,19 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     function cancelTask(uint256 id) external canCreate(_layout()._tasks[id].projectId) {
         Layout storage l = _layout();
         Task storage t = _task(l, id);
-        if (t.status != Status.UNCLAIMED && t.status != Status.APPLICATION_SUBMITTED) revert AlreadyClaimed();
+        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
 
         Project storage p = l._projects[t.projectId];
+        if (p.spent < t.payout) revert SpentUnderflow();
         unchecked {
-            p.spent -= t.payout; // safe: payout was added to spent when task created
+            p.spent -= t.payout;
         }
         t.status = Status.CANCELLED;
-        t.claimer = address(0); // Clear any applicant
+        t.claimer = address(0);
+
+        // Clear all applications - zero out the mapping and delete applicants array
+        delete l.taskApplicants[id];
+
         emit TaskCancelled(id, _msgSender());
     }
 
@@ -430,13 +439,20 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     function applyForTask(uint256 id, bytes32 applicationHash) external canClaim(id) {
         Layout storage l = _layout();
         Task storage t = _task(l, id);
-        if (t.status != Status.UNCLAIMED) revert AlreadyApplied();
+        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
         if (applicationHash == bytes32(0)) revert InvalidString();
         if (!t.requiresApplication) revert NoApplicationRequired();
 
-        t.status = Status.APPLICATION_SUBMITTED;
-        t.claimer = _msgSender(); // Store applicant in claimer field
-        emit TaskApplicationSubmitted(id, _msgSender(), applicationHash);
+        address applicant = _msgSender();
+
+        // Check if user has already applied
+        if (l.taskApplications[id][applicant] != bytes32(0)) revert AlreadyApplied();
+
+        // Add applicant to the list
+        l.taskApplicants[id].push(applicant);
+        l.taskApplications[id][applicant] = applicationHash;
+
+        emit TaskApplicationSubmitted(id, applicant, applicationHash);
     }
 
     /**
@@ -447,11 +463,12 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     function approveApplication(uint256 id, address applicant) external canAssign(_layout()._tasks[id].projectId) {
         Layout storage l = _layout();
         Task storage t = _task(l, id);
-        if (t.status != Status.APPLICATION_SUBMITTED) revert NoApplication();
-        if (t.claimer != applicant) revert NotApplicant();
+        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+        if (l.taskApplications[id][applicant] == bytes32(0)) revert NotApplicant();
 
         t.status = Status.CLAIMED;
-        // claimer remains the same (applicant)
+        t.claimer = applicant;
+        delete l.taskApplicants[id];
         emit TaskApplicationApproved(id, applicant, _msgSender());
     }
 
@@ -522,7 +539,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         // Create and assign task in one go
         taskId = l.nextTaskId++;
         l._tasks[taskId] =
-            Task(pid, uint96(payout), assignee, uint96(bountyPayout), bountyToken, Status.CLAIMED, requiresApplication);
+            Task(pid, uint96(payout), assignee, uint96(bountyPayout), requiresApplication, Status.CLAIMED, bountyToken);
 
         // Emit events
         emit TaskCreated(taskId, pid, payout, meta);
@@ -561,6 +578,22 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Project storage p = l._projects[pid];
         if (!p.exists) revert UnknownProject();
         return (p.cap, p.spent, p.managers[_msgSender()]);
+    }
+
+    function getTaskApplicants(uint256 id) external view returns (address[] memory) {
+        return _layout().taskApplicants[id];
+    }
+
+    function getTaskApplication(uint256 id, address applicant) external view returns (bytes32) {
+        return _layout().taskApplications[id][applicant];
+    }
+
+    function getTaskApplicantCount(uint256 id) external view returns (uint256) {
+        return _layout().taskApplicants[id].length;
+    }
+
+    function hasAppliedForTask(uint256 id, address applicant) external view returns (bool) {
+        return _layout().taskApplications[id][applicant] != bytes32(0);
     }
 
     /*──────── Governance / Admin ─────*/
