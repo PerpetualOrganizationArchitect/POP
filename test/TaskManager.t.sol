@@ -1621,7 +1621,7 @@ contract TaskManagerTest is Test {
         // Test that both TaskCreated and TaskAssigned events are emitted
         vm.prank(creator1);
         vm.expectEmit(true, true, true, true);
-        emit TaskManager.TaskCreated(0, projectId, 1 ether, bytes("event_test"));
+        emit TaskManager.TaskCreated(0, projectId, 1 ether, address(0), 0, false, bytes("event_test"));
         vm.expectEmit(true, true, true, true);
         emit TaskManager.TaskAssigned(0, member1, creator1);
         tm.createAndAssignTask(1 ether, bytes("event_test"), projectId, member1, address(0), 0);
@@ -3085,7 +3085,9 @@ contract TaskManagerBountyTest is Test {
         // Create task with bounty
         vm.prank(creator1);
         vm.expectEmit(true, true, true, true);
-        emit TaskManager.TaskCreated(0, BOUNTY_PROJECT_ID, 1 ether, bytes("bounty_event_task"));
+        emit TaskManager.TaskCreated(
+            0, BOUNTY_PROJECT_ID, 1 ether, address(bountyToken1), 0.3 ether, false, bytes("bounty_event_task")
+        );
         tm.createTask(1 ether, bytes("bounty_event_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
 
         // Complete task and verify events

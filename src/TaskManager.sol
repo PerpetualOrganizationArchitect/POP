@@ -107,25 +107,33 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     /*──────── Events ───────*/
-    event CreatorHatSet(uint256 hat, bool allowed);
-    event ProjectCreated(bytes32 id, bytes metadata, uint256 cap);
-    event ProjectCapUpdated(bytes32 id, uint256 oldCap, uint256 newCap);
-    event ProjectManagerAdded(bytes32 id, address manager);
-    event ProjectManagerRemoved(bytes32 id, address manager);
-    event ProjectDeleted(bytes32 id, bytes metadata);
-    event ProjectRolePermSet(bytes32 id, uint256 hatId, uint8 mask);
+    event CreatorHatSet(uint256 indexed hat, bool allowed);
+    event ProjectCreated(bytes32 indexed id, bytes metadata, uint256 cap);
+    event ProjectCapUpdated(bytes32 indexed id, uint256 oldCap, uint256 newCap);
+    event ProjectManagerAdded(bytes32 indexed id, address indexed manager);
+    event ProjectManagerRemoved(bytes32 indexed id, address indexed manager);
+    event ProjectDeleted(bytes32 indexed id, bytes metadata);
+    event ProjectRolePermSet(bytes32 indexed id, uint256 indexed hatId, uint8 mask);
     event BountyCapSet(bytes32 indexed projectId, address indexed token, uint256 oldCap, uint256 newCap);
 
-    event TaskCreated(uint256 id, bytes32 project, uint256 payout, bytes metadata);
-    event TaskUpdated(uint256 id, uint256 payout, bytes metadata);
-    event TaskSubmitted(uint256 id, bytes metadata);
-    event TaskClaimed(uint256 id, address claimer);
-    event TaskAssigned(uint256 id, address assignee, address assigner);
-    event TaskCompleted(uint256 id, address completer);
-    event TaskCancelled(uint256 id, address canceller);
-    event TaskApplicationSubmitted(uint256 id, address applicant, bytes32 applicationHash);
-    event TaskApplicationApproved(uint256 id, address applicant, address approver);
-    event ExecutorSet(address newExecutor);
+    event TaskCreated(
+        uint256 indexed id,
+        bytes32 indexed project,
+        uint256 payout,
+        address bountyToken,
+        uint256 bountyPayout,
+        bool requiresApplication,
+        bytes metadata
+    );
+    event TaskUpdated(uint256 indexed id, uint256 payout, address bountyToken, uint256 bountyPayout, bytes metadata);
+    event TaskSubmitted(uint256 indexed id, bytes metadata);
+    event TaskClaimed(uint256 indexed id, address indexed claimer);
+    event TaskAssigned(uint256 indexed id, address indexed assignee, address indexed assigner);
+    event TaskCompleted(uint256 indexed id, address indexed completer);
+    event TaskCancelled(uint256 indexed id, address indexed canceller);
+    event TaskApplicationSubmitted(uint256 indexed id, address indexed applicant, bytes32 applicationHash);
+    event TaskApplicationApproved(uint256 indexed id, address indexed applicant, address indexed approver);
+    event ExecutorSet(address indexed newExecutor);
 
     /*──────── Initialiser ───────*/
     function initialize(
@@ -338,7 +346,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         l._tasks[id] = Task(
             pid, uint96(payout), address(0), uint96(bountyPayout), requiresApplication, Status.UNCLAIMED, bountyToken
         );
-        emit TaskCreated(id, pid, payout, meta);
+        emit TaskCreated(id, pid, payout, bountyToken, bountyPayout, requiresApplication, meta);
     }
 
     function updateTask(
@@ -405,7 +413,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
             revert AlreadyCompleted();
         }
 
-        emit TaskUpdated(id, newPayout, newMetadata);
+        emit TaskUpdated(id, newPayout, newBountyToken, newBountyPayout, newMetadata);
     }
 
     function claimTask(uint256 id) external canClaim(id) {
@@ -605,7 +613,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
             Task(pid, uint96(payout), assignee, uint96(bountyPayout), requiresApplication, Status.CLAIMED, bountyToken);
 
         // Emit events
-        emit TaskCreated(taskId, pid, payout, meta);
+        emit TaskCreated(taskId, pid, payout, bountyToken, bountyPayout, requiresApplication, meta);
         emit TaskAssigned(taskId, assignee, sender);
     }
 
