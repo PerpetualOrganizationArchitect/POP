@@ -42,6 +42,43 @@ contract MockToken is Test, IERC20 {
     }
 }
 
+/*────────────────── Mock ERC20 for Bounty Testing ──────────────────*/
+contract MockERC20 is Test, IERC20 {
+    string public constant name = "BountyToken";
+    string public constant symbol = "BOUNTY";
+    uint8 public constant decimals = 18;
+
+    mapping(address => uint256) public override balanceOf;
+    uint256 public override totalSupply;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
+    }
+
+    function transfer(address to, uint256 amount) external override returns (bool) {
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external override returns (bool) {
+        require(balanceOf[from] >= amount, "Insufficient balance");
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function approve(address spender, uint256 amount) external override returns (bool) {
+        return true;
+    }
+
+    function allowance(address owner, address spender) external view override returns (uint256) {
+        return type(uint256).max;
+    }
+}
+
 /*──────────────────── Test Suite ────────────────────*/
 contract TaskManagerTest is Test {
     /* test actors */
@@ -132,7 +169,7 @@ contract TaskManagerTest is Test {
 
         // creator2 creates a task (should succeed, cap == 0)
         vm.prank(creator2);
-        tm.createTask(1 ether, bytes("ipfs://meta"), UNLIM_ID);
+        tm.createTask(1 ether, bytes("ipfs://meta"), UNLIM_ID, address(0), 0);
 
         (,, address claimer,,) = tm.getTask(0);
         assertEq(claimer, address(0), "should be unclaimed");
@@ -157,15 +194,15 @@ contract TaskManagerTest is Test {
 
         // pm1 can create tasks until cap reached
         vm.prank(pm1);
-        tm.createTask(1 ether, bytes("a"), CAPPED_ID);
+        tm.createTask(1 ether, bytes("a"), CAPPED_ID, address(0), 0);
 
         vm.prank(pm1);
-        tm.createTask(2 ether, bytes("b"), CAPPED_ID);
+        tm.createTask(2 ether, bytes("b"), CAPPED_ID, address(0), 0);
 
         // next task (1 wei over budget) reverts
         vm.prank(pm1);
         vm.expectRevert(TaskManager.BudgetExceeded.selector);
-        tm.createTask(1, bytes("c"), CAPPED_ID);
+        tm.createTask(1, bytes("c"), CAPPED_ID, address(0), 0);
     }
 
     function test_ProjectSpecificRolePermissions() public {
@@ -194,7 +231,7 @@ contract TaskManagerTest is Test {
 
         // Custom creator should be able to create tasks
         vm.prank(customCreator);
-        tm.createTask(1 ether, bytes("custom_task"), projectId);
+        tm.createTask(1 ether, bytes("custom_task"), projectId, address(0), 0);
 
         // But not review tasks
         vm.prank(member1);
@@ -239,7 +276,7 @@ contract TaskManagerTest is Test {
 
         // Global user should be able to create (global permission)
         vm.prank(globalUser);
-        tm.createTask(1 ether, bytes("task"), projectId);
+        tm.createTask(1 ether, bytes("task"), projectId, address(0), 0);
 
         // But not review (project override)
         vm.prank(member1);
@@ -269,7 +306,7 @@ contract TaskManagerTest is Test {
             tm.createProject(bytes("BUD"), 2 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         vm.prank(creator1);
-        tm.createTask(2 ether, bytes("foo"), BUD_ID);
+        tm.createTask(2 ether, bytes("foo"), BUD_ID, address(0), 0);
 
         // try lowering cap below spent
         vm.prank(executor);
@@ -302,7 +339,7 @@ contract TaskManagerTest is Test {
         tm.addProjectManager(FLOW_ID, pm1);
 
         vm.prank(pm1);
-        tm.createTask(1 ether, bytes("hash"), FLOW_ID);
+        tm.createTask(1 ether, bytes("hash"), FLOW_ID, address(0), 0);
         return 0;
     }
 
@@ -344,11 +381,11 @@ contract TaskManagerTest is Test {
             tm.createProject(bytes("UPD"), 3 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         vm.prank(creator1);
-        tm.createTask(1 ether, bytes("foo"), UPD_ID);
+        tm.createTask(1 ether, bytes("foo"), UPD_ID, address(0), 0);
 
         // raise payout by 1 ether
         vm.prank(creator1);
-        tm.updateTask(0, 2 ether, bytes("bar"));
+        tm.updateTask(0, 2 ether, bytes("bar"), address(0), 0);
 
         // spent should now be 2 ether
         (uint256 cap, uint256 spent,) = tm.getProjectInfo(UPD_ID);
@@ -364,7 +401,7 @@ contract TaskManagerTest is Test {
 
         // attempt to change payout should still emit but NOT change storage
         vm.prank(pm1);
-        tm.updateTask(id, 5 ether, bytes("newhash"));
+        tm.updateTask(id, 5 ether, bytes("newhash"), address(0), 0);
 
         (uint256 payout,,,,) = tm.getTask(id);
         assertEq(payout, 1 ether, "payout unchanged");
@@ -386,7 +423,7 @@ contract TaskManagerTest is Test {
             tm.createProject(bytes("CAN"), 2 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
 
         vm.prank(creator1);
-        tm.createTask(1 ether, bytes("foo"), CAN_ID);
+        tm.createTask(1 ether, bytes("foo"), CAN_ID, address(0), 0);
 
         (uint256 cap, uint256 spentBefore, bool isManager) = tm.getProjectInfo(CAN_ID);
         assertEq(spentBefore, 1 ether);
@@ -417,7 +454,7 @@ contract TaskManagerTest is Test {
         // outsider has no role and no permissions
         vm.prank(outsider);
         vm.expectRevert(TaskManager.Unauthorized.selector);
-        tm.createTask(1, bytes("x"), ACC_ID);
+        tm.createTask(1, bytes("x"), ACC_ID, address(0), 0);
     }
 
     function test_OnlyAuthorizedCanAssignTask() public {
@@ -460,7 +497,7 @@ contract TaskManagerTest is Test {
 
         // Custom user should be able to create tasks
         vm.prank(customUser);
-        tm.createTask(1 ether, bytes("custom_task"), projectId);
+        tm.createTask(1 ether, bytes("custom_task"), projectId, address(0), 0);
 
         // But not assign tasks (no ASSIGN permission)
         vm.prank(customUser);
@@ -503,7 +540,7 @@ contract TaskManagerTest is Test {
 
         // User should only have CREATE permission in this project
         vm.prank(globalUser);
-        tm.createTask(1 ether, bytes("task"), projectId);
+        tm.createTask(1 ether, bytes("task"), projectId, address(0), 0);
 
         // But not REVIEW (project override removed it)
         vm.prank(member1);
@@ -544,13 +581,13 @@ contract TaskManagerTest is Test {
 
         // Create multiple tasks across projects
         vm.prank(creator1);
-        tm.createTask(1 ether, bytes("task1_A"), PROJECT_A_ID);
+        tm.createTask(1 ether, bytes("task1_A"), PROJECT_A_ID, address(0), 0);
 
         vm.prank(creator1);
-        tm.createTask(2 ether, bytes("task1_B"), PROJECT_B_ID);
+        tm.createTask(2 ether, bytes("task1_B"), PROJECT_B_ID, address(0), 0);
 
         vm.prank(creator1);
-        tm.createTask(2 ether, bytes("task1_C"), PROJECT_C_ID);
+        tm.createTask(2 ether, bytes("task1_C"), PROJECT_C_ID, address(0), 0);
 
         // Member claims tasks from different projects
         vm.startPrank(member1);
@@ -569,7 +606,7 @@ contract TaskManagerTest is Test {
         // Test trying to exceed PROJECT_B budget
         vm.prank(creator1);
         vm.expectRevert(TaskManager.BudgetExceeded.selector);
-        tm.createTask(1 ether + 1, bytes("task2_B"), PROJECT_B_ID); // Would exceed cap
+        tm.createTask(1 ether + 1, bytes("task2_B"), PROJECT_B_ID, address(0), 0); // Would exceed cap
 
         // Complete task from PROJECT_C
         vm.prank(member1);
@@ -616,7 +653,7 @@ contract TaskManagerTest is Test {
 
         // Verify new project exists by creating a task
         vm.prank(newCreator);
-        tm.createTask(0.5 ether, bytes("new_task"), NEW_PROJECT_ID);
+        tm.createTask(0.5 ether, bytes("new_task"), NEW_PROJECT_ID, address(0), 0);
 
         // Disable the hat using the executor
         vm.prank(executor);
@@ -652,10 +689,10 @@ contract TaskManagerTest is Test {
 
         // Both PMs should be able to create tasks (as project managers)
         vm.prank(pm1);
-        tm.createTask(2 ether, bytes("pm1_task"), MULTI_PM_ID);
+        tm.createTask(2 ether, bytes("pm1_task"), MULTI_PM_ID, address(0), 0);
 
         vm.prank(pm2);
-        tm.createTask(3 ether, bytes("pm2_task"), MULTI_PM_ID);
+        tm.createTask(3 ether, bytes("pm2_task"), MULTI_PM_ID, address(0), 0);
 
         // PM1 can complete PM2's task (as project manager)
         vm.prank(member1);
@@ -674,18 +711,18 @@ contract TaskManagerTest is Test {
         // PM2 can no longer create tasks (no longer a project manager and no role)
         vm.prank(pm2);
         vm.expectRevert(TaskManager.Unauthorized.selector);
-        tm.createTask(1 ether, bytes("should_fail"), MULTI_PM_ID);
+        tm.createTask(1 ether, bytes("should_fail"), MULTI_PM_ID, address(0), 0);
 
         // But PM1 still can (still a project manager)
         vm.prank(pm1);
-        tm.createTask(1 ether, bytes("still_works"), MULTI_PM_ID);
+        tm.createTask(1 ether, bytes("still_works"), MULTI_PM_ID, address(0), 0);
 
         // Now give PM2 the PM_HAT
         setHat(pm2, PM_HAT);
 
         // PM2 should now be able to create tasks again (has PM_HAT with CREATE permission)
         vm.prank(pm2);
-        tm.createTask(1 ether, bytes("pm2_with_hat"), MULTI_PM_ID);
+        tm.createTask(1 ether, bytes("pm2_with_hat"), MULTI_PM_ID, address(0), 0);
 
         // Verify overall budget tracking
         (, uint256 spent,) = tm.getProjectInfo(MULTI_PM_ID);
@@ -709,7 +746,7 @@ contract TaskManagerTest is Test {
 
         // Create and immediately cancel a task
         vm.startPrank(creator1);
-        tm.createTask(1 ether, bytes("to_cancel"), EDGE_ID);
+        tm.createTask(1 ether, bytes("to_cancel"), EDGE_ID, address(0), 0);
         tm.cancelTask(0);
         vm.stopPrank();
 
@@ -719,7 +756,7 @@ contract TaskManagerTest is Test {
 
         // Create a task, assign it, then try operations that should fail
         vm.prank(creator1);
-        tm.createTask(2 ether, bytes("edge_task"), EDGE_ID);
+        tm.createTask(2 ether, bytes("edge_task"), EDGE_ID, address(0), 0);
 
         vm.prank(creator1);
         tm.assignTask(1, member1);
@@ -807,7 +844,7 @@ contract TaskManagerTest is Test {
 
             vm.prank(creator);
             bytes memory taskMetadata = abi.encodePacked("task", i);
-            tm.createTask(payout, taskMetadata, MEGA_ID);
+            tm.createTask(payout, taskMetadata, MEGA_ID, address(0), 0);
 
             // Assign tasks to different members
             address assignee = members[i % members.length];
@@ -855,7 +892,7 @@ contract TaskManagerTest is Test {
 
             vm.prank(pms[0]);
             bytes memory taskMetadata = abi.encodePacked("capped_task", cappedTaskCount);
-            tm.createTask(payout, taskMetadata, CAPPED_BIG_ID);
+            tm.createTask(payout, taskMetadata, CAPPED_BIG_ID, address(0), 0);
 
             cappedTaskCount++;
             cappedSpent += payout;
@@ -864,7 +901,7 @@ contract TaskManagerTest is Test {
         // Verify we can't exceed cap
         vm.prank(pms[0]);
         vm.expectRevert(TaskManager.BudgetExceeded.selector);
-        tm.createTask(1 ether, bytes("exceeds_cap"), CAPPED_BIG_ID);
+        tm.createTask(1 ether, bytes("exceeds_cap"), CAPPED_BIG_ID, address(0), 0);
 
         // Verify task counts and budget usage
         (uint256 cap, uint256 actualSpent,) = tm.getProjectInfo(CAPPED_BIG_ID);
@@ -899,7 +936,7 @@ contract TaskManagerTest is Test {
 
         // Create a task, complete it, then verify project can be deleted
         vm.prank(creator1);
-        tm.createTask(1 ether, bytes("task1"), TO_DELETE_ID);
+        tm.createTask(1 ether, bytes("task1"), TO_DELETE_ID, address(0), 0);
 
         vm.prank(creator1);
         tm.assignTask(0, member1);
@@ -912,7 +949,7 @@ contract TaskManagerTest is Test {
 
         // Create another task and cancel it
         vm.prank(creator1);
-        tm.createTask(2 ether, bytes("task2"), TO_DELETE_ID);
+        tm.createTask(2 ether, bytes("task2"), TO_DELETE_ID, address(0), 0);
 
         vm.prank(creator1);
         tm.cancelTask(1);
@@ -946,7 +983,7 @@ contract TaskManagerTest is Test {
 
         // Add tasks, verify we can still delete with non-zero spent
         vm.prank(creator1);
-        tm.createTask(3 ether, bytes("unlimited_task"), ZERO_CAP_ID);
+        tm.createTask(3 ether, bytes("unlimited_task"), ZERO_CAP_ID, address(0), 0);
 
         // Delete should succeed with zero cap, non-zero spent
         vm.prank(creator1);
@@ -1026,7 +1063,7 @@ contract TaskManagerTest is Test {
         // Executor should be able to create tasks even without member role
         // (executor address has no role but should bypass the member check)
         vm.prank(executor);
-        tm.createTask(1 ether, bytes("executor_task"), EXECUTOR_BYPASS_ID);
+        tm.createTask(1 ether, bytes("executor_task"), EXECUTOR_BYPASS_ID, address(0), 0);
 
         // Executor should be able to claim tasks
         vm.prank(executor);
@@ -1062,7 +1099,7 @@ contract TaskManagerTest is Test {
 
         // User should be able to create tasks with CREATE permission
         vm.prank(multiUser);
-        tm.createTask(1 ether, bytes("multi_task"), projectId);
+        tm.createTask(1 ether, bytes("multi_task"), projectId, address(0), 0);
 
         // User should be able to claim tasks with CLAIM permission
         vm.prank(multiUser);
@@ -1095,7 +1132,7 @@ contract TaskManagerTest is Test {
         // User can't create tasks (no permissions)
         vm.prank(dynamicUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
-        tm.createTask(1 ether, bytes("should_fail"), projectId);
+        tm.createTask(1 ether, bytes("should_fail"), projectId, address(0), 0);
 
         // Grant CREATE permission at project level
         vm.prank(creator1);
@@ -1103,7 +1140,7 @@ contract TaskManagerTest is Test {
 
         // Now user can create tasks
         vm.prank(dynamicUser);
-        tm.createTask(1 ether, bytes("now_works"), projectId);
+        tm.createTask(1 ether, bytes("now_works"), projectId, address(0), 0);
 
         // Another user claims and submits
         vm.prank(member1);
@@ -1155,10 +1192,10 @@ contract TaskManagerTest is Test {
 
         // User can create tasks in both projects
         vm.prank(overrideUser);
-        tm.createTask(1 ether, bytes("task1"), projectId);
+        tm.createTask(1 ether, bytes("task1"), projectId, address(0), 0);
 
         vm.prank(overrideUser);
-        tm.createTask(1 ether, bytes("task2"), projectId2);
+        tm.createTask(1 ether, bytes("task2"), projectId2, address(0), 0);
 
         // In first project, user can't assign tasks (project override)
         vm.prank(overrideUser);
@@ -1213,7 +1250,7 @@ contract TaskManagerTest is Test {
 
         // User can create tasks
         vm.prank(tempUser);
-        tm.createTask(1 ether, bytes("task"), projectId);
+        tm.createTask(1 ether, bytes("task"), projectId, address(0), 0);
 
         // Revoke permission
         vm.prank(executor);
@@ -1222,7 +1259,7 @@ contract TaskManagerTest is Test {
         // User can't create tasks anymore
         vm.prank(tempUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
-        tm.createTask(1 ether, bytes("fail"), projectId);
+        tm.createTask(1 ether, bytes("fail"), projectId, address(0), 0);
     }
 
     function test_IndividualPermissionFlags() public {
@@ -1265,7 +1302,7 @@ contract TaskManagerTest is Test {
 
         // Test CREATE permission - should succeed
         vm.prank(createUser);
-        tm.createTask(1 ether, bytes("create_task"), projectId);
+        tm.createTask(1 ether, bytes("create_task"), projectId, address(0), 0);
 
         // createUser should not be able to claim or assign
         vm.prank(createUser);
@@ -1283,12 +1320,12 @@ contract TaskManagerTest is Test {
         // assignUser should not be able to create or review
         vm.prank(assignUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
-        tm.createTask(1 ether, bytes("assign_fail"), projectId);
+        tm.createTask(1 ether, bytes("assign_fail"), projectId, address(0), 0);
 
         // Test CLAIM permission - indirectly tested by previous assign
         // Create a new task for claiming
         vm.prank(createUser);
-        tm.createTask(1 ether, bytes("for_claiming"), projectId);
+        tm.createTask(1 ether, bytes("for_claiming"), projectId, address(0), 0);
 
         // claimUser should be able to claim
         vm.prank(claimUser);
@@ -1309,7 +1346,7 @@ contract TaskManagerTest is Test {
         // reviewUser should not be able to create or assign
         vm.prank(reviewUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
-        tm.createTask(1 ether, bytes("review_fail"), projectId);
+        tm.createTask(1 ether, bytes("review_fail"), projectId, address(0), 0);
 
         vm.prank(reviewUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
@@ -1336,7 +1373,7 @@ contract TaskManagerTest is Test {
 
         // Test basic create and assign functionality
         vm.prank(creator1);
-        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("test_task"), projectId, member1);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("test_task"), projectId, member1, address(0), 0);
 
         // Verify task was created and assigned correctly
         (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId,) = tm.getTask(taskId);
@@ -1376,7 +1413,7 @@ contract TaskManagerTest is Test {
 
         vm.prank(createOnlyUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
-        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1);
+        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1, address(0), 0);
 
         // Test that user with only ASSIGN permission cannot use createAndAssignTask
         uint256 ASSIGN_ONLY_HAT = 301;
@@ -1388,7 +1425,7 @@ contract TaskManagerTest is Test {
 
         vm.prank(assignOnlyUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
-        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1);
+        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1, address(0), 0);
 
         // Test that user with both CREATE and ASSIGN permissions can use createAndAssignTask
         uint256 CREATE_ASSIGN_HAT = 302;
@@ -1399,7 +1436,7 @@ contract TaskManagerTest is Test {
         tm.setRolePerm(CREATE_ASSIGN_HAT, TaskPerm.CREATE | TaskPerm.ASSIGN);
 
         vm.prank(createAssignUser);
-        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("should_work"), projectId, member1);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("should_work"), projectId, member1, address(0), 0);
 
         // Verify task was created successfully
         (,, address claimer,,) = tm.getTask(taskId);
@@ -1426,7 +1463,7 @@ contract TaskManagerTest is Test {
 
         // Test that project manager can use createAndAssignTask
         vm.prank(pm1);
-        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("pm_task"), projectId, member1);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("pm_task"), projectId, member1, address(0), 0);
 
         // Verify task was created and assigned
         (,, address claimer,,) = tm.getTask(taskId);
@@ -1435,7 +1472,7 @@ contract TaskManagerTest is Test {
         // Test that non-project manager cannot use createAndAssignTask
         vm.prank(outsider);
         vm.expectRevert(TaskManager.Unauthorized.selector);
-        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1);
+        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1, address(0), 0);
     }
 
     function test_CreateAndAssignTaskValidation() public {
@@ -1457,27 +1494,27 @@ contract TaskManagerTest is Test {
         // Test zero address assignee
         vm.prank(creator1);
         vm.expectRevert(TaskManager.ZeroAddress.selector);
-        tm.createAndAssignTask(1 ether, bytes("test"), projectId, address(0));
+        tm.createAndAssignTask(1 ether, bytes("test"), projectId, address(0), address(0), 0);
 
         // Test zero payout
         vm.prank(creator1);
         vm.expectRevert(TaskManager.InvalidPayout.selector);
-        tm.createAndAssignTask(0, bytes("test"), projectId, member1);
+        tm.createAndAssignTask(0, bytes("test"), projectId, member1, address(0), 0);
 
         // Test excessive payout
         vm.prank(creator1);
         vm.expectRevert(TaskManager.InvalidPayout.selector);
-        tm.createAndAssignTask(1e25, bytes("test"), projectId, member1); // Over MAX_PAYOUT
+        tm.createAndAssignTask(1e25, bytes("test"), projectId, member1, address(0), 0); // Over MAX_PAYOUT
 
         // Test empty metadata
         vm.prank(creator1);
         vm.expectRevert(TaskManager.InvalidString.selector);
-        tm.createAndAssignTask(1 ether, bytes(""), projectId, member1);
+        tm.createAndAssignTask(1 ether, bytes(""), projectId, member1, address(0), 0);
 
         // Test non-existent project - this will fail with Unauthorized because permission check happens first
         vm.prank(creator1);
         vm.expectRevert(TaskManager.Unauthorized.selector);
-        tm.createAndAssignTask(1 ether, bytes("test"), bytes32(uint256(999)), member1);
+        tm.createAndAssignTask(1 ether, bytes("test"), bytes32(uint256(999)), member1, address(0), 0);
     }
 
     function test_CreateAndAssignTaskBudgetEnforcement() public {
@@ -1498,16 +1535,16 @@ contract TaskManagerTest is Test {
 
         // Create first task within budget
         vm.prank(creator1);
-        uint256 taskId1 = tm.createAndAssignTask(1 ether, bytes("task1"), projectId, member1);
+        uint256 taskId1 = tm.createAndAssignTask(1 ether, bytes("task1"), projectId, member1, address(0), 0);
 
         // Create second task within budget
         vm.prank(creator1);
-        uint256 taskId2 = tm.createAndAssignTask(1 ether, bytes("task2"), projectId, member1);
+        uint256 taskId2 = tm.createAndAssignTask(1 ether, bytes("task2"), projectId, member1, address(0), 0);
 
         // Try to create third task that would exceed budget
         vm.prank(creator1);
         vm.expectRevert(TaskManager.BudgetExceeded.selector);
-        tm.createAndAssignTask(1 ether, bytes("task3"), projectId, member1);
+        tm.createAndAssignTask(1 ether, bytes("task3"), projectId, member1, address(0), 0);
 
         // Verify project budget tracking
         (uint256 cap, uint256 spent,) = tm.getProjectInfo(projectId);
@@ -1537,7 +1574,7 @@ contract TaskManagerTest is Test {
         emit TaskManager.TaskCreated(0, projectId, 1 ether, bytes("event_test"));
         vm.expectEmit(true, true, true, true);
         emit TaskManager.TaskAssigned(0, member1, creator1);
-        tm.createAndAssignTask(1 ether, bytes("event_test"), projectId, member1);
+        tm.createAndAssignTask(1 ether, bytes("event_test"), projectId, member1, address(0), 0);
     }
 
     function test_CreateAndAssignTaskLifecycle() public {
@@ -1558,7 +1595,7 @@ contract TaskManagerTest is Test {
 
         // Create and assign task
         vm.prank(creator1);
-        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("lifecycle_test"), projectId, member1);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("lifecycle_test"), projectId, member1, address(0), 0);
 
         // Verify task is in CLAIMED status
         (, TaskManager.Status status,,,) = tm.getTask(taskId);
@@ -1601,7 +1638,7 @@ contract TaskManagerTest is Test {
         // Measure gas for createAndAssignTask
         vm.prank(creator1);
         uint256 gasBefore = gasleft();
-        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("gas_test"), projectId, member1);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("gas_test"), projectId, member1, address(0), 0);
         uint256 gasUsed = gasBefore - gasleft();
 
         console.log("Gas used for createAndAssignTask:", gasUsed);
@@ -1613,7 +1650,7 @@ contract TaskManagerTest is Test {
         // For comparison, measure gas for separate create + assign operations
         vm.prank(creator1);
         gasBefore = gasleft();
-        tm.createTask(1 ether, bytes("gas_test2"), projectId);
+        tm.createTask(1 ether, bytes("gas_test2"), projectId, address(0), 0);
         uint256 gasCreate = gasBefore - gasleft();
 
         vm.prank(creator1);
@@ -1654,7 +1691,8 @@ contract TaskManagerTest is Test {
         // Create and assign tasks to different users
         for (uint256 i = 0; i < users.length; i++) {
             vm.prank(creator1);
-            uint256 taskId = tm.createAndAssignTask(1 ether, bytes("multi_user_task"), projectId, users[i]);
+            uint256 taskId =
+                tm.createAndAssignTask(1 ether, bytes("multi_user_task"), projectId, users[i], address(0), 0);
 
             // Verify each task is assigned to the correct user
             (,, address claimer,,) = tm.getTask(taskId);
@@ -1684,14 +1722,14 @@ contract TaskManagerTest is Test {
 
         // Test assigning to self
         vm.prank(creator1);
-        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("self_assign"), projectId, creator1);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("self_assign"), projectId, creator1, address(0), 0);
 
         (,, address claimer,,) = tm.getTask(taskId);
         assertEq(claimer, creator1, "Task should be assigned to creator1");
 
         // Test assigning to executor
         vm.prank(creator1);
-        taskId = tm.createAndAssignTask(1 ether, bytes("executor_assign"), projectId, executor);
+        taskId = tm.createAndAssignTask(1 ether, bytes("executor_assign"), projectId, executor, address(0), 0);
 
         (,, claimer,,) = tm.getTask(taskId);
         assertEq(claimer, executor, "Task should be assigned to executor");
@@ -1703,7 +1741,7 @@ contract TaskManagerTest is Test {
         );
 
         vm.prank(creator1);
-        taskId = tm.createAndAssignTask(1e24, bytes("max_payout"), maxProjectId, member1); // MAX_PAYOUT
+        taskId = tm.createAndAssignTask(1e24, bytes("max_payout"), maxProjectId, member1, address(0), 0); // MAX_PAYOUT
 
         (uint256 payout,,,,) = tm.getTask(taskId);
         assertEq(payout, 1e24, "Task should have maximum payout");
@@ -1729,7 +1767,7 @@ contract TaskManagerTest is Test {
         // User should not be able to createAndAssignTask (no ASSIGN permission)
         vm.prank(globalUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
-        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1);
+        tm.createAndAssignTask(1 ether, bytes("should_fail"), projectId, member1, address(0), 0);
 
         // Add ASSIGN permission at project level
         vm.prank(creator1);
@@ -1737,7 +1775,7 @@ contract TaskManagerTest is Test {
 
         // Now user should be able to createAndAssignTask
         vm.prank(globalUser);
-        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("should_work"), projectId, member1);
+        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("should_work"), projectId, member1, address(0), 0);
 
         // Verify task was created and assigned
         (,, address claimer,,) = tm.getTask(taskId);
@@ -1764,7 +1802,7 @@ contract TaskManagerTest is Test {
 
         // Create a task that requires applications
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId, address(0), 0);
 
         // Member applies for task
         bytes32 applicationHash = keccak256("application_content");
@@ -1798,7 +1836,7 @@ contract TaskManagerTest is Test {
         );
 
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId, address(0), 0);
 
         // Test that only users with CLAIM permission can apply
         vm.prank(outsider);
@@ -1831,7 +1869,7 @@ contract TaskManagerTest is Test {
         );
 
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId, address(0), 0);
 
         // Test empty application hash
         vm.prank(member1);
@@ -1869,7 +1907,7 @@ contract TaskManagerTest is Test {
         );
 
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId, address(0), 0);
 
         // Member applies
         vm.prank(member1);
@@ -1902,7 +1940,7 @@ contract TaskManagerTest is Test {
         );
 
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId, address(0), 0);
 
         vm.prank(member1);
         tm.applyForTask(0, keccak256("application"));
@@ -1941,7 +1979,7 @@ contract TaskManagerTest is Test {
         );
 
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId, address(0), 0);
 
         // Test approving task without application
         vm.prank(pm1);
@@ -1983,7 +2021,7 @@ contract TaskManagerTest is Test {
         );
 
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId, address(0), 0);
 
         bytes32 applicationHash = keccak256("application_content");
 
@@ -2017,7 +2055,7 @@ contract TaskManagerTest is Test {
         );
 
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId, address(0), 0);
 
         // 1. Apply for task
         vm.prank(member1);
@@ -2058,7 +2096,7 @@ contract TaskManagerTest is Test {
         );
 
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId, address(0), 0);
 
         // Apply for task
         vm.prank(member1);
@@ -2095,9 +2133,9 @@ contract TaskManagerTest is Test {
 
         // Create multiple tasks
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("task1"), projectId);
+        tm.createApplicationTask(1 ether, bytes("task1"), projectId, address(0), 0);
         vm.prank(creator1);
-        tm.createApplicationTask(2 ether, bytes("task2"), projectId);
+        tm.createApplicationTask(2 ether, bytes("task2"), projectId, address(0), 0);
 
         // Create multiple members
         address member2 = makeAddr("member2");
@@ -2142,7 +2180,7 @@ contract TaskManagerTest is Test {
         );
 
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("test_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("test_task"), projectId, address(0), 0);
 
         // Apply for task
         vm.prank(member1);
@@ -2182,7 +2220,7 @@ contract TaskManagerTest is Test {
 
         // Create application-required task
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("app_required_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("app_required_task"), projectId, address(0), 0);
 
         // Verify task requires applications
         (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId, bool requiresApplication) =
@@ -2210,7 +2248,7 @@ contract TaskManagerTest is Test {
 
         // Create application-required task
         vm.prank(creator1);
-        tm.createApplicationTask(1 ether, bytes("app_required_task"), projectId);
+        tm.createApplicationTask(1 ether, bytes("app_required_task"), projectId, address(0), 0);
 
         // Test that direct claiming is prevented
         vm.prank(member1);
@@ -2245,7 +2283,7 @@ contract TaskManagerTest is Test {
 
         // Create regular task (doesn't require applications)
         vm.prank(creator1);
-        tm.createTask(1 ether, bytes("regular_task"), projectId);
+        tm.createTask(1 ether, bytes("regular_task"), projectId, address(0), 0);
 
         // Verify task doesn't require applications
         (,,,, bool requiresApplication) = tm.getTask(0);
@@ -2264,5 +2302,529 @@ contract TaskManagerTest is Test {
         (, TaskManager.Status status, address claimer,,) = tm.getTask(0);
         assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED));
         assertEq(claimer, member1);
+    }
+}
+
+/*───────────────── BOUNTY FUNCTIONALITY TESTS ────────────────────*/
+
+contract TaskManagerBountyTest is Test {
+    /* test actors */
+    address creator1 = makeAddr("creator1");
+    address creator2 = makeAddr("creator2");
+    address pm1 = makeAddr("pm1");
+    address member1 = makeAddr("member1");
+    address outsider = makeAddr("outsider");
+    address executor = makeAddr("executor");
+
+    uint256 constant CREATOR_HAT = 1;
+    uint256 constant PM_HAT = 2;
+    uint256 constant MEMBER_HAT = 3;
+
+    /* project IDs */
+    bytes32 BOUNTY_PROJECT_ID;
+    bytes32 DUAL_BOUNTY_PROJECT_ID;
+    bytes32 NO_BOUNTY_PROJECT_ID;
+
+    /* deployed contracts */
+    TaskManager tm;
+    MockToken token;
+    MockERC20 bountyToken1;
+    MockERC20 bountyToken2;
+    MockHats hats;
+
+    /* helpers */
+    function setHat(address who, uint256 hatId) internal {
+        hats.mintHat(hatId, who);
+    }
+
+    function setUp() public {
+        token = new MockToken();
+        bountyToken1 = new MockERC20();
+        bountyToken2 = new MockERC20();
+        hats = new MockHats();
+
+        // give creator hat to two addresses, other hats to pm1 / member1
+        setHat(creator1, CREATOR_HAT);
+        setHat(creator2, CREATOR_HAT);
+        setHat(pm1, PM_HAT);
+        setHat(member1, MEMBER_HAT);
+
+        // initialize TaskManager
+        tm = new TaskManager();
+        uint256[] memory creatorHats = new uint256[](1);
+        creatorHats[0] = CREATOR_HAT;
+
+        vm.prank(creator1);
+        tm.initialize(address(token), address(hats), creatorHats, executor);
+
+        // Set up default global permissions
+        vm.prank(executor);
+        tm.setRolePerm(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN);
+        vm.prank(executor);
+        tm.setRolePerm(MEMBER_HAT, TaskPerm.CLAIM);
+
+        // Set up projects for testing
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        BOUNTY_PROJECT_ID = tm.createProject(
+            bytes("BOUNTY_PROJECT"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        DUAL_BOUNTY_PROJECT_ID = tm.createProject(
+            bytes("DUAL_BOUNTY_PROJECT"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        NO_BOUNTY_PROJECT_ID = tm.createProject(
+            bytes("NO_BOUNTY_PROJECT"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Fund the bounty tokens to the TaskManager (simulating treasury)
+        bountyToken1.mint(address(tm), 1000 ether);
+        bountyToken2.mint(address(tm), 1000 ether);
+    }
+
+    function test_CreateTaskWithBounty() public {
+        // Create task with bounty token
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.5 ether);
+
+        // Verify task has bounty info
+        (
+            uint256 payout,
+            uint256 bountyPayout,
+            address bountyToken,
+            TaskManager.Status status,
+            address claimer,
+            bytes32 projectId,
+            bool requiresApplication
+        ) = tm.getTaskFull(0);
+        assertEq(payout, 1 ether, "Participation token payout should be correct");
+        assertEq(bountyPayout, 0.5 ether, "Bounty payout should be correct");
+        assertEq(bountyToken, address(bountyToken1), "Bounty token should be correct");
+        assertEq(uint8(status), uint8(TaskManager.Status.UNCLAIMED), "Status should be UNCLAIMED");
+    }
+
+    function test_CreateTaskWithoutBounty() public {
+        // Create task without bounty (backward compatibility)
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("no_bounty_task"), NO_BOUNTY_PROJECT_ID, address(0), 0);
+
+        // Verify task has no bounty info
+        (
+            uint256 payout,
+            uint256 bountyPayout,
+            address bountyToken,
+            TaskManager.Status status,
+            address claimer,
+            bytes32 projectId,
+            bool requiresApplication
+        ) = tm.getTaskFull(0);
+        assertEq(payout, 1 ether, "Participation token payout should be correct");
+        assertEq(bountyPayout, 0, "Bounty payout should be zero");
+        assertEq(bountyToken, address(0), "Bounty token should be zero address");
+    }
+
+    function test_CreateApplicationTaskWithBounty() public {
+        // Create application task with bounty
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("app_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
+
+        // Verify task has bounty info and requires application
+        (
+            uint256 payout,
+            uint256 bountyPayout,
+            address bountyToken,
+            TaskManager.Status status,
+            address claimer,
+            bytes32 projectId,
+            bool requiresApplication
+        ) = tm.getTaskFull(0);
+        assertEq(payout, 1 ether, "Participation token payout should be correct");
+        assertEq(bountyPayout, 0.3 ether, "Bounty payout should be correct");
+        assertEq(bountyToken, address(bountyToken1), "Bounty token should be correct");
+        assertEq(requiresApplication, true, "Should require application");
+    }
+
+    function test_CreateAndAssignTaskWithBounty() public {
+        // Create and assign task with bounty
+        vm.prank(creator1);
+        uint256 taskId = tm.createAndAssignTask(
+            1 ether, bytes("assign_bounty_task"), BOUNTY_PROJECT_ID, member1, address(bountyToken1), 0.4 ether
+        );
+
+        // Verify task is assigned and has bounty info
+        (
+            uint256 payout,
+            uint256 bountyPayout,
+            address bountyToken,
+            TaskManager.Status status,
+            address claimer,
+            bytes32 projectId,
+            bool requiresApplication
+        ) = tm.getTaskFull(taskId);
+        assertEq(payout, 1 ether, "Participation token payout should be correct");
+        assertEq(bountyPayout, 0.4 ether, "Bounty payout should be correct");
+        assertEq(bountyToken, address(bountyToken1), "Bounty token should be correct");
+        assertEq(claimer, member1, "Task should be assigned to member1");
+        assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Status should be CLAIMED");
+    }
+
+    function test_CompleteTaskWithBounty() public {
+        // Create task with bounty
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("complete_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.5 ether);
+
+        // Assign and complete task
+        vm.prank(creator1);
+        tm.assignTask(0, member1);
+
+        vm.prank(member1);
+        tm.submitTask(0, bytes("submission"));
+
+        uint256 tokenBalanceBefore = token.balanceOf(member1);
+        uint256 bountyBalanceBefore = bountyToken1.balanceOf(member1);
+
+        vm.prank(creator1);
+        tm.completeTask(0);
+
+        // Verify both tokens were transferred
+        assertEq(token.balanceOf(member1), tokenBalanceBefore + 1 ether, "Participation tokens should be minted");
+        assertEq(
+            bountyToken1.balanceOf(member1), bountyBalanceBefore + 0.5 ether, "Bounty tokens should be transferred"
+        );
+    }
+
+    function test_CompleteTaskWithoutBounty() public {
+        // Create task without bounty
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("complete_no_bounty_task"), NO_BOUNTY_PROJECT_ID, address(0), 0);
+
+        // Assign and complete task
+        vm.prank(creator1);
+        tm.assignTask(0, member1);
+
+        vm.prank(member1);
+        tm.submitTask(0, bytes("submission"));
+
+        uint256 tokenBalanceBefore = token.balanceOf(member1);
+
+        vm.prank(creator1);
+        tm.completeTask(0);
+
+        // Verify only participation tokens were minted
+        assertEq(token.balanceOf(member1), tokenBalanceBefore + 1 ether, "Participation tokens should be minted");
+        assertEq(bountyToken1.balanceOf(member1), 0, "No bounty tokens should be transferred");
+    }
+
+    function test_UpdateTaskBountyBeforeClaim() public {
+        // Create task with initial bounty
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("update_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
+
+        // Update bounty before claim
+        vm.prank(creator1);
+        tm.updateTask(0, 1 ether, bytes("updated_metadata"), address(bountyToken2), 0.6 ether);
+
+        // Verify bounty was updated
+        (
+            uint256 payout,
+            uint256 bountyPayout,
+            address bountyToken,
+            TaskManager.Status status,
+            address claimer,
+            bytes32 projectId,
+            bool requiresApplication
+        ) = tm.getTaskFull(0);
+        assertEq(bountyPayout, 0.6 ether, "Bounty payout should be updated");
+        assertEq(bountyToken, address(bountyToken2), "Bounty token should be updated");
+    }
+
+    function test_UpdateTaskBountyAfterClaim() public {
+        // Create task with initial bounty
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("update_claimed_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
+
+        // Assign task
+        vm.prank(creator1);
+        tm.assignTask(0, member1);
+
+        // Update bounty after claim (should work)
+        vm.prank(creator1);
+        tm.updateTask(0, 1 ether, bytes("updated_metadata"), address(bountyToken2), 0.6 ether);
+
+        // Complete task and verify new bounty is used
+        vm.prank(member1);
+        tm.submitTask(0, bytes("submission"));
+
+        uint256 bountyBalanceBefore = bountyToken2.balanceOf(member1);
+
+        vm.prank(creator1);
+        tm.completeTask(0);
+
+        assertEq(
+            bountyToken2.balanceOf(member1),
+            bountyBalanceBefore + 0.6 ether,
+            "Updated bounty tokens should be transferred"
+        );
+    }
+
+    function test_UpdateTaskRemoveBounty() public {
+        // Create task with bounty
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("remove_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
+
+        // Remove bounty
+        vm.prank(creator1);
+        tm.updateTask(0, 1 ether, bytes("updated_metadata"), address(0), 0);
+
+        // Verify bounty was removed
+        (
+            uint256 payout,
+            uint256 bountyPayout,
+            address bountyToken,
+            TaskManager.Status status,
+            address claimer,
+            bytes32 projectId,
+            bool requiresApplication
+        ) = tm.getTaskFull(0);
+        assertEq(bountyPayout, 0, "Bounty payout should be zero");
+        assertEq(bountyToken, address(0), "Bounty token should be zero address");
+    }
+
+    function test_CompleteTaskWithDifferentBountyTokens() public {
+        // Create two tasks with different bounty tokens
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("bounty1_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
+
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("bounty2_task"), BOUNTY_PROJECT_ID, address(bountyToken2), 0.4 ether);
+
+        // Complete both tasks
+        vm.startPrank(creator1);
+        tm.assignTask(0, member1);
+        tm.assignTask(1, member1);
+        vm.stopPrank();
+
+        vm.startPrank(member1);
+        tm.submitTask(0, bytes("submission1"));
+        tm.submitTask(1, bytes("submission2"));
+        vm.stopPrank();
+
+        uint256 bounty1Before = bountyToken1.balanceOf(member1);
+        uint256 bounty2Before = bountyToken2.balanceOf(member1);
+
+        vm.startPrank(creator1);
+        tm.completeTask(0);
+        tm.completeTask(1);
+        vm.stopPrank();
+
+        // Verify both bounty tokens were transferred correctly
+        assertEq(bountyToken1.balanceOf(member1), bounty1Before + 0.3 ether, "Bounty token 1 should be transferred");
+        assertEq(bountyToken2.balanceOf(member1), bounty2Before + 0.4 ether, "Bounty token 2 should be transferred");
+    }
+
+    function test_BountyValidationErrors() public {
+        // Test bounty token with zero payout
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.InvalidPayout.selector);
+        tm.createTask(1 ether, bytes("invalid_bounty"), BOUNTY_PROJECT_ID, address(bountyToken1), 0);
+
+        // Test excessive bounty payout
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.InvalidPayout.selector);
+        tm.createTask(1 ether, bytes("excessive_bounty"), BOUNTY_PROJECT_ID, address(bountyToken1), 1e25); // Over MAX_PAYOUT
+
+        // Test that zero bounty token with non-zero payout is allowed (no validation for this case)
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("valid_no_bounty"), BOUNTY_PROJECT_ID, address(0), 0.5 ether);
+
+        // Verify the task was created successfully
+        (
+            uint256 payout,
+            uint256 bountyPayout,
+            address bountyToken,
+            TaskManager.Status status,
+            address claimer,
+            bytes32 projectId,
+            bool requiresApplication
+        ) = tm.getTaskFull(0);
+        assertEq(bountyPayout, 0.5 ether, "Bounty payout should be stored");
+        assertEq(bountyToken, address(0), "Bounty token should be zero address");
+    }
+
+    function test_ApplicationTaskWithBounty() public {
+        // Create application task with bounty
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("app_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
+
+        // Apply for task
+        vm.prank(member1);
+        tm.applyForTask(0, keccak256("application"));
+
+        // Approve application
+        vm.prank(creator1);
+        tm.approveApplication(0, member1);
+
+        // Submit and complete
+        vm.prank(member1);
+        tm.submitTask(0, bytes("submission"));
+
+        uint256 tokenBalanceBefore = token.balanceOf(member1);
+        uint256 bountyBalanceBefore = bountyToken1.balanceOf(member1);
+
+        vm.prank(creator1);
+        tm.completeTask(0);
+
+        // Verify both tokens were transferred
+        assertEq(token.balanceOf(member1), tokenBalanceBefore + 1 ether, "Participation tokens should be minted");
+        assertEq(
+            bountyToken1.balanceOf(member1), bountyBalanceBefore + 0.3 ether, "Bounty tokens should be transferred"
+        );
+    }
+
+    function test_CancelTaskWithBounty() public {
+        // Create task with bounty
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("cancel_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
+
+        // Cancel task
+        vm.prank(creator1);
+        tm.cancelTask(0);
+
+        // Verify task is cancelled and bounty info is preserved
+        (
+            uint256 payout,
+            uint256 bountyPayout,
+            address bountyToken,
+            TaskManager.Status status,
+            address claimer,
+            bytes32 projectId,
+            bool requiresApplication
+        ) = tm.getTaskFull(0);
+        assertEq(uint8(status), uint8(TaskManager.Status.CANCELLED), "Status should be CANCELLED");
+        assertEq(bountyPayout, 0.3 ether, "Bounty payout should be preserved");
+        assertEq(bountyToken, address(bountyToken1), "Bounty token should be preserved");
+    }
+
+    function test_GetTaskFullFunction() public {
+        // Create task with bounty
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("full_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
+
+        // Test getTaskFull function
+        (
+            uint256 payout,
+            uint256 bountyPayout,
+            address bountyToken,
+            TaskManager.Status status,
+            address claimer,
+            bytes32 projectId,
+            bool requiresApplication
+        ) = tm.getTaskFull(0);
+        assertEq(payout, 1 ether, "Payout should be correct");
+        assertEq(bountyPayout, 0.3 ether, "Bounty payout should be correct");
+        assertEq(bountyToken, address(bountyToken1), "Bounty token should be correct");
+        assertEq(uint8(status), uint8(TaskManager.Status.UNCLAIMED), "Status should be correct");
+        assertEq(claimer, address(0), "Claimer should be correct");
+        assertEq(projectId, BOUNTY_PROJECT_ID, "Project ID should be correct");
+        assertEq(requiresApplication, false, "Requires application should be correct");
+
+        // Compare with getTask function (should not include bounty info)
+        (uint256 payout2, TaskManager.Status status2, address claimer2, bytes32 projectId2, bool requiresApplication2) =
+            tm.getTask(0);
+        assertEq(payout2, payout, "getTask payout should match getTaskFull");
+        assertEq(uint8(status2), uint8(status), "getTask status should match getTaskFull");
+        assertEq(claimer2, claimer, "getTask claimer should match getTaskFull");
+        assertEq(projectId2, projectId, "getTask project ID should match getTaskFull");
+        assertEq(requiresApplication2, requiresApplication, "getTask requires application should match getTaskFull");
+    }
+
+    function test_BountyEvents() public {
+        // Create task with bounty
+        vm.prank(creator1);
+        vm.expectEmit(true, true, true, true);
+        emit TaskManager.TaskCreated(0, BOUNTY_PROJECT_ID, 1 ether, bytes("bounty_event_task"));
+        tm.createTask(1 ether, bytes("bounty_event_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
+
+        // Complete task and verify events
+        vm.prank(creator1);
+        tm.assignTask(0, member1);
+
+        vm.prank(member1);
+        tm.submitTask(0, bytes("submission"));
+
+        vm.prank(creator1);
+        vm.expectEmit(true, true, true, true);
+        emit TaskManager.TaskCompleted(0, creator1);
+        tm.completeTask(0);
+    }
+
+    function test_MultipleBountyTokensInProject() public {
+        // Create multiple tasks with different bounty tokens in same project
+        vm.startPrank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.2 ether);
+        tm.createTask(1 ether, bytes("task2"), BOUNTY_PROJECT_ID, address(bountyToken2), 0.3 ether);
+        tm.createTask(1 ether, bytes("task3"), BOUNTY_PROJECT_ID, address(0), 0); // No bounty
+        vm.stopPrank();
+
+        // Complete all tasks
+        vm.startPrank(creator1);
+        tm.assignTask(0, member1);
+        tm.assignTask(1, member1);
+        tm.assignTask(2, member1);
+        vm.stopPrank();
+
+        vm.startPrank(member1);
+        tm.submitTask(0, bytes("submission1"));
+        tm.submitTask(1, bytes("submission2"));
+        tm.submitTask(2, bytes("submission3"));
+        vm.stopPrank();
+
+        uint256 bounty1Before = bountyToken1.balanceOf(member1);
+        uint256 bounty2Before = bountyToken2.balanceOf(member1);
+        uint256 tokenBefore = token.balanceOf(member1);
+
+        vm.startPrank(creator1);
+        tm.completeTask(0);
+        tm.completeTask(1);
+        tm.completeTask(2);
+        vm.stopPrank();
+
+        // Verify all payouts
+        assertEq(bountyToken1.balanceOf(member1), bounty1Before + 0.2 ether, "Bounty token 1 should be transferred");
+        assertEq(bountyToken2.balanceOf(member1), bounty2Before + 0.3 ether, "Bounty token 2 should be transferred");
+        assertEq(token.balanceOf(member1), tokenBefore + 3 ether, "All participation tokens should be minted");
+    }
+
+    function test_BountyTokenTransferFailure() public {
+        // Create a mock token that fails on transfer
+        MockERC20 failingToken = new MockERC20();
+        // Don't mint any tokens to TaskManager, so transfer will fail
+
+        // Create task with failing bounty token
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("failing_bounty_task"), BOUNTY_PROJECT_ID, address(failingToken), 0.3 ether);
+
+        // Assign and submit task
+        vm.prank(creator1);
+        tm.assignTask(0, member1);
+
+        vm.prank(member1);
+        tm.submitTask(0, bytes("submission"));
+
+        // Complete task - should fail due to insufficient bounty tokens
+        vm.prank(creator1);
+        vm.expectRevert(); // Should revert due to transfer failure
+        tm.completeTask(0);
     }
 }
