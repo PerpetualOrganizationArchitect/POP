@@ -171,7 +171,7 @@ contract HybridVotingTest is Test {
 
         vm.stopPrank();
 
-        assertEq(hv.proposalsCount(), 1, "should store proposal");
+        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)), 1, "should store proposal");
     }
 
     function testCreateProposalUnauthorized() public {
@@ -221,7 +221,7 @@ contract HybridVotingTest is Test {
     function _createHatPoll(uint8 opts, uint256[] memory hatIds) internal returns (uint256) {
         vm.prank(alice);
         hv.createHatPoll(bytes("ipfs://test"), 15, opts, hatIds);
-        return hv.proposalsCount() - 1;
+        return abi.decode(hv.getStorage(HybridVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
     }
 
     function _voteYES(address voter) internal {
@@ -357,7 +357,7 @@ contract HybridVotingTest is Test {
 
         vm.prank(newCreator);
         hv.createProposal(bytes("ipfs://test"), 15, 2, batches);
-        assertEq(hv.proposalsCount(), 1);
+        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)), 1);
 
         // Disable new hat
         vm.prank(address(exec));
@@ -523,9 +523,9 @@ contract HybridVotingTest is Test {
         );
 
         uint256 id = _createHatPoll(2, hatIds);
-        assertTrue(hv.pollRestricted(id));
-        assertTrue(hv.pollHatAllowed(id, EXECUTIVE_HAT_ID));
-        assertFalse(hv.pollHatAllowed(id, DEFAULT_HAT_ID));
+        assertTrue(abi.decode(hv.getStorage(HybridVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
+        assertTrue(abi.decode(hv.getStorage(HybridVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, EXECUTIVE_HAT_ID)), (bool)));
+        assertFalse(abi.decode(hv.getStorage(HybridVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, DEFAULT_HAT_ID)), (bool)));
     }
 
     function testHatPollRestrictions() public {
@@ -556,7 +556,7 @@ contract HybridVotingTest is Test {
         // Empty hat IDs should create unrestricted poll
         uint256[] memory hatIds = new uint256[](0);
         uint256 id = _createHatPoll(1, hatIds);
-        assertFalse(hv.pollRestricted(id));
+        assertFalse(abi.decode(hv.getStorage(HybridVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
 
         // Anyone with voting hat should be able to vote
         uint8[] memory idx = new uint8[](1);

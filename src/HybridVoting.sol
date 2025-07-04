@@ -93,7 +93,11 @@ contract HybridVoting is Initializable {
         CREATOR_HATS,
         VOTING_HAT_COUNT,
         DEMOCRACY_HAT_COUNT,
-        CREATOR_HAT_COUNT
+        CREATOR_HAT_COUNT,
+        POLL_HAT_ALLOWED,
+        POLL_RESTRICTED,
+        VERSION,
+        PROPOSALS_COUNT
     }
     function _layout() private pure returns (Layout storage s) {
         assembly {
@@ -554,18 +558,7 @@ contract HybridVoting is Initializable {
         emit ProposalCleaned(id, cleaned);
     }
 
-    /* ─────── View helpers ─────── */
-    function proposalsCount() external view returns (uint256) {
-        return _layout()._proposals.length;
-    }
 
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
-
-    function moduleId() external pure returns (bytes4) {
-        return MODULE_ID;
-    }
 
 
 
@@ -599,22 +592,24 @@ contract HybridVoting is Initializable {
             return abi.encode(HatManager.getHatCount(l.democracyHatIds));
         } else if (key == StorageKey.CREATOR_HAT_COUNT) {
             return abi.encode(HatManager.getHatCount(l.creatorHatIds));
+        } else if (key == StorageKey.POLL_HAT_ALLOWED) {
+            (uint256 id, uint256 hat) = abi.decode(params, (uint256, uint256));
+            if (id >= l._proposals.length) revert InvalidProposal();
+            return abi.encode(l._proposals[id].pollHatAllowed[hat]);
+        } else if (key == StorageKey.POLL_RESTRICTED) {
+            uint256 id = abi.decode(params, (uint256));
+            if (id >= l._proposals.length) revert InvalidProposal();
+            return abi.encode(l._proposals[id].restricted);
+        } else if (key == StorageKey.VERSION) {
+            return abi.encode("v1");
+        } else if (key == StorageKey.PROPOSALS_COUNT) {
+            return abi.encode(l._proposals.length);
         }
         
         revert InvalidIndex();
     }
 
-    function pollHatAllowed(uint256 id, uint256 hat) external view returns (bool) {
-        Layout storage l = _layout();
-        if (id >= l._proposals.length) revert InvalidProposal();
-        return l._proposals[id].pollHatAllowed[hat];
-    }
 
-    function pollRestricted(uint256 id) external view returns (bool) {
-        Layout storage l = _layout();
-        if (id >= l._proposals.length) revert InvalidProposal();
-        return l._proposals[id].restricted;
-    }
 
 
 }
