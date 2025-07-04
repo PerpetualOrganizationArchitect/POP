@@ -33,7 +33,6 @@ contract ParticipationVoting is Initializable {
     error RoleNotAllowed();
 
     /* ───────────── Constants ───────────── */
-    bytes4 public constant MODULE_ID = 0x70766F74; /* "pvot" */
     uint8 public constant MAX_OPTIONS = 50;
     uint8 public constant MAX_CALLS = 20;
     uint32 public constant MAX_DURATION_MIN = 43_200; /* 30 days */
@@ -115,8 +114,7 @@ contract ParticipationVoting is Initializable {
     }
 
     /* ───────────── Events ───────────── */
-    event HatSet(uint256 hat, bool allowed);
-    event CreatorHatSet(uint256 hat, bool allowed);
+    event HatSet(HatType hatType, uint256 hat, bool allowed);
     event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 createdAt);
     event NewHatProposal(
         uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 createdAt, uint256[] hatIds
@@ -129,6 +127,41 @@ contract ParticipationVoting is Initializable {
     event QuorumPercentageSet(uint8 pct);
     event QuadraticToggled(bool enabled);
     event MinBalanceSet(uint256 newMinBalance);
+
+    /* ─────── Hat Management ─────── */
+    enum HatType {
+        VOTING,
+        CREATOR
+    }
+
+    /* ─────── Storage Getter Enum ─────── */
+    enum StorageKey {
+        PARTICIPATION_TOKEN,
+        HATS,
+        EXECUTOR,
+        QUORUM_PERCENTAGE,
+        QUADRATIC_VOTING,
+        MIN_BAL,
+        VOTING_HATS,
+        CREATOR_HATS,
+        VOTING_HAT_COUNT,
+        CREATOR_HAT_COUNT,
+        POLL_HAT_ALLOWED,
+        POLL_RESTRICTED,
+        VERSION,
+        PROPOSALS_COUNT,
+        ALLOWED_TARGET
+    }
+
+    /* ─────── Configuration Setters ─────── */
+    enum ConfigKey {
+        QUORUM,
+        QUADRATIC,
+        MIN_BALANCE,
+        TARGET_ALLOWED,
+        EXECUTOR,
+        HAT_ALLOWED
+    }
 
     modifier onlyExecutor() {
         if (_msgSender() != address(_layout().executor)) revert Unauthorized();
@@ -202,44 +235,45 @@ contract ParticipationVoting is Initializable {
         _unpause();
     }
 
-    function setExecutor(address a) external onlyExecutor {
-        if (a == address(0)) revert ZeroAddress();
-        _layout().executor = IExecutor(a);
-        emit ExecutorUpdated(a);
-    }
 
-    function setHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        HatManager.setHatInArray(_layout().votingHatIds, h, ok);
-        emit HatSet(h, ok);
-    }
-
-    function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        HatManager.setHatInArray(_layout().creatorHatIds, h, ok);
-        emit CreatorHatSet(h, ok);
-    }
-
-    function setTargetAllowed(address t, bool ok) external onlyExecutor {
-        if (t == address(0)) revert ZeroAddress();
-        _layout().allowedTarget[t] = ok;
-        emit TargetAllowed(t, ok);
-    }
-
-    function setQuorumPercentage(uint8 q) external onlyExecutor {
-        VotingMath.validateQuorum(q);
-        _layout().quorumPercentage = q;
-        emit QuorumPercentageSet(q);
-    }
-
-    function toggleQuadratic() external onlyExecutor {
+    function setConfig(ConfigKey key, bytes calldata value) external onlyExecutor {
         Layout storage l = _layout();
-        l.quadraticVoting = !l.quadraticVoting;
-        emit QuadraticToggled(l.quadraticVoting);
-    }
-
-    function setMinBalance(uint256 n) external onlyExecutor {
-        VotingMath.validateMinBalance(n);
-        _layout().MIN_BAL = n;
-        emit MinBalanceSet(n);
+        
+        if (key == ConfigKey.QUORUM) {
+            uint8 q = abi.decode(value, (uint8));
+            VotingMath.validateQuorum(q);
+            l.quorumPercentage = q;
+            emit QuorumPercentageSet(q);
+        } else if (key == ConfigKey.QUADRATIC) {
+            bool enabled = abi.decode(value, (bool));
+            l.quadraticVoting = enabled;
+            emit QuadraticToggled(enabled);
+        } else if (key == ConfigKey.MIN_BALANCE) {
+            uint256 n = abi.decode(value, (uint256));
+            VotingMath.validateMinBalance(n);
+            l.MIN_BAL = n;
+            emit MinBalanceSet(n);
+        } else if (key == ConfigKey.TARGET_ALLOWED) {
+            (address target, bool allowed) = abi.decode(value, (address, bool));
+            if (target == address(0)) revert ZeroAddress();
+            l.allowedTarget[target] = allowed;
+            emit TargetAllowed(target, allowed);
+        } else if (key == ConfigKey.EXECUTOR) {
+            address newExecutor = abi.decode(value, (address));
+            if (newExecutor == address(0)) revert ZeroAddress();
+            l.executor = IExecutor(newExecutor);
+            emit ExecutorUpdated(newExecutor);
+        } else if (key == ConfigKey.HAT_ALLOWED) {
+            (HatType hatType, uint256 hat, bool allowed) = abi.decode(value, (HatType, uint256, bool));
+            
+            if (hatType == HatType.VOTING) {
+                HatManager.setHatInArray(l.votingHatIds, hat, allowed);
+            } else if (hatType == HatType.CREATOR) {
+                HatManager.setHatInArray(l.creatorHatIds, hat, allowed);
+            }
+            
+            emit HatSet(hatType, hat, allowed);
+        }
     }
 
     /* ───────────── Modifiers ───────────── */
@@ -248,15 +282,6 @@ contract ParticipationVoting is Initializable {
         if (_msgSender() != address(l.executor)) {
             bool canCreate = HatManager.hasAnyHat(l.hats, l.creatorHatIds, _msgSender());
             if (!canCreate) revert Unauthorized();
-        }
-        _;
-    }
-
-    modifier onlyVoter() {
-        Layout storage l = _layout();
-        if (_msgSender() != address(l.executor)) {
-            bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
-            if (!canVote) revert Unauthorized();
         }
         _;
     }
@@ -356,12 +381,14 @@ contract ParticipationVoting is Initializable {
         external
         exists(id)
         notExpired(id)
-        onlyVoter
         whenNotPaused
     {
-        if (idxs.length != weights.length) revert LengthMismatch();
-
         Layout storage l = _layout();
+        if (_msgSender() != address(l.executor)) {
+            bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
+            if (!canVote) revert Unauthorized();
+        }
+        if (idxs.length != weights.length) revert LengthMismatch();
 
         uint256 bal = l.participationToken.balanceOf(_msgSender());
         VotingMath.checkMinBalance(bal, l.MIN_BAL);
@@ -451,25 +478,69 @@ contract ParticipationVoting is Initializable {
     }
 
     /* ─────────── Cleanup ─────────── */
-    function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
+    // function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
+    //     Layout storage l = _layout();
+    //     Proposal storage p = l._proposals[id];
+    //     require(p.batches.length > 0 || voters.length > 0, "nothing");
+    //     uint256 cleaned;
+    //     uint256 len = voters.length;
+    //     for (uint256 i; i < len && i < 4_000;) {
+    //         if (p.hasVoted[voters[i]]) {
+    //             delete p.hasVoted[voters[i]];
+    //             unchecked {
+    //                 ++cleaned;
+    //             }
+    //         }
+    //         unchecked {
+    //             ++i;
+    //         }
+    //     }
+    //     if (cleaned == 0 && p.batches.length > 0) delete p.batches;
+    //     emit ProposalCleaned(id, cleaned);
+    // }
+
+    /* ─────── Unified Storage Getter ─────── */
+    function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
         Layout storage l = _layout();
-        Proposal storage p = l._proposals[id];
-        require(p.batches.length > 0 || voters.length > 0, "nothing");
-        uint256 cleaned;
-        uint256 len = voters.length;
-        for (uint256 i; i < len && i < 4_000;) {
-            if (p.hasVoted[voters[i]]) {
-                delete p.hasVoted[voters[i]];
-                unchecked {
-                    ++cleaned;
-                }
-            }
-            unchecked {
-                ++i;
-            }
+        
+        if (key == StorageKey.PARTICIPATION_TOKEN) {
+            return abi.encode(l.participationToken);
+        } else if (key == StorageKey.HATS) {
+            return abi.encode(l.hats);
+        } else if (key == StorageKey.EXECUTOR) {
+            return abi.encode(l.executor);
+        } else if (key == StorageKey.QUORUM_PERCENTAGE) {
+            return abi.encode(l.quorumPercentage);
+        } else if (key == StorageKey.QUADRATIC_VOTING) {
+            return abi.encode(l.quadraticVoting);
+        } else if (key == StorageKey.MIN_BAL) {
+            return abi.encode(l.MIN_BAL);
+        } else if (key == StorageKey.VOTING_HATS) {
+            return abi.encode(HatManager.getHatArray(l.votingHatIds));
+        } else if (key == StorageKey.CREATOR_HATS) {
+            return abi.encode(HatManager.getHatArray(l.creatorHatIds));
+        } else if (key == StorageKey.VOTING_HAT_COUNT) {
+            return abi.encode(HatManager.getHatCount(l.votingHatIds));
+        } else if (key == StorageKey.CREATOR_HAT_COUNT) {
+            return abi.encode(HatManager.getHatCount(l.creatorHatIds));
+        } else if (key == StorageKey.POLL_HAT_ALLOWED) {
+            (uint256 id, uint256 hat) = abi.decode(params, (uint256, uint256));
+            if (id >= l._proposals.length) revert InvalidProposal();
+            return abi.encode(l._proposals[id].pollHatAllowed[hat]);
+        } else if (key == StorageKey.POLL_RESTRICTED) {
+            uint256 id = abi.decode(params, (uint256));
+            if (id >= l._proposals.length) revert InvalidProposal();
+            return abi.encode(l._proposals[id].restricted);
+        } else if (key == StorageKey.VERSION) {
+            return abi.encode("v1");
+        } else if (key == StorageKey.PROPOSALS_COUNT) {
+            return abi.encode(l._proposals.length);
+        } else if (key == StorageKey.ALLOWED_TARGET) {
+            address target = abi.decode(params, (address));
+            return abi.encode(l.allowedTarget[target]);
         }
-        if (cleaned == 0 && p.batches.length > 0) delete p.batches;
-        emit ProposalCleaned(id, cleaned);
+        
+        revert InvalidIndex();
     }
 
     /* ───────────── View helpers ───────────── */
@@ -495,81 +566,5 @@ contract ParticipationVoting is Initializable {
         ok = (uint256(high) * 100 > uint256(p.totalWeight) * l.quorumPercentage) && (high > second);
     }
 
-    function proposalsCount() external view returns (uint256) {
-        return _layout()._proposals.length;
-    }
 
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
-
-    function moduleId() external pure returns (bytes4) {
-        return MODULE_ID;
-    }
-
-    /* ─────────── Public getters for storage variables ─────────── */
-    function MIN_BAL() external view returns (uint256) {
-        return _layout().MIN_BAL;
-    }
-
-    function participationToken() external view returns (IERC20) {
-        return _layout().participationToken;
-    }
-
-    function hats() external view returns (IHats) {
-        return _layout().hats;
-    }
-
-    function executor() external view returns (IExecutor) {
-        return _layout().executor;
-    }
-
-    function allowedTarget(address target) external view returns (bool) {
-        return _layout().allowedTarget[target];
-    }
-
-    function quorumPercentage() external view returns (uint8) {
-        return _layout().quorumPercentage;
-    }
-
-    function quadraticVoting() external view returns (bool) {
-        return _layout().quadraticVoting;
-    }
-
-    function pollHatAllowed(uint256 id, uint256 hat) external view returns (bool) {
-        Layout storage l = _layout();
-        if (id >= l._proposals.length) revert InvalidProposal();
-        return l._proposals[id].pollHatAllowed[hat];
-    }
-
-    function pollRestricted(uint256 id) external view returns (bool) {
-        Layout storage l = _layout();
-        if (id >= l._proposals.length) revert InvalidProposal();
-        return l._proposals[id].restricted;
-    }
-
-    /* ───────────── Hat Management View Functions ───────────── */
-    function getVotingHats() external view returns (uint256[] memory) {
-        return HatManager.getHatArray(_layout().votingHatIds);
-    }
-
-    function getCreatorHats() external view returns (uint256[] memory) {
-        return HatManager.getHatArray(_layout().creatorHatIds);
-    }
-
-    function votingHatCount() external view returns (uint256) {
-        return HatManager.getHatCount(_layout().votingHatIds);
-    }
-
-    function creatorHatCount() external view returns (uint256) {
-        return HatManager.getHatCount(_layout().creatorHatIds);
-    }
-
-    function isVotingHat(uint256 hatId) external view returns (bool) {
-        return HatManager.isHatInArray(_layout().votingHatIds, hatId);
-    }
-
-    function isCreatorHat(uint256 hatId) external view returns (bool) {
-        return HatManager.isHatInArray(_layout().creatorHatIds, hatId);
-    }
 }

@@ -60,26 +60,26 @@ contract HatManagerTest is Test {
 
     function testInitialHatConfiguration() public {
         // Test initial hat setup
-        uint256[] memory votingHats = dd.getVotingHats();
-        uint256[] memory creatorHats = dd.getCreatorHats();
+        uint256[] memory votingHats = abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.VOTING_HATS, ""), (uint256[]));
+        uint256[] memory creatorHats = abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.CREATOR_HATS, ""), (uint256[]));
 
         assertEq(votingHats.length, 1);
         assertEq(votingHats[0], VOTING_HAT_1);
         assertEq(creatorHats.length, 1);
         assertEq(creatorHats[0], CREATOR_HAT_1);
 
-        assertEq(dd.votingHatCount(), 1);
-        assertEq(dd.creatorHatCount(), 1);
+        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.VOTING_HAT_COUNT, ""), (uint256)), 1);
+        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.CREATOR_HAT_COUNT, ""), (uint256)), 1);
     }
 
     function testAddVotingHat() public {
         // Add a second voting hat
         vm.prank(address(exec));
-        dd.setHatAllowed(VOTING_HAT_2, true);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, VOTING_HAT_2, true));
 
-        uint256[] memory votingHats = dd.getVotingHats();
+        uint256[] memory votingHats = abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.VOTING_HATS, ""), (uint256[]));
         assertEq(votingHats.length, 2);
-        assertEq(dd.votingHatCount(), 2);
+        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.VOTING_HAT_COUNT, ""), (uint256)), 2);
 
         // Verify both hats are present
         bool foundHat1 = false;
@@ -95,27 +95,27 @@ contract HatManagerTest is Test {
     function testRemoveVotingHat() public {
         // Add a second hat first
         vm.prank(address(exec));
-        dd.setHatAllowed(VOTING_HAT_2, true);
-        assertEq(dd.votingHatCount(), 2);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, VOTING_HAT_2, true));
+        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.VOTING_HAT_COUNT, ""), (uint256)), 2);
 
         // Remove the first hat
         vm.prank(address(exec));
-        dd.setHatAllowed(VOTING_HAT_1, false);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, VOTING_HAT_1, false));
 
-        uint256[] memory votingHats = dd.getVotingHats();
+        uint256[] memory votingHats = abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.VOTING_HATS, ""), (uint256[]));
         assertEq(votingHats.length, 1);
         assertEq(votingHats[0], VOTING_HAT_2);
-        assertEq(dd.votingHatCount(), 1);
+        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.VOTING_HAT_COUNT, ""), (uint256)), 1);
     }
 
     function testAddCreatorHat() public {
         // Add a second creator hat
         vm.prank(address(exec));
-        dd.setCreatorHatAllowed(CREATOR_HAT_2, true);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.CREATOR, CREATOR_HAT_2, true));
 
-        uint256[] memory creatorHats = dd.getCreatorHats();
+        uint256[] memory creatorHats = abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.CREATOR_HATS, ""), (uint256[]));
         assertEq(creatorHats.length, 2);
-        assertEq(dd.creatorHatCount(), 2);
+        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.CREATOR_HAT_COUNT, ""), (uint256)), 2);
     }
 
     function testVotingPermissions() public {
@@ -125,7 +125,7 @@ contract HatManagerTest is Test {
 
         vm.prank(creator);
         dd.createProposal("test", 10, 1, batches);
-        assertEq(dd.proposalsCount(), 1);
+        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)), 1);
 
         // Voter should be able to vote
         uint8[] memory idx = new uint8[](1);
@@ -140,7 +140,7 @@ contract HatManagerTest is Test {
     function testPermissionDeniedAfterHatRemoval() public {
         // Remove voting hat from creator
         vm.prank(address(exec));
-        dd.setHatAllowed(VOTING_HAT_1, false);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, VOTING_HAT_1, false));
 
         // Creator should still be able to create (has creator hat)
         IExecutor.Call[][] memory batches = new IExecutor.Call[][](1);
@@ -164,7 +164,7 @@ contract HatManagerTest is Test {
         // Add second voting hat and give it to admin
         hats.mintHat(VOTING_HAT_2, admin);
         vm.prank(address(exec));
-        dd.setHatAllowed(VOTING_HAT_2, true);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, VOTING_HAT_2, true));
 
         // Admin should now be able to vote with the new hat
         IExecutor.Call[][] memory batches = new IExecutor.Call[][](1);
@@ -187,25 +187,25 @@ contract HatManagerTest is Test {
         emit HatManager.HatToggled(VOTING_HAT_2, true);
 
         vm.prank(address(exec));
-        dd.setHatAllowed(VOTING_HAT_2, true);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, VOTING_HAT_2, true));
 
         // Test creator hat event
         vm.expectEmit(true, true, false, false);
         emit HatManager.HatToggled(CREATOR_HAT_2, true);
 
         vm.prank(address(exec));
-        dd.setCreatorHatAllowed(CREATOR_HAT_2, true);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.CREATOR, CREATOR_HAT_2, true));
     }
 
     function testUnauthorizedHatManagement() public {
         // Non-executor should not be able to manage hats
         vm.prank(voter);
         vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
-        dd.setHatAllowed(999, true);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, 999, true));
 
         vm.prank(creator);
         vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
-        dd.setCreatorHatAllowed(999, true);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.CREATOR, 999, true));
     }
 
     function testHatArraysEmptyInitially() public {
@@ -219,11 +219,11 @@ contract HatManagerTest is Test {
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), data);
         DirectDemocracyVoting newDD = DirectDemocracyVoting(address(proxy));
 
-        assertEq(newDD.votingHatCount(), 0);
-        assertEq(newDD.creatorHatCount(), 0);
+        assertEq(abi.decode(newDD.getStorage(DirectDemocracyVoting.StorageKey.VOTING_HAT_COUNT, ""), (uint256)), 0);
+        assertEq(abi.decode(newDD.getStorage(DirectDemocracyVoting.StorageKey.CREATOR_HAT_COUNT, ""), (uint256)), 0);
 
-        uint256[] memory votingHats = newDD.getVotingHats();
-        uint256[] memory creatorHats = newDD.getCreatorHats();
+        uint256[] memory votingHats = abi.decode(newDD.getStorage(DirectDemocracyVoting.StorageKey.VOTING_HATS, ""), (uint256[]));
+        uint256[] memory creatorHats = abi.decode(newDD.getStorage(DirectDemocracyVoting.StorageKey.CREATOR_HATS, ""), (uint256[]));
 
         assertEq(votingHats.length, 0);
         assertEq(creatorHats.length, 0);
