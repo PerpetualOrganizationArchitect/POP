@@ -159,7 +159,8 @@ contract ParticipationVoting is Initializable {
         QUADRATIC,
         MIN_BALANCE,
         TARGET_ALLOWED,
-        EXECUTOR
+        EXECUTOR,
+        HAT_ALLOWED
     }
 
     modifier onlyExecutor() {
@@ -234,47 +235,6 @@ contract ParticipationVoting is Initializable {
         _unpause();
     }
 
-    function setExecutor(address a) external onlyExecutor {
-        if (a == address(0)) revert ZeroAddress();
-        _layout().executor = IExecutor(a);
-        emit ExecutorUpdated(a);
-    }
-
-    function setHatAllowed(HatType hatType, uint256 h, bool ok) external onlyExecutor {
-        Layout storage l = _layout();
-        
-        if (hatType == HatType.VOTING) {
-            HatManager.setHatInArray(l.votingHatIds, h, ok);
-        } else if (hatType == HatType.CREATOR) {
-            HatManager.setHatInArray(l.creatorHatIds, h, ok);
-        }
-        
-        emit HatSet(hatType, h, ok);
-    }
-
-    function setTargetAllowed(address t, bool ok) external onlyExecutor {
-        if (t == address(0)) revert ZeroAddress();
-        _layout().allowedTarget[t] = ok;
-        emit TargetAllowed(t, ok);
-    }
-
-    function setQuorumPercentage(uint8 q) external onlyExecutor {
-        VotingMath.validateQuorum(q);
-        _layout().quorumPercentage = q;
-        emit QuorumPercentageSet(q);
-    }
-
-    function toggleQuadratic() external onlyExecutor {
-        Layout storage l = _layout();
-        l.quadraticVoting = !l.quadraticVoting;
-        emit QuadraticToggled(l.quadraticVoting);
-    }
-
-    function setMinBalance(uint256 n) external onlyExecutor {
-        VotingMath.validateMinBalance(n);
-        _layout().MIN_BAL = n;
-        emit MinBalanceSet(n);
-    }
 
     function setConfig(ConfigKey key, bytes calldata value) external onlyExecutor {
         Layout storage l = _layout();
@@ -303,6 +263,16 @@ contract ParticipationVoting is Initializable {
             if (newExecutor == address(0)) revert ZeroAddress();
             l.executor = IExecutor(newExecutor);
             emit ExecutorUpdated(newExecutor);
+        } else if (key == ConfigKey.HAT_ALLOWED) {
+            (HatType hatType, uint256 hat, bool allowed) = abi.decode(value, (HatType, uint256, bool));
+            
+            if (hatType == HatType.VOTING) {
+                HatManager.setHatInArray(l.votingHatIds, hat, allowed);
+            } else if (hatType == HatType.CREATOR) {
+                HatManager.setHatInArray(l.creatorHatIds, hat, allowed);
+            }
+            
+            emit HatSet(hatType, hat, allowed);
         }
     }
 
@@ -312,15 +282,6 @@ contract ParticipationVoting is Initializable {
         if (_msgSender() != address(l.executor)) {
             bool canCreate = HatManager.hasAnyHat(l.hats, l.creatorHatIds, _msgSender());
             if (!canCreate) revert Unauthorized();
-        }
-        _;
-    }
-
-    modifier onlyVoter() {
-        Layout storage l = _layout();
-        if (_msgSender() != address(l.executor)) {
-            bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
-            if (!canVote) revert Unauthorized();
         }
         _;
     }
@@ -420,12 +381,14 @@ contract ParticipationVoting is Initializable {
         external
         exists(id)
         notExpired(id)
-        onlyVoter
         whenNotPaused
     {
-        if (idxs.length != weights.length) revert LengthMismatch();
-
         Layout storage l = _layout();
+        if (_msgSender() != address(l.executor)) {
+            bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
+            if (!canVote) revert Unauthorized();
+        }
+        if (idxs.length != weights.length) revert LengthMismatch();
 
         uint256 bal = l.participationToken.balanceOf(_msgSender());
         VotingMath.checkMinBalance(bal, l.MIN_BAL);
@@ -515,26 +478,26 @@ contract ParticipationVoting is Initializable {
     }
 
     /* ─────────── Cleanup ─────────── */
-    function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
-        Layout storage l = _layout();
-        Proposal storage p = l._proposals[id];
-        require(p.batches.length > 0 || voters.length > 0, "nothing");
-        uint256 cleaned;
-        uint256 len = voters.length;
-        for (uint256 i; i < len && i < 4_000;) {
-            if (p.hasVoted[voters[i]]) {
-                delete p.hasVoted[voters[i]];
-                unchecked {
-                    ++cleaned;
-                }
-            }
-            unchecked {
-                ++i;
-            }
-        }
-        if (cleaned == 0 && p.batches.length > 0) delete p.batches;
-        emit ProposalCleaned(id, cleaned);
-    }
+    // function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
+    //     Layout storage l = _layout();
+    //     Proposal storage p = l._proposals[id];
+    //     require(p.batches.length > 0 || voters.length > 0, "nothing");
+    //     uint256 cleaned;
+    //     uint256 len = voters.length;
+    //     for (uint256 i; i < len && i < 4_000;) {
+    //         if (p.hasVoted[voters[i]]) {
+    //             delete p.hasVoted[voters[i]];
+    //             unchecked {
+    //                 ++cleaned;
+    //             }
+    //         }
+    //         unchecked {
+    //             ++i;
+    //         }
+    //     }
+    //     if (cleaned == 0 && p.batches.length > 0) delete p.batches;
+    //     emit ProposalCleaned(id, cleaned);
+    // }
 
     /* ─────── Unified Storage Getter ─────── */
     function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
