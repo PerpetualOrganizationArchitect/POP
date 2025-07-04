@@ -7,6 +7,8 @@ import "forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {TaskManager} from "../src/TaskManager.sol";
 import {TaskPerm} from "../src/libs/TaskPerm.sol";
+import {BudgetLib} from "../src/libs/BudgetLib.sol";
+import {ValidationLib} from "../src/libs/ValidationLib.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {MockHats} from "./mocks/MockHats.sol";
 
@@ -201,7 +203,7 @@ contract TaskManagerTest is Test {
 
         // next task (1 wei over budget) reverts
         vm.prank(pm1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createTask(1, bytes("c"), CAPPED_ID, address(0), 0);
     }
 
@@ -310,7 +312,7 @@ contract TaskManagerTest is Test {
 
         // try lowering cap below spent
         vm.prank(executor);
-        vm.expectRevert(TaskManager.CapBelowCommitted.selector);
+        vm.expectRevert(ValidationLib.CapBelowCommitted.selector);
         tm.updateProjectCap(BUD_ID, 1 ether);
     }
 
@@ -653,7 +655,7 @@ contract TaskManagerTest is Test {
 
         // Test trying to exceed PROJECT_B budget
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createTask(1 ether + 1, bytes("task2_B"), PROJECT_B_ID, address(0), 0); // Would exceed cap
 
         // Complete task from PROJECT_C
@@ -948,7 +950,7 @@ contract TaskManagerTest is Test {
 
         // Verify we can't exceed cap
         vm.prank(pms[0]);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createTask(1 ether, bytes("exceeds_cap"), CAPPED_BIG_ID, address(0), 0);
 
         // Verify task counts and budget usage
@@ -1006,16 +1008,7 @@ contract TaskManagerTest is Test {
         (uint256 cap, uint256 spent,) = tm.getProjectInfo(TO_DELETE_ID);
         assertEq(spent, 1 ether, "Project spent should only reflect completed task");
 
-        // Try to delete - should fail because cap (3 ether) != spent (1 ether)
-        vm.prank(creator1);
-        vm.expectRevert(TaskManager.CapBelowCommitted.selector);
-        tm.deleteProject(TO_DELETE_ID, bytes("TO_DELETE"));
-
-        // Update the cap to match spent amount
-        vm.prank(executor);
-        tm.updateProjectCap(TO_DELETE_ID, 1 ether);
-
-        // Now deletion should succeed
+        // Deletion should succeed because cap (3 ether) >= spent (1 ether)
         vm.prank(creator1);
         tm.deleteProject(TO_DELETE_ID, bytes("TO_DELETE"));
 
@@ -1541,22 +1534,22 @@ contract TaskManagerTest is Test {
 
         // Test zero address assignee
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.ZeroAddress.selector);
+        vm.expectRevert(ValidationLib.ZeroAddress.selector);
         tm.createAndAssignTask(1 ether, bytes("test"), projectId, address(0), address(0), 0);
 
         // Test zero payout
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.InvalidPayout.selector);
+        vm.expectRevert(ValidationLib.InvalidPayout.selector);
         tm.createAndAssignTask(0, bytes("test"), projectId, member1, address(0), 0);
 
         // Test excessive payout
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.InvalidPayout.selector);
+        vm.expectRevert(ValidationLib.InvalidPayout.selector);
         tm.createAndAssignTask(1e25, bytes("test"), projectId, member1, address(0), 0); // Over MAX_PAYOUT
 
         // Test empty metadata
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.InvalidString.selector);
+        vm.expectRevert(ValidationLib.InvalidString.selector);
         tm.createAndAssignTask(1 ether, bytes(""), projectId, member1, address(0), 0);
 
         // Test non-existent project - this will fail with Unauthorized because permission check happens first
@@ -1591,7 +1584,7 @@ contract TaskManagerTest is Test {
 
         // Try to create third task that would exceed budget
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createAndAssignTask(1 ether, bytes("task3"), projectId, member1, address(0), 0);
 
         // Verify project budget tracking
@@ -1924,7 +1917,7 @@ contract TaskManagerTest is Test {
 
         // Test empty application hash
         vm.prank(member1);
-        vm.expectRevert(TaskManager.InvalidString.selector);
+        vm.expectRevert(ValidationLib.InvalidString.selector);
         tm.applyForTask(0, bytes32(0));
 
         // Test applying twice by same user
@@ -2952,17 +2945,17 @@ contract TaskManagerBountyTest is Test {
     function test_BountyValidationErrors() public {
         // Test bounty token with zero payout
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.InvalidPayout.selector);
+        vm.expectRevert(ValidationLib.InvalidPayout.selector);
         tm.createTask(1 ether, bytes("invalid_bounty"), BOUNTY_PROJECT_ID, address(bountyToken1), 0);
 
         // Test excessive bounty payout
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.InvalidPayout.selector);
+        vm.expectRevert(ValidationLib.InvalidPayout.selector);
         tm.createTask(1 ether, bytes("excessive_bounty"), BOUNTY_PROJECT_ID, address(bountyToken1), 1e25); // Over MAX_PAYOUT
 
         // Test that zero bounty token with non-zero payout is not allowed
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.ZeroAddress.selector);
+        vm.expectRevert(ValidationLib.ZeroAddress.selector);
         tm.createTask(1 ether, bytes("invalid_zero_token"), BOUNTY_PROJECT_ID, address(0), 0.5 ether);
     }
 
@@ -3264,12 +3257,12 @@ contract TaskManagerBountyBudgetTest is Test {
     function test_SetBountyCapValidation() public {
         // Test zero address token
         vm.prank(executor);
-        vm.expectRevert(TaskManager.ZeroAddress.selector);
+        vm.expectRevert(ValidationLib.ZeroAddress.selector);
         tm.setBountyCap(BUDGET_PROJECT_ID, address(0), 5 ether);
 
         // Test excessive cap
         vm.prank(executor);
-        vm.expectRevert(TaskManager.InvalidPayout.selector);
+        vm.expectRevert(ValidationLib.InvalidPayout.selector);
         tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 1e25); // Over MAX_PAYOUT
 
         // Test non-existent project
@@ -3280,7 +3273,7 @@ contract TaskManagerBountyBudgetTest is Test {
 
     function test_GetBountyBudgetValidation() public {
         // Test zero address token
-        vm.expectRevert(TaskManager.ZeroAddress.selector);
+        vm.expectRevert(ValidationLib.ZeroAddress.selector);
         tm.getBountyBudget(BUDGET_PROJECT_ID, address(0));
 
         // Test non-existent project
@@ -3312,7 +3305,7 @@ contract TaskManagerBountyBudgetTest is Test {
 
         // Try to exceed budget
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createTask(1 ether, bytes("task3"), BUDGET_PROJECT_ID, address(bountyToken1), 0.1 ether);
     }
 
@@ -3359,7 +3352,7 @@ contract TaskManagerBountyBudgetTest is Test {
 
         // Try to exceed token1 budget
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createTask(1 ether, bytes("task4"), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 0.1 ether);
 
         // But token2 should still work
@@ -3393,7 +3386,7 @@ contract TaskManagerBountyBudgetTest is Test {
 
         // Try to update to exceed budget
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.updateTask(0, 1 ether, bytes("updated2"), address(bountyToken1), 5.1 ether);
     }
 
@@ -3486,7 +3479,7 @@ contract TaskManagerBountyBudgetTest is Test {
 
         // Try to exceed budget with another task
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createAndAssignTask(
             1 ether, bytes("assign_task2"), BUDGET_PROJECT_ID, member1, address(bountyToken1), 2.1 ether
         );
@@ -3507,7 +3500,7 @@ contract TaskManagerBountyBudgetTest is Test {
 
         // Try to create another task that would exceed budget
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createApplicationTask(1 ether, bytes("app_task2"), BUDGET_PROJECT_ID, address(bountyToken1), 1.1 ether);
     }
 
@@ -3522,7 +3515,7 @@ contract TaskManagerBountyBudgetTest is Test {
 
         // Try to set cap below spent amount
         vm.prank(executor);
-        vm.expectRevert(TaskManager.CapBelowCommitted.selector);
+        vm.expectRevert(ValidationLib.CapBelowCommitted.selector);
         tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
 
         // Setting cap equal to spent should work
@@ -3573,12 +3566,12 @@ contract TaskManagerBountyBudgetTest is Test {
 
         // Try to exceed participation token budget
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createTask(0.6 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 0.5 ether);
 
         // Create task that only exceeds bounty budget
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createTask(0.5 ether, bytes("task3"), BUDGET_PROJECT_ID, address(bountyToken1), 1.1 ether);
     }
 
@@ -3698,15 +3691,15 @@ contract TaskManagerBountyBudgetTest is Test {
 
         // Try to exceed budgets
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createTask(0.1 ether, bytes("fail1"), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 7.6 ether);
 
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createTask(0.1 ether, bytes("fail2"), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 11.1 ether);
 
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createTask(0.1 ether, bytes("fail3"), MULTI_TOKEN_PROJECT_ID, address(bountyToken3), 14.1 ether);
     }
 
