@@ -29,7 +29,6 @@ contract HybridVoting is Initializable {
     error Paused();
 
     /* ─────── Constants ─────── */
-    bytes4 public constant MODULE_ID = 0x68766f74; /* "hfot" */
     uint8 public constant MAX_OPTIONS = 50;
     uint8 public constant MAX_CALLS = 20;
     uint32 public constant MAX_DURATION = 43_200; /* 30 days */
@@ -517,35 +516,35 @@ contract HybridVoting is Initializable {
     }
 
     /* ─────── Cleanup (storage‑refund helper) ─────── */
-    function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
-        Layout storage l = _layout();
-        Proposal storage p = l._proposals[id];
+    // function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
+    //     Layout storage l = _layout();
+    //     Proposal storage p = l._proposals[id];
 
-        // nothing to do?
-        require(p.batches.length > 0 || voters.length > 0, "nothing");
+    //     // nothing to do?
+    //     require(p.batches.length > 0 || voters.length > 0, "nothing");
 
-        uint256 cleaned;
-        // cap loop to stay well below the 4 million refund limit
-        uint256 len = voters.length;
-        for (uint256 i; i < len && i < 4_000;) {
-            if (p.hasVoted[voters[i]]) {
-                delete p.hasVoted[voters[i]];
-                unchecked {
-                    ++cleaned;
-                }
-            }
-            unchecked {
-                ++i;
-            }
-        }
+    //     uint256 cleaned;
+    //     // cap loop to stay well below the 4 million refund limit
+    //     uint256 len = voters.length;
+    //     for (uint256 i; i < len && i < 4_000;) {
+    //         if (p.hasVoted[voters[i]]) {
+    //             delete p.hasVoted[voters[i]];
+    //             unchecked {
+    //                 ++cleaned;
+    //             }
+    //         }
+    //         unchecked {
+    //             ++i;
+    //         }
+    //     }
 
-        // once all voters are wiped you can also clear the call‑batches
-        if (cleaned == 0 && p.batches.length > 0) {
-            delete p.batches;
-        }
+    //     // once all voters are wiped you can also clear the call‑batches
+    //     if (cleaned == 0 && p.batches.length > 0) {
+    //         delete p.batches;
+    //     }
 
-        emit ProposalCleaned(id, cleaned);
-    }
+    //     emit ProposalCleaned(id, cleaned);
+    // }
 
     /* ─────── Unified Storage Getter ─────── */
     function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
