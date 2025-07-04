@@ -393,18 +393,16 @@ contract TaskManagerTest is Test {
         assertEq(spent, 2 ether);
     }
 
-    function test_UpdateTaskAfterClaimOnlyIPFS() public {
+    function test_UpdateTaskAfterClaimReverts() public {
         uint256 id = _prepareFlow();
 
         vm.prank(member1);
         tm.claimTask(id);
 
-        // attempt to change payout should still emit but NOT change storage
+        // attempt to update claimed task should revert
         vm.prank(pm1);
+        vm.expectRevert(TaskManager.AlreadyClaimed.selector);
         tm.updateTask(id, 5 ether, bytes("newhash"), address(0), 0);
-
-        (uint256 payout,,,,) = tm.getTask(id);
-        assertEq(payout, 1 ether, "payout unchanged");
     }
 
     function test_CancelTaskSpentUnderflowProtection() public {
@@ -2881,7 +2879,7 @@ contract TaskManagerBountyTest is Test {
         assertEq(bountyToken, address(bountyToken2), "Bounty token should be updated");
     }
 
-    function test_UpdateTaskBountyAfterClaim() public {
+    function test_UpdateTaskBountyAfterClaimReverts() public {
         // Create task with initial bounty
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("update_claimed_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
@@ -2890,24 +2888,10 @@ contract TaskManagerBountyTest is Test {
         vm.prank(creator1);
         tm.assignTask(0, member1);
 
-        // Update bounty after claim (should work)
+        // Update bounty after claim should revert
         vm.prank(creator1);
+        vm.expectRevert(TaskManager.AlreadyClaimed.selector);
         tm.updateTask(0, 1 ether, bytes("updated_metadata"), address(bountyToken2), 0.6 ether);
-
-        // Complete task and verify new bounty is used
-        vm.prank(member1);
-        tm.submitTask(0, bytes("submission"));
-
-        uint256 bountyBalanceBefore = bountyToken2.balanceOf(member1);
-
-        vm.prank(creator1);
-        tm.completeTask(0);
-
-        assertEq(
-            bountyToken2.balanceOf(member1),
-            bountyBalanceBefore + 0.6 ether,
-            "Updated bounty tokens should be transferred"
-        );
     }
 
     function test_UpdateTaskRemoveBounty() public {
@@ -2976,22 +2960,10 @@ contract TaskManagerBountyTest is Test {
         vm.expectRevert(TaskManager.InvalidPayout.selector);
         tm.createTask(1 ether, bytes("excessive_bounty"), BOUNTY_PROJECT_ID, address(bountyToken1), 1e25); // Over MAX_PAYOUT
 
-        // Test that zero bounty token with non-zero payout is allowed (no validation for this case)
+        // Test that zero bounty token with non-zero payout is not allowed
         vm.prank(creator1);
-        tm.createTask(1 ether, bytes("valid_no_bounty"), BOUNTY_PROJECT_ID, address(0), 0.5 ether);
-
-        // Verify the task was created successfully
-        (
-            uint256 payout,
-            uint256 bountyPayout,
-            address bountyToken,
-            TaskManager.Status status,
-            address claimer,
-            bytes32 projectId,
-            bool requiresApplication
-        ) = tm.getTaskFull(0);
-        assertEq(bountyPayout, 0.5 ether, "Bounty payout should be stored");
-        assertEq(bountyToken, address(0), "Bounty token should be zero address");
+        vm.expectRevert(TaskManager.ZeroAddress.selector);
+        tm.createTask(1 ether, bytes("invalid_zero_token"), BOUNTY_PROJECT_ID, address(0), 0.5 ether);
     }
 
     function test_ApplicationTaskWithBounty() public {
@@ -3641,7 +3613,7 @@ contract TaskManagerBountyBudgetTest is Test {
         assertEq(token.balanceOf(member1), 1 ether, "Participation tokens should be minted");
     }
 
-    function test_UpdateTaskAfterClaimBountyBudget() public {
+    function test_UpdateTaskAfterClaimBountyBudgetReverts() public {
         // Set bounty caps
         vm.startPrank(executor);
         tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
@@ -3655,26 +3627,10 @@ contract TaskManagerBountyBudgetTest is Test {
         vm.prank(creator1);
         tm.assignTask(0, member1);
 
-        // Update bounty after claim (should work and update budgets)
+        // Update bounty after claim should revert
         vm.prank(creator1);
+        vm.expectRevert(TaskManager.AlreadyClaimed.selector);
         tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken2), 3 ether);
-
-        // Verify budget changes
-        (uint256 cap1, uint256 spent1) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
-        (uint256 cap2, uint256 spent2) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken2));
-
-        assertEq(spent1, 0, "Token1 budget should be rolled back");
-        assertEq(spent2, 3 ether, "Token2 budget should be updated");
-
-        // Complete task and verify correct token is transferred
-        vm.prank(member1);
-        tm.submitTask(0, bytes("submission"));
-
-        vm.prank(creator1);
-        tm.completeTask(0);
-
-        assertEq(bountyToken1.balanceOf(member1), 0, "Token1 should not be transferred");
-        assertEq(bountyToken2.balanceOf(member1), 3 ether, "Token2 should be transferred");
     }
 
     function test_ZeroBountyCapMeansUnlimited() public {
@@ -3797,15 +3753,13 @@ contract TaskManagerBountyBudgetTest is Test {
         (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
         assertEq(spent, 1.5 ether, "Spent should be updated correctly");
 
-        // Update after claiming should also work
+        // Update after claiming should revert
         vm.prank(creator1);
         tm.assignTask(0, member1);
 
         vm.prank(creator1);
+        vm.expectRevert(TaskManager.AlreadyClaimed.selector);
         tm.updateTask(0, 1 ether, bytes("updated2"), address(bountyToken1), 1 ether);
-
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
-        assertEq(spent, 1 ether, "Spent should be updated correctly after claim");
     }
 
     function test_BountyBudgetUnderflowProtectionEdgeCase() public {
