@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.21;
+pragma solidity ^0.8.20;
 
 /*──────── OpenZeppelin v5.3 Upgradeables ────────*/
 import {Initializable} from "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
@@ -8,7 +8,11 @@ import {ReentrancyGuardUpgradeable} from
 import {ContextUpgradeable} from "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+/*────────── Internal Libraries ──────────*/
 import {TaskPerm} from "./libs/TaskPerm.sol";
+import {BudgetLib} from "./libs/BudgetLib.sol";
+import {ValidationLib} from "./libs/ValidationLib.sol";
 
 /*────────── External Hats interface ──────────*/
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
@@ -22,11 +26,11 @@ interface IParticipationToken is IERC20 {
 /*────────────────────── Contract ───────────────────────*/
 contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgradeable {
     using SafeERC20 for IERC20;
-    /*──────── Errors ───────*/
+    using BudgetLib for BudgetLib.Budget;
+    using ValidationLib for address;
+    using ValidationLib for bytes;
 
-    error ZeroAddress();
-    error InvalidString();
-    error InvalidPayout();
+    /*──────── Errors ───────*/
     error UnknownTask();
     error UnknownProject();
     error NotCreator();
@@ -34,19 +38,14 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     error AlreadySubmitted();
     error AlreadyCompleted();
     error NotClaimer();
-    error BudgetExceeded();
-    error CapBelowCommitted();
     error NotExecutor();
     error Unauthorized();
     error NotApplicant();
     error AlreadyApplied();
     error RequiresApplication();
     error NoApplicationRequired();
-    error SpentUnderflow();
 
     /*──────── Constants ─────*/
-    uint256 public constant MAX_PAYOUT = 1e24; // 1 000 000 tokens (18 dec)
-    uint96 public constant MAX_PAYOUT_96 = 1e24; // same as above, but as uint96
     bytes4 public constant MODULE_ID = 0x54534b32; // "TSK2"
 
     /*──────── Data Types ────*/
@@ -68,17 +67,12 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         address bountyToken; // slot 4: 20 bytes (optimized packing: small fields grouped together)
     }
 
-    struct Budget {
-        uint128 cap; // 16 bytes
-        uint128 spent; // 16 bytes (total 32 bytes)
-    }
-
     struct Project {
         mapping(address => bool) managers; // slot 0: mapping (full slot)
         uint128 cap; // slot 1: 16 bytes (participation token cap)
         uint128 spent; // slot 1: 16 bytes (participation token spent)
         bool exists; // slot 2: 1 byte (separate slot for cleaner access)
-        mapping(address => Budget) bountyBudgets; // slot 2: rest of slot & beyond
+        mapping(address => BudgetLib.Budget) bountyBudgets; // slot 2: rest of slot & beyond
     }
 
     /*──────── Storage (ERC-7201) ───────*/
@@ -142,9 +136,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         uint256[] calldata creatorHats,
         address executorAddress
     ) external initializer {
-        if (tokenAddress == address(0) || hatsAddress == address(0) || executorAddress == address(0)) {
-            revert ZeroAddress();
-        }
+        tokenAddress.requireNonZeroAddress();
+        hatsAddress.requireNonZeroAddress();
+        executorAddress.requireNonZeroAddress();
 
         __ReentrancyGuard_init();
         __Context_init();
@@ -229,8 +223,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         uint256[] calldata reviewHats,
         uint256[] calldata assignHats
     ) external onlyCreator returns (bytes32 projectId) {
-        if (metadata.length == 0) revert InvalidString();
-        if (cap > MAX_PAYOUT) revert InvalidPayout();
+        ValidationLib.requireValidProjectParams(metadata, cap);
 
         Layout storage l = _layout();
         projectId = bytes32(uint256(l.nextProjectId++));
@@ -242,7 +235,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         p.managers[_msgSender()] = true;
         emit ProjectManagerAdded(projectId, _msgSender());
         for (uint256 i; i < managers.length;) {
-            if (managers[i] == address(0)) revert ZeroAddress();
+            managers[i].requireNonZeroAddress();
             p.managers[managers[i]] = true;
             emit ProjectManagerAdded(projectId, managers[i]);
             unchecked {
@@ -260,11 +253,11 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     function updateProjectCap(bytes32 pid, uint256 newCap) external onlyExecutor projectExists(pid) {
-        if (newCap > MAX_PAYOUT) revert InvalidPayout();
+        ValidationLib.requireValidCapAmount(newCap);
 
         Layout storage l = _layout();
         Project storage p = l._projects[pid];
-        if (newCap != 0 && newCap < p.spent) revert CapBelowCommitted();
+        ValidationLib.requireValidCap(newCap, p.spent);
 
         uint256 old = p.cap;
         p.cap = uint128(newCap);
@@ -272,7 +265,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     function addProjectManager(bytes32 pid, address mgr) external onlyExecutor projectExists(pid) {
-        if (mgr == address(0)) revert ZeroAddress();
+        mgr.requireNonZeroAddress();
         Layout storage l = _layout();
         l._projects[pid].managers[mgr] = true;
         emit ProjectManagerAdded(pid, mgr);
@@ -285,11 +278,10 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     function deleteProject(bytes32 pid, bytes calldata metadata) external onlyCreator {
-        if (metadata.length == 0) revert InvalidString();
+        metadata.requireNonEmptyBytes();
         Layout storage l = _layout();
         Project storage p = l._projects[pid];
         if (!p.exists) revert UnknownProject();
-        if (p.cap != 0 && p.spent != p.cap) revert CapBelowCommitted();
 
         delete l._projects[pid];
         emit ProjectDeleted(pid, metadata);
@@ -322,25 +314,20 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         uint256 bountyPayout
     ) internal {
         Layout storage l = _layout();
-        if (payout == 0 || payout > MAX_PAYOUT_96) revert InvalidPayout();
-        if (meta.length == 0) revert InvalidString();
+        ValidationLib.requireValidTaskParams(payout, meta, bountyToken, bountyPayout);
+
         Project storage p = l._projects[pid];
         if (!p.exists) revert UnknownProject();
 
-        if (bountyPayout > 0 && bountyToken == address(0)) revert ZeroAddress();
-        if (bountyToken != address(0) && bountyPayout == 0) revert InvalidPayout();
-        if (bountyPayout > MAX_PAYOUT_96) revert InvalidPayout();
-
+        // Update participation token budget
         uint256 newSpent = p.spent + payout;
-        if (p.cap != 0 && newSpent > p.cap) revert BudgetExceeded();
+        if (p.cap != 0 && newSpent > p.cap) revert BudgetLib.BudgetExceeded();
         p.spent = uint128(newSpent);
 
         // Check and update bounty budget if applicable
         if (bountyToken != address(0) && bountyPayout > 0) {
-            Budget storage bb = p.bountyBudgets[bountyToken];
-            uint256 newBountySpent = bb.spent + bountyPayout;
-            if (bb.cap != 0 && newBountySpent > bb.cap) revert BudgetExceeded();
-            bb.spent = uint128(newBountySpent);
+            BudgetLib.Budget storage bb = p.bountyBudgets[bountyToken];
+            bb.addSpent(bountyPayout);
         }
 
         uint48 id = l.nextTaskId++;
@@ -358,10 +345,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         uint256 newBountyPayout
     ) external canCreate(_layout()._tasks[id].projectId) {
         Layout storage l = _layout();
-        if (newPayout == 0 || newPayout > MAX_PAYOUT_96) revert InvalidPayout();
-        if (newBountyPayout > MAX_PAYOUT_96) revert InvalidPayout();
-        if (newBountyPayout > 0 && newBountyToken == address(0)) revert ZeroAddress();
-        if (newBountyToken != address(0) && newBountyPayout == 0) revert InvalidPayout();
+        ValidationLib.requireValidTaskParams(newPayout, newMetadata, newBountyToken, newBountyPayout);
 
         Task storage t = _task(l, id);
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
@@ -370,22 +354,18 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
         // Update participation token budget
         uint256 tentative = p.spent - t.payout + newPayout;
-        if (p.cap != 0 && tentative > p.cap) revert BudgetExceeded();
+        if (p.cap != 0 && tentative > p.cap) revert BudgetLib.BudgetExceeded();
         p.spent = uint128(tentative);
 
-        // Roll back previous bounty cost
+        // Update bounty budgets
         if (t.bountyToken != address(0) && t.bountyPayout > 0) {
-            Budget storage oldB = p.bountyBudgets[t.bountyToken];
-            if (oldB.spent < t.bountyPayout) revert SpentUnderflow();
-            oldB.spent -= t.bountyPayout;
+            BudgetLib.Budget storage oldB = p.bountyBudgets[t.bountyToken];
+            oldB.subtractSpent(t.bountyPayout);
         }
 
-        // Apply new bounty cost
         if (newBountyToken != address(0) && newBountyPayout > 0) {
-            Budget storage newB = p.bountyBudgets[newBountyToken];
-            uint256 newBountySpent = newB.spent + newBountyPayout;
-            if (newB.cap != 0 && newBountySpent > newB.cap) revert BudgetExceeded();
-            newB.spent = uint128(newBountySpent);
+            BudgetLib.Budget storage newB = p.bountyBudgets[newBountyToken];
+            newB.addSpent(newBountyPayout);
         }
 
         // Update task
@@ -408,7 +388,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     function assignTask(uint256 id, address assignee) external canAssign(_layout()._tasks[id].projectId) {
-        if (assignee == address(0)) revert ZeroAddress();
+        assignee.requireNonZeroAddress();
         Layout storage l = _layout();
 
         Task storage t = _task(l, id);
@@ -424,7 +404,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Task storage t = _task(l, id);
         if (t.status != Status.CLAIMED) revert AlreadySubmitted();
         if (t.claimer != _msgSender()) revert NotClaimer();
-        if (metadata.length == 0) revert InvalidString();
+        metadata.requireNonEmptyBytes();
 
         t.status = Status.SUBMITTED;
         emit TaskSubmitted(id, metadata);
@@ -452,16 +432,15 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
 
         Project storage p = l._projects[t.projectId];
-        if (p.spent < t.payout) revert SpentUnderflow();
+        if (p.spent < t.payout) revert BudgetLib.SpentUnderflow();
         unchecked {
             p.spent -= t.payout;
         }
 
         // Roll back bounty budget if applicable
         if (t.bountyToken != address(0) && t.bountyPayout > 0) {
-            Budget storage bb = p.bountyBudgets[t.bountyToken];
-            if (bb.spent < t.bountyPayout) revert SpentUnderflow();
-            bb.spent -= t.bountyPayout;
+            BudgetLib.Budget storage bb = p.bountyBudgets[t.bountyToken];
+            bb.subtractSpent(t.bountyPayout);
         }
 
         t.status = Status.CANCELLED;
@@ -483,7 +462,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Layout storage l = _layout();
         Task storage t = _task(l, id);
         if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
-        if (applicationHash == bytes32(0)) revert InvalidString();
+        ValidationLib.requireValidApplicationHash(applicationHash);
         if (!t.requiresApplication) revert NoApplicationRequired();
 
         address applicant = _msgSender();
@@ -554,7 +533,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         address bountyToken,
         uint256 bountyPayout
     ) internal returns (uint256 taskId) {
-        if (assignee == address(0)) revert ZeroAddress();
+        assignee.requireNonZeroAddress();
 
         Layout storage l = _layout();
         address sender = _msgSender();
@@ -566,26 +545,20 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
             revert Unauthorized();
         }
 
-        // Validation (similar to createTask)
-        if (payout == 0 || payout > MAX_PAYOUT_96) revert InvalidPayout();
-        if (meta.length == 0) revert InvalidString();
-        if (bountyPayout > 0 && bountyToken == address(0)) revert ZeroAddress();
-        if (bountyToken != address(0) && bountyPayout == 0) revert InvalidPayout();
-        if (bountyPayout > MAX_PAYOUT_96) revert InvalidPayout();
+        // Validation
+        ValidationLib.requireValidTaskParams(payout, meta, bountyToken, bountyPayout);
 
         Project storage p = l._projects[pid];
         if (!p.exists) revert UnknownProject();
 
         uint256 newSpent = p.spent + payout;
-        if (p.cap != 0 && newSpent > p.cap) revert BudgetExceeded();
+        if (p.cap != 0 && newSpent > p.cap) revert BudgetLib.BudgetExceeded();
         p.spent = uint128(newSpent);
 
         // Check and update bounty budget if applicable
         if (bountyToken != address(0) && bountyPayout > 0) {
-            Budget storage bb = p.bountyBudgets[bountyToken];
-            uint256 newBountySpent = bb.spent + bountyPayout;
-            if (bb.cap != 0 && newBountySpent > bb.cap) revert BudgetExceeded();
-            bb.spent = uint128(newBountySpent);
+            BudgetLib.Budget storage bb = p.bountyBudgets[bountyToken];
+            bb.addSpent(bountyPayout);
         }
 
         // Create and assign task in one go
@@ -676,18 +649,18 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     function setExecutor(address newExec) external onlyExecutor {
-        if (newExec == address(0)) revert ZeroAddress();
+        newExec.requireNonZeroAddress();
         _layout().executor = newExec;
         emit ExecutorSet(newExec);
     }
 
     function setBountyCap(bytes32 pid, address token, uint256 newCap) external onlyExecutor projectExists(pid) {
-        if (token == address(0)) revert ZeroAddress();
-        if (newCap > MAX_PAYOUT) revert InvalidPayout();
+        token.requireNonZeroAddress();
+        ValidationLib.requireValidCapAmount(newCap);
 
         Layout storage l = _layout();
-        Budget storage b = l._projects[pid].bountyBudgets[token];
-        if (newCap != 0 && newCap < b.spent) revert CapBelowCommitted();
+        BudgetLib.Budget storage b = l._projects[pid].bountyBudgets[token];
+        ValidationLib.requireValidCap(newCap, b.spent);
 
         uint256 oldCap = b.cap;
         b.cap = uint128(newCap);
@@ -701,8 +674,8 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         projectExists(pid)
         returns (uint256 cap, uint256 spent)
     {
-        if (token == address(0)) revert ZeroAddress();
-        Budget storage b = _layout()._projects[pid].bountyBudgets[token];
+        token.requireNonZeroAddress();
+        BudgetLib.Budget storage b = _layout()._projects[pid].bountyBudgets[token];
         return (b.cap, b.spent);
     }
 
