@@ -68,11 +68,17 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         address bountyToken; // slot 4: 20 bytes (optimized packing: small fields grouped together)
     }
 
+    struct Budget {
+        uint128 cap; // 16 bytes
+        uint128 spent; // 16 bytes (total 32 bytes)
+    }
+
     struct Project {
         mapping(address => bool) managers; // slot 0: mapping (full slot)
-        uint128 cap; // slot 1: 16 bytes
-        uint128 spent; // slot 1: 16 bytes (total 32 bytes)
+        uint128 cap; // slot 1: 16 bytes (participation token cap)
+        uint128 spent; // slot 1: 16 bytes (participation token spent)
         bool exists; // slot 2: 1 byte (separate slot for cleaner access)
+        mapping(address => Budget) bountyBudgets; // slot 2: rest of slot & beyond
     }
 
     /*──────── Storage (ERC-7201) ───────*/
@@ -108,6 +114,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     event ProjectManagerRemoved(bytes32 id, address manager);
     event ProjectDeleted(bytes32 id, bytes metadata);
     event ProjectRolePermSet(bytes32 id, uint256 hatId, uint8 mask);
+    event BountyCapSet(bytes32 indexed projectId, address indexed token, uint256 oldCap, uint256 newCap);
 
     event TaskCreated(uint256 id, bytes32 project, uint256 payout, bytes metadata);
     event TaskUpdated(uint256 id, uint256 payout, bytes metadata);
@@ -319,6 +326,14 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         if (p.cap != 0 && newSpent > p.cap) revert BudgetExceeded();
         p.spent = uint128(newSpent);
 
+        // Check and update bounty budget if applicable
+        if (bountyToken != address(0) && bountyPayout > 0) {
+            Budget storage bb = p.bountyBudgets[bountyToken];
+            uint256 newBountySpent = bb.spent + bountyPayout;
+            if (bb.cap != 0 && newBountySpent > bb.cap) revert BudgetExceeded();
+            bb.spent = uint128(newBountySpent);
+        }
+
         uint48 id = l.nextTaskId++;
         l._tasks[id] = Task(
             pid, uint96(payout), address(0), uint96(bountyPayout), requiresApplication, Status.UNCLAIMED, bountyToken
@@ -343,6 +358,22 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
         if (t.status == Status.CLAIMED || t.status == Status.SUBMITTED) {
             if (newMetadata.length == 0) revert InvalidString();
+
+            // Roll back previous bounty cost
+            if (t.bountyToken != address(0) && t.bountyPayout > 0) {
+                Budget storage oldB = p.bountyBudgets[t.bountyToken];
+                if (oldB.spent < t.bountyPayout) revert SpentUnderflow();
+                oldB.spent -= t.bountyPayout;
+            }
+
+            // Apply new bounty cost
+            if (newBountyToken != address(0) && newBountyPayout > 0) {
+                Budget storage newB = p.bountyBudgets[newBountyToken];
+                uint256 newBountySpent = newB.spent + newBountyPayout;
+                if (newB.cap != 0 && newBountySpent > newB.cap) revert BudgetExceeded();
+                newB.spent = uint128(newBountySpent);
+            }
+
             // Can update bounty details even when claimed/submitted
             t.bountyToken = newBountyToken;
             t.bountyPayout = uint96(newBountyPayout);
@@ -351,6 +382,22 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
             uint256 tentative = p.spent - t.payout + newPayout;
             if (p.cap != 0 && tentative > p.cap) revert BudgetExceeded();
             p.spent = uint128(tentative);
+
+            // Roll back previous bounty cost
+            if (t.bountyToken != address(0) && t.bountyPayout > 0) {
+                Budget storage oldB = p.bountyBudgets[t.bountyToken];
+                if (oldB.spent < t.bountyPayout) revert SpentUnderflow();
+                oldB.spent -= t.bountyPayout;
+            }
+
+            // Apply new bounty cost
+            if (newBountyToken != address(0) && newBountyPayout > 0) {
+                Budget storage newB = p.bountyBudgets[newBountyToken];
+                uint256 newBountySpent = newB.spent + newBountyPayout;
+                if (newB.cap != 0 && newBountySpent > newB.cap) revert BudgetExceeded();
+                newB.spent = uint128(newBountySpent);
+            }
+
             t.payout = uint96(newPayout);
             t.bountyToken = newBountyToken;
             t.bountyPayout = uint96(newBountyPayout);
@@ -421,6 +468,14 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         unchecked {
             p.spent -= t.payout;
         }
+
+        // Roll back bounty budget if applicable
+        if (t.bountyToken != address(0) && t.bountyPayout > 0) {
+            Budget storage bb = p.bountyBudgets[t.bountyToken];
+            if (bb.spent < t.bountyPayout) revert SpentUnderflow();
+            bb.spent -= t.bountyPayout;
+        }
+
         t.status = Status.CANCELLED;
         t.claimer = address(0);
 
@@ -536,6 +591,14 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         if (p.cap != 0 && newSpent > p.cap) revert BudgetExceeded();
         p.spent = uint128(newSpent);
 
+        // Check and update bounty budget if applicable
+        if (bountyToken != address(0) && bountyPayout > 0) {
+            Budget storage bb = p.bountyBudgets[bountyToken];
+            uint256 newBountySpent = bb.spent + bountyPayout;
+            if (bb.cap != 0 && newBountySpent > bb.cap) revert BudgetExceeded();
+            bb.spent = uint128(newBountySpent);
+        }
+
         // Create and assign task in one go
         taskId = l.nextTaskId++;
         l._tasks[taskId] =
@@ -627,6 +690,31 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         if (newExec == address(0)) revert ZeroAddress();
         _layout().executor = newExec;
         emit ExecutorSet(newExec);
+    }
+
+    function setBountyCap(bytes32 pid, address token, uint256 newCap) external onlyExecutor projectExists(pid) {
+        if (token == address(0)) revert ZeroAddress();
+        if (newCap > MAX_PAYOUT) revert InvalidPayout();
+
+        Layout storage l = _layout();
+        Budget storage b = l._projects[pid].bountyBudgets[token];
+        if (newCap != 0 && newCap < b.spent) revert CapBelowCommitted();
+
+        uint256 oldCap = b.cap;
+        b.cap = uint128(newCap);
+
+        emit BountyCapSet(pid, token, oldCap, newCap);
+    }
+
+    function getBountyBudget(bytes32 pid, address token)
+        external
+        view
+        projectExists(pid)
+        returns (uint256 cap, uint256 spent)
+    {
+        if (token == address(0)) revert ZeroAddress();
+        Budget storage b = _layout()._projects[pid].bountyBudgets[token];
+        return (b.cap, b.spent);
     }
 
     /*──────── Public getters for storage variables ─────────── */

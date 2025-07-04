@@ -3160,3 +3160,698 @@ contract TaskManagerBountyTest is Test {
         tm.completeTask(0);
     }
 }
+
+/*───────────────── BOUNTY BUDGET FUNCTIONALITY TESTS ────────────────────*/
+
+contract TaskManagerBountyBudgetTest is Test {
+    /* test actors */
+    address creator1 = makeAddr("creator1");
+    address creator2 = makeAddr("creator2");
+    address pm1 = makeAddr("pm1");
+    address member1 = makeAddr("member1");
+    address outsider = makeAddr("outsider");
+    address executor = makeAddr("executor");
+
+    uint256 constant CREATOR_HAT = 1;
+    uint256 constant PM_HAT = 2;
+    uint256 constant MEMBER_HAT = 3;
+
+    /* project IDs */
+    bytes32 BUDGET_PROJECT_ID;
+    bytes32 MULTI_TOKEN_PROJECT_ID;
+    bytes32 UNLIMITED_PROJECT_ID;
+
+    /* deployed contracts */
+    TaskManager tm;
+    MockToken token;
+    MockERC20 bountyToken1;
+    MockERC20 bountyToken2;
+    MockERC20 bountyToken3;
+    MockHats hats;
+
+    /* helpers */
+    function setHat(address who, uint256 hatId) internal {
+        hats.mintHat(hatId, who);
+    }
+
+    function setUp() public {
+        token = new MockToken();
+        bountyToken1 = new MockERC20();
+        bountyToken2 = new MockERC20();
+        bountyToken3 = new MockERC20();
+        hats = new MockHats();
+
+        // give creator hat to two addresses, other hats to pm1 / member1
+        setHat(creator1, CREATOR_HAT);
+        setHat(creator2, CREATOR_HAT);
+        setHat(pm1, PM_HAT);
+        setHat(member1, MEMBER_HAT);
+
+        // initialize TaskManager
+        tm = new TaskManager();
+        uint256[] memory creatorHats = new uint256[](1);
+        creatorHats[0] = CREATOR_HAT;
+
+        vm.prank(creator1);
+        tm.initialize(address(token), address(hats), creatorHats, executor);
+
+        // Set up default global permissions
+        vm.prank(executor);
+        tm.setRolePerm(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN);
+        vm.prank(executor);
+        tm.setRolePerm(MEMBER_HAT, TaskPerm.CLAIM);
+
+        // Set up projects for testing
+        uint256[] memory createHats = new uint256[](1);
+        createHats[0] = CREATOR_HAT;
+        uint256[] memory claimHats = new uint256[](1);
+        claimHats[0] = MEMBER_HAT;
+        uint256[] memory reviewHats = new uint256[](1);
+        reviewHats[0] = PM_HAT;
+        uint256[] memory assignHats = new uint256[](1);
+        assignHats[0] = PM_HAT;
+
+        vm.prank(creator1);
+        BUDGET_PROJECT_ID = tm.createProject(
+            bytes("BUDGET_PROJECT"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        MULTI_TOKEN_PROJECT_ID = tm.createProject(
+            bytes("MULTI_TOKEN_PROJECT"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        vm.prank(creator1);
+        UNLIMITED_PROJECT_ID = tm.createProject(
+            bytes("UNLIMITED_PROJECT"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats
+        );
+
+        // Fund the bounty tokens to the TaskManager (simulating treasury)
+        bountyToken1.mint(address(tm), 1000 ether);
+        bountyToken2.mint(address(tm), 1000 ether);
+        bountyToken3.mint(address(tm), 1000 ether);
+    }
+
+    function test_SetBountyCapBasic() public {
+        // Test setting bounty cap
+        vm.prank(executor);
+        vm.expectEmit(true, true, true, true);
+        emit TaskManager.BountyCapSet(BUDGET_PROJECT_ID, address(bountyToken1), 0, 5 ether);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        // Verify cap was set
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(cap, 5 ether, "Bounty cap should be set correctly");
+        assertEq(spent, 0, "Bounty spent should be zero initially");
+    }
+
+    function test_SetBountyCapPermissions() public {
+        // Only executor can set bounty caps
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.NotExecutor.selector);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        vm.prank(pm1);
+        vm.expectRevert(TaskManager.NotExecutor.selector);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        vm.prank(member1);
+        vm.expectRevert(TaskManager.NotExecutor.selector);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        // Executor can set cap
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(cap, 5 ether, "Executor should be able to set bounty cap");
+    }
+
+    function test_SetBountyCapValidation() public {
+        // Test zero address token
+        vm.prank(executor);
+        vm.expectRevert(TaskManager.ZeroAddress.selector);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(0), 5 ether);
+
+        // Test excessive cap
+        vm.prank(executor);
+        vm.expectRevert(TaskManager.InvalidPayout.selector);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 1e25); // Over MAX_PAYOUT
+
+        // Test non-existent project
+        vm.prank(executor);
+        vm.expectRevert(TaskManager.UnknownProject.selector);
+        tm.setBountyCap(bytes32(uint256(999)), address(bountyToken1), 5 ether);
+    }
+
+    function test_GetBountyBudgetValidation() public {
+        // Test zero address token
+        vm.expectRevert(TaskManager.ZeroAddress.selector);
+        tm.getBountyBudget(BUDGET_PROJECT_ID, address(0));
+
+        // Test non-existent project
+        vm.expectRevert(TaskManager.UnknownProject.selector);
+        tm.getBountyBudget(bytes32(uint256(999)), address(bountyToken1));
+    }
+
+    function test_CreateTaskWithBountyBudgetEnforcement() public {
+        // Set bounty cap
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+
+        // Create task within budget
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 1.5 ether);
+
+        // Verify budget tracking
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(cap, 3 ether, "Cap should remain unchanged");
+        assertEq(spent, 1.5 ether, "Spent should be updated");
+
+        // Create another task within budget
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 1.5 ether);
+
+        // Verify budget tracking
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 3 ether, "Spent should be at cap");
+
+        // Try to exceed budget
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        tm.createTask(1 ether, bytes("task3"), BUDGET_PROJECT_ID, address(bountyToken1), 0.1 ether);
+    }
+
+    function test_CreateTaskWithoutBountyBudgetSet() public {
+        // Create task without setting bounty budget (should work - unlimited)
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        // Verify budget tracking (cap should be 0, spent should be updated)
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(cap, 0, "Cap should be zero (unlimited)");
+        assertEq(spent, 5 ether, "Spent should be updated");
+
+        // Create another large task (should work since cap is 0 = unlimited)
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 10 ether);
+
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 15 ether, "Spent should be cumulative");
+    }
+
+    function test_MultipleBountyTokensBudgets() public {
+        // Set different caps for different tokens
+        vm.startPrank(executor);
+        tm.setBountyCap(MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 2 ether);
+        tm.setBountyCap(MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 3 ether);
+        vm.stopPrank();
+
+        // Create tasks with different tokens
+        vm.startPrank(creator1);
+        tm.createTask(1 ether, bytes("task1"), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 1 ether);
+        tm.createTask(1 ether, bytes("task2"), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 2 ether);
+        tm.createTask(1 ether, bytes("task3"), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 1 ether);
+        vm.stopPrank();
+
+        // Verify independent budget tracking
+        (uint256 cap1, uint256 spent1) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken1));
+        (uint256 cap2, uint256 spent2) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken2));
+
+        assertEq(cap1, 2 ether, "Token1 cap should be correct");
+        assertEq(spent1, 2 ether, "Token1 spent should be at cap");
+        assertEq(cap2, 3 ether, "Token2 cap should be correct");
+        assertEq(spent2, 2 ether, "Token2 spent should be correct");
+
+        // Try to exceed token1 budget
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        tm.createTask(1 ether, bytes("task4"), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 0.1 ether);
+
+        // But token2 should still work
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task5"), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 1 ether);
+
+        (cap2, spent2) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken2));
+        assertEq(spent2, 3 ether, "Token2 spent should now be at cap");
+    }
+
+    function test_UpdateTaskBountyBudgetTracking() public {
+        // Set bounty cap
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        // Create task
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
+
+        // Verify initial budget
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 2 ether, "Initial spent should be correct");
+
+        // Update task to higher bounty (within budget)
+        vm.prank(creator1);
+        tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken1), 3 ether);
+
+        // Verify budget updated
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 3 ether, "Spent should be updated after task update");
+
+        // Try to update to exceed budget
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        tm.updateTask(0, 1 ether, bytes("updated2"), address(bountyToken1), 5.1 ether);
+    }
+
+    function test_UpdateTaskChangeBountyToken() public {
+        // Set caps for both tokens
+        vm.startPrank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken2), 4 ether);
+        vm.stopPrank();
+
+        // Create task with token1
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
+
+        // Verify initial budgets
+        (uint256 cap1, uint256 spent1) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        (uint256 cap2, uint256 spent2) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken2));
+        assertEq(spent1, 2 ether, "Token1 spent should be correct");
+        assertEq(spent2, 0, "Token2 spent should be zero");
+
+        // Update task to use token2
+        vm.prank(creator1);
+        tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken2), 3 ether);
+
+        // Verify budgets updated correctly
+        (cap1, spent1) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        (cap2, spent2) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken2));
+        assertEq(spent1, 0, "Token1 spent should be rolled back");
+        assertEq(spent2, 3 ether, "Token2 spent should be updated");
+    }
+
+    function test_UpdateTaskRemoveBounty() public {
+        // Set bounty cap
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        // Create task with bounty
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+
+        // Verify budget
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 3 ether, "Spent should be correct");
+
+        // Remove bounty from task
+        vm.prank(creator1);
+        tm.updateTask(0, 1 ether, bytes("updated"), address(0), 0);
+
+        // Verify budget rolled back
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 0, "Spent should be rolled back");
+    }
+
+    function test_CancelTaskBountyBudgetRollback() public {
+        // Set bounty cap
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        // Create task
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
+
+        // Verify budget
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 2 ether, "Spent should be correct");
+
+        // Cancel task
+        vm.prank(creator1);
+        tm.cancelTask(0);
+
+        // Verify budget rolled back
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 0, "Spent should be rolled back after cancel");
+    }
+
+    function test_CreateAndAssignTaskBountyBudget() public {
+        // Set bounty cap
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        // Create and assign task
+        vm.prank(creator1);
+        uint256 taskId = tm.createAndAssignTask(
+            1 ether, bytes("assign_task"), BUDGET_PROJECT_ID, member1, address(bountyToken1), 3 ether
+        );
+
+        // Verify budget tracking
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 3 ether, "Spent should be updated");
+
+        // Try to exceed budget with another task
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        tm.createAndAssignTask(
+            1 ether, bytes("assign_task2"), BUDGET_PROJECT_ID, member1, address(bountyToken1), 2.1 ether
+        );
+    }
+
+    function test_ApplicationTaskBountyBudget() public {
+        // Set bounty cap
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        // Create application task
+        vm.prank(creator1);
+        tm.createApplicationTask(1 ether, bytes("app_task"), BUDGET_PROJECT_ID, address(bountyToken1), 4 ether);
+
+        // Verify budget tracking
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 4 ether, "Spent should be updated");
+
+        // Try to create another task that would exceed budget
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        tm.createApplicationTask(1 ether, bytes("app_task2"), BUDGET_PROJECT_ID, address(bountyToken1), 1.1 ether);
+    }
+
+    function test_SetBountyCapBelowSpent() public {
+        // Create task first
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+
+        // Verify spent
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 3 ether, "Spent should be correct");
+
+        // Try to set cap below spent amount
+        vm.prank(executor);
+        vm.expectRevert(TaskManager.CapBelowCommitted.selector);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
+
+        // Setting cap equal to spent should work
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(cap, 3 ether, "Cap should be set correctly");
+
+        // Setting cap above spent should work
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(cap, 5 ether, "Cap should be updated correctly");
+    }
+
+    function test_UpdateBountyCapEvent() public {
+        // Set initial cap
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+
+        // Update cap and verify event
+        vm.prank(executor);
+        vm.expectEmit(true, true, true, true);
+        emit TaskManager.BountyCapSet(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, 5 ether);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+    }
+
+    function test_BountyBudgetIndependentFromParticipationToken() public {
+        // Set both participation token cap and bounty cap
+        vm.prank(executor);
+        tm.updateProjectCap(BUDGET_PROJECT_ID, 2 ether);
+
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+
+        // Create task that uses both budgets
+        vm.prank(creator1);
+        tm.createTask(1.5 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
+
+        // Verify both budgets are tracked independently
+        (uint256 participationCap, uint256 participationSpent,) = tm.getProjectInfo(BUDGET_PROJECT_ID);
+        (uint256 bountyCap, uint256 bountySpent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+
+        assertEq(participationSpent, 1.5 ether, "Participation token spent should be correct");
+        assertEq(bountySpent, 2 ether, "Bounty token spent should be correct");
+
+        // Try to exceed participation token budget
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        tm.createTask(0.6 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 0.5 ether);
+
+        // Create task that only exceeds bounty budget
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        tm.createTask(0.5 ether, bytes("task3"), BUDGET_PROJECT_ID, address(bountyToken1), 1.1 ether);
+    }
+
+    function test_CompleteTaskWithBountyBudgetTracking() public {
+        // Set bounty cap
+        vm.prank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+
+        // Create and complete task
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+
+        vm.prank(creator1);
+        tm.assignTask(0, member1);
+
+        vm.prank(member1);
+        tm.submitTask(0, bytes("submission"));
+
+        // Budget should remain reserved during completion
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 3 ether, "Spent should remain reserved");
+
+        vm.prank(creator1);
+        tm.completeTask(0);
+
+        // Budget should still be marked as spent after completion
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 3 ether, "Spent should remain after completion");
+
+        // Verify tokens were transferred
+        assertEq(bountyToken1.balanceOf(member1), 3 ether, "Bounty tokens should be transferred");
+        assertEq(token.balanceOf(member1), 1 ether, "Participation tokens should be minted");
+    }
+
+    function test_UpdateTaskAfterClaimBountyBudget() public {
+        // Set bounty caps
+        vm.startPrank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken2), 4 ether);
+        vm.stopPrank();
+
+        // Create and claim task
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
+
+        vm.prank(creator1);
+        tm.assignTask(0, member1);
+
+        // Update bounty after claim (should work and update budgets)
+        vm.prank(creator1);
+        tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken2), 3 ether);
+
+        // Verify budget changes
+        (uint256 cap1, uint256 spent1) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        (uint256 cap2, uint256 spent2) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken2));
+
+        assertEq(spent1, 0, "Token1 budget should be rolled back");
+        assertEq(spent2, 3 ether, "Token2 budget should be updated");
+
+        // Complete task and verify correct token is transferred
+        vm.prank(member1);
+        tm.submitTask(0, bytes("submission"));
+
+        vm.prank(creator1);
+        tm.completeTask(0);
+
+        assertEq(bountyToken1.balanceOf(member1), 0, "Token1 should not be transferred");
+        assertEq(bountyToken2.balanceOf(member1), 3 ether, "Token2 should be transferred");
+    }
+
+    function test_ZeroBountyCapMeansUnlimited() public {
+        // Don't set any bounty cap (defaults to 0 = unlimited)
+
+        // Create large bounty task
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 100 ether);
+
+        // Verify budget tracking
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(cap, 0, "Cap should be zero (unlimited)");
+        assertEq(spent, 100 ether, "Spent should be tracked");
+
+        // Create another large task (should work)
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 200 ether);
+
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 300 ether, "Spent should be cumulative");
+    }
+
+    function test_GetBountyBudgetUnusedToken() public {
+        // Get budget for token that was never used
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(cap, 0, "Unused token cap should be zero");
+        assertEq(spent, 0, "Unused token spent should be zero");
+    }
+
+    function test_BountyBudgetStressTest() public {
+        // Set caps for multiple tokens
+        vm.startPrank(executor);
+        tm.setBountyCap(MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 10 ether);
+        tm.setBountyCap(MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 15 ether);
+        tm.setBountyCap(MULTI_TOKEN_PROJECT_ID, address(bountyToken3), 20 ether);
+        vm.stopPrank();
+
+        uint256 totalTasks = 15;
+
+        // Create many tasks with different tokens
+        for (uint256 i = 0; i < totalTasks; i++) {
+            address token = address(bountyToken1);
+            uint256 bountyAmount = 0.5 ether;
+
+            if (i % 3 == 1) {
+                token = address(bountyToken2);
+                bountyAmount = 0.8 ether;
+            } else if (i % 3 == 2) {
+                token = address(bountyToken3);
+                bountyAmount = 1.2 ether;
+            }
+
+            vm.prank(creator1);
+            tm.createTask(0.1 ether, abi.encodePacked("task", i), MULTI_TOKEN_PROJECT_ID, token, bountyAmount);
+        }
+
+        // Verify final budget states
+        (uint256 cap1, uint256 spent1) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken1));
+        (uint256 cap2, uint256 spent2) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken2));
+        (uint256 cap3, uint256 spent3) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken3));
+
+        assertEq(spent1, 2.5 ether, "Token1 spent should be correct"); // 5 tasks * 0.5 ether
+        assertEq(spent2, 4 ether, "Token2 spent should be correct"); // 5 tasks * 0.8 ether
+        assertEq(spent3, 6 ether, "Token3 spent should be correct"); // 5 tasks * 1.2 ether
+
+        // Try to exceed budgets
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        tm.createTask(0.1 ether, bytes("fail1"), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 7.6 ether);
+
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        tm.createTask(0.1 ether, bytes("fail2"), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 11.1 ether);
+
+        vm.prank(creator1);
+        vm.expectRevert(TaskManager.BudgetExceeded.selector);
+        tm.createTask(0.1 ether, bytes("fail3"), MULTI_TOKEN_PROJECT_ID, address(bountyToken3), 14.1 ether);
+    }
+
+    function test_BountyBudgetUnderflowProtectionCancelTask() public {
+        // Create task with bounty
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
+
+        // Artificially corrupt the bounty budget to simulate underflow scenario
+
+        // First, let's verify normal cancellation works
+        vm.prank(creator1);
+        tm.cancelTask(0);
+
+        // Create another task to test the protection
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 1 ether);
+
+        // Verify budget is correct
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 1 ether, "Spent should be correct");
+
+        // Normal cancellation should work
+        vm.prank(creator1);
+        tm.cancelTask(1);
+
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 0, "Spent should be rolled back correctly");
+    }
+
+    function test_BountyBudgetUnderflowProtectionUpdateTask() public {
+        // Create task with bounty
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
+
+        // Verify budget
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 2 ether, "Spent should be correct");
+
+        // Normal update should work (rolling back and applying new bounty)
+        vm.prank(creator1);
+        tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken1), 1.5 ether);
+
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 1.5 ether, "Spent should be updated correctly");
+
+        // Update after claiming should also work
+        vm.prank(creator1);
+        tm.assignTask(0, member1);
+
+        vm.prank(creator1);
+        tm.updateTask(0, 1 ether, bytes("updated2"), address(bountyToken1), 1 ether);
+
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 1 ether, "Spent should be updated correctly after claim");
+    }
+
+    function test_BountyBudgetUnderflowProtectionEdgeCase() public {
+        // Test edge case where bounty payout equals spent
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+
+        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 3 ether, "Spent should equal bounty payout");
+
+        // Cancelling should work when spent equals payout
+        vm.prank(creator1);
+        tm.cancelTask(0);
+
+        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        assertEq(spent, 0, "Spent should be zero after cancel");
+    }
+
+    function test_BountyBudgetUnderflowProtectionMultipleTokens() public {
+        // Set caps for both tokens
+        vm.startPrank(executor);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken2), 5 ether);
+        vm.stopPrank();
+
+        // Create task with token1
+        vm.prank(creator1);
+        tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
+
+        // Update to token2 (should roll back token1 and apply token2)
+        vm.prank(creator1);
+        tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken2), 3 ether);
+
+        // Verify budgets
+        (uint256 cap1, uint256 spent1) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        (uint256 cap2, uint256 spent2) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken2));
+
+        assertEq(spent1, 0, "Token1 spent should be rolled back");
+        assertEq(spent2, 3 ether, "Token2 spent should be applied");
+
+        // Cancel task should roll back token2
+        vm.prank(creator1);
+        tm.cancelTask(0);
+
+        (cap1, spent1) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        (cap2, spent2) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken2));
+
+        assertEq(spent1, 0, "Token1 spent should remain zero");
+        assertEq(spent2, 0, "Token2 spent should be rolled back");
+    }
+}
