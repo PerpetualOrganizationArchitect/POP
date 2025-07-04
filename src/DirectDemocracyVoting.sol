@@ -40,6 +40,33 @@ contract DirectDemocracyVoting is Initializable {
     uint32 public constant MAX_DURATION_MIN = 43_200; /* 30 days */
     uint32 public constant MIN_DURATION_MIN = 10; /* spam guard */
 
+    enum HatType {
+        VOTING,
+        CREATOR
+    }
+
+    enum ConfigKey {
+        QUORUM,
+        EXECUTOR,
+        TARGET_ALLOWED,
+        HAT_ALLOWED
+    }
+
+    enum StorageKey {
+        HATS,
+        EXECUTOR,
+        QUORUM_PERCENTAGE,
+        VOTING_HATS,
+        CREATOR_HATS,
+        VOTING_HAT_COUNT,
+        CREATOR_HAT_COUNT,
+        POLL_HAT_ALLOWED,
+        POLL_RESTRICTED,
+        VERSION,
+        PROPOSALS_COUNT,
+        ALLOWED_TARGET
+    }
+
     /* ─────────── Data Structures ─────────── */
     struct PollOption {
         uint96 votes;
@@ -113,7 +140,7 @@ contract DirectDemocracyVoting is Initializable {
     }
 
     /* ─────────── Events ─────────── */
-    event HatSet(uint256 hat, bool allowed);
+    event HatSet(HatType hatType, uint256 hat, bool allowed);
     event CreatorHatSet(uint256 hat, bool allowed);
     event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created);
     event NewHatProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created, uint256[] hatIds);
@@ -186,33 +213,31 @@ contract DirectDemocracyVoting is Initializable {
         _unpause();
     }
 
-    function setExecutor(address a) external onlyExecutor {
-        if (a == address(0)) revert ZeroAddress();
-        _layout().executor = IExecutor(a);
-        emit ExecutorUpdated(a);
-    }
-
-    function setHatAllowed(uint256 h, bool ok) external onlyExecutor {
+    function setConfig(ConfigKey key, bytes calldata value) external onlyExecutor {
         Layout storage l = _layout();
-        HatManager.setHatInArray(l.votingHatIds, h, ok);
-        emit HatSet(h, ok);
-    }
-
-    function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        Layout storage l = _layout();
-        HatManager.setHatInArray(l.creatorHatIds, h, ok);
-        emit CreatorHatSet(h, ok);
-    }
-
-    function setTargetAllowed(address t, bool ok) external onlyExecutor {
-        _layout().allowedTarget[t] = ok;
-        emit TargetAllowed(t, ok);
-    }
-
-    function setQuorumPercentage(uint8 q) external onlyExecutor {
-        VotingMath.validateQuorum(q);
-        _layout().quorumPercentage = q;
-        emit QuorumPercentageSet(q);
+        if (key == ConfigKey.QUORUM) {
+            uint8 q = abi.decode(value, (uint8));
+            VotingMath.validateQuorum(q);
+            l.quorumPercentage = q;
+            emit QuorumPercentageSet(q);
+        } else if (key == ConfigKey.EXECUTOR) {
+            address newExecutor = abi.decode(value, (address));
+            if (newExecutor == address(0)) revert ZeroAddress();
+            l.executor = IExecutor(newExecutor);
+            emit ExecutorUpdated(newExecutor);
+        } else if (key == ConfigKey.TARGET_ALLOWED) {
+            (address target, bool allowed) = abi.decode(value, (address, bool));
+            l.allowedTarget[target] = allowed;
+            emit TargetAllowed(target, allowed);
+        } else if (key == ConfigKey.HAT_ALLOWED) {
+            (HatType hatType, uint256 hat, bool allowed) = abi.decode(value, (HatType, uint256, bool));
+            if (hatType == HatType.VOTING) {
+                HatManager.setHatInArray(l.votingHatIds, hat, allowed);
+            } else if (hatType == HatType.CREATOR) {
+                HatManager.setHatInArray(l.creatorHatIds, hat, allowed);
+            }
+            emit HatSet(hatType, hat, allowed);
+        }
     }
 
     /* ─────────── Modifiers ─────────── */
@@ -221,15 +246,6 @@ contract DirectDemocracyVoting is Initializable {
         if (_msgSender() != address(l.executor)) {
             bool canCreate = HatManager.hasAnyHat(l.hats, l.creatorHatIds, _msgSender());
             if (!canCreate) revert Unauthorized();
-        }
-        _;
-    }
-
-    modifier onlyVoter() {
-        Layout storage l = _layout();
-        if (_msgSender() != address(l.executor)) {
-            bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
-            if (!canVote) revert Unauthorized();
         }
         _;
     }
@@ -329,12 +345,14 @@ contract DirectDemocracyVoting is Initializable {
         external
         exists(id)
         notExpired(id)
-        onlyVoter
         whenNotPaused
     {
         if (idxs.length != weights.length) revert LengthMismatch();
         Layout storage l = _layout();
-
+        if (_msgSender() != address(l.executor)) {
+            bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
+            if (!canVote) revert Unauthorized();
+        }
         Proposal storage p = l._proposals[id];
         if (p.restricted) {
             bool hasAllowedHat = false;
@@ -398,26 +416,26 @@ contract DirectDemocracyVoting is Initializable {
     }
 
     /* ─────────── Cleanup ─────────── */
-    function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
-        Layout storage l = _layout();
-        Proposal storage p = l._proposals[id];
-        require(p.batches.length > 0 || voters.length > 0, "nothing");
-        uint256 cleaned;
-        uint256 len = voters.length;
-        for (uint256 i; i < len && i < 4_000;) {
-            if (p.hasVoted[voters[i]]) {
-                delete p.hasVoted[voters[i]];
-                unchecked {
-                    ++cleaned;
-                }
-            }
-            unchecked {
-                ++i;
-            }
-        }
-        if (cleaned == 0 && p.batches.length > 0) delete p.batches;
-        emit ProposalCleaned(id, cleaned);
-    }
+    // function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
+    //     Layout storage l = _layout();
+    //     Proposal storage p = l._proposals[id];
+    //     require(p.batches.length > 0 || voters.length > 0, "nothing");
+    //     uint256 cleaned;
+    //     uint256 len = voters.length;
+    //     for (uint256 i; i < len && i < 4_000;) {
+    //         if (p.hasVoted[voters[i]]) {
+    //             delete p.hasVoted[voters[i]];
+    //             unchecked {
+    //                 ++cleaned;
+    //             }
+    //         }
+    //         unchecked {
+    //             ++i;
+    //         }
+    //     }
+    //     if (cleaned == 0 && p.batches.length > 0) delete p.batches;
+    //     emit ProposalCleaned(id, cleaned);
+    // }
 
     /* ─────────── View helpers ─────────── */
     function _calcWinner(uint256 id) internal view returns (uint256 win, bool ok) {
@@ -442,70 +460,39 @@ contract DirectDemocracyVoting is Initializable {
         ok = VotingMath.meetsQuorum(hi, second, p.totalWeight, l.quorumPercentage);
     }
 
-    function proposalsCount() external view returns (uint256) {
-        return _layout()._proposals.length;
-    }
-
-    /* ─────────── Version / ID ─────────── */
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
-
-    function moduleId() external pure returns (bytes4) {
-        return MODULE_ID;
-    }
-
-    /* ─────────── Public getters for storage variables ─────────── */
-    function hats() external view returns (IHats) {
-        return _layout().hats;
-    }
-
-    function executor() external view returns (IExecutor) {
-        return _layout().executor;
-    }
-
-    function allowedTarget(address target) external view returns (bool) {
-        return _layout().allowedTarget[target];
-    }
-
-    function quorumPercentage() external view returns (uint8) {
-        return _layout().quorumPercentage;
-    }
-
-    function pollHatAllowed(uint256 id, uint256 hat) external view returns (bool) {
+    function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
         Layout storage l = _layout();
-        if (id >= l._proposals.length) revert InvalidProposal();
-        return l._proposals[id].pollHatAllowed[hat];
+        if (key == StorageKey.HATS) {
+            return abi.encode(l.hats);
+        } else if (key == StorageKey.EXECUTOR) {
+            return abi.encode(l.executor);
+        } else if (key == StorageKey.QUORUM_PERCENTAGE) {
+            return abi.encode(l.quorumPercentage);
+        } else if (key == StorageKey.VOTING_HATS) {
+            return abi.encode(HatManager.getHatArray(l.votingHatIds));
+        } else if (key == StorageKey.CREATOR_HATS) {
+            return abi.encode(HatManager.getHatArray(l.creatorHatIds));
+        } else if (key == StorageKey.VOTING_HAT_COUNT) {
+            return abi.encode(HatManager.getHatCount(l.votingHatIds));
+        } else if (key == StorageKey.CREATOR_HAT_COUNT) {
+            return abi.encode(HatManager.getHatCount(l.creatorHatIds));
+        } else if (key == StorageKey.POLL_HAT_ALLOWED) {
+            (uint256 id, uint256 hat) = abi.decode(params, (uint256, uint256));
+            if (id >= l._proposals.length) revert InvalidProposal();
+            return abi.encode(l._proposals[id].pollHatAllowed[hat]);
+        } else if (key == StorageKey.POLL_RESTRICTED) {
+            uint256 id = abi.decode(params, (uint256));
+            if (id >= l._proposals.length) revert InvalidProposal();
+            return abi.encode(l._proposals[id].restricted);
+        } else if (key == StorageKey.VERSION) {
+            return abi.encode("v1");
+        } else if (key == StorageKey.PROPOSALS_COUNT) {
+            return abi.encode(l._proposals.length);
+        } else if (key == StorageKey.ALLOWED_TARGET) {
+            address target = abi.decode(params, (address));
+            return abi.encode(l.allowedTarget[target]);
+        }
+        revert InvalidIndex();
     }
 
-    function pollRestricted(uint256 id) external view returns (bool) {
-        Layout storage l = _layout();
-        if (id >= l._proposals.length) revert InvalidProposal();
-        return l._proposals[id].restricted;
-    }
-
-    /* ─────────── Hat Management View Functions ─────────── */
-    function getVotingHats() external view returns (uint256[] memory) {
-        return HatManager.getHatArray(_layout().votingHatIds);
-    }
-
-    function getCreatorHats() external view returns (uint256[] memory) {
-        return HatManager.getHatArray(_layout().creatorHatIds);
-    }
-
-    function votingHatCount() external view returns (uint256) {
-        return HatManager.getHatCount(_layout().votingHatIds);
-    }
-
-    function creatorHatCount() external view returns (uint256) {
-        return HatManager.getHatCount(_layout().creatorHatIds);
-    }
-
-    function isVotingHat(uint256 hatId) external view returns (bool) {
-        return HatManager.isHatInArray(_layout().votingHatIds, hatId);
-    }
-
-    function isCreatorHat(uint256 hatId) external view returns (bool) {
-        return HatManager.isHatInArray(_layout().creatorHatIds, hatId);
-    }
 }
