@@ -326,9 +326,9 @@ contract Deployer is Initializable, OwnableUpgradeable {
         require(roleNames.length == roleCanVote.length, "HATS_SETUP: array mismatch");
 
         // ─────────────────────────────────────────────────────────────
-        //  Deploy EligibilityModule with Deployer as initial admin
+        //  Deploy EligibilityModule with Deployer as initial super admin
         // ─────────────────────────────────────────────────────────────
-        eligibilityModule = new EligibilityModule(address(this));
+        eligibilityModule = new EligibilityModule(address(this), address(hats));
         address eligibilityModuleAddress = address(eligibilityModule);
 
         // ─────────────────────────────────────────────────────────────
@@ -346,8 +346,8 @@ contract Deployer is Initializable, OwnableUpgradeable {
             "" //image uri
         );
 
-        // Configure Top Hat eligibility and toggle
-        eligibilityModule.setHatRules(topHatId, true, true);
+        // Configure Top Hat eligibility and toggle (for the executor initially)
+        eligibilityModule.setWearerEligibility(address(this), topHatId, true, true);
         toggleModule.setHatStatus(topHatId, true);
 
         // ─────────────────────────────────────────────────────────────
@@ -368,8 +368,8 @@ contract Deployer is Initializable, OwnableUpgradeable {
                 roleNames[i] // data blob (optional)
             );
 
-            // Configure role hat eligibility and toggle
-            eligibilityModule.setHatRules(roleHatIds[i], true, true);
+            // Configure role hat eligibility and toggle for the executor
+            eligibilityModule.setWearerEligibility(executorAddr, roleHatIds[i], true, true);
             toggleModule.setHatStatus(roleHatIds[i], true);
 
             // Give the role hat to the Executor right away if flagged
@@ -383,9 +383,36 @@ contract Deployer is Initializable, OwnableUpgradeable {
         hats.transferHat(topHatId, address(this), executorAddr);
 
         // ─────────────────────────────────────────────────────────────
+        //  Set default eligibility for all hats so minting works
+        // ─────────────────────────────────────────────────────────────
+        eligibilityModule.setDefaultEligibility(topHatId, true, true);
+        for (uint256 i = 0; i < roleHatIds.length; i++) {
+            eligibilityModule.setDefaultEligibility(roleHatIds[i], true, true);
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  Set up admin hat system: EXECUTIVE role can control DEFAULT role
+        // ─────────────────────────────────────────────────────────────
+        if (roleHatIds.length >= 2) {
+            uint256 defaultRoleHat = roleHatIds[0]; // DEFAULT role hat
+            uint256 executiveRoleHat = roleHatIds[1]; // EXECUTIVE role hat
+
+            // Set the EXECUTIVE role hat as an admin hat
+            eligibilityModule.setAdminHat(executiveRoleHat, true);
+
+            // Give the EXECUTIVE role hat permission to control the DEFAULT role hat
+            uint256[] memory targetHats = new uint256[](1);
+            targetHats[0] = defaultRoleHat;
+            bool[] memory permissions = new bool[](1);
+            permissions[0] = true;
+
+            eligibilityModule.setAdminPermissions(executiveRoleHat, targetHats, permissions);
+        }
+
+        // ─────────────────────────────────────────────────────────────
         //  Transfer module admin rights to the Executor
         // ─────────────────────────────────────────────────────────────
-        eligibilityModule.transferAdmin(executorAddr);
+        eligibilityModule.transferSuperAdmin(executorAddr);
         toggleModule.transferAdmin(executorAddr);
 
         // ─────────────────────────────────────────────────────────────

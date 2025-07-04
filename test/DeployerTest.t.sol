@@ -22,11 +22,44 @@ import "../src/ImplementationRegistry.sol";
 import "../src/PoaManager.sol";
 import "../src/OrgRegistry.sol";
 import {Deployer} from "../src/Deployer.sol";
+import {EligibilityModule} from "../src/EligibilityModule.sol";
 import {IExecutor} from "../src/Executor.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 
+// Define events for testing
+interface IEligibilityModuleEvents {
+    event WearerEligibilityUpdated(
+        address indexed wearer, 
+        uint256 indexed hatId, 
+        bool eligible, 
+        bool standing,
+        address indexed admin
+    );
+
+    event DefaultEligibilityUpdated(
+        uint256 indexed hatId, 
+        bool eligible, 
+        bool standing,
+        address indexed admin
+    );
+
+    event AdminHatUpdated(uint256 indexed hatId, bool isAdmin, address indexed admin);
+
+    event AdminPermissionUpdated(
+        uint256 indexed adminHatId, 
+        uint256 indexed targetHatId, 
+        bool canControl,
+        address indexed admin
+    );
+
+    event SuperAdminTransferred(
+        address indexed oldSuperAdmin,
+        address indexed newSuperAdmin
+    );
+}
+
 /*────────────── Test contract ───────────*/
-contract DeployerTest is Test {
+contract DeployerTest is Test, IEligibilityModuleEvents {
     /*–––– implementations ––––*/
     HybridVoting hybridImpl;
     Executor execImpl;
@@ -336,8 +369,8 @@ contract DeployerTest is Test {
             "NEW_ROLE" // data blob
         );
 
-        // Configure the new role hat
-        deployer.eligibilityModule().setHatRules(newRoleHatId, true, true);
+        // Configure the new role hat for the executor
+        deployer.eligibilityModule().setWearerEligibility(exec, newRoleHatId, true, true);
         deployer.toggleModule().setHatStatus(newRoleHatId, true);
 
         // Mint the new role hat to the executor
@@ -347,5 +380,669 @@ contract DeployerTest is Test {
         assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(exec, newRoleHatId), "Executor should wear the new role hat");
 
         vm.stopPrank();
+    }
+
+    function testEligibilityModuleAdminHatSystem() public {
+        vm.startPrank(orgOwner);
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        );
+
+        vm.stopPrank();
+
+        // Get the eligibility module address directly
+        address eligibilityModuleAddr = address(deployer.eligibilityModule());
+
+        // Verify executor is the super admin
+        assertEq(EligibilityModule(eligibilityModuleAddr).superAdmin(), exec, "Executor should be the super admin");
+
+        // Get role hat IDs
+        uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
+        uint256 executiveRoleHat = orgRegistry.getRoleHat(ORG_ID, 1);
+
+        // Verify executive role hat is an admin hat
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).isAdminHat(executiveRoleHat),
+            "Executive role hat should be an admin hat"
+        );
+
+        // Verify executive role hat can control default role hat
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(executiveRoleHat, defaultRoleHat),
+            "Executive role hat should be able to control default role hat"
+        );
+
+        // Test that someone wearing the executive role hat can change eligibility
+        // First, mint the executive role hat to voter1
+        vm.prank(exec);
+        IHats(SEPOLIA_HATS).mintHat(executiveRoleHat, voter1);
+
+        // Verify voter1 is wearing the executive role hat
+        assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(voter1, executiveRoleHat), "voter1 should wear executive role hat");
+
+        // Now voter1 should be able to change eligibility for voter2's default role hat
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(voter2, defaultRoleHat, false, false);
+
+        // Verify the eligibility was changed for voter2
+        (bool eligible, bool standing) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(voter2, defaultRoleHat);
+        assertFalse(eligible, "voter2's default role hat should be ineligible");
+        assertFalse(standing, "voter2's default role hat should have bad standing");
+
+        // voter1's eligibility should be unaffected since it's per-wearer (should still have default eligibility)
+        (eligible, standing) = EligibilityModule(eligibilityModuleAddr).getWearerStatus(voter1, defaultRoleHat);
+        assertTrue(eligible, "voter1's default role hat should still be default (eligible)");
+        assertTrue(standing, "voter1's default role hat should still be default (good standing)");
+
+        // Change voter2 back to eligible
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(voter2, defaultRoleHat, true, true);
+
+        // Verify the eligibility was changed back for voter2
+        (eligible, standing) = EligibilityModule(eligibilityModuleAddr).getWearerStatus(voter2, defaultRoleHat);
+        assertTrue(eligible, "voter2's default role hat should be eligible");
+        assertTrue(standing, "voter2's default role hat should have good standing");
+
+        // Test that someone without the executive role hat cannot change eligibility
+        vm.prank(voter2);
+        vm.expectRevert("Not authorized admin for this hat");
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(voter2, defaultRoleHat, false, false);
+
+        // Test that executor (as super admin) can add new admin hats
+        uint256 newAdminHatId = 999; // Example hat ID
+
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setAdminHat(newAdminHatId, true);
+
+        // Verify the new admin hat was added
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).isAdminHat(newAdminHatId), "New admin hat should be registered"
+        );
+
+        // Set permissions for the new admin hat
+        uint256[] memory targetHats = new uint256[](1);
+        targetHats[0] = defaultRoleHat;
+        bool[] memory permissions = new bool[](1);
+        permissions[0] = true;
+
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setAdminPermissions(newAdminHatId, targetHats, permissions);
+
+        // Verify the permissions were set
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(newAdminHatId, defaultRoleHat),
+            "New admin hat should be able to control default role hat"
+        );
+
+        // Test full flow: Executive makes someone eligible and they claim the hat
+        // First, make voter2 ineligible for the default role hat
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(voter2, defaultRoleHat, false, false);
+
+        // Verify voter2 cannot mint the default role hat when ineligible
+        vm.prank(exec);
+        vm.expectRevert();
+        IHats(SEPOLIA_HATS).mintHat(defaultRoleHat, voter2);
+
+        // Executive (voter1) makes voter2 eligible for the default role hat
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(voter2, defaultRoleHat, true, true);
+
+        // Now exec should be able to mint the default role hat for voter2
+        vm.prank(exec);
+        bool success = IHats(SEPOLIA_HATS).mintHat(defaultRoleHat, voter2);
+        assertTrue(success, "Should successfully mint hat when eligible");
+
+        // Verify voter2 is now wearing the default role hat
+        assertTrue(
+            IHats(SEPOLIA_HATS).isWearerOfHat(voter2, defaultRoleHat), "voter2 should be wearing the default role hat"
+        );
+
+        // Verify voter2 is eligible and in good standing
+        (bool eligible2, bool standing2) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(voter2, defaultRoleHat);
+        assertTrue(eligible2, "voter2 should be eligible for default role hat");
+        assertTrue(standing2, "voter2 should have good standing for default role hat");
+
+        // Test revoking eligibility while wearing the hat
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(voter2, defaultRoleHat, false, false);
+
+        // Verify voter2 is now ineligible (and thus no longer wearing the hat)
+        // The Hats protocol integrates eligibility checking into isWearerOfHat
+        assertFalse(
+            IHats(SEPOLIA_HATS).isWearerOfHat(voter2, defaultRoleHat),
+            "voter2 should no longer be wearing the hat when ineligible"
+        );
+
+        // Verify voter2 is now ineligible
+        (bool eligible3, bool standing3) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(voter2, defaultRoleHat);
+        assertFalse(eligible3, "voter2 should now be ineligible for default role hat");
+        assertFalse(standing3, "voter2 should now have bad standing for default role hat");
+    }
+
+    function testMultipleAdminHatsWithRoleManagement() public {
+        vm.startPrank(orgOwner);
+        string[] memory names = new string[](4);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        names[2] = "MODERATOR";
+        names[3] = "CONTRIBUTOR";
+        string[] memory images = new string[](4);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        images[2] = "ipfs://moderator-role-image";
+        images[3] = "ipfs://contributor-role-image";
+        bool[] memory voting = new bool[](4);
+        voting[0] = true;
+        voting[1] = true;
+        voting[2] = true;
+        voting[3] = true;
+
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+            ORG_ID, "Multi-Admin DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        );
+
+        vm.stopPrank();
+
+        // Get the eligibility module address
+        address eligibilityModuleAddr = address(deployer.eligibilityModule());
+
+        // Get role hat IDs
+        uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
+        uint256 executiveRoleHat = orgRegistry.getRoleHat(ORG_ID, 1);
+        uint256 moderatorRoleHat = orgRegistry.getRoleHat(ORG_ID, 2);
+        uint256 contributorRoleHat = orgRegistry.getRoleHat(ORG_ID, 3);
+
+        // Set up admin hat permissions:
+        // - EXECUTIVE can control DEFAULT and CONTRIBUTOR
+        // - MODERATOR can control DEFAULT and CONTRIBUTOR
+        // - CONTRIBUTOR can only control DEFAULT
+
+        // Set EXECUTIVE as admin hat
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setAdminHat(executiveRoleHat, true);
+
+        // Set MODERATOR as admin hat
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setAdminHat(moderatorRoleHat, true);
+
+        // Set CONTRIBUTOR as admin hat
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setAdminHat(contributorRoleHat, true);
+
+        // Give EXECUTIVE permission to control DEFAULT and CONTRIBUTOR
+        uint256[] memory executiveTargets = new uint256[](2);
+        executiveTargets[0] = defaultRoleHat;
+        executiveTargets[1] = contributorRoleHat;
+        bool[] memory executivePermissions = new bool[](2);
+        executivePermissions[0] = true;
+        executivePermissions[1] = true;
+
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setAdminPermissions(
+            executiveRoleHat, executiveTargets, executivePermissions
+        );
+
+        // Give MODERATOR permission to control DEFAULT and CONTRIBUTOR
+        uint256[] memory moderatorTargets = new uint256[](2);
+        moderatorTargets[0] = defaultRoleHat;
+        moderatorTargets[1] = contributorRoleHat;
+        bool[] memory moderatorPermissions = new bool[](2);
+        moderatorPermissions[0] = true;
+        moderatorPermissions[1] = true;
+
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setAdminPermissions(
+            moderatorRoleHat, moderatorTargets, moderatorPermissions
+        );
+
+        // Give CONTRIBUTOR permission to control only DEFAULT
+        uint256[] memory contributorTargets = new uint256[](1);
+        contributorTargets[0] = defaultRoleHat;
+        bool[] memory contributorPermissions = new bool[](1);
+        contributorPermissions[0] = true;
+
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setAdminPermissions(
+            contributorRoleHat, contributorTargets, contributorPermissions
+        );
+
+        // Verify admin hat setup
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).isAdminHat(executiveRoleHat), "EXECUTIVE should be admin hat"
+        );
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).isAdminHat(moderatorRoleHat), "MODERATOR should be admin hat"
+        );
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).isAdminHat(contributorRoleHat), "CONTRIBUTOR should be admin hat"
+        );
+
+        // Verify permissions
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(executiveRoleHat, defaultRoleHat),
+            "EXECUTIVE should control DEFAULT"
+        );
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(executiveRoleHat, contributorRoleHat),
+            "EXECUTIVE should control CONTRIBUTOR"
+        );
+        assertFalse(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(executiveRoleHat, executiveRoleHat),
+            "EXECUTIVE should not control itself"
+        );
+        assertFalse(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(executiveRoleHat, moderatorRoleHat),
+            "EXECUTIVE should not control MODERATOR"
+        );
+
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(moderatorRoleHat, defaultRoleHat),
+            "MODERATOR should control DEFAULT"
+        );
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(moderatorRoleHat, contributorRoleHat),
+            "MODERATOR should control CONTRIBUTOR"
+        );
+        assertFalse(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(moderatorRoleHat, executiveRoleHat),
+            "MODERATOR should not control EXECUTIVE"
+        );
+
+        assertTrue(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(contributorRoleHat, defaultRoleHat),
+            "CONTRIBUTOR should control DEFAULT"
+        );
+        assertFalse(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(contributorRoleHat, contributorRoleHat),
+            "CONTRIBUTOR should not control itself"
+        );
+        assertFalse(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(contributorRoleHat, executiveRoleHat),
+            "CONTRIBUTOR should not control EXECUTIVE"
+        );
+        assertFalse(
+            EligibilityModule(eligibilityModuleAddr).canAdminControlHat(contributorRoleHat, moderatorRoleHat),
+            "CONTRIBUTOR should not control MODERATOR"
+        );
+
+        // Mint admin hats to test users
+        vm.prank(exec);
+        IHats(SEPOLIA_HATS).mintHat(executiveRoleHat, voter1);
+
+        vm.prank(exec);
+        IHats(SEPOLIA_HATS).mintHat(moderatorRoleHat, voter2);
+
+        vm.prank(exec);
+        IHats(SEPOLIA_HATS).mintHat(contributorRoleHat, address(5)); // voter3
+
+        // Test EXECUTIVE (voter1) can control DEFAULT and CONTRIBUTOR for a test user
+        address testUser = address(6);
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, defaultRoleHat, false, false);
+
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, contributorRoleHat, false, false);
+
+        // Verify the changes took effect
+        (bool eligible, bool standing) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(testUser, defaultRoleHat);
+        assertFalse(eligible, "DEFAULT should be ineligible after EXECUTIVE change");
+        assertFalse(standing, "DEFAULT should have bad standing after EXECUTIVE change");
+
+        (eligible, standing) = EligibilityModule(eligibilityModuleAddr).getWearerStatus(testUser, contributorRoleHat);
+        assertFalse(eligible, "CONTRIBUTOR should be ineligible after EXECUTIVE change");
+        assertFalse(standing, "CONTRIBUTOR should have bad standing after EXECUTIVE change");
+
+        // Test EXECUTIVE cannot control EXECUTIVE or MODERATOR
+        vm.prank(voter1);
+        vm.expectRevert("Not authorized admin for this hat");
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, executiveRoleHat, false, false);
+
+        vm.prank(voter1);
+        vm.expectRevert("Not authorized admin for this hat");
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, moderatorRoleHat, false, false);
+
+        // Test MODERATOR (voter2) can control DEFAULT and CONTRIBUTOR
+        vm.prank(voter2);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, defaultRoleHat, true, true);
+
+        vm.prank(voter2);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, contributorRoleHat, true, true);
+
+        // Verify the changes took effect
+        (eligible, standing) = EligibilityModule(eligibilityModuleAddr).getWearerStatus(testUser, defaultRoleHat);
+        assertTrue(eligible, "DEFAULT should be eligible after MODERATOR change");
+        assertTrue(standing, "DEFAULT should have good standing after MODERATOR change");
+
+        (eligible, standing) = EligibilityModule(eligibilityModuleAddr).getWearerStatus(testUser, contributorRoleHat);
+        assertTrue(eligible, "CONTRIBUTOR should be eligible after MODERATOR change");
+        assertTrue(standing, "CONTRIBUTOR should have good standing after MODERATOR change");
+
+        // Test MODERATOR cannot control EXECUTIVE
+        vm.prank(voter2);
+        vm.expectRevert("Not authorized admin for this hat");
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, executiveRoleHat, false, false);
+
+        // Test CONTRIBUTOR (voter3) can only control DEFAULT
+        vm.prank(address(5));
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, defaultRoleHat, false, false);
+
+        // Verify the change took effect
+        (eligible, standing) = EligibilityModule(eligibilityModuleAddr).getWearerStatus(testUser, defaultRoleHat);
+        assertFalse(eligible, "DEFAULT should be ineligible after CONTRIBUTOR change");
+        assertFalse(standing, "DEFAULT should have bad standing after CONTRIBUTOR change");
+
+        // Test CONTRIBUTOR cannot control other roles
+        vm.prank(address(5));
+        vm.expectRevert("Not authorized admin for this hat");
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, contributorRoleHat, false, false);
+
+        vm.prank(address(5));
+        vm.expectRevert("Not authorized admin for this hat");
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, executiveRoleHat, false, false);
+
+        vm.prank(address(5));
+        vm.expectRevert("Not authorized admin for this hat");
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, moderatorRoleHat, false, false);
+
+        // Test that non-admin users cannot control any roles
+        vm.prank(address(6));
+        vm.expectRevert("Not authorized admin for this hat");
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, defaultRoleHat, true, true);
+
+        // Test full workflow: EXECUTIVE makes someone eligible, they get the hat, then MODERATOR revokes it
+        address hatRecipient = address(7);
+        // EXECUTIVE makes DEFAULT eligible for address(7)
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(hatRecipient, defaultRoleHat, true, true);
+
+        // Mint DEFAULT hat to the new user
+        vm.prank(exec);
+        bool success = IHats(SEPOLIA_HATS).mintHat(defaultRoleHat, hatRecipient);
+        assertTrue(success, "Should successfully mint DEFAULT hat when eligible");
+
+        // Verify the user is wearing the hat
+        assertTrue(
+            IHats(SEPOLIA_HATS).isWearerOfHat(hatRecipient, defaultRoleHat), "User should be wearing DEFAULT hat"
+        );
+
+        // MODERATOR revokes eligibility for address(7)
+        vm.prank(voter2);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(hatRecipient, defaultRoleHat, false, false);
+
+        // Verify the user is no longer wearing the hat
+        assertFalse(
+            IHats(SEPOLIA_HATS).isWearerOfHat(hatRecipient, defaultRoleHat),
+            "User should no longer be wearing DEFAULT hat when ineligible"
+        );
+
+        // Test that the super admin can still control all hats for testUser
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, defaultRoleHat, true, true);
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, executiveRoleHat, false, false);
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, moderatorRoleHat, false, false);
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, contributorRoleHat, false, false);
+
+        // Verify all hats are now controlled by super admin for testUser
+        (eligible, standing) = EligibilityModule(eligibilityModuleAddr).getWearerStatus(testUser, defaultRoleHat);
+        assertTrue(eligible, "DEFAULT should be eligible after super admin change");
+        assertTrue(standing, "DEFAULT should have good standing after super admin change");
+
+        (eligible, standing) = EligibilityModule(eligibilityModuleAddr).getWearerStatus(testUser, executiveRoleHat);
+        assertFalse(eligible, "EXECUTIVE should be ineligible after super admin change");
+        assertFalse(standing, "EXECUTIVE should have bad standing after super admin change");
+
+        (eligible, standing) = EligibilityModule(eligibilityModuleAddr).getWearerStatus(testUser, moderatorRoleHat);
+        assertFalse(eligible, "MODERATOR should be ineligible after super admin change");
+        assertFalse(standing, "MODERATOR should have bad standing after super admin change");
+
+        (eligible, standing) = EligibilityModule(eligibilityModuleAddr).getWearerStatus(testUser, contributorRoleHat);
+        assertFalse(eligible, "CONTRIBUTOR should be ineligible after super admin change");
+        assertFalse(standing, "CONTRIBUTOR should have bad standing after super admin change");
+    }
+
+    function testExecutiveGivesHatsToTwoPeopleThenTurnsOffOne() public {
+        vm.startPrank(orgOwner);
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+            ORG_ID, "Executive Hat Test DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        );
+
+        vm.stopPrank();
+
+        // Get the eligibility module address
+        address eligibilityModuleAddr = address(deployer.eligibilityModule());
+
+        // Get role hat IDs
+        uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
+        uint256 executiveRoleHat = orgRegistry.getRoleHat(ORG_ID, 1);
+
+        // Define two people who will receive hats
+        address person1 = address(0x100);
+        address person2 = address(0x101);
+
+        // First, mint the executive role hat to voter1 so they can act as an executive
+        vm.prank(exec);
+        IHats(SEPOLIA_HATS).mintHat(executiveRoleHat, voter1);
+
+        // Verify voter1 is wearing the executive role hat
+        assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(voter1, executiveRoleHat), "voter1 should wear executive role hat");
+
+        // Executive (voter1) makes both people eligible for the DEFAULT role hat
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(person1, defaultRoleHat, true, true);
+
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(person2, defaultRoleHat, true, true);
+
+        // Verify both people are eligible for the DEFAULT role hat
+        (bool eligible1, bool standing1) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(person1, defaultRoleHat);
+        assertTrue(eligible1, "person1 should be eligible for DEFAULT role hat");
+        assertTrue(standing1, "person1 should have good standing for DEFAULT role hat");
+
+        (bool eligible2, bool standing2) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(person2, defaultRoleHat);
+        assertTrue(eligible2, "person2 should be eligible for DEFAULT role hat");
+        assertTrue(standing2, "person2 should have good standing for DEFAULT role hat");
+
+        // The executor mints the DEFAULT role hat to both people
+        vm.prank(exec);
+        bool success1 = IHats(SEPOLIA_HATS).mintHat(defaultRoleHat, person1);
+        assertTrue(success1, "Should successfully mint DEFAULT hat to person1");
+
+        vm.prank(exec);
+        bool success2 = IHats(SEPOLIA_HATS).mintHat(defaultRoleHat, person2);
+        assertTrue(success2, "Should successfully mint DEFAULT hat to person2");
+
+        // Verify both people are wearing the DEFAULT role hat
+        assertTrue(
+            IHats(SEPOLIA_HATS).isWearerOfHat(person1, defaultRoleHat), "person1 should be wearing DEFAULT role hat"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isWearerOfHat(person2, defaultRoleHat), "person2 should be wearing DEFAULT role hat"
+        );
+
+        // Executive (voter1) turns off person1's hat but leaves person2's hat on
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(person1, defaultRoleHat, false, false);
+
+        // Verify person1 is no longer eligible and not wearing the hat
+        (bool eligible1After, bool standing1After) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(person1, defaultRoleHat);
+        assertFalse(eligible1After, "person1 should now be ineligible for DEFAULT role hat");
+        assertFalse(standing1After, "person1 should now have bad standing for DEFAULT role hat");
+
+        // The Hats protocol should recognize that person1 is no longer wearing the hat
+        assertFalse(
+            IHats(SEPOLIA_HATS).isWearerOfHat(person1, defaultRoleHat),
+            "person1 should no longer be wearing DEFAULT role hat"
+        );
+
+        // Verify person2 is still eligible and wearing the hat
+        (bool eligible2After, bool standing2After) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(person2, defaultRoleHat);
+        assertTrue(eligible2After, "person2 should still be eligible for DEFAULT role hat");
+        assertTrue(standing2After, "person2 should still have good standing for DEFAULT role hat");
+
+        assertTrue(
+            IHats(SEPOLIA_HATS).isWearerOfHat(person2, defaultRoleHat),
+            "person2 should still be wearing DEFAULT role hat"
+        );
+
+        // Executive can turn person1's hat back on
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(person1, defaultRoleHat, true, true);
+
+        // Verify person1 is eligible again
+        (bool eligible1Final, bool standing1Final) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(person1, defaultRoleHat);
+        assertTrue(eligible1Final, "person1 should be eligible again for DEFAULT role hat");
+        assertTrue(standing1Final, "person1 should have good standing again for DEFAULT role hat");
+
+        // person1 should automatically be wearing the hat again since they're eligible
+        assertTrue(
+            IHats(SEPOLIA_HATS).isWearerOfHat(person1, defaultRoleHat),
+            "person1 should be wearing DEFAULT role hat again"
+        );
+
+        // Executive can also turn off person2's hat
+        vm.prank(voter1);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(person2, defaultRoleHat, false, false);
+
+        // Verify person2 is no longer eligible and not wearing the hat
+        (bool eligible2Final, bool standing2Final) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(person2, defaultRoleHat);
+        assertFalse(eligible2Final, "person2 should now be ineligible for DEFAULT role hat");
+        assertFalse(standing2Final, "person2 should now have bad standing for DEFAULT role hat");
+
+        assertFalse(
+            IHats(SEPOLIA_HATS).isWearerOfHat(person2, defaultRoleHat),
+            "person2 should no longer be wearing DEFAULT role hat"
+        );
+
+        // Test that only the executive can control these hats - person1 cannot control person2's hat
+        vm.prank(person1);
+        vm.expectRevert("Not authorized admin for this hat");
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(person2, defaultRoleHat, true, true);
+
+        // Test that the super admin (executor) can still control all hats
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(person1, defaultRoleHat, false, false);
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(person2, defaultRoleHat, true, true);
+
+        // Verify the super admin changes took effect
+        (bool eligible1SuperAdmin, bool standing1SuperAdmin) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(person1, defaultRoleHat);
+        assertFalse(eligible1SuperAdmin, "person1 should be ineligible after super admin change");
+        assertFalse(standing1SuperAdmin, "person1 should have bad standing after super admin change");
+
+        (bool eligible2SuperAdmin, bool standing2SuperAdmin) =
+            EligibilityModule(eligibilityModuleAddr).getWearerStatus(person2, defaultRoleHat);
+        assertTrue(eligible2SuperAdmin, "person2 should be eligible after super admin change");
+        assertTrue(standing2SuperAdmin, "person2 should have good standing after super admin change");
+
+        // Final check: person1 should not be wearing the hat, person2 should be wearing it
+        assertFalse(
+            IHats(SEPOLIA_HATS).isWearerOfHat(person1, defaultRoleHat),
+            "person1 should not be wearing DEFAULT role hat after super admin change"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isWearerOfHat(person2, defaultRoleHat),
+            "person2 should be wearing DEFAULT role hat after super admin change"
+        );
+    }
+
+    function testEligibilityModuleEvents() public {
+        vm.startPrank(orgOwner);
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+            ORG_ID, "Events Test DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
+        );
+
+        vm.stopPrank();
+
+        // Get the eligibility module address
+        address eligibilityModuleAddr = address(deployer.eligibilityModule());
+
+        // Get role hat IDs
+        uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
+        uint256 executiveRoleHat = orgRegistry.getRoleHat(ORG_ID, 1);
+
+        // Test that events are emitted when setting wearer eligibility
+        vm.expectEmit(true, true, false, true);
+        emit WearerEligibilityUpdated(voter1, defaultRoleHat, true, true, exec);
+        
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setWearerEligibility(voter1, defaultRoleHat, true, true);
+
+        // Test that events are emitted when setting default eligibility
+        vm.expectEmit(true, false, false, true);
+        emit DefaultEligibilityUpdated(defaultRoleHat, false, false, exec);
+        
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setDefaultEligibility(defaultRoleHat, false, false);
+
+        // Test that events are emitted when setting admin hat
+        vm.expectEmit(true, false, false, true);
+        emit AdminHatUpdated(999, true, exec);
+        
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setAdminHat(999, true);
+
+        // Test that events are emitted when setting admin permissions
+        uint256[] memory targetHats = new uint256[](1);
+        targetHats[0] = defaultRoleHat;
+        bool[] memory permissions = new bool[](1);
+        permissions[0] = true;
+
+        vm.expectEmit(true, true, false, true);
+        emit AdminPermissionUpdated(999, defaultRoleHat, true, exec);
+        
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).setAdminPermissions(999, targetHats, permissions);
+
+        // Test that events are emitted when transferring super admin
+        vm.expectEmit(true, true, false, false);
+        emit SuperAdminTransferred(exec, voter1);
+        
+        vm.prank(exec);
+        EligibilityModule(eligibilityModuleAddr).transferSuperAdmin(voter1);
     }
 }
