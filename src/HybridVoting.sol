@@ -79,7 +79,7 @@ contract HybridVoting is Initializable {
     // keccak256("poa.hybridvoting.storage") → unique, collision-free slot
     bytes32 private constant _STORAGE_SLOT = 0x5ca2a7292ae8f852850852b5f984e5237d39f3240052e7ba31e27bf071bdb62b;
 
-        /* ─────── Storage Getter Enum ─────── */
+    /* ─────── Storage Getter Enum ─────── */
     enum StorageKey {
         PARTICIPATION_TOKEN,
         HATS,
@@ -99,6 +99,7 @@ contract HybridVoting is Initializable {
         VERSION,
         PROPOSALS_COUNT
     }
+
     function _layout() private pure returns (Layout storage s) {
         assembly {
             s.slot := _STORAGE_SLOT
@@ -130,11 +131,8 @@ contract HybridVoting is Initializable {
         _layout()._paused = false;
     }
 
-
     /* ─────── Events ─────── */
-    event HatSet(uint256 hat, bool allowed);
-    event DemocracyHatSet(uint256 hat, bool allowed);
-    event CreatorHatSet(uint256 hat, bool allowed);
+    event HatSet(HatType hatType, uint256 hat, bool allowed);
     event TargetAllowed(address target, bool allowed);
     event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created);
     event NewHatProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created, uint256[] hatIds);
@@ -248,7 +246,6 @@ contract HybridVoting is Initializable {
         _unpause();
     }
 
-
     /* ─────── Hat Management ─────── */
     enum HatType {
         VOTING,
@@ -256,22 +253,19 @@ contract HybridVoting is Initializable {
         DEMOCRACY
     }
 
-    function setHatAllowed(HatType hatType, uint256 h, bool ok) external onlyExecutor {
+        function setHatAllowed(HatType hatType, uint256 h, bool ok) external onlyExecutor {
         Layout storage l = _layout();
         
         if (hatType == HatType.VOTING) {
             HatManager.setHatInArray(l.votingHatIds, h, ok);
-            emit HatSet(h, ok);
         } else if (hatType == HatType.CREATOR) {
             HatManager.setHatInArray(l.creatorHatIds, h, ok);
-            emit CreatorHatSet(h, ok);
         } else if (hatType == HatType.DEMOCRACY) {
             HatManager.setHatInArray(l.democracyHatIds, h, ok);
-            emit DemocracyHatSet(h, ok);
         }
+        
+        emit HatSet(hatType, h, ok);
     }
-
-
 
     /* ─────── Configuration Setters ─────── */
     enum ConfigKey {
@@ -285,7 +279,7 @@ contract HybridVoting is Initializable {
 
     function setConfig(ConfigKey key, bytes calldata value) external onlyExecutor {
         Layout storage l = _layout();
-        
+
         if (key == ConfigKey.QUORUM) {
             uint8 q = abi.decode(value, (uint8));
             VotingMath.validateQuorum(q);
@@ -326,7 +320,6 @@ contract HybridVoting is Initializable {
         }
         _;
     }
-
 
     modifier exists(uint256 id) {
         if (id >= _layout()._proposals.length) revert InvalidProposal();
@@ -414,11 +407,7 @@ contract HybridVoting is Initializable {
     }
 
     /* ─────── Voting ─────── */
-    function vote(uint256 id, uint8[] calldata idxs, uint8[] calldata weights)
-        external
-        exists(id)
-        whenNotPaused
-    {
+    function vote(uint256 id, uint8[] calldata idxs, uint8[] calldata weights) external exists(id) whenNotPaused {
         if (idxs.length != weights.length) revert LengthMismatch();
         if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingExpired();
         Layout storage l = _layout();
@@ -558,14 +547,10 @@ contract HybridVoting is Initializable {
         emit ProposalCleaned(id, cleaned);
     }
 
-
-
-
-
     /* ─────── Unified Storage Getter ─────── */
     function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
         Layout storage l = _layout();
-        
+
         if (key == StorageKey.PARTICIPATION_TOKEN) {
             return abi.encode(l.participationToken);
         } else if (key == StorageKey.HATS) {
@@ -605,11 +590,7 @@ contract HybridVoting is Initializable {
         } else if (key == StorageKey.PROPOSALS_COUNT) {
             return abi.encode(l._proposals.length);
         }
-        
+
         revert InvalidIndex();
     }
-
-
-
-
 }
