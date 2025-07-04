@@ -327,6 +327,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         Project storage p = l._projects[pid];
         if (!p.exists) revert UnknownProject();
 
+        if (bountyPayout > 0 && bountyToken == address(0)) revert ZeroAddress();
         if (bountyToken != address(0) && bountyPayout == 0) revert InvalidPayout();
         if (bountyPayout > MAX_PAYOUT_96) revert InvalidPayout();
 
@@ -357,61 +358,40 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         uint256 newBountyPayout
     ) external canCreate(_layout()._tasks[id].projectId) {
         Layout storage l = _layout();
-        if (newPayout > MAX_PAYOUT_96) revert InvalidPayout();
+        if (newPayout == 0 || newPayout > MAX_PAYOUT_96) revert InvalidPayout();
         if (newBountyPayout > MAX_PAYOUT_96) revert InvalidPayout();
+        if (newBountyPayout > 0 && newBountyToken == address(0)) revert ZeroAddress();
         if (newBountyToken != address(0) && newBountyPayout == 0) revert InvalidPayout();
 
         Task storage t = _task(l, id);
+        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+
         Project storage p = l._projects[t.projectId];
 
-        if (t.status == Status.CLAIMED || t.status == Status.SUBMITTED) {
-            if (newMetadata.length == 0) revert InvalidString();
+        // Update participation token budget
+        uint256 tentative = p.spent - t.payout + newPayout;
+        if (p.cap != 0 && tentative > p.cap) revert BudgetExceeded();
+        p.spent = uint128(tentative);
 
-            // Roll back previous bounty cost
-            if (t.bountyToken != address(0) && t.bountyPayout > 0) {
-                Budget storage oldB = p.bountyBudgets[t.bountyToken];
-                if (oldB.spent < t.bountyPayout) revert SpentUnderflow();
-                oldB.spent -= t.bountyPayout;
-            }
-
-            // Apply new bounty cost
-            if (newBountyToken != address(0) && newBountyPayout > 0) {
-                Budget storage newB = p.bountyBudgets[newBountyToken];
-                uint256 newBountySpent = newB.spent + newBountyPayout;
-                if (newB.cap != 0 && newBountySpent > newB.cap) revert BudgetExceeded();
-                newB.spent = uint128(newBountySpent);
-            }
-
-            // Can update bounty details even when claimed/submitted
-            t.bountyToken = newBountyToken;
-            t.bountyPayout = uint96(newBountyPayout);
-        } else if (t.status == Status.UNCLAIMED) {
-            if (newPayout == 0 || newPayout > MAX_PAYOUT_96) revert InvalidPayout();
-            uint256 tentative = p.spent - t.payout + newPayout;
-            if (p.cap != 0 && tentative > p.cap) revert BudgetExceeded();
-            p.spent = uint128(tentative);
-
-            // Roll back previous bounty cost
-            if (t.bountyToken != address(0) && t.bountyPayout > 0) {
-                Budget storage oldB = p.bountyBudgets[t.bountyToken];
-                if (oldB.spent < t.bountyPayout) revert SpentUnderflow();
-                oldB.spent -= t.bountyPayout;
-            }
-
-            // Apply new bounty cost
-            if (newBountyToken != address(0) && newBountyPayout > 0) {
-                Budget storage newB = p.bountyBudgets[newBountyToken];
-                uint256 newBountySpent = newB.spent + newBountyPayout;
-                if (newB.cap != 0 && newBountySpent > newB.cap) revert BudgetExceeded();
-                newB.spent = uint128(newBountySpent);
-            }
-
-            t.payout = uint96(newPayout);
-            t.bountyToken = newBountyToken;
-            t.bountyPayout = uint96(newBountyPayout);
-        } else {
-            revert AlreadyCompleted();
+        // Roll back previous bounty cost
+        if (t.bountyToken != address(0) && t.bountyPayout > 0) {
+            Budget storage oldB = p.bountyBudgets[t.bountyToken];
+            if (oldB.spent < t.bountyPayout) revert SpentUnderflow();
+            oldB.spent -= t.bountyPayout;
         }
+
+        // Apply new bounty cost
+        if (newBountyToken != address(0) && newBountyPayout > 0) {
+            Budget storage newB = p.bountyBudgets[newBountyToken];
+            uint256 newBountySpent = newB.spent + newBountyPayout;
+            if (newB.cap != 0 && newBountySpent > newB.cap) revert BudgetExceeded();
+            newB.spent = uint128(newBountySpent);
+        }
+
+        // Update task
+        t.payout = uint96(newPayout);
+        t.bountyToken = newBountyToken;
+        t.bountyPayout = uint96(newBountyPayout);
 
         emit TaskUpdated(id, newPayout, newBountyToken, newBountyPayout, newMetadata);
     }
@@ -589,6 +569,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         // Validation (similar to createTask)
         if (payout == 0 || payout > MAX_PAYOUT_96) revert InvalidPayout();
         if (meta.length == 0) revert InvalidString();
+        if (bountyPayout > 0 && bountyToken == address(0)) revert ZeroAddress();
         if (bountyToken != address(0) && bountyPayout == 0) revert InvalidPayout();
         if (bountyPayout > MAX_PAYOUT_96) revert InvalidPayout();
 
