@@ -58,8 +58,10 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
     struct Task {
         bytes32 projectId; // slot 1: full 32 bytes
-        uint96 payout; // slot 2: 12 bytes (supports up to 7e28, well over 1e24 cap)
+        uint96 payout; // slot 2: 12 bytes (supports up to 7e28, well over 1e24 cap), voting token payout
         address claimer; // slot 2: 20 bytes (total 32 bytes in slot 2)
+        uint96 bountyPayout; // slot 3: 12 bytes, additional payout in bounty currency
+        address bountyToken; // slot 3: 20 bytes (total 32 bytes in slot 3)
         Status status; // packed into previous slot's remaining space
         bool requiresApplication; // packed into previous slot's remaining space
     }
@@ -275,48 +277,79 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     /*──────── Task Logic ───────*/
-    function createTask(uint256 payout, bytes calldata meta, bytes32 pid) external canCreate(pid) {
-        _createTask(payout, meta, pid, false);
+    function createTask(uint256 payout, bytes calldata meta, bytes32 pid, address bountyToken, uint256 bountyPayout)
+        external
+        canCreate(pid)
+    {
+        _createTask(payout, meta, pid, false, bountyToken, bountyPayout);
     }
 
-    function createApplicationTask(uint256 payout, bytes calldata meta, bytes32 pid) external canCreate(pid) {
-        _createTask(payout, meta, pid, true);
+    function createApplicationTask(
+        uint256 payout,
+        bytes calldata meta,
+        bytes32 pid,
+        address bountyToken,
+        uint256 bountyPayout
+    ) external canCreate(pid) {
+        _createTask(payout, meta, pid, true, bountyToken, bountyPayout);
     }
 
-    function _createTask(uint256 payout, bytes calldata meta, bytes32 pid, bool requiresApplication) internal {
+    function _createTask(
+        uint256 payout,
+        bytes calldata meta,
+        bytes32 pid,
+        bool requiresApplication,
+        address bountyToken,
+        uint256 bountyPayout
+    ) internal {
         Layout storage l = _layout();
         if (payout == 0 || payout > MAX_PAYOUT_96) revert InvalidPayout();
         if (meta.length == 0) revert InvalidString();
         Project storage p = l._projects[pid];
         if (!p.exists) revert UnknownProject();
 
+        if (bountyToken != address(0) && bountyPayout == 0) revert InvalidPayout();
+        if (bountyPayout > MAX_PAYOUT_96) revert InvalidPayout();
+
         uint256 newSpent = p.spent + payout;
         if (p.cap != 0 && newSpent > p.cap) revert BudgetExceeded();
         p.spent = uint128(newSpent);
 
         uint48 id = l.nextTaskId++;
-        l._tasks[id] = Task(pid, uint96(payout), address(0), Status.UNCLAIMED, requiresApplication);
+        l._tasks[id] = Task(
+            pid, uint96(payout), address(0), uint96(bountyPayout), bountyToken, Status.UNCLAIMED, requiresApplication
+        );
         emit TaskCreated(id, pid, payout, meta);
     }
 
-    function updateTask(uint256 id, uint256 newPayout, bytes calldata newMetadata)
-        external
-        canCreate(_layout()._tasks[id].projectId)
-    {
+    function updateTask(
+        uint256 id,
+        uint256 newPayout,
+        bytes calldata newMetadata,
+        address newBountyToken,
+        uint256 newBountyPayout
+    ) external canCreate(_layout()._tasks[id].projectId) {
         Layout storage l = _layout();
         if (newPayout > MAX_PAYOUT_96) revert InvalidPayout();
+        if (newBountyPayout > MAX_PAYOUT_96) revert InvalidPayout();
+        if (newBountyToken != address(0) && newBountyPayout == 0) revert InvalidPayout();
 
         Task storage t = _task(l, id);
         Project storage p = l._projects[t.projectId];
 
         if (t.status == Status.CLAIMED || t.status == Status.SUBMITTED) {
             if (newMetadata.length == 0) revert InvalidString();
+            // Can update bounty details even when claimed/submitted
+            t.bountyToken = newBountyToken;
+            t.bountyPayout = uint96(newBountyPayout);
         } else if (t.status == Status.UNCLAIMED) {
             if (newPayout == 0 || newPayout > MAX_PAYOUT_96) revert InvalidPayout();
             uint256 tentative = p.spent - t.payout + newPayout;
             if (p.cap != 0 && tentative > p.cap) revert BudgetExceeded();
             p.spent = uint128(tentative);
             t.payout = uint96(newPayout);
+            t.bountyToken = newBountyToken;
+            t.bountyPayout = uint96(newBountyPayout);
         } else {
             revert AlreadyCompleted();
         }
@@ -365,6 +398,12 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
         t.status = Status.COMPLETED;
         l.token.mint(t.claimer, uint256(t.payout));
+
+        // Transfer bounty token if set
+        if (t.bountyToken != address(0) && t.bountyPayout > 0) {
+            IERC20(t.bountyToken).transfer(t.claimer, uint256(t.bountyPayout));
+        }
+
         emit TaskCompleted(id, _msgSender());
     }
 
@@ -424,26 +463,26 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
      * @param assignee Address to assign the task to
      * @return taskId The ID of the created task
      */
-    function createAndAssignTask(uint256 payout, bytes calldata meta, bytes32 pid, address assignee)
-        external
-        returns (uint256 taskId)
-    {
-        return _createAndAssignTask(payout, meta, pid, assignee, false);
+    function createAndAssignTask(
+        uint256 payout,
+        bytes calldata meta,
+        bytes32 pid,
+        address assignee,
+        address bountyToken,
+        uint256 bountyPayout
+    ) external returns (uint256 taskId) {
+        return _createAndAssignTask(payout, meta, pid, assignee, false, bountyToken, bountyPayout);
     }
 
-    /**
-     * @dev Creates an application-required task and immediately assigns it to the specified assignee.
-     * @param payout The payout amount for the task
-     * @param meta Task metadata
-     * @param pid Project ID
-     * @param assignee Address to assign the task to
-     * @return taskId The ID of the created task
-     */
-    function createAndAssignApplicationTask(uint256 payout, bytes calldata meta, bytes32 pid, address assignee)
-        external
-        returns (uint256 taskId)
-    {
-        return _createAndAssignTask(payout, meta, pid, assignee, true);
+    function createAndAssignApplicationTask(
+        uint256 payout,
+        bytes calldata meta,
+        bytes32 pid,
+        address assignee,
+        address bountyToken,
+        uint256 bountyPayout
+    ) external returns (uint256 taskId) {
+        return _createAndAssignTask(payout, meta, pid, assignee, true, bountyToken, bountyPayout);
     }
 
     function _createAndAssignTask(
@@ -451,7 +490,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         bytes calldata meta,
         bytes32 pid,
         address assignee,
-        bool requiresApplication
+        bool requiresApplication,
+        address bountyToken,
+        uint256 bountyPayout
     ) internal returns (uint256 taskId) {
         if (assignee == address(0)) revert ZeroAddress();
 
@@ -468,6 +509,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         // Validation (similar to createTask)
         if (payout == 0 || payout > MAX_PAYOUT_96) revert InvalidPayout();
         if (meta.length == 0) revert InvalidString();
+        if (bountyToken != address(0) && bountyPayout == 0) revert InvalidPayout();
+        if (bountyPayout > MAX_PAYOUT_96) revert InvalidPayout();
+
         Project storage p = l._projects[pid];
         if (!p.exists) revert UnknownProject();
 
@@ -477,7 +521,8 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
         // Create and assign task in one go
         taskId = l.nextTaskId++;
-        l._tasks[taskId] = Task(pid, uint96(payout), assignee, Status.CLAIMED, requiresApplication);
+        l._tasks[taskId] =
+            Task(pid, uint96(payout), assignee, uint96(bountyPayout), bountyToken, Status.CLAIMED, requiresApplication);
 
         // Emit events
         emit TaskCreated(taskId, pid, payout, meta);
@@ -492,6 +537,23 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     {
         Task storage t = _task(_layout(), id);
         return (t.payout, t.status, t.claimer, t.projectId, t.requiresApplication);
+    }
+
+    function getTaskFull(uint256 id)
+        external
+        view
+        returns (
+            uint256 payout,
+            uint256 bountyPayout,
+            address bountyToken,
+            Status status,
+            address claimer,
+            bytes32 projectId,
+            bool requiresApplication
+        )
+    {
+        Task storage t = _task(_layout(), id);
+        return (t.payout, t.bountyPayout, t.bountyToken, t.status, t.claimer, t.projectId, t.requiresApplication);
     }
 
     function getProjectInfo(bytes32 pid) external view returns (uint256 cap, uint256 spent, bool isManager) {
