@@ -171,7 +171,11 @@ contract HybridVotingTest is Test {
 
         vm.stopPrank();
 
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)), 1, "should store proposal");
+        assertEq(
+            abi.decode(hv.getStorage(HybridVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)),
+            1,
+            "should store proposal"
+        );
     }
 
     function testCreateProposalUnauthorized() public {
@@ -419,20 +423,20 @@ contract HybridVotingTest is Test {
 
         // Set quorum
         hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(60));
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.QUORUM_PCT,""), (uint8)), 60);
+        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.QUORUM_PCT, ""), (uint8)), 60);
 
         // Set split
         hv.setConfig(HybridVoting.ConfigKey.SPLIT, abi.encode(60));
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.DD_SHARE_PCT,""), (uint8)), 60);
+        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.DD_SHARE_PCT, ""), (uint8)), 60);
 
         // Toggle quadratic
-        bool initialQuadratic = abi.decode(hv.getStorage(HybridVoting.StorageKey.QUADRATIC_VOTING,""), (bool));
+        bool initialQuadratic = abi.decode(hv.getStorage(HybridVoting.StorageKey.QUADRATIC_VOTING, ""), (bool));
         hv.setConfig(HybridVoting.ConfigKey.QUADRATIC, abi.encode(!initialQuadratic));
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.QUADRATIC_VOTING,""), (bool)), !initialQuadratic);
+        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.QUADRATIC_VOTING, ""), (bool)), !initialQuadratic);
 
         // Set min balance
         hv.setConfig(HybridVoting.ConfigKey.MIN_BALANCE, abi.encode(2 ether));
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.MIN_BAL,""), (uint256)), 2 ether);
+        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.MIN_BAL, ""), (uint256)), 2 ether);
 
         vm.stopPrank();
     }
@@ -453,7 +457,7 @@ contract HybridVotingTest is Test {
         // New executor should have permissions
         vm.prank(newExecutor);
         hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(70));
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.QUORUM_PCT,""), (uint8)), 70);
+        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.QUORUM_PCT, ""), (uint8)), 70);
     }
 
     // function testCleanup() public {
@@ -524,8 +528,14 @@ contract HybridVotingTest is Test {
 
         uint256 id = _createHatPoll(2, hatIds);
         assertTrue(abi.decode(hv.getStorage(HybridVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
-        assertTrue(abi.decode(hv.getStorage(HybridVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, EXECUTIVE_HAT_ID)), (bool)));
-        assertFalse(abi.decode(hv.getStorage(HybridVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, DEFAULT_HAT_ID)), (bool)));
+        assertTrue(
+            abi.decode(
+                hv.getStorage(HybridVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, EXECUTIVE_HAT_ID)), (bool)
+            )
+        );
+        assertFalse(
+            abi.decode(hv.getStorage(HybridVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, DEFAULT_HAT_ID)), (bool))
+        );
     }
 
     function testHatPollRestrictions() public {
