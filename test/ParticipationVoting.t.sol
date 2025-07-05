@@ -178,7 +178,9 @@ contract PVotingTest is Test {
 
     function testSetHatAllowed() public {
         vm.prank(address(exec));
-        pv.setConfig(ParticipationVoting.ConfigKey.HAT_ALLOWED, abi.encode(ParticipationVoting.HatType.VOTING, HAT_ID, false));
+        pv.setConfig(
+            ParticipationVoting.ConfigKey.HAT_ALLOWED, abi.encode(ParticipationVoting.HatType.VOTING, HAT_ID, false)
+        );
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
         b[0] = new IExecutor.Call[](0);
         // Creator should still be able to create (different permission)
@@ -197,7 +199,9 @@ contract PVotingTest is Test {
 
         // Re-enable voting
         vm.prank(address(exec));
-        pv.setConfig(ParticipationVoting.ConfigKey.HAT_ALLOWED, abi.encode(ParticipationVoting.HatType.VOTING, HAT_ID, true));
+        pv.setConfig(
+            ParticipationVoting.ConfigKey.HAT_ALLOWED, abi.encode(ParticipationVoting.HatType.VOTING, HAT_ID, true)
+        );
         vm.prank(voter);
         pv.vote(0, idx, w); // Should work now
     }
@@ -212,7 +216,9 @@ contract PVotingTest is Test {
 
         // Enable new hat as creator hat
         vm.prank(address(exec));
-        pv.setConfig(ParticipationVoting.ConfigKey.HAT_ALLOWED, abi.encode(ParticipationVoting.HatType.CREATOR, newHatId, true));
+        pv.setConfig(
+            ParticipationVoting.ConfigKey.HAT_ALLOWED, abi.encode(ParticipationVoting.HatType.CREATOR, newHatId, true)
+        );
 
         // New creator should be able to create proposal
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
@@ -223,7 +229,9 @@ contract PVotingTest is Test {
 
         // Disable new hat
         vm.prank(address(exec));
-        pv.setConfig(ParticipationVoting.ConfigKey.HAT_ALLOWED, abi.encode(ParticipationVoting.HatType.CREATOR, newHatId, false));
+        pv.setConfig(
+            ParticipationVoting.ConfigKey.HAT_ALLOWED, abi.encode(ParticipationVoting.HatType.CREATOR, newHatId, false)
+        );
 
         // Should now fail
         vm.prank(newCreator);
@@ -485,8 +493,14 @@ contract PVotingTest is Test {
 
         uint256 id = _createHatPoll(2, hatIds);
         assertTrue(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
-        assertTrue(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, HAT_ID)), (bool)));
-        assertFalse(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, CREATOR_HAT_ID)), (bool)));
+        assertTrue(
+            abi.decode(pv.getStorage(ParticipationVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, HAT_ID)), (bool))
+        );
+        assertFalse(
+            abi.decode(
+                pv.getStorage(ParticipationVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, CREATOR_HAT_ID)), (bool)
+            )
+        );
     }
 
     function testHatPollRestrictions() public {
