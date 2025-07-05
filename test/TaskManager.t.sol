@@ -148,9 +148,9 @@ contract TaskManagerTest is Test {
 
         // Set up default global permissions
         vm.prank(executor);
-        tm.setRolePerm(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN));
         vm.prank(executor);
-        tm.setRolePerm(MEMBER_HAT, TaskPerm.CLAIM);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MEMBER_HAT, TaskPerm.CLAIM));
     }
 
     /*───────────────── PROJECT SCENARIOS ───────────────*/
@@ -172,8 +172,8 @@ contract TaskManagerTest is Test {
         // creator2 creates a task (should succeed, cap == 0)
         vm.prank(creator2);
         tm.createTask(1 ether, bytes("ipfs://meta"), UNLIM_ID, address(0), 0);
-
-        (,, address claimer,,) = tm.getTask(0);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(0));
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 projectId, bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(claimer, address(0), "should be unclaimed");
     }
 
@@ -259,7 +259,7 @@ contract TaskManagerTest is Test {
 
         // Set global permissions
         vm.prank(executor);
-        tm.setRolePerm(globalHat, TaskPerm.CREATE | TaskPerm.REVIEW);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(globalHat, TaskPerm.CREATE | TaskPerm.REVIEW));
 
         // Create project with different permissions for the same hat
         uint256[] memory createHats = new uint256[](1);
@@ -363,7 +363,8 @@ contract TaskManagerTest is Test {
         tm.completeTask(id);
 
         assertEq(token.balanceOf(member1), balBefore + 1 ether, "minted payout");
-        (, TaskManager.Status st,,,) = tm.getTask(id);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(id));
+        (uint256 payout, TaskManager.Status st, address claimer, bytes32 projectId, bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(st), uint8(TaskManager.Status.COMPLETED));
     }
 
@@ -390,7 +391,8 @@ contract TaskManagerTest is Test {
         tm.updateTask(0, 2 ether, bytes("bar"), address(0), 0);
 
         // spent should now be 2 ether
-        (uint256 cap, uint256 spent,) = tm.getProjectInfo(UPD_ID);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(UPD_ID));
+        (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(cap, 3 ether);
         assertEq(spent, 2 ether);
     }
@@ -453,7 +455,8 @@ contract TaskManagerTest is Test {
         tm.cancelTask(0); // This should work normally
 
         // Verify spent was correctly reduced
-        (, uint256 spent,) = tm.getProjectInfo(projectId);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(projectId));
+        (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spent, 1 ether, "Spent should be reduced by cancelled task payout");
     }
 
@@ -475,13 +478,15 @@ contract TaskManagerTest is Test {
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("foo"), CAN_ID, address(0), 0);
 
-        (uint256 cap, uint256 spentBefore, bool isManager) = tm.getProjectInfo(CAN_ID);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(CAN_ID));
+        (uint256 cap, uint256 spentBefore, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spentBefore, 1 ether);
 
         vm.prank(creator1);
         tm.cancelTask(0);
 
-        (, uint256 spentAfter,) = tm.getProjectInfo(CAN_ID);
+         result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(CAN_ID));
+        ( ,  uint256 spentAfter ,  ) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spentAfter, 0);
     }
 
@@ -582,7 +587,7 @@ contract TaskManagerTest is Test {
 
         // Set global permissions
         vm.prank(executor);
-        tm.setRolePerm(globalHat, TaskPerm.CREATE | TaskPerm.REVIEW);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(globalHat, TaskPerm.CREATE | TaskPerm.REVIEW));
 
         // Override in project
         vm.prank(creator1);
@@ -646,11 +651,13 @@ contract TaskManagerTest is Test {
         vm.stopPrank();
 
         // Budget verification
-        (uint256 capA, uint256 spentA,) = tm.getProjectInfo(PROJECT_A_ID);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(PROJECT_A_ID));
+        (uint256 capA, uint256 spentA, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spentA, 1 ether, "PROJECT_A spent should be 1 ether");
         assertEq(capA, 5 ether, "PROJECT_A cap should be 5 ether");
 
-        (uint256 capB, uint256 spentB,) = tm.getProjectInfo(PROJECT_B_ID);
+        result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(PROJECT_B_ID));
+        (uint256 capB, uint256 spentB, bool isManagerB) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spentB, 2 ether, "PROJECT_B spent should be 2 ether");
 
         // Test trying to exceed PROJECT_B budget
@@ -689,7 +696,7 @@ contract TaskManagerTest is Test {
         // Add new hat to the creator hats using the executor
         uint256 NEW_HAT = 100;
         vm.prank(executor);
-        tm.setCreatorHatAllowed(NEW_HAT, true);
+        tm.setConfig(TaskManager.ConfigKey.CREATOR_HAT_ALLOWED, abi.encode(NEW_HAT, true));
 
         // Assign new hat to an address
         address newCreator = makeAddr("newCreator");
@@ -707,7 +714,7 @@ contract TaskManagerTest is Test {
 
         // Disable the hat using the executor
         vm.prank(executor);
-        tm.setCreatorHatAllowed(NEW_HAT, false);
+        tm.setConfig(TaskManager.ConfigKey.CREATOR_HAT_ALLOWED, abi.encode(NEW_HAT, false));
 
         // Verify the hat can no longer create projects
         vm.prank(newCreator);
@@ -775,7 +782,8 @@ contract TaskManagerTest is Test {
         tm.createTask(1 ether, bytes("pm2_with_hat"), MULTI_PM_ID, address(0), 0);
 
         // Verify overall budget tracking
-        (, uint256 spent,) = tm.getProjectInfo(MULTI_PM_ID);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(MULTI_PM_ID));
+        (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spent, 7 ether, "Project should track 7 ether spent");
     }
 
@@ -801,7 +809,8 @@ contract TaskManagerTest is Test {
         vm.stopPrank();
 
         // Verify project budget is refunded
-        (, uint256 spent,) = tm.getProjectInfo(EDGE_ID);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(EDGE_ID));
+        (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spent, 0, "Budget should be refunded after cancel");
 
         // Create a task, assign it, then try operations that should fail
@@ -904,7 +913,8 @@ contract TaskManagerTest is Test {
         }
 
         // Verify project spent
-        (, uint256 spent,) = tm.getProjectInfo(MEGA_ID);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(MEGA_ID));
+        ( , uint256 spent,  ) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spent, totalValue, "Project should track all task value");
 
         // Submit half the tasks
@@ -921,7 +931,8 @@ contract TaskManagerTest is Test {
         uint256 completedValue = 0;
 
         for (uint256 i = 0; i < completedTasks; i++) {
-            (uint256 payout,,,,) = tm.getTask(i);
+            bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(i));
+            (uint256 payout, TaskManager.Status status, address claimer, bytes32 projectId, bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
             completedValue += payout;
 
             vm.prank(pms[0]);
@@ -954,7 +965,8 @@ contract TaskManagerTest is Test {
         tm.createTask(1 ether, bytes("exceeds_cap"), CAPPED_BIG_ID, address(0), 0);
 
         // Verify task counts and budget usage
-        (uint256 cap, uint256 actualSpent,) = tm.getProjectInfo(CAPPED_BIG_ID);
+        result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(CAPPED_BIG_ID));
+        ( uint256 cap, uint256 actualSpent,  ) = abi.decode(result, (uint256, uint256, bool));
         assertEq(cap, 10 ether, "Cap should be preserved");
         assertEq(actualSpent, cappedSpent, "Spent should match tracked value");
 
@@ -1005,7 +1017,8 @@ contract TaskManagerTest is Test {
         tm.cancelTask(1);
 
         // Verify spent amount is 1 ether (from completed task)
-        (uint256 cap, uint256 spent,) = tm.getProjectInfo(TO_DELETE_ID);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(TO_DELETE_ID));
+        (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spent, 1 ether, "Project spent should only reflect completed task");
 
         // Deletion should succeed because cap (3 ether) >= spent (1 ether)
@@ -1015,7 +1028,7 @@ contract TaskManagerTest is Test {
         // Verify project no longer exists by trying to get info
         vm.prank(creator1);
         vm.expectRevert(TaskManager.UnknownProject.selector);
-        tm.getProjectInfo(TO_DELETE_ID);
+        tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(TO_DELETE_ID));
 
         // Create a zero-cap project
         vm.prank(creator1);
@@ -1048,21 +1061,21 @@ contract TaskManagerTest is Test {
         // Non-executor can't set executor
         vm.prank(creator1);
         vm.expectRevert(TaskManager.NotExecutor.selector);
-        tm.setExecutor(executor2);
+        tm.setConfig(TaskManager.ConfigKey.EXECUTOR, abi.encode(executor2));
 
         // Executor can update executor
         vm.prank(executor);
-        tm.setExecutor(executor2);
+        tm.setConfig(TaskManager.ConfigKey.EXECUTOR, abi.encode(executor2));
 
         // Old executor can no longer set creator hats
         uint256 TEST_HAT = 123;
         vm.prank(executor);
         vm.expectRevert(TaskManager.NotExecutor.selector);
-        tm.setCreatorHatAllowed(TEST_HAT, true);
+        tm.setConfig(TaskManager.ConfigKey.CREATOR_HAT_ALLOWED, abi.encode(TEST_HAT, true));
 
         // New executor can set creator hats
         vm.prank(executor2);
-        tm.setCreatorHatAllowed(TEST_HAT, true);
+        tm.setConfig(TaskManager.ConfigKey.CREATOR_HAT_ALLOWED, abi.encode(TEST_HAT, true));
 
         // Assign the new hat to a user
         address testCreator = makeAddr("testCreator");
@@ -1076,7 +1089,7 @@ contract TaskManagerTest is Test {
 
         // New executor can revoke the hat
         vm.prank(executor2);
-        tm.setCreatorHatAllowed(TEST_HAT, false);
+        tm.setConfig(TaskManager.ConfigKey.CREATOR_HAT_ALLOWED, abi.encode(TEST_HAT, false));
 
         // Hat should no longer work
         vm.prank(testCreator);
@@ -1115,7 +1128,8 @@ contract TaskManagerTest is Test {
         tm.submitTask(0, bytes("executor_submission"));
 
         // Verify task status and submission
-        (, TaskManager.Status status,,,) = tm.getTask(0);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(0));
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 projectId, bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.SUBMITTED));
     }
 
@@ -1129,7 +1143,7 @@ contract TaskManagerTest is Test {
 
         // Set global permissions (CREATE | CLAIM)
         vm.prank(executor);
-        tm.setRolePerm(MULTI_HAT, TaskPerm.CREATE | TaskPerm.CLAIM);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MULTI_HAT, TaskPerm.CREATE | TaskPerm.CLAIM));
 
         // Create project (use creator1 who has creator hat)
         uint256[] memory emptyHats = new uint256[](0);
@@ -1177,7 +1191,7 @@ contract TaskManagerTest is Test {
 
         // Grant CREATE permission at project level
         vm.prank(creator1);
-        tm.setProjectRolePerm(projectId, DYNAMIC_HAT, TaskPerm.CREATE);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(DYNAMIC_HAT, TaskPerm.CREATE));
 
         // Now user can create tasks
         vm.prank(dynamicUser);
@@ -1197,7 +1211,7 @@ contract TaskManagerTest is Test {
 
         // Add REVIEW permission
         vm.prank(creator1);
-        tm.setProjectRolePerm(projectId, DYNAMIC_HAT, TaskPerm.CREATE | TaskPerm.REVIEW);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(DYNAMIC_HAT, TaskPerm.CREATE | TaskPerm.REVIEW));
 
         // Now user can complete tasks
         vm.prank(dynamicUser);
@@ -1212,7 +1226,7 @@ contract TaskManagerTest is Test {
 
         // Set full permissions globally
         vm.prank(executor);
-        tm.setRolePerm(OVERRIDE_HAT, TaskPerm.CREATE | TaskPerm.CLAIM | TaskPerm.REVIEW | TaskPerm.ASSIGN);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(OVERRIDE_HAT, TaskPerm.CREATE | TaskPerm.CLAIM | TaskPerm.REVIEW | TaskPerm.ASSIGN));
 
         // Create project
         uint256[] memory emptyHats = new uint256[](0);
@@ -1229,7 +1243,7 @@ contract TaskManagerTest is Test {
 
         // Restrict permissions on the first project (only CREATE)
         vm.prank(creator1);
-        tm.setProjectRolePerm(projectId, OVERRIDE_HAT, TaskPerm.CREATE);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(OVERRIDE_HAT, TaskPerm.CREATE));
 
         // User can create tasks in both projects
         vm.prank(overrideUser);
@@ -1275,7 +1289,7 @@ contract TaskManagerTest is Test {
 
         // Give CREATE permission
         vm.prank(executor);
-        tm.setRolePerm(TEMP_HAT, TaskPerm.CREATE);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(TEMP_HAT, TaskPerm.CREATE));
 
         // Create project
         vm.prank(creator1);
@@ -1295,7 +1309,7 @@ contract TaskManagerTest is Test {
 
         // Revoke permission
         vm.prank(executor);
-        tm.setRolePerm(TEMP_HAT, 0);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(TEMP_HAT, 0));
 
         // User can't create tasks anymore
         vm.prank(tempUser);
@@ -1323,10 +1337,10 @@ contract TaskManagerTest is Test {
 
         // Set permissions
         vm.startPrank(executor);
-        tm.setRolePerm(CREATE_HAT, TaskPerm.CREATE);
-        tm.setRolePerm(CLAIM_HAT, TaskPerm.CLAIM);
-        tm.setRolePerm(REVIEW_HAT, TaskPerm.REVIEW);
-        tm.setRolePerm(ASSIGN_HAT, TaskPerm.ASSIGN);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(CREATE_HAT, TaskPerm.CREATE));
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(CLAIM_HAT, TaskPerm.CLAIM));
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(REVIEW_HAT, TaskPerm.REVIEW));
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(ASSIGN_HAT, TaskPerm.ASSIGN));
         vm.stopPrank();
 
         // Create project
@@ -1417,14 +1431,16 @@ contract TaskManagerTest is Test {
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("test_task"), projectId, member1, address(0), 0);
 
         // Verify task was created and assigned correctly
-        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId,) = tm.getTask(taskId);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(taskId));
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId, bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(payout, 1 ether, "Payout should be correct");
         assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Status should be CLAIMED");
         assertEq(claimer, member1, "Task should be assigned to member1");
         assertEq(taskProjectId, projectId, "Project ID should match");
 
         // Verify project budget was updated
-        (uint256 cap, uint256 spent,) = tm.getProjectInfo(projectId);
+        result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(projectId));
+        (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spent, 1 ether, "Project spent should be updated");
     }
 
@@ -1450,7 +1466,7 @@ contract TaskManagerTest is Test {
         setHat(createOnlyUser, CREATE_ONLY_HAT);
 
         vm.prank(executor);
-        tm.setRolePerm(CREATE_ONLY_HAT, TaskPerm.CREATE);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(CREATE_ONLY_HAT, TaskPerm.CREATE));
 
         vm.prank(createOnlyUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
@@ -1462,7 +1478,7 @@ contract TaskManagerTest is Test {
         setHat(assignOnlyUser, ASSIGN_ONLY_HAT);
 
         vm.prank(executor);
-        tm.setRolePerm(ASSIGN_ONLY_HAT, TaskPerm.ASSIGN);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(ASSIGN_ONLY_HAT, TaskPerm.ASSIGN));
 
         vm.prank(assignOnlyUser);
         vm.expectRevert(TaskManager.Unauthorized.selector);
@@ -1474,13 +1490,14 @@ contract TaskManagerTest is Test {
         setHat(createAssignUser, CREATE_ASSIGN_HAT);
 
         vm.prank(executor);
-        tm.setRolePerm(CREATE_ASSIGN_HAT, TaskPerm.CREATE | TaskPerm.ASSIGN);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(CREATE_ASSIGN_HAT, TaskPerm.CREATE | TaskPerm.ASSIGN));
 
         vm.prank(createAssignUser);
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("should_work"), projectId, member1, address(0), 0);
 
         // Verify task was created successfully
-        (,, address claimer,,) = tm.getTask(taskId);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(taskId));
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId, bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(claimer, member1, "Task should be assigned to member1");
     }
 
@@ -1507,7 +1524,8 @@ contract TaskManagerTest is Test {
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("pm_task"), projectId, member1, address(0), 0);
 
         // Verify task was created and assigned
-        (,, address claimer,,) = tm.getTask(taskId);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(taskId));
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId, bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(claimer, member1, "Task should be assigned to member1");
 
         // Test that non-project manager cannot use createAndAssignTask
@@ -1588,7 +1606,8 @@ contract TaskManagerTest is Test {
         tm.createAndAssignTask(1 ether, bytes("task3"), projectId, member1, address(0), 0);
 
         // Verify project budget tracking
-        (uint256 cap, uint256 spent,) = tm.getProjectInfo(projectId);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(projectId));
+        (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spent, 2 ether, "Project should have spent 2 ether");
         assertEq(cap, 2 ether, "Project cap should be 2 ether");
     }
@@ -1639,7 +1658,8 @@ contract TaskManagerTest is Test {
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("lifecycle_test"), projectId, member1, address(0), 0);
 
         // Verify task is in CLAIMED status
-        (, TaskManager.Status status,,,) = tm.getTask(taskId);
+        bytes memory ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(taskId));
+        (,TaskManager.Status status, ,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Task should be CLAIMED");
 
         // Assigned user should be able to submit
@@ -1647,7 +1667,8 @@ contract TaskManagerTest is Test {
         tm.submitTask(taskId, bytes("submission"));
 
         // Verify task is now SUBMITTED
-        (, status,,,) = tm.getTask(taskId);
+        ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(taskId));
+        (,status, ,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.SUBMITTED), "Task should be SUBMITTED");
 
         // Reviewer should be able to complete
@@ -1655,7 +1676,8 @@ contract TaskManagerTest is Test {
         tm.completeTask(taskId);
 
         // Verify task is completed and tokens minted
-        (, status,,,) = tm.getTask(taskId);
+        ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(taskId));
+        (,status, ,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.COMPLETED), "Task should be COMPLETED");
         assertEq(token.balanceOf(member1), 1 ether, "Member should receive tokens");
     }
@@ -1685,7 +1707,8 @@ contract TaskManagerTest is Test {
         console.log("Gas used for createAndAssignTask:", gasUsed);
 
         // Verify task was created and assigned correctly
-        (,, address claimer,,) = tm.getTask(taskId);
+        bytes memory ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(taskId));
+        (,, address claimer,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(claimer, member1, "Task should be assigned to member1");
 
         // For comparison, measure gas for separate create + assign operations
@@ -1736,12 +1759,14 @@ contract TaskManagerTest is Test {
                 tm.createAndAssignTask(1 ether, bytes("multi_user_task"), projectId, users[i], address(0), 0);
 
             // Verify each task is assigned to the correct user
-            (,, address claimer,,) = tm.getTask(taskId);
+            bytes memory ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(taskId));
+            (,, address claimer,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
             assertEq(claimer, users[i], "Task should be assigned to correct user");
         }
 
         // Verify project budget tracking
-        (uint256 cap, uint256 spent,) = tm.getProjectInfo(projectId);
+        bytes memory ret = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO,abi.encode(projectId));
+        (uint256 cap, uint256 spent,) = abi.decode(ret, (uint256,uint256, bool));
         assertEq(spent, 3 ether, "Project should have spent 3 ether");
     }
 
@@ -1764,15 +1789,16 @@ contract TaskManagerTest is Test {
         // Test assigning to self
         vm.prank(creator1);
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("self_assign"), projectId, creator1, address(0), 0);
-
-        (,, address claimer,,) = tm.getTask(taskId);
+        bytes memory ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(taskId));
+        (,, address claimer,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(claimer, creator1, "Task should be assigned to creator1");
 
         // Test assigning to executor
         vm.prank(creator1);
         taskId = tm.createAndAssignTask(1 ether, bytes("executor_assign"), projectId, executor, address(0), 0);
 
-        (,, claimer,,) = tm.getTask(taskId);
+        ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(taskId));
+        (,, claimer,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(claimer, executor, "Task should be assigned to executor");
 
         // Test maximum payout - need to create a new project with higher cap
@@ -1783,8 +1809,9 @@ contract TaskManagerTest is Test {
 
         vm.prank(creator1);
         taskId = tm.createAndAssignTask(1e24, bytes("max_payout"), maxProjectId, member1, address(0), 0); // MAX_PAYOUT
-
-        (uint256 payout,,,,) = tm.getTask(taskId);
+        
+        ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(taskId));
+        (uint256 payout,,,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(payout, 1e24, "Task should have maximum payout");
     }
 
@@ -1796,7 +1823,7 @@ contract TaskManagerTest is Test {
 
         // Set global permissions (CREATE only)
         vm.prank(executor);
-        tm.setRolePerm(GLOBAL_HAT, TaskPerm.CREATE);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(GLOBAL_HAT, TaskPerm.CREATE));
 
         // Create project
         uint256[] memory emptyHats = new uint256[](0);
@@ -1812,14 +1839,15 @@ contract TaskManagerTest is Test {
 
         // Add ASSIGN permission at project level
         vm.prank(creator1);
-        tm.setProjectRolePerm(projectId, GLOBAL_HAT, TaskPerm.CREATE | TaskPerm.ASSIGN);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(GLOBAL_HAT, TaskPerm.CREATE | TaskPerm.ASSIGN));
 
         // Now user should be able to createAndAssignTask
         vm.prank(globalUser);
         uint256 taskId = tm.createAndAssignTask(1 ether, bytes("should_work"), projectId, member1, address(0), 0);
 
         // Verify task was created and assigned
-        (,, address claimer,,) = tm.getTask(taskId);
+        bytes memory ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(taskId));
+        (,, address claimer,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(claimer, member1, "Task should be assigned to member1");
     }
 
@@ -1851,15 +1879,16 @@ contract TaskManagerTest is Test {
         tm.applyForTask(0, applicationHash);
 
         // Verify task status remains UNCLAIMED and applicant is recorded
-        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId,) = tm.getTask(0);
+        bytes memory ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(0));
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId,) = abi.decode(ret, (uint256, TaskManager.Status, address, bytes32, bytes32));
         assertEq(uint8(status), uint8(TaskManager.Status.UNCLAIMED), "Status should remain UNCLAIMED");
         assertEq(claimer, address(0), "Claimer should remain empty until approved");
         assertEq(payout, 1 ether, "Payout should remain unchanged");
         assertEq(taskProjectId, projectId, "Project ID should be correct");
 
         // Verify application was recorded
-        assertTrue(tm.hasAppliedForTask(0, member1), "Member1 should have applied");
-        assertEq(tm.getTaskApplication(0, member1), applicationHash, "Application hash should match");
+        assertEq(abi.decode(tm.getStorage(TaskManager.StorageKey.TASK_APPLICANTS,abi.encode(0)), (address[]))[0], member1, "Member1 should have applied");
+        assertEq(abi.decode(tm.getStorage(TaskManager.StorageKey.TASK_APPLICATION,abi.encode(0,member1)), (bytes32)), applicationHash, "Application hash should match");
     }
 
     function test_ApplyForTaskPermissions() public {
@@ -1891,9 +1920,10 @@ contract TaskManagerTest is Test {
         tm.applyForTask(0, keccak256("application"));
 
         // Verify application was recorded but status remains UNCLAIMED
-        (, TaskManager.Status status,,,) = tm.getTask(0);
+        bytes memory ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(0));
+        (, TaskManager.Status status,,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.UNCLAIMED));
-        assertTrue(tm.hasAppliedForTask(0, member1), "Member1 should have applied");
+        assertEq(abi.decode(tm.getStorage(TaskManager.StorageKey.TASK_APPLICANTS,abi.encode(0)), (address[]))[0], member1, "Member1 should have applied");
     }
 
     function test_ApplyForTaskValidation() public {
@@ -1962,7 +1992,8 @@ contract TaskManagerTest is Test {
         tm.approveApplication(0, member1);
 
         // Verify task is now claimed
-        (, TaskManager.Status status, address claimer,,) = tm.getTask(0);
+        bytes memory ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(0));
+        (, TaskManager.Status status, address claimer,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Status should be CLAIMED");
         assertEq(claimer, member1, "Claimer should remain the applicant");
     }
@@ -2002,7 +2033,8 @@ contract TaskManagerTest is Test {
         vm.prank(pm1);
         tm.approveApplication(0, member1);
 
-        (, TaskManager.Status status,,,) = tm.getTask(0);
+        bytes memory ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(0));
+        (, TaskManager.Status status,,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED));
     }
 
@@ -2118,7 +2150,8 @@ contract TaskManagerTest is Test {
         tm.completeTask(0);
 
         // Verify final state
-        (, TaskManager.Status status,,,) = tm.getTask(0);
+        bytes memory ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(0));
+        (, TaskManager.Status status,,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.COMPLETED));
         assertEq(token.balanceOf(member1), 1 ether, "Member should receive tokens");
     }
@@ -2151,11 +2184,12 @@ contract TaskManagerTest is Test {
         tm.cancelTask(0);
 
         // Verify task is cancelled and budget refunded
-        (, TaskManager.Status status, address claimer,,) = tm.getTask(0);
+        bytes memory ret = tm.getStorage(TaskManager.StorageKey.TASK_INFO,abi.encode(0));
+        (, TaskManager.Status status, address claimer,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.CANCELLED));
         assertEq(claimer, address(0), "Claimer should be cleared");
-
-        (uint256 cap, uint256 spent,) = tm.getProjectInfo(projectId);
+        ret = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO,abi.encode(projectId));
+        (uint256 cap, uint256 spent, bool isManager) = abi.decode(ret, (uint256, uint256, bool));
         assertEq(spent, 0, "Budget should be refunded");
     }
 
@@ -2197,15 +2231,19 @@ contract TaskManagerTest is Test {
         tm.approveApplication(0, member1);
 
         // Verify first task is claimed
-        (, TaskManager.Status status1, address claimer1,,) = tm.getTask(0);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(0));
+        (uint256 payout, TaskManager.Status status1, address claimer1,  , bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status1), uint8(TaskManager.Status.CLAIMED));
         assertEq(claimer1, member1);
 
         // Second task should still be UNCLAIMED with pending application
-        (, TaskManager.Status status2, address claimer2,,) = tm.getTask(1);
+        result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(1));
+        ( , TaskManager.Status status2, address claimer2,,  ) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status2), uint8(TaskManager.Status.UNCLAIMED));
         assertEq(claimer2, address(0));
-        assertTrue(tm.hasAppliedForTask(1, member2), "Member2 should have applied for task 1");
+        result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(1, member2));
+        bytes32 hasApplied = abi.decode(result, (bytes32));
+        assertTrue(hasApplied == bytes32(0), "Member2 should have applied for task 1");
     }
 
     function test_ApplicationSystemPreventsClaiming() public {
@@ -2244,7 +2282,8 @@ contract TaskManagerTest is Test {
         tm.assignTask(0, member2);
 
         // Verify task is now claimed by member2
-        (, TaskManager.Status status, address claimer,,) = tm.getTask(0);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(0));
+        (uint256 payout, TaskManager.Status status, address claimer, , bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED));
         assertEq(claimer, member2);
     }
@@ -2272,8 +2311,8 @@ contract TaskManagerTest is Test {
         tm.createApplicationTask(1 ether, bytes("app_required_task"), projectId, address(0), 0);
 
         // Verify task requires applications
-        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId, bool requiresApplication) =
-            tm.getTask(0);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(0));
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId, bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(requiresApplication, true, "Task should require applications");
         assertEq(uint8(status), uint8(TaskManager.Status.UNCLAIMED), "Status should be UNCLAIMED");
         assertEq(claimer, address(0), "Claimer should be empty");
@@ -2309,7 +2348,8 @@ contract TaskManagerTest is Test {
         tm.assignTask(0, member1);
 
         // Verify task is now claimed
-        (, TaskManager.Status status, address claimer,,) = tm.getTask(0);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(0));
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId, bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED));
         assertEq(claimer, member1);
     }
@@ -2335,7 +2375,8 @@ contract TaskManagerTest is Test {
         tm.createTask(1 ether, bytes("regular_task"), projectId, address(0), 0);
 
         // Verify task doesn't require applications
-        (,,,, bool requiresApplication) = tm.getTask(0);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(0));
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId, bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(requiresApplication, false, "Task should not require applications");
 
         // Test that applications are prevented
@@ -2348,7 +2389,8 @@ contract TaskManagerTest is Test {
         tm.claimTask(0);
 
         // Verify task is claimed
-        (, TaskManager.Status status, address claimer,,) = tm.getTask(0);
+        result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(0));
+        (payout, status, claimer, taskProjectId, requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED));
         assertEq(claimer, member1);
     }
@@ -2391,27 +2433,44 @@ contract TaskManagerTest is Test {
         tm.applyForTask(0, keccak256("application3"));
 
         // Verify all applicants are stored
-        address[] memory applicants = tm.getTaskApplicants(0);
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICANTS, abi.encode(0));
+        address[] memory applicants = abi.decode(result, (address[]));
         assertEq(applicants.length, 3, "Should have 3 applicants");
         assertEq(applicants[0], member1, "First applicant should be member1");
         assertEq(applicants[1], member2, "Second applicant should be member2");
         assertEq(applicants[2], member3, "Third applicant should be member3");
 
         // Verify application hashes
-        assertEq(tm.getTaskApplication(0, member1), keccak256("application1"), "Member1 application hash should match");
-        assertEq(tm.getTaskApplication(0, member2), keccak256("application2"), "Member2 application hash should match");
-        assertEq(tm.getTaskApplication(0, member3), keccak256("application3"), "Member3 application hash should match");
+        result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICATION, abi.encode(0, member1));
+        bytes32 applicationHash = abi.decode(result, (bytes32));
+        assertEq(applicationHash, keccak256("application1"), "Member1 application hash should match");
+        result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICATION, abi.encode(0, member2));
+        applicationHash = abi.decode(result, (bytes32));
+        assertEq(applicationHash, keccak256("application2"), "Member2 application hash should match");
+        result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICATION, abi.encode(0, member3));
+        applicationHash = abi.decode(result, (bytes32));
+        assertEq(applicationHash, keccak256("application3"), "Member3 application hash should match");
 
         // Verify applicant count
-        assertEq(tm.getTaskApplicantCount(0), 3, "Applicant count should be 3");
+        result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICANT_COUNT, abi.encode(0));
+        uint256 applicantCount = abi.decode(result, (uint256));
+        assertEq(applicantCount, 3, "Applicant count should be 3");
 
         // Verify hasAppliedForTask
-        assertTrue(tm.hasAppliedForTask(0, member1), "Member1 should have applied");
-        assertTrue(tm.hasAppliedForTask(0, member2), "Member2 should have applied");
-        assertTrue(tm.hasAppliedForTask(0, member3), "Member3 should have applied");
+        result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member1));
+        bytes32 hasApplied = abi.decode(result, (bytes32));
+        assertTrue(hasApplied != bytes32(0), "Member1 should have applied");
+        result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member2));
+        hasApplied = abi.decode(result, (bytes32));
+        assertTrue(hasApplied != bytes32(0), "Member2 should have applied");
+        result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member3));
+        hasApplied = abi.decode(result, (bytes32));
+        assertTrue(hasApplied != bytes32(0), "Member3 should have applied");
 
         address nonApplicant = makeAddr("nonApplicant");
-        assertFalse(tm.hasAppliedForTask(0, nonApplicant), "Non-applicant should not have applied");
+        result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, nonApplicant));
+        hasApplied = abi.decode(result, (bytes32));
+        assertTrue(hasApplied == bytes32(0), "Non-applicant should not have applied");
     }
 
     function test_ApproveSpecificApplicant() public {
@@ -2454,9 +2513,10 @@ contract TaskManagerTest is Test {
         tm.approveApplication(0, member2);
 
         // Verify task is claimed by member2
-        (, TaskManager.Status status, address claimer,,) = tm.getTask(0);
-        assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Task should be claimed");
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(0));
+        (uint256 payout, TaskManager.Status status, address claimer, bytes32 taskProjectId, bool requiresApplication) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(claimer, member2, "Task should be claimed by member2");
+        assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Task should be claimed");
 
         // Verify other applicants can't be approved now
         vm.prank(pm1);
@@ -2493,7 +2553,9 @@ contract TaskManagerTest is Test {
         tm.applyForTask(0, applicationHash);
 
         // Verify application data persists
-        assertEq(tm.getTaskApplication(0, member1), applicationHash, "Application hash should persist");
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICATION, abi.encode(0, member1));
+        applicationHash = abi.decode(result, (bytes32));
+        assertEq(applicationHash, keccak256("detailed_application_content"), "Application hash should persist");
 
         // Approve and complete task
         vm.prank(pm1);
@@ -2506,7 +2568,9 @@ contract TaskManagerTest is Test {
         tm.completeTask(0);
 
         // Verify application data still accessible even after completion
-        assertEq(tm.getTaskApplication(0, member1), applicationHash, "Application hash should persist after completion");
+         result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICATION, abi.encode(0, member1));
+        applicationHash = abi.decode(result, (bytes32));
+        assertEq(applicationHash, keccak256("detailed_application_content"), "Application hash should persist after completion");
     }
 
     function test_CancelTaskClearsApplications() public {
@@ -2540,24 +2604,37 @@ contract TaskManagerTest is Test {
         tm.applyForTask(0, keccak256("application2"));
 
         // Verify applications exist
-        assertEq(tm.getTaskApplicantCount(0), 2, "Should have 2 applicants");
-        assertTrue(tm.hasAppliedForTask(0, member1), "Member1 should have applied");
-        assertTrue(tm.hasAppliedForTask(0, member2), "Member2 should have applied");
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICANT_COUNT, abi.encode(0));
+        uint256 applicantCount = abi.decode(result, (uint256));
+        assertEq(applicantCount, 2, "Should have 2 applicants");
+        result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member1));
+        bytes32 hasApplied = abi.decode(result, (bytes32));
+        assertTrue(hasApplied == bytes32(0), "Member1 should have applied");
+        result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member2));
+        hasApplied = abi.decode(result, (bytes32));
+        assertTrue(hasApplied == bytes32(0), "Member2 should have applied");
 
         // Cancel task
         vm.prank(creator1);
         tm.cancelTask(0);
 
         // Verify applicants array is cleared (but application hashes remain to avoid DoS)
-        assertEq(tm.getTaskApplicantCount(0), 0, "Should have 0 applicants after cancel");
+        result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICANT_COUNT, abi.encode(0));
+        applicantCount = abi.decode(result, (uint256));
+        assertEq(applicantCount, 0, "Should have 0 applicants after cancel");
 
-        address[] memory applicants = tm.getTaskApplicants(0);
+        result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICANTS, abi.encode(0));
+        address[] memory applicants = abi.decode(result, (address[]));
         assertEq(applicants.length, 0, "Applicants array should be empty");
 
         // Note: Application hashes remain in storage to avoid DoS attacks from clearing
         // them in a loop. This is intentional behavior.
-        assertTrue(tm.hasAppliedForTask(0, member1), "Member1 application hash should remain");
-        assertTrue(tm.hasAppliedForTask(0, member2), "Member2 application hash should remain");
+        result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member1));
+        hasApplied = abi.decode(result, (bytes32));
+        assertTrue(hasApplied == bytes32(0), "Member1 application hash should remain");
+        result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member2));
+        hasApplied = abi.decode(result, (bytes32));
+        assertTrue(hasApplied == bytes32(0), "Member2 application hash should remain");
     }
 
     function test_DuplicateApplicationPrevented() public {
@@ -2589,8 +2666,12 @@ contract TaskManagerTest is Test {
         tm.applyForTask(0, keccak256("application2"));
 
         // Verify only one application exists
-        assertEq(tm.getTaskApplicantCount(0), 1, "Should have only 1 applicant");
-        assertEq(tm.getTaskApplication(0, member1), keccak256("application1"), "Should have first application hash");
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICANT_COUNT, abi.encode(0));
+        uint256 applicantCount = abi.decode(result, (uint256));
+        assertEq(applicantCount, 1, "Should have only 1 applicant");
+        result = tm.getStorage(TaskManager.StorageKey.TASK_APPLICATION, abi.encode(0, member1));
+        bytes32 applicationHash = abi.decode(result, (bytes32));
+        assertEq(applicationHash, keccak256("application1"), "Should have first application hash");
     }
 
     function test_ApplicationSystemEvents() public {
@@ -2682,9 +2763,9 @@ contract TaskManagerBountyTest is Test {
 
         // Set up default global permissions
         vm.prank(executor);
-        tm.setRolePerm(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN));
         vm.prank(executor);
-        tm.setRolePerm(MEMBER_HAT, TaskPerm.CLAIM);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MEMBER_HAT, TaskPerm.CLAIM));
 
         // Set up projects for testing
         uint256[] memory createHats = new uint256[](1);
@@ -2722,6 +2803,7 @@ contract TaskManagerBountyTest is Test {
         tm.createTask(1 ether, bytes("bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.5 ether);
 
         // Verify task has bounty info
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_FULL_INFO,abi.encode(0));
         (
             uint256 payout,
             uint256 bountyPayout,
@@ -2730,7 +2812,7 @@ contract TaskManagerBountyTest is Test {
             address claimer,
             bytes32 projectId,
             bool requiresApplication
-        ) = tm.getTaskFull(0);
+        ) = abi.decode(result, (uint256, uint256, address, TaskManager.Status, address, bytes32, bool));
         assertEq(payout, 1 ether, "Participation token payout should be correct");
         assertEq(bountyPayout, 0.5 ether, "Bounty payout should be correct");
         assertEq(bountyToken, address(bountyToken1), "Bounty token should be correct");
@@ -2743,6 +2825,7 @@ contract TaskManagerBountyTest is Test {
         tm.createTask(1 ether, bytes("no_bounty_task"), NO_BOUNTY_PROJECT_ID, address(0), 0);
 
         // Verify task has no bounty info
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_FULL_INFO,abi.encode(0));
         (
             uint256 payout,
             uint256 bountyPayout,
@@ -2751,7 +2834,7 @@ contract TaskManagerBountyTest is Test {
             address claimer,
             bytes32 projectId,
             bool requiresApplication
-        ) = tm.getTaskFull(0);
+        ) = abi.decode(result, (uint256, uint256, address, TaskManager.Status, address, bytes32, bool));
         assertEq(payout, 1 ether, "Participation token payout should be correct");
         assertEq(bountyPayout, 0, "Bounty payout should be zero");
         assertEq(bountyToken, address(0), "Bounty token should be zero address");
@@ -2763,6 +2846,7 @@ contract TaskManagerBountyTest is Test {
         tm.createApplicationTask(1 ether, bytes("app_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
 
         // Verify task has bounty info and requires application
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_FULL_INFO,abi.encode(0));
         (
             uint256 payout,
             uint256 bountyPayout,
@@ -2771,7 +2855,7 @@ contract TaskManagerBountyTest is Test {
             address claimer,
             bytes32 projectId,
             bool requiresApplication
-        ) = tm.getTaskFull(0);
+        ) = abi.decode(result, (uint256, uint256, address, TaskManager.Status, address, bytes32, bool));
         assertEq(payout, 1 ether, "Participation token payout should be correct");
         assertEq(bountyPayout, 0.3 ether, "Bounty payout should be correct");
         assertEq(bountyToken, address(bountyToken1), "Bounty token should be correct");
@@ -2786,6 +2870,7 @@ contract TaskManagerBountyTest is Test {
         );
 
         // Verify task is assigned and has bounty info
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_FULL_INFO,abi.encode(taskId));
         (
             uint256 payout,
             uint256 bountyPayout,
@@ -2794,7 +2879,7 @@ contract TaskManagerBountyTest is Test {
             address claimer,
             bytes32 projectId,
             bool requiresApplication
-        ) = tm.getTaskFull(taskId);
+        ) = abi.decode(result, (uint256, uint256, address, TaskManager.Status, address, bytes32, bool));
         assertEq(payout, 1 ether, "Participation token payout should be correct");
         assertEq(bountyPayout, 0.4 ether, "Bounty payout should be correct");
         assertEq(bountyToken, address(bountyToken1), "Bounty token should be correct");
@@ -2859,6 +2944,7 @@ contract TaskManagerBountyTest is Test {
         tm.updateTask(0, 1 ether, bytes("updated_metadata"), address(bountyToken2), 0.6 ether);
 
         // Verify bounty was updated
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_FULL_INFO,abi.encode(0));
         (
             uint256 payout,
             uint256 bountyPayout,
@@ -2867,7 +2953,7 @@ contract TaskManagerBountyTest is Test {
             address claimer,
             bytes32 projectId,
             bool requiresApplication
-        ) = tm.getTaskFull(0);
+        ) = abi.decode(result, (uint256, uint256, address, TaskManager.Status, address, bytes32, bool));
         assertEq(bountyPayout, 0.6 ether, "Bounty payout should be updated");
         assertEq(bountyToken, address(bountyToken2), "Bounty token should be updated");
     }
@@ -2897,6 +2983,7 @@ contract TaskManagerBountyTest is Test {
         tm.updateTask(0, 1 ether, bytes("updated_metadata"), address(0), 0);
 
         // Verify bounty was removed
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_FULL_INFO,abi.encode(0));
         (
             uint256 payout,
             uint256 bountyPayout,
@@ -2905,7 +2992,7 @@ contract TaskManagerBountyTest is Test {
             address claimer,
             bytes32 projectId,
             bool requiresApplication
-        ) = tm.getTaskFull(0);
+        ) = abi.decode(result, (uint256, uint256, address, TaskManager.Status, address, bytes32, bool));
         assertEq(bountyPayout, 0, "Bounty payout should be zero");
         assertEq(bountyToken, address(0), "Bounty token should be zero address");
     }
@@ -2999,6 +3086,7 @@ contract TaskManagerBountyTest is Test {
         tm.cancelTask(0);
 
         // Verify task is cancelled and bounty info is preserved
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_FULL_INFO,abi.encode(0));
         (
             uint256 payout,
             uint256 bountyPayout,
@@ -3007,7 +3095,7 @@ contract TaskManagerBountyTest is Test {
             address claimer,
             bytes32 projectId,
             bool requiresApplication
-        ) = tm.getTaskFull(0);
+        ) = abi.decode(result, (uint256, uint256, address, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.CANCELLED), "Status should be CANCELLED");
         assertEq(bountyPayout, 0.3 ether, "Bounty payout should be preserved");
         assertEq(bountyToken, address(bountyToken1), "Bounty token should be preserved");
@@ -3019,6 +3107,7 @@ contract TaskManagerBountyTest is Test {
         tm.createTask(1 ether, bytes("full_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether);
 
         // Test getTaskFull function
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.TASK_FULL_INFO,abi.encode(0));
         (
             uint256 payout,
             uint256 bountyPayout,
@@ -3027,7 +3116,7 @@ contract TaskManagerBountyTest is Test {
             address claimer,
             bytes32 projectId,
             bool requiresApplication
-        ) = tm.getTaskFull(0);
+        ) = abi.decode(result, (uint256, uint256, address, TaskManager.Status, address, bytes32, bool));
         assertEq(payout, 1 ether, "Payout should be correct");
         assertEq(bountyPayout, 0.3 ether, "Bounty payout should be correct");
         assertEq(bountyToken, address(bountyToken1), "Bounty token should be correct");
@@ -3038,7 +3127,7 @@ contract TaskManagerBountyTest is Test {
 
         // Compare with getTask function (should not include bounty info)
         (uint256 payout2, TaskManager.Status status2, address claimer2, bytes32 projectId2, bool requiresApplication2) =
-            tm.getTask(0);
+            abi.decode(tm.getStorage(TaskManager.StorageKey.TASK_INFO, abi.encode(0)), (uint256, TaskManager.Status, address, bytes32, bool));
         assertEq(payout2, payout, "getTask payout should match getTaskFull");
         assertEq(uint8(status2), uint8(status), "getTask status should match getTaskFull");
         assertEq(claimer2, claimer, "getTask claimer should match getTaskFull");
@@ -3184,9 +3273,9 @@ contract TaskManagerBountyBudgetTest is Test {
 
         // Set up default global permissions
         vm.prank(executor);
-        tm.setRolePerm(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN));
         vm.prank(executor);
-        tm.setRolePerm(MEMBER_HAT, TaskPerm.CLAIM);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MEMBER_HAT, TaskPerm.CLAIM));
 
         // Set up projects for testing
         uint256[] memory createHats = new uint256[](1);
@@ -3224,10 +3313,11 @@ contract TaskManagerBountyBudgetTest is Test {
         vm.prank(executor);
         vm.expectEmit(true, true, true, true);
         emit TaskManager.BountyCapSet(BUDGET_PROJECT_ID, address(bountyToken1), 0, 5 ether);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         // Verify cap was set
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 5 ether, "Bounty cap should be set correctly");
         assertEq(spent, 0, "Bounty spent should be zero initially");
     }
@@ -3236,21 +3326,22 @@ contract TaskManagerBountyBudgetTest is Test {
         // Only executor can set bounty caps
         vm.prank(creator1);
         vm.expectRevert(TaskManager.NotExecutor.selector);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         vm.prank(pm1);
         vm.expectRevert(TaskManager.NotExecutor.selector);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         vm.prank(member1);
         vm.expectRevert(TaskManager.NotExecutor.selector);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         // Executor can set cap
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 5 ether, "Executor should be able to set bounty cap");
     }
 
@@ -3258,40 +3349,41 @@ contract TaskManagerBountyBudgetTest is Test {
         // Test zero address token
         vm.prank(executor);
         vm.expectRevert(ValidationLib.ZeroAddress.selector);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(0), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(0), 5 ether));
 
         // Test excessive cap
         vm.prank(executor);
         vm.expectRevert(ValidationLib.InvalidPayout.selector);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 1e25); // Over MAX_PAYOUT
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 1e25)); // Over MAX_PAYOUT
 
         // Test non-existent project
         vm.prank(executor);
         vm.expectRevert(TaskManager.UnknownProject.selector);
-        tm.setBountyCap(bytes32(uint256(999)), address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(bytes32(uint256(999)), address(bountyToken1), 5 ether));
     }
 
     function test_GetBountyBudgetValidation() public {
         // Test zero address token
         vm.expectRevert(ValidationLib.ZeroAddress.selector);
-        tm.getBountyBudget(BUDGET_PROJECT_ID, address(0));
+        tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(0)));
 
         // Test non-existent project
         vm.expectRevert(TaskManager.UnknownProject.selector);
-        tm.getBountyBudget(bytes32(uint256(999)), address(bountyToken1));
+        tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(bytes32(uint256(999)), address(bountyToken1)));
     }
 
     function test_CreateTaskWithBountyBudgetEnforcement() public {
         // Set bounty cap
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether));
 
         // Create task within budget
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 1.5 ether);
 
         // Verify budget tracking
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 3 ether, "Cap should remain unchanged");
         assertEq(spent, 1.5 ether, "Spent should be updated");
 
@@ -3300,7 +3392,8 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 1.5 ether);
 
         // Verify budget tracking
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should be at cap");
 
         // Try to exceed budget
@@ -3315,7 +3408,8 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
 
         // Verify budget tracking (cap should be 0, spent should be updated)
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 0, "Cap should be zero (unlimited)");
         assertEq(spent, 5 ether, "Spent should be updated");
 
@@ -3323,15 +3417,16 @@ contract TaskManagerBountyBudgetTest is Test {
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 10 ether);
 
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 15 ether, "Spent should be cumulative");
     }
 
     function test_MultipleBountyTokensBudgets() public {
         // Set different caps for different tokens
         vm.startPrank(executor);
-        tm.setBountyCap(MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 2 ether);
-        tm.setBountyCap(MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 3 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 2 ether));
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 3 ether));
         vm.stopPrank();
 
         // Create tasks with different tokens
@@ -3342,8 +3437,10 @@ contract TaskManagerBountyBudgetTest is Test {
         vm.stopPrank();
 
         // Verify independent budget tracking
-        (uint256 cap1, uint256 spent1) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken1));
-        (uint256 cap2, uint256 spent2) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken2));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap1, uint256 spent1) = abi.decode(result, (uint256, uint256));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2)));
+        (uint256 cap2, uint256 spent2) = abi.decode(result, (uint256, uint256));
 
         assertEq(cap1, 2 ether, "Token1 cap should be correct");
         assertEq(spent1, 2 ether, "Token1 spent should be at cap");
@@ -3359,21 +3456,23 @@ contract TaskManagerBountyBudgetTest is Test {
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task5"), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 1 ether);
 
-        (cap2, spent2) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken2));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2)));
+        (cap2, spent2) = abi.decode(result, (uint256, uint256));
         assertEq(spent2, 3 ether, "Token2 spent should now be at cap");
     }
 
     function test_UpdateTaskBountyBudgetTracking() public {
         // Set bounty cap
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         // Create task
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
 
         // Verify initial budget
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 2 ether, "Initial spent should be correct");
 
         // Update task to higher bounty (within budget)
@@ -3381,7 +3480,8 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken1), 3 ether);
 
         // Verify budget updated
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should be updated after task update");
 
         // Try to update to exceed budget
@@ -3393,8 +3493,8 @@ contract TaskManagerBountyBudgetTest is Test {
     function test_UpdateTaskChangeBountyToken() public {
         // Set caps for both tokens
         vm.startPrank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken2), 4 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether));
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2), 4 ether));
         vm.stopPrank();
 
         // Create task with token1
@@ -3402,8 +3502,10 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
 
         // Verify initial budgets
-        (uint256 cap1, uint256 spent1) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
-        (uint256 cap2, uint256 spent2) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken2));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap1, uint256 spent1) = abi.decode(result, (uint256, uint256));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2)));
+        (uint256 cap2, uint256 spent2) = abi.decode(result, (uint256, uint256));
         assertEq(spent1, 2 ether, "Token1 spent should be correct");
         assertEq(spent2, 0, "Token2 spent should be zero");
 
@@ -3412,8 +3514,10 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken2), 3 ether);
 
         // Verify budgets updated correctly
-        (cap1, spent1) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
-        (cap2, spent2) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken2));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap1, spent1) = abi.decode(result, (uint256, uint256));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2)));
+        (cap2, spent2) = abi.decode(result, (uint256, uint256));
         assertEq(spent1, 0, "Token1 spent should be rolled back");
         assertEq(spent2, 3 ether, "Token2 spent should be updated");
     }
@@ -3421,14 +3525,15 @@ contract TaskManagerBountyBudgetTest is Test {
     function test_UpdateTaskRemoveBounty() public {
         // Set bounty cap
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         // Create task with bounty
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
 
         // Verify budget
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should be correct");
 
         // Remove bounty from task
@@ -3436,21 +3541,23 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.updateTask(0, 1 ether, bytes("updated"), address(0), 0);
 
         // Verify budget rolled back
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 0, "Spent should be rolled back");
     }
 
     function test_CancelTaskBountyBudgetRollback() public {
         // Set bounty cap
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         // Create task
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
 
         // Verify budget
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 2 ether, "Spent should be correct");
 
         // Cancel task
@@ -3458,14 +3565,15 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.cancelTask(0);
 
         // Verify budget rolled back
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 0, "Spent should be rolled back after cancel");
     }
 
     function test_CreateAndAssignTaskBountyBudget() public {
         // Set bounty cap
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         // Create and assign task
         vm.prank(creator1);
@@ -3474,7 +3582,8 @@ contract TaskManagerBountyBudgetTest is Test {
         );
 
         // Verify budget tracking
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should be updated");
 
         // Try to exceed budget with another task
@@ -3488,14 +3597,15 @@ contract TaskManagerBountyBudgetTest is Test {
     function test_ApplicationTaskBountyBudget() public {
         // Set bounty cap
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         // Create application task
         vm.prank(creator1);
         tm.createApplicationTask(1 ether, bytes("app_task"), BUDGET_PROJECT_ID, address(bountyToken1), 4 ether);
 
         // Verify budget tracking
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 4 ether, "Spent should be updated");
 
         // Try to create another task that would exceed budget
@@ -3510,39 +3620,42 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
 
         // Verify spent
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should be correct");
 
         // Try to set cap below spent amount
         vm.prank(executor);
         vm.expectRevert(ValidationLib.CapBelowCommitted.selector);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 2 ether));
 
         // Setting cap equal to spent should work
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether));
 
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 3 ether, "Cap should be set correctly");
 
         // Setting cap above spent should work
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 5 ether, "Cap should be updated correctly");
     }
 
     function test_UpdateBountyCapEvent() public {
         // Set initial cap
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether));
 
         // Update cap and verify event
         vm.prank(executor);
         vm.expectEmit(true, true, true, true);
         emit TaskManager.BountyCapSet(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, 5 ether);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
     }
 
     function test_BountyBudgetIndependentFromParticipationToken() public {
@@ -3551,15 +3664,17 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.updateProjectCap(BUDGET_PROJECT_ID, 2 ether);
 
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether));
 
         // Create task that uses both budgets
         vm.prank(creator1);
         tm.createTask(1.5 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
 
         // Verify both budgets are tracked independently
-        (uint256 participationCap, uint256 participationSpent,) = tm.getProjectInfo(BUDGET_PROJECT_ID);
-        (uint256 bountyCap, uint256 bountySpent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.PROJECT_INFO, abi.encode(BUDGET_PROJECT_ID));
+        (uint256 participationCap, uint256 participationSpent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
+        bytes memory bountyResult = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 bountyCap, uint256 bountySpent) = abi.decode(bountyResult, (uint256, uint256));
 
         assertEq(participationSpent, 1.5 ether, "Participation token spent should be correct");
         assertEq(bountySpent, 2 ether, "Bounty token spent should be correct");
@@ -3578,7 +3693,7 @@ contract TaskManagerBountyBudgetTest is Test {
     function test_CompleteTaskWithBountyBudgetTracking() public {
         // Set bounty cap
         vm.prank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         // Create and complete task
         vm.prank(creator1);
@@ -3591,14 +3706,16 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.submitTask(0, bytes("submission"));
 
         // Budget should remain reserved during completion
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should remain reserved");
 
         vm.prank(creator1);
         tm.completeTask(0);
 
         // Budget should still be marked as spent after completion
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should remain after completion");
 
         // Verify tokens were transferred
@@ -3609,8 +3726,8 @@ contract TaskManagerBountyBudgetTest is Test {
     function test_UpdateTaskAfterClaimBountyBudgetReverts() public {
         // Set bounty caps
         vm.startPrank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken2), 4 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2), 4 ether));
         vm.stopPrank();
 
         // Create and claim task
@@ -3634,7 +3751,8 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 100 ether);
 
         // Verify budget tracking
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 0, "Cap should be zero (unlimited)");
         assertEq(spent, 100 ether, "Spent should be tracked");
 
@@ -3642,13 +3760,16 @@ contract TaskManagerBountyBudgetTest is Test {
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 200 ether);
 
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 300 ether, "Spent should be cumulative");
     }
 
     function test_GetBountyBudgetUnusedToken() public {
         // Get budget for token that was never used
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 0, "Unused token cap should be zero");
         assertEq(spent, 0, "Unused token spent should be zero");
     }
@@ -3656,9 +3777,9 @@ contract TaskManagerBountyBudgetTest is Test {
     function test_BountyBudgetStressTest() public {
         // Set caps for multiple tokens
         vm.startPrank(executor);
-        tm.setBountyCap(MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 10 ether);
-        tm.setBountyCap(MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 15 ether);
-        tm.setBountyCap(MULTI_TOKEN_PROJECT_ID, address(bountyToken3), 20 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 10 ether));
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 15 ether));
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken3), 20 ether));
         vm.stopPrank();
 
         uint256 totalTasks = 15;
@@ -3681,9 +3802,12 @@ contract TaskManagerBountyBudgetTest is Test {
         }
 
         // Verify final budget states
-        (uint256 cap1, uint256 spent1) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken1));
-        (uint256 cap2, uint256 spent2) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken2));
-        (uint256 cap3, uint256 spent3) = tm.getBountyBudget(MULTI_TOKEN_PROJECT_ID, address(bountyToken3));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap1, uint256 spent1) = abi.decode(result, (uint256, uint256));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2)));
+        (uint256 cap2, uint256 spent2) = abi.decode(result, (uint256, uint256));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken3)));
+        (uint256 cap3, uint256 spent3) = abi.decode(result, (uint256, uint256));
 
         assertEq(spent1, 2.5 ether, "Token1 spent should be correct"); // 5 tasks * 0.5 ether
         assertEq(spent2, 4 ether, "Token2 spent should be correct"); // 5 tasks * 0.8 ether
@@ -3719,14 +3843,15 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 1 ether);
 
         // Verify budget is correct
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 1 ether, "Spent should be correct");
 
         // Normal cancellation should work
         vm.prank(creator1);
         tm.cancelTask(1);
-
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 0, "Spent should be rolled back correctly");
     }
 
@@ -3736,14 +3861,15 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether);
 
         // Verify budget
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 2 ether, "Spent should be correct");
 
         // Normal update should work (rolling back and applying new bounty)
         vm.prank(creator1);
         tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken1), 1.5 ether);
-
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 1.5 ether, "Spent should be updated correctly");
 
         // Update after claiming should revert
@@ -3760,22 +3886,24 @@ contract TaskManagerBountyBudgetTest is Test {
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether);
 
-        (uint256 cap, uint256 spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should equal bounty payout");
 
         // Cancelling should work when spent equals payout
         vm.prank(creator1);
         tm.cancelTask(0);
 
-        (cap, spent) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 0, "Spent should be zero after cancel");
     }
 
     function test_BountyBudgetUnderflowProtectionMultipleTokens() public {
         // Set caps for both tokens
         vm.startPrank(executor);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether);
-        tm.setBountyCap(BUDGET_PROJECT_ID, address(bountyToken2), 5 ether);
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
+        tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2), 5 ether));
         vm.stopPrank();
 
         // Create task with token1
@@ -3787,8 +3915,10 @@ contract TaskManagerBountyBudgetTest is Test {
         tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken2), 3 ether);
 
         // Verify budgets
-        (uint256 cap1, uint256 spent1) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
-        (uint256 cap2, uint256 spent2) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken2));
+        bytes memory result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (uint256 cap1, uint256 spent1) = abi.decode(result, (uint256, uint256));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2)));
+        (uint256 cap2, uint256 spent2) = abi.decode(result, (uint256, uint256));
 
         assertEq(spent1, 0, "Token1 spent should be rolled back");
         assertEq(spent2, 3 ether, "Token2 spent should be applied");
@@ -3796,9 +3926,10 @@ contract TaskManagerBountyBudgetTest is Test {
         // Cancel task should roll back token2
         vm.prank(creator1);
         tm.cancelTask(0);
-
-        (cap1, spent1) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken1));
-        (cap2, spent2) = tm.getBountyBudget(BUDGET_PROJECT_ID, address(bountyToken2));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        (cap1, spent1) = abi.decode(result, (uint256, uint256));
+        result = tm.getStorage(TaskManager.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2)));
+        (cap2, spent2) = abi.decode(result, (uint256, uint256));
 
         assertEq(spent1, 0, "Token1 spent should remain zero");
         assertEq(spent2, 0, "Token2 spent should be rolled back");
