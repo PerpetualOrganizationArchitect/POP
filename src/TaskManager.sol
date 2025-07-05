@@ -596,14 +596,10 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit TaskAssigned(taskId, assignee, sender);
     }
 
-
-
-
-
     /*──────── Unified Storage Getter ─────── */
     function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
         Layout storage l = _layout();
-        
+
         if (key == StorageKey.HATS) {
             return abi.encode(l.hats);
         } else if (key == StorageKey.EXECUTOR) {
@@ -625,7 +621,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         } else if (key == StorageKey.TASK_FULL_INFO) {
             uint256 id = abi.decode(params, (uint256));
             Task storage t = _task(l, id);
-            return abi.encode(t.payout, t.bountyPayout, t.bountyToken, t.status, t.claimer, t.projectId, t.requiresApplication);
+            return abi.encode(
+                t.payout, t.bountyPayout, t.bountyToken, t.status, t.claimer, t.projectId, t.requiresApplication
+            );
         } else if (key == StorageKey.PROJECT_INFO) {
             bytes32 pid = abi.decode(params, (bytes32));
             Project storage p = l._projects[pid];
@@ -651,14 +649,14 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
             BudgetLib.Budget storage b = p.bountyBudgets[token];
             return abi.encode(b.cap, b.spent);
         }
-        
+
         revert InvalidIndex();
     }
 
     /*──────── Unified Config Setter ─────── */
     function setConfig(ConfigKey key, bytes calldata value) external onlyExecutor {
         Layout storage l = _layout();
-        
+
         if (key == ConfigKey.EXECUTOR) {
             address newExecutor = abi.decode(value, (address));
             newExecutor.requireNonZeroAddress();
@@ -671,31 +669,31 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         } else if (key == ConfigKey.ROLE_PERM) {
             (uint256 hatId, uint8 mask) = abi.decode(value, (uint256, uint8));
             l.rolePermGlobal[hatId] = mask;
-            
+
             // Track that this hat has permissions
             if (mask != 0) {
                 HatManager.setHatInArray(l.permissionHatIds, hatId, true);
             } else {
                 HatManager.setHatInArray(l.permissionHatIds, hatId, false);
             }
-            
         } else if (key == ConfigKey.BOUNTY_CAP) {
             (bytes32 pid, address token, uint256 newCap) = abi.decode(value, (bytes32, address, uint256));
             token.requireNonZeroAddress();
             ValidationLib.requireValidCapAmount(newCap);
-            
+
             Project storage p = l._projects[pid];
             if (!p.exists) revert UnknownProject();
-            
+
             BudgetLib.Budget storage b = p.bountyBudgets[token];
             ValidationLib.requireValidCap(newCap, b.spent);
-            
+
             uint256 oldCap = b.cap;
             b.cap = uint128(newCap);
-            
+
             emit BountyCapSet(pid, token, oldCap, newCap);
         }
     }
+
     function setProjectRolePerm(bytes32 pid, uint256 hatId, uint8 mask) external onlyCreator projectExists(pid) {
         Layout storage l = _layout();
         l.rolePermProj[pid][hatId] = mask;
@@ -710,6 +708,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit ProjectRolePermSet(pid, hatId, mask);
     }
     /*──────── Internal Perm helpers ─────*/
+
     function _permMask(address user, bytes32 pid) internal view returns (uint8 m) {
         Layout storage l = _layout();
         uint256 len = l.permissionHatIds.length;
