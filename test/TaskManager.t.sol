@@ -2243,7 +2243,7 @@ contract TaskManagerTest is Test {
         assertEq(claimer2, address(0));
         result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(1, member2));
         bytes32 hasApplied = abi.decode(result, (bytes32));
-        assertTrue(hasApplied == bytes32(0), "Member2 should have applied for task 1");
+        assertTrue(hasApplied != bytes32(0), "Member2 should have applied for task 1");
     }
 
     function test_ApplicationSystemPreventsClaiming() public {
@@ -2609,10 +2609,10 @@ contract TaskManagerTest is Test {
         assertEq(applicantCount, 2, "Should have 2 applicants");
         result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member1));
         bytes32 hasApplied = abi.decode(result, (bytes32));
-        assertTrue(hasApplied == bytes32(0), "Member1 should have applied");
+        assertTrue(hasApplied != bytes32(0), "Member1 should have applied");
         result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member2));
         hasApplied = abi.decode(result, (bytes32));
-        assertTrue(hasApplied == bytes32(0), "Member2 should have applied");
+        assertTrue(hasApplied != bytes32(0), "Member2 should have applied");
 
         // Cancel task
         vm.prank(creator1);
@@ -2631,10 +2631,10 @@ contract TaskManagerTest is Test {
         // them in a loop. This is intentional behavior.
         result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member1));
         hasApplied = abi.decode(result, (bytes32));
-        assertTrue(hasApplied == bytes32(0), "Member1 application hash should remain");
+        assertTrue(hasApplied != bytes32(0), "Member1 application hash should remain");
         result = tm.getStorage(TaskManager.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member2));
         hasApplied = abi.decode(result, (bytes32));
-        assertTrue(hasApplied == bytes32(0), "Member2 application hash should remain");
+        assertTrue(hasApplied != bytes32(0), "Member2 application hash should remain");
     }
 
     function test_DuplicateApplicationPrevented() public {
