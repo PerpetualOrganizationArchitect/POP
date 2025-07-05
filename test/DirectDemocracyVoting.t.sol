@@ -128,7 +128,9 @@ contract DDVotingTest is Test {
 
     function testSetHatAllowed() public {
         vm.prank(address(exec));
-        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, HAT_ID, false));
+        dd.setConfig(
+            DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, HAT_ID, false)
+        );
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
         b[0] = new IExecutor.Call[](0);
         // Creator should still be able to create (different permission)
@@ -147,7 +149,9 @@ contract DDVotingTest is Test {
 
         // Re-enable voting
         vm.prank(address(exec));
-        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, HAT_ID, true));
+        dd.setConfig(
+            DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, HAT_ID, true)
+        );
         vm.prank(voter);
         dd.vote(0, idx, w); // Should work now
     }
@@ -162,7 +166,10 @@ contract DDVotingTest is Test {
 
         // Enable new hat as creator hat
         vm.prank(address(exec));
-        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.CREATOR, newHatId, true));
+        dd.setConfig(
+            DirectDemocracyVoting.ConfigKey.HAT_ALLOWED,
+            abi.encode(DirectDemocracyVoting.HatType.CREATOR, newHatId, true)
+        );
 
         // New creator should be able to create proposal
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
@@ -173,7 +180,10 @@ contract DDVotingTest is Test {
 
         // Disable new hat
         vm.prank(address(exec));
-        dd.setConfig(DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.CREATOR, newHatId, false));
+        dd.setConfig(
+            DirectDemocracyVoting.ConfigKey.HAT_ALLOWED,
+            abi.encode(DirectDemocracyVoting.HatType.CREATOR, newHatId, false)
+        );
 
         // Should now fail
         vm.prank(newCreator);
@@ -400,7 +410,9 @@ contract DDVotingTest is Test {
 
         uint256 id = _createHatPoll(1, hatIds);
         assertTrue(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
-        assertTrue(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, HAT_ID)), (bool)));
+        assertTrue(
+            abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, HAT_ID)), (bool))
+        );
     }
 
     function testAnnounceWinner() public {
@@ -490,7 +502,8 @@ contract DDVotingTest is Test {
         // Create the election proposal
         vm.prank(creator);
         dd.createProposal("Election: Choose new executive leader", 60, 3, batches);
-        uint256 proposalId = abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
+        uint256 proposalId =
+            abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
 
         // Verify no candidates have the hat initially
         assertFalse(hats.isWearerOfHat(alice, executiveHatId));
@@ -564,7 +577,8 @@ contract DDVotingTest is Test {
         // Create the election proposal
         vm.prank(creator);
         dd.createProposal("Election: Choose executive with different privileges", 60, 2, batches);
-        uint256 proposalId = abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
+        uint256 proposalId =
+            abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
 
         // Vote for Alice (option 0) who gets both hats
         uint8[] memory idx = new uint8[](1);

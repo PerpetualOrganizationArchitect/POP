@@ -252,9 +252,9 @@ contract HybridVoting is Initializable {
         DEMOCRACY
     }
 
-        function setHatAllowed(HatType hatType, uint256 h, bool ok) external onlyExecutor {
+    function setHatAllowed(HatType hatType, uint256 h, bool ok) external onlyExecutor {
         Layout storage l = _layout();
-        
+
         if (hatType == HatType.VOTING) {
             HatManager.setHatInArray(l.votingHatIds, h, ok);
         } else if (hatType == HatType.CREATOR) {
@@ -262,7 +262,7 @@ contract HybridVoting is Initializable {
         } else if (hatType == HatType.DEMOCRACY) {
             HatManager.setHatInArray(l.democracyHatIds, h, ok);
         }
-        
+
         emit HatSet(hatType, h, ok);
     }
 
