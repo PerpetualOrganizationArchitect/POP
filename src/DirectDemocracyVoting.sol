@@ -494,5 +494,4 @@ contract DirectDemocracyVoting is Initializable {
         }
         revert InvalidIndex();
     }
-
 }
