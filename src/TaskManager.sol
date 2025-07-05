@@ -44,9 +44,41 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     error AlreadyApplied();
     error RequiresApplication();
     error NoApplicationRequired();
+    error InvalidIndex();
 
     /*──────── Constants ─────*/
     bytes4 public constant MODULE_ID = 0x54534b32; // "TSK2"
+
+    /*──────── Enums ─────*/
+    enum HatType {
+        CREATOR
+    }
+
+    enum ConfigKey {
+        EXECUTOR,
+        CREATOR_HAT_ALLOWED,
+        ROLE_PERM,
+        PROJECT_ROLE_PERM,
+        BOUNTY_CAP
+    }
+
+    enum StorageKey {
+        HATS,
+        EXECUTOR,
+        CREATOR_HATS,
+        CREATOR_HAT_COUNT,
+        PERMISSION_HATS,
+        PERMISSION_HAT_COUNT,
+        VERSION,
+        TASK_INFO,
+        TASK_FULL_INFO,
+        PROJECT_INFO,
+        TASK_APPLICANTS,
+        TASK_APPLICATION,
+        TASK_APPLICANT_COUNT,
+        HAS_APPLIED_FOR_TASK,
+        BOUNTY_BUDGET
+    }
 
     /*──────── Data Types ────*/
     enum Status {
@@ -101,7 +133,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     }
 
     /*──────── Events ───────*/
-    event CreatorHatSet(uint256 indexed hat, bool allowed);
+    event HatSet(HatType hatType, uint256 hat, bool allowed);
     event ProjectCreated(bytes32 indexed id, bytes metadata, uint256 cap);
     event ProjectCapUpdated(bytes32 indexed id, uint256 oldCap, uint256 newCap);
     event ProjectManagerAdded(bytes32 indexed id, address indexed manager);
@@ -127,7 +159,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     event TaskCancelled(uint256 indexed id, address indexed canceller);
     event TaskApplicationSubmitted(uint256 indexed id, address indexed applicant, bytes32 applicationHash);
     event TaskApplicationApproved(uint256 indexed id, address indexed applicant, address indexed approver);
-    event ExecutorSet(address indexed newExecutor);
+    event ExecutorUpdated(address newExecutor);
 
     /*──────── Initialiser ───────*/
     function initialize(
@@ -151,20 +183,13 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         // Initialize creator hat arrays using HatManager
         for (uint256 i; i < creatorHats.length;) {
             HatManager.setHatInArray(l.creatorHatIds, creatorHats[i], true);
-            emit CreatorHatSet(creatorHats[i], true);
+            emit HatSet(HatType.CREATOR, creatorHats[i], true);
             unchecked {
                 ++i;
             }
         }
 
-        emit ExecutorSet(executorAddress);
-    }
-
-    /*──────── Hat Management ─────*/
-    function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
-        Layout storage l = _layout();
-        HatManager.setHatInArray(l.creatorHatIds, h, ok);
-        emit CreatorHatSet(h, ok);
+        emit ExecutorUpdated(executorAddress);
     }
 
     /*──────── Modifiers ─────*/
@@ -571,69 +596,106 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit TaskAssigned(taskId, assignee, sender);
     }
 
-    /*────────── View Helpers ─────────────*/
-    function getTask(uint256 id)
-        external
-        view
-        returns (uint256 payout, Status status, address claimer, bytes32 projectId, bool requiresApplication)
-    {
-        Task storage t = _task(_layout(), id);
-        return (t.payout, t.status, t.claimer, t.projectId, t.requiresApplication);
-    }
 
-    function getTaskFull(uint256 id)
-        external
-        view
-        returns (
-            uint256 payout,
-            uint256 bountyPayout,
-            address bountyToken,
-            Status status,
-            address claimer,
-            bytes32 projectId,
-            bool requiresApplication
-        )
-    {
-        Task storage t = _task(_layout(), id);
-        return (t.payout, t.bountyPayout, t.bountyToken, t.status, t.claimer, t.projectId, t.requiresApplication);
-    }
 
-    function getProjectInfo(bytes32 pid) external view returns (uint256 cap, uint256 spent, bool isManager) {
+
+
+    /*──────── Unified Storage Getter ─────── */
+    function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
         Layout storage l = _layout();
-        Project storage p = l._projects[pid];
-        if (!p.exists) revert UnknownProject();
-        return (p.cap, p.spent, p.managers[_msgSender()]);
+        
+        if (key == StorageKey.HATS) {
+            return abi.encode(l.hats);
+        } else if (key == StorageKey.EXECUTOR) {
+            return abi.encode(l.executor);
+        } else if (key == StorageKey.CREATOR_HATS) {
+            return abi.encode(HatManager.getHatArray(l.creatorHatIds));
+        } else if (key == StorageKey.CREATOR_HAT_COUNT) {
+            return abi.encode(HatManager.getHatCount(l.creatorHatIds));
+        } else if (key == StorageKey.PERMISSION_HATS) {
+            return abi.encode(HatManager.getHatArray(l.permissionHatIds));
+        } else if (key == StorageKey.PERMISSION_HAT_COUNT) {
+            return abi.encode(HatManager.getHatCount(l.permissionHatIds));
+        } else if (key == StorageKey.VERSION) {
+            return abi.encode("v1");
+        } else if (key == StorageKey.TASK_INFO) {
+            uint256 id = abi.decode(params, (uint256));
+            Task storage t = _task(l, id);
+            return abi.encode(t.payout, t.status, t.claimer, t.projectId, t.requiresApplication);
+        } else if (key == StorageKey.TASK_FULL_INFO) {
+            uint256 id = abi.decode(params, (uint256));
+            Task storage t = _task(l, id);
+            return abi.encode(t.payout, t.bountyPayout, t.bountyToken, t.status, t.claimer, t.projectId, t.requiresApplication);
+        } else if (key == StorageKey.PROJECT_INFO) {
+            bytes32 pid = abi.decode(params, (bytes32));
+            Project storage p = l._projects[pid];
+            if (!p.exists) revert UnknownProject();
+            return abi.encode(p.cap, p.spent, p.managers[_msgSender()]);
+        } else if (key == StorageKey.TASK_APPLICANTS) {
+            uint256 id = abi.decode(params, (uint256));
+            return abi.encode(l.taskApplicants[id]);
+        } else if (key == StorageKey.TASK_APPLICATION) {
+            (uint256 id, address applicant) = abi.decode(params, (uint256, address));
+            return abi.encode(l.taskApplications[id][applicant]);
+        } else if (key == StorageKey.TASK_APPLICANT_COUNT) {
+            uint256 id = abi.decode(params, (uint256));
+            return abi.encode(l.taskApplicants[id].length);
+        } else if (key == StorageKey.HAS_APPLIED_FOR_TASK) {
+            (uint256 id, address applicant) = abi.decode(params, (uint256, address));
+            return abi.encode(l.taskApplications[id][applicant]);
+        } else if (key == StorageKey.BOUNTY_BUDGET) {
+            (bytes32 pid, address token) = abi.decode(params, (bytes32, address));
+            token.requireNonZeroAddress();
+            Project storage p = l._projects[pid];
+            if (!p.exists) revert UnknownProject();
+            BudgetLib.Budget storage b = p.bountyBudgets[token];
+            return abi.encode(b.cap, b.spent);
+        }
+        
+        revert InvalidIndex();
     }
 
-    function getTaskApplicants(uint256 id) external view returns (address[] memory) {
-        return _layout().taskApplicants[id];
-    }
-
-    function getTaskApplication(uint256 id, address applicant) external view returns (bytes32) {
-        return _layout().taskApplications[id][applicant];
-    }
-
-    function getTaskApplicantCount(uint256 id) external view returns (uint256) {
-        return _layout().taskApplicants[id].length;
-    }
-
-    function hasAppliedForTask(uint256 id, address applicant) external view returns (bool) {
-        return _layout().taskApplications[id][applicant] != bytes32(0);
-    }
-
-    /*──────── Governance / Admin ─────*/
-    function setRolePerm(uint256 hatId, uint8 mask) external onlyExecutor {
+    /*──────── Unified Config Setter ─────── */
+    function setConfig(ConfigKey key, bytes calldata value) external onlyExecutor {
         Layout storage l = _layout();
-        l.rolePermGlobal[hatId] = mask;
-
-        // Track that this hat has permissions
-        if (mask != 0) {
-            HatManager.setHatInArray(l.permissionHatIds, hatId, true);
-        } else {
-            HatManager.setHatInArray(l.permissionHatIds, hatId, false);
+        
+        if (key == ConfigKey.EXECUTOR) {
+            address newExecutor = abi.decode(value, (address));
+            newExecutor.requireNonZeroAddress();
+            l.executor = newExecutor;
+            emit ExecutorUpdated(newExecutor);
+        } else if (key == ConfigKey.CREATOR_HAT_ALLOWED) {
+            (uint256 hat, bool allowed) = abi.decode(value, (uint256, bool));
+            HatManager.setHatInArray(l.creatorHatIds, hat, allowed);
+            emit HatSet(HatType.CREATOR, hat, allowed);
+        } else if (key == ConfigKey.ROLE_PERM) {
+            (uint256 hatId, uint8 mask) = abi.decode(value, (uint256, uint8));
+            l.rolePermGlobal[hatId] = mask;
+            
+            // Track that this hat has permissions
+            if (mask != 0) {
+                HatManager.setHatInArray(l.permissionHatIds, hatId, true);
+            } else {
+                HatManager.setHatInArray(l.permissionHatIds, hatId, false);
+            }
+            
+        } else if (key == ConfigKey.BOUNTY_CAP) {
+            (bytes32 pid, address token, uint256 newCap) = abi.decode(value, (bytes32, address, uint256));
+            token.requireNonZeroAddress();
+            ValidationLib.requireValidCapAmount(newCap);
+            
+            Project storage p = l._projects[pid];
+            if (!p.exists) revert UnknownProject();
+            
+            BudgetLib.Budget storage b = p.bountyBudgets[token];
+            ValidationLib.requireValidCap(newCap, b.spent);
+            
+            uint256 oldCap = b.cap;
+            b.cap = uint128(newCap);
+            
+            emit BountyCapSet(pid, token, oldCap, newCap);
         }
     }
-
     function setProjectRolePerm(bytes32 pid, uint256 hatId, uint8 mask) external onlyCreator projectExists(pid) {
         Layout storage l = _layout();
         l.rolePermProj[pid][hatId] = mask;
@@ -647,51 +709,6 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
         emit ProjectRolePermSet(pid, hatId, mask);
     }
-
-    function setExecutor(address newExec) external onlyExecutor {
-        newExec.requireNonZeroAddress();
-        _layout().executor = newExec;
-        emit ExecutorSet(newExec);
-    }
-
-    function setBountyCap(bytes32 pid, address token, uint256 newCap) external onlyExecutor projectExists(pid) {
-        token.requireNonZeroAddress();
-        ValidationLib.requireValidCapAmount(newCap);
-
-        Layout storage l = _layout();
-        BudgetLib.Budget storage b = l._projects[pid].bountyBudgets[token];
-        ValidationLib.requireValidCap(newCap, b.spent);
-
-        uint256 oldCap = b.cap;
-        b.cap = uint128(newCap);
-
-        emit BountyCapSet(pid, token, oldCap, newCap);
-    }
-
-    function getBountyBudget(bytes32 pid, address token)
-        external
-        view
-        projectExists(pid)
-        returns (uint256 cap, uint256 spent)
-    {
-        token.requireNonZeroAddress();
-        BudgetLib.Budget storage b = _layout()._projects[pid].bountyBudgets[token];
-        return (b.cap, b.spent);
-    }
-
-    /*──────── Public getters for storage variables ─────────── */
-    function hats() external view returns (IHats) {
-        return _layout().hats;
-    }
-
-    function executor() external view returns (address) {
-        return _layout().executor;
-    }
-
-    function creatorHatIds() external view returns (uint256[] memory) {
-        return HatManager.getHatArray(_layout().creatorHatIds);
-    }
-
     /*──────── Internal Perm helpers ─────*/
     function _permMask(address user, bytes32 pid) internal view returns (uint8 m) {
         Layout storage l = _layout();
@@ -764,26 +781,5 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     function _task(Layout storage l, uint256 id) private view returns (Task storage t) {
         if (id >= l.nextTaskId) revert UnknownTask();
         t = l._tasks[id];
-    }
-
-    /*──────── Hat Management View Functions ─────────── */
-    function creatorHatCount() external view returns (uint256) {
-        return HatManager.getHatCount(_layout().creatorHatIds);
-    }
-
-    function permissionHatCount() external view returns (uint256) {
-        return HatManager.getHatCount(_layout().permissionHatIds);
-    }
-
-    function isCreatorHat(uint256 hatId) external view returns (bool) {
-        return HatManager.isHatInArray(_layout().creatorHatIds, hatId);
-    }
-
-    function isPermissionHat(uint256 hatId) external view returns (bool) {
-        return HatManager.isHatInArray(_layout().permissionHatIds, hatId);
-    }
-
-    function version() external pure returns (string memory) {
-        return "v1";
     }
 }
