@@ -235,10 +235,9 @@ contract ParticipationVoting is Initializable {
         _unpause();
     }
 
-
     function setConfig(ConfigKey key, bytes calldata value) external onlyExecutor {
         Layout storage l = _layout();
-        
+
         if (key == ConfigKey.QUORUM) {
             uint8 q = abi.decode(value, (uint8));
             VotingMath.validateQuorum(q);
@@ -265,13 +264,13 @@ contract ParticipationVoting is Initializable {
             emit ExecutorUpdated(newExecutor);
         } else if (key == ConfigKey.HAT_ALLOWED) {
             (HatType hatType, uint256 hat, bool allowed) = abi.decode(value, (HatType, uint256, bool));
-            
+
             if (hatType == HatType.VOTING) {
                 HatManager.setHatInArray(l.votingHatIds, hat, allowed);
             } else if (hatType == HatType.CREATOR) {
                 HatManager.setHatInArray(l.creatorHatIds, hat, allowed);
             }
-            
+
             emit HatSet(hatType, hat, allowed);
         }
     }
@@ -502,7 +501,7 @@ contract ParticipationVoting is Initializable {
     /* ─────── Unified Storage Getter ─────── */
     function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
         Layout storage l = _layout();
-        
+
         if (key == StorageKey.PARTICIPATION_TOKEN) {
             return abi.encode(l.participationToken);
         } else if (key == StorageKey.HATS) {
@@ -539,7 +538,7 @@ contract ParticipationVoting is Initializable {
             address target = abi.decode(params, (address));
             return abi.encode(l.allowedTarget[target]);
         }
-        
+
         revert InvalidIndex();
     }
 
@@ -565,6 +564,4 @@ contract ParticipationVoting is Initializable {
         }
         ok = (uint256(high) * 100 > uint256(p.totalWeight) * l.quorumPercentage) && (high > second);
     }
-
-
 }
