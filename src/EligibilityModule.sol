@@ -8,8 +8,8 @@ import "../lib/hats-protocol/src/Interfaces/IHatsEligibility.sol";
  * @title EligibilityModule
  * @notice A hat-based module for configuring eligibility and standing
  *         on a per-hat basis in the Hats Protocol, controlled by admin hats.
+ *         Now supports optional N-Vouch eligibility system.
  */
-
 contract EligibilityModule is IHatsEligibility {
     /// @notice The Hats Protocol contract
     IHats public immutable hats;
@@ -22,6 +22,14 @@ contract EligibilityModule is IHatsEligibility {
     struct WearerRules {
         bool eligible;
         bool standing;
+    }
+
+    /// @notice Configuration for vouching system per hat
+    struct VouchConfig {
+        uint32 quorum; // Number of vouches required
+        uint256 membershipHatId; // Hat ID whose wearers can vouch
+        bool enabled; // Whether vouching is enabled for this hat
+        bool combineWithHierarchy; // If true, hierarchy OR vouching (default). If false, vouching only.
     }
 
     /// @notice Store the rules for each wearer for each hat
@@ -43,53 +51,57 @@ contract EligibilityModule is IHatsEligibility {
     /// @notice Array to track all admin hat IDs for efficient iteration
     uint256[] public adminHatIds;
 
+    /// @notice Per-hat vouching configuration
+    mapping(uint256 => VouchConfig) public vouchConfigs;
+
+    /// @notice Track whether an address has vouched for a wearer for a specific hat
+    /// @dev hatId => wearer => voucher => hasVouched
+    mapping(uint256 => mapping(address => mapping(address => bool))) public vouchers;
+
+    /// @notice Count of valid vouches for each wearer for each hat
+    /// @dev hatId => wearer => vouchCount
+    mapping(uint256 => mapping(address => uint32)) public currentVouchCount;
+
+    /// @notice Track addresses that have met vouch quorum for a hat
+    /// @dev hatId => wearer => approved
+    mapping(uint256 => mapping(address => bool)) public vouchApproved;
+
     /// @notice Emitted when an admin updates a wearer's eligibility or standing for a hat
     event WearerEligibilityUpdated(
-        address indexed wearer, 
-        uint256 indexed hatId, 
-        bool eligible, 
-        bool standing,
-        address indexed admin
+        address indexed wearer, uint256 indexed hatId, bool eligible, bool standing, address indexed admin
     );
 
     /// @notice Emitted when an admin updates the default eligibility for a hat
-    event DefaultEligibilityUpdated(
-        uint256 indexed hatId, 
-        bool eligible, 
-        bool standing,
-        address indexed admin
-    );
+    event DefaultEligibilityUpdated(uint256 indexed hatId, bool eligible, bool standing, address indexed admin);
 
     /// @notice Emitted when an admin hat is added or removed
     event AdminHatUpdated(uint256 indexed hatId, bool isAdmin, address indexed admin);
 
     /// @notice Emitted when admin permissions are updated
     event AdminPermissionUpdated(
-        uint256 indexed adminHatId, 
-        uint256 indexed targetHatId, 
-        bool canControl,
-        address indexed admin
+        uint256 indexed adminHatId, uint256 indexed targetHatId, bool canControl, address indexed admin
     );
 
     /// @notice Emitted when bulk wearer eligibility is updated
     event BulkWearerEligibilityUpdated(
-        address[] wearers,
-        uint256 indexed hatId,
-        bool eligible,
-        bool standing,
-        address indexed admin
+        address[] wearers, uint256 indexed hatId, bool eligible, bool standing, address indexed admin
     );
 
     /// @notice Emitted when super admin is transferred
-    event SuperAdminTransferred(
-        address indexed oldSuperAdmin,
-        address indexed newSuperAdmin
-    );
+    event SuperAdminTransferred(address indexed oldSuperAdmin, address indexed newSuperAdmin);
 
     /// @notice Emitted when the module is initialized
-    event EligibilityModuleInitialized(
-        address indexed superAdmin,
-        address indexed hatsContract
+    event EligibilityModuleInitialized(address indexed superAdmin, address indexed hatsContract);
+
+    /// @notice Emitted when someone vouches for a wearer
+    event Vouched(address indexed voucher, address indexed wearer, uint256 indexed hatId, uint32 newCount);
+
+    /// @notice Emitted when a vouch is revoked
+    event VouchRevoked(address indexed voucher, address indexed wearer, uint256 indexed hatId, uint32 newCount);
+
+    /// @notice Emitted when vouch configuration is set
+    event VouchConfigSet(
+        uint256 indexed hatId, uint32 quorum, uint256 membershipHatId, bool enabled, bool combineWithHierarchy
     );
 
     /**
@@ -230,26 +242,140 @@ contract EligibilityModule is IHatsEligibility {
     }
 
     /**
+     * @notice Configure vouching system for a specific hat
+     * @param hatId The hat ID to configure vouching for
+     * @param quorum Number of vouches required (0 to disable)
+     * @param membershipHatId Hat ID whose wearers can vouch
+     * @param combineWithHierarchy If true, hierarchy OR vouching passes. If false, vouching only.
+     */
+    function configureVouching(uint256 hatId, uint32 quorum, uint256 membershipHatId, bool combineWithHierarchy)
+        external
+        onlySuperAdmin
+    {
+        bool enabled = quorum > 0;
+        vouchConfigs[hatId] = VouchConfig({
+            quorum: quorum,
+            membershipHatId: membershipHatId,
+            enabled: enabled,
+            combineWithHierarchy: combineWithHierarchy
+        });
+
+        emit VouchConfigSet(hatId, quorum, membershipHatId, enabled, combineWithHierarchy);
+    }
+
+    /**
+     * @notice Vouch for a wearer to receive a specific hat
+     * @param wearer The address to vouch for
+     * @param hatId The hat ID to vouch for
+     */
+    function vouchFor(address wearer, uint256 hatId) external {
+        VouchConfig memory config = vouchConfigs[hatId];
+        require(config.enabled, "Vouching not enabled for this hat");
+        require(hats.isWearerOfHat(msg.sender, config.membershipHatId), "Not authorized to vouch");
+        require(!vouchers[hatId][wearer][msg.sender], "Already vouched for this wearer");
+
+        // Record the vouch
+        vouchers[hatId][wearer][msg.sender] = true;
+        currentVouchCount[hatId][wearer]++;
+
+        // Check if quorum is met
+        if (currentVouchCount[hatId][wearer] >= config.quorum) {
+            vouchApproved[hatId][wearer] = true;
+        }
+
+        emit Vouched(msg.sender, wearer, hatId, currentVouchCount[hatId][wearer]);
+    }
+
+    /**
+     * @notice Revoke a vouch for a wearer
+     * @param wearer The address to revoke vouch for
+     * @param hatId The hat ID to revoke vouch for
+     */
+    function revokeVouch(address wearer, uint256 hatId) external {
+        VouchConfig memory config = vouchConfigs[hatId];
+        require(config.enabled, "Vouching not enabled for this hat");
+        require(vouchers[hatId][wearer][msg.sender], "Haven't vouched for this wearer");
+
+        // Remove the vouch
+        vouchers[hatId][wearer][msg.sender] = false;
+        currentVouchCount[hatId][wearer]--;
+
+        // Check if we need to revoke approval
+        if (currentVouchCount[hatId][wearer] < config.quorum) {
+            vouchApproved[hatId][wearer] = false;
+        }
+
+        emit VouchRevoked(msg.sender, wearer, hatId, currentVouchCount[hatId][wearer]);
+    }
+
+    /**
+     * @notice Reset all vouches for a specific hat (super admin only)
+     * @param hatId The hat ID to reset vouches for
+     */
+    function resetVouches(uint256 hatId) external onlySuperAdmin {
+        delete vouchConfigs[hatId];
+        emit VouchConfigSet(hatId, 0, 0, false, false);
+    }
+
+    /**
      * @notice The Hats Protocol calls this to determine if `wearer` is eligible
      *         for `hatId`, and if they are in good standing.
      * @param wearer The address wearing or attempting to wear the hat
      * @param hatId The ID of the hat being checked
-     * @return eligible uint256 (0 = ineligible, 1 = eligible)
-     * @return standing uint256 (0 = bad standing, 1 = good standing)
+     * @return eligible bool (false = ineligible, true = eligible)
+     * @return standing bool (false = bad standing, true = good standing)
      */
     function getWearerStatus(address wearer, uint256 hatId) external view returns (bool eligible, bool standing) {
+        // Check if vouching is enabled for this hat
+        VouchConfig memory config = vouchConfigs[hatId];
+
+        bool hierarchyEligible = false;
+        bool hierarchyStanding = false;
+        bool vouchEligible = false;
+        bool vouchStanding = false;
+
+        // 1. Check hierarchy path (existing logic)
         bool hasSpecific = hasSpecificRules[wearer][hatId];
-        
-        // If specific rules have been set for this wearer-hat combination, use them
         if (hasSpecific) {
             WearerRules memory rules = wearerRules[wearer][hatId];
-            eligible = rules.eligible;
-            standing = rules.standing;
+            hierarchyEligible = rules.eligible;
+            hierarchyStanding = rules.standing;
         } else {
-            // Otherwise, use default rules for this hat
             WearerRules memory defaultRule = defaultRules[hatId];
-            eligible = defaultRule.eligible;
-            standing = defaultRule.standing;
+            hierarchyEligible = defaultRule.eligible;
+            hierarchyStanding = defaultRule.standing;
+        }
+
+        // 2. Check vouch path (if enabled)
+        if (config.enabled) {
+            // Check if wearer has been approved through vouching
+            if (vouchApproved[hatId][wearer]) {
+                vouchEligible = true;
+                vouchStanding = true;
+            } else {
+                // Check if current vouch count meets quorum
+                if (currentVouchCount[hatId][wearer] >= config.quorum) {
+                    vouchEligible = true;
+                    vouchStanding = true;
+                }
+            }
+        }
+
+        // 3. Combine results based on configuration
+        if (config.enabled) {
+            if (config.combineWithHierarchy) {
+                // OR logic: either hierarchy OR vouching passes
+                eligible = hierarchyEligible || vouchEligible;
+                standing = hierarchyStanding || vouchStanding;
+            } else {
+                // Vouching only
+                eligible = vouchEligible;
+                standing = vouchStanding;
+            }
+        } else {
+            // Vouching disabled, use hierarchy only
+            eligible = hierarchyEligible;
+            standing = hierarchyStanding;
         }
     }
 
@@ -289,5 +415,25 @@ contract EligibilityModule is IHatsEligibility {
      */
     function getAdminHatIds() external view returns (uint256[] memory) {
         return adminHatIds;
+    }
+
+    /**
+     * @notice Get vouch configuration for a hat
+     * @param hatId The hat ID to get configuration for
+     * @return config The vouch configuration
+     */
+    function getVouchConfig(uint256 hatId) external view returns (VouchConfig memory config) {
+        return vouchConfigs[hatId];
+    }
+
+    /**
+     * @notice Check if an address has vouched for a wearer for a specific hat
+     * @param hatId The hat ID
+     * @param wearer The wearer address
+     * @param voucher The voucher address
+     * @return hasVouched Whether the voucher has vouched for the wearer
+     */
+    function hasVouched(uint256 hatId, address wearer, address voucher) external view returns (bool hasVouched) {
+        return vouchers[hatId][wearer][voucher];
     }
 }
