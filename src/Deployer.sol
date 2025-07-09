@@ -268,6 +268,15 @@ contract Deployer is Initializable, OwnableUpgradeable {
         ehProxy = _deploy(orgId, "EducationHub", executorAddr, autoUp, customImpl, init, lastRegister);
     }
 
+    /*---------  EligibilityModule  ---------*/
+    function _deployEligibilityModule(bytes32 orgId, bool autoUp, address customImpl)
+        internal
+        returns (address emProxy)
+    {
+        bytes memory init = abi.encodeWithSignature("initialize(address,address)", address(this), address(hats));
+        emProxy = _deploy(orgId, "EligibilityModule", address(this), autoUp, customImpl, init, false);
+    }
+
     /*---------  HybridVoting  ---------*/
     function _deployHybridVoting(
         bytes32 orgId,
@@ -328,8 +337,8 @@ contract Deployer is Initializable, OwnableUpgradeable {
         // ─────────────────────────────────────────────────────────────
         //  Deploy EligibilityModule with Deployer as initial super admin
         // ─────────────────────────────────────────────────────────────
-        eligibilityModule = new EligibilityModule(address(this), address(hats));
-        address eligibilityModuleAddress = address(eligibilityModule);
+        address eligibilityModuleAddress = _deployEligibilityModule(orgId, true, address(0));
+        eligibilityModule = EligibilityModule(eligibilityModuleAddress);
 
         // ─────────────────────────────────────────────────────────────
         //  Deploy ToggleModule with Deployer as initial admin
@@ -407,6 +416,9 @@ contract Deployer is Initializable, OwnableUpgradeable {
             permissions[0] = true;
 
             eligibilityModule.setAdminPermissions(executiveRoleHat, targetHats, permissions);
+
+            // Initialize admin rights for the executor who will be wearing the executive hat
+            eligibilityModule.updateUserAdminHat(executorAddr, executiveRoleHat);
         }
 
         // ─────────────────────────────────────────────────────────────
