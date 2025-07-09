@@ -3,6 +3,8 @@ pragma solidity ^0.8.19;
 
 import "../lib/hats-protocol/src/Interfaces/IHats.sol";
 import "../lib/hats-protocol/src/Interfaces/IHatsEligibility.sol";
+import "../lib/openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 
 /**
  * @title EligibilityModule
@@ -10,61 +12,130 @@ import "../lib/hats-protocol/src/Interfaces/IHatsEligibility.sol";
  *         on a per-hat basis in the Hats Protocol, controlled by admin hats.
  *         Now supports optional N-Vouch eligibility system.
  */
-contract EligibilityModule is IHatsEligibility {
-    /// @notice The Hats Protocol contract
-    IHats public immutable hats;
+contract EligibilityModule is Initializable, IHatsEligibility {
+    using EnumerableSet for EnumerableSet.UintSet;
 
-    /// @notice The super admin who can manage admin hats and their permissions, the executor contract
-    address public superAdmin;
+    /*═══════════════════════════════════════════ ERRORS ═══════════════════════════════════════════*/
 
-    /// @notice Per-wearer per-hat configuration for eligibility and standing
-    /// @dev wearer => hatId => (eligible, standing)
+    error NotSuperAdmin();
+    error NotAuthorizedAdmin();
+    error ZeroAddress();
+    error NotAnAdminHat();
+    error ArrayLengthMismatch();
+    error VouchingNotEnabled();
+    error NotAuthorizedToVouch();
+    error AlreadyVouched();
+    error HasNotVouched();
+
+    /*═════════════════════════════════════════ STRUCTS ═════════════════════════════════════════*/
+
+    /// @notice Per-wearer per-hat configuration for eligibility and standing (packed)
+    /// @dev wearer => hatId => flags (bit 0 = eligible, bit 1 = standing)
     struct WearerRules {
-        bool eligible;
-        bool standing;
+        uint8 flags; // Packed flags: bit 0 = eligible, bit 1 = standing
     }
 
-    /// @notice Configuration for vouching system per hat
+    /// @notice Configuration for vouching system per hat (packed)
     struct VouchConfig {
         uint32 quorum; // Number of vouches required
         uint256 membershipHatId; // Hat ID whose wearers can vouch
-        bool enabled; // Whether vouching is enabled for this hat
-        bool combineWithHierarchy; // If true, hierarchy OR vouching (default). If false, vouching only.
+        uint8 flags; // Packed flags: bit 0 = enabled, bit 1 = combineWithHierarchy
     }
 
-    /// @notice Store the rules for each wearer for each hat
-    mapping(address => mapping(uint256 => WearerRules)) public wearerRules;
+    /*═════════════════════════════════════ ERC-7201 STORAGE ═════════════════════════════════════*/
 
-    /// @notice Store the default rules for each hat (applied when no specific wearer rules exist)
-    mapping(uint256 => WearerRules) public defaultRules;
+    /// @custom:storage-location erc7201:poa.eligibilitymodule.storage
+    struct Layout {
+        /// @notice The Hats Protocol contract
+        IHats hats;
+        /// @notice The super admin who can manage admin hats and their permissions, the executor contract
+        address superAdmin;
+        /// @notice Store the rules for each wearer for each hat
+        mapping(address => mapping(uint256 => WearerRules)) wearerRules;
+        /// @notice Track whether specific wearer rules have been explicitly set (to distinguish from default)
+        /// @dev wearer => hatId => hasSpecificRules
+        mapping(address => mapping(uint256 => bool)) hasSpecificWearerRules;
+        /// @notice Store the default rules for each hat (applied when no specific wearer rules exist)
+        mapping(uint256 => WearerRules) defaultRules;
+        /// @notice Track which hats are admin hats (legacy - still used for compatibility)
+        mapping(uint256 => bool) adminHats;
+        /// @notice Track which hats each admin hat can control
+        /// @dev adminHatId => targetHatId => canControl
+        mapping(uint256 => mapping(uint256 => bool)) adminPermissions;
+        /// @notice Set of all admin hat IDs for efficient iteration
+        EnumerableSet.UintSet adminHatIds;
+        /// @notice Track which admin hats each user currently wears
+        /// @dev user => set of adminHatIds they currently wear
+        mapping(address => EnumerableSet.UintSet) userAdminHats;
+        /// @notice Track which admin hats are currently active
+        /// @dev adminHatId => bool (isAdminHat and currently active)
+        mapping(uint256 => bool) adminHatActive;
+        /// @notice Per-hat vouching configuration
+        mapping(uint256 => VouchConfig) vouchConfigs;
+        /// @notice Track whether an address has vouched for a wearer for a specific hat
+        /// @dev hatId => wearer => voucher => hasVouched
+        mapping(uint256 => mapping(address => mapping(address => bool))) vouchers;
+        /// @notice Count of valid vouches for each wearer for each hat
+        /// @dev hatId => wearer => vouchCount
+        mapping(uint256 => mapping(address => uint32)) currentVouchCount;
+    }
 
-    /// @notice Track whether specific rules have been set for a wearer-hat combination
-    mapping(address => mapping(uint256 => bool)) public hasSpecificRules;
+    // keccak256("poa.eligibilitymodule.storage") → unique, collision-free slot
+    bytes32 private constant _STORAGE_SLOT = 0x8f7c0d6a29b3e7e2f1a0c9b8d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6;
 
-    /// @notice Track which hats are admin hats
-    mapping(uint256 => bool) public adminHats;
+    function _layout() private pure returns (Layout storage s) {
+        assembly {
+            s.slot := _STORAGE_SLOT
+        }
+    }
 
-    /// @notice Track which hats each admin hat can control
-    /// @dev adminHatId => targetHatId => canControl
-    mapping(uint256 => mapping(uint256 => bool)) public adminPermissions;
+    /*═══════════════════════════════════════ FLAG CONSTANTS ═══════════════════════════════════════*/
 
-    /// @notice Array to track all admin hat IDs for efficient iteration
-    uint256[] public adminHatIds;
+    /// @notice WearerRules flag constants
+    uint8 internal constant ELIGIBLE_FLAG = 0x01; // bit 0
+    uint8 internal constant STANDING_FLAG = 0x02; // bit 1
 
-    /// @notice Per-hat vouching configuration
-    mapping(uint256 => VouchConfig) public vouchConfigs;
+    /// @notice VouchConfig flag constants
+    uint8 internal constant ENABLED_FLAG = 0x01; // bit 0
+    uint8 internal constant COMBINE_HIERARCHY_FLAG = 0x02; // bit 1
 
-    /// @notice Track whether an address has vouched for a wearer for a specific hat
-    /// @dev hatId => wearer => voucher => hasVouched
-    mapping(uint256 => mapping(address => mapping(address => bool))) public vouchers;
+    /*═══════════════════════════════════ USER ADMIN HAT MANAGEMENT ═══════════════════════════════════*/
 
-    /// @notice Count of valid vouches for each wearer for each hat
-    /// @dev hatId => wearer => vouchCount
-    mapping(uint256 => mapping(address => uint32)) public currentVouchCount;
+    /// @notice Add an admin hat to a user's active set
+    /// @param user The user address
+    /// @param adminHatId The admin hat ID to add
+    function _addUserAdminHat(address user, uint256 adminHatId) internal {
+        Layout storage l = _layout();
+        if (l.adminHatActive[adminHatId]) {
+            l.userAdminHats[user].add(adminHatId);
+            emit UserAdminHatAdded(user, adminHatId);
+        }
+    }
 
-    /// @notice Track addresses that have met vouch quorum for a hat
-    /// @dev hatId => wearer => approved
-    mapping(uint256 => mapping(address => bool)) public vouchApproved;
+    /// @notice Remove an admin hat from a user's active set
+    /// @param user The user address
+    /// @param adminHatId The admin hat ID to remove
+    function _removeUserAdminHat(address user, uint256 adminHatId) internal {
+        Layout storage l = _layout();
+        if (l.userAdminHats[user].remove(adminHatId)) {
+            emit UserAdminHatRemoved(user, adminHatId);
+        }
+    }
+
+    /// @notice Update a user's admin hat status based on current hat ownership
+    /// @param user The user address
+    /// @param adminHatId The admin hat ID
+    function _updateUserAdminHat(address user, uint256 adminHatId) internal {
+        Layout storage l = _layout();
+        bool isWearing = l.hats.isWearerOfHat(user, adminHatId);
+        bool hasInSet = l.userAdminHats[user].contains(adminHatId);
+
+        if (isWearing && !hasInSet) {
+            _addUserAdminHat(user, adminHatId);
+        } else if (!isWearing && hasInSet) {
+            _removeUserAdminHat(user, adminHatId);
+        }
+    }
 
     /// @notice Emitted when an admin updates a wearer's eligibility or standing for a hat
     event WearerEligibilityUpdated(
@@ -104,20 +175,33 @@ contract EligibilityModule is IHatsEligibility {
         uint256 indexed hatId, uint32 quorum, uint256 membershipHatId, bool enabled, bool combineWithHierarchy
     );
 
+    /// @notice Emitted when a user gains an admin hat
+    event UserAdminHatAdded(address indexed user, uint256 indexed adminHatId);
+
+    /// @notice Emitted when a user loses an admin hat
+    event UserAdminHatRemoved(address indexed user, uint256 indexed adminHatId);
+
     /**
-     * @dev Set the super admin and Hats contract
+     * @notice Initialize the module with super admin and Hats contract
+     * @param _superAdmin The super admin address
+     * @param _hats The Hats contract address
      */
-    constructor(address _superAdmin, address _hats) {
-        superAdmin = _superAdmin;
-        hats = IHats(_hats);
+    function initialize(address _superAdmin, address _hats) external initializer {
+        Layout storage l = _layout();
+        l.superAdmin = _superAdmin;
+        l.hats = IHats(_hats);
         emit EligibilityModuleInitialized(_superAdmin, _hats);
+    }
+
+    constructor() {
+        _disableInitializers();
     }
 
     /**
      * @dev Restricts certain calls so only the super admin can perform them
      */
     modifier onlySuperAdmin() {
-        require(msg.sender == superAdmin, "Not super admin");
+        if (msg.sender != _layout().superAdmin) revert NotSuperAdmin();
         _;
     }
 
@@ -125,26 +209,30 @@ contract EligibilityModule is IHatsEligibility {
      * @dev Restricts calls to admin hats with permission for the specific target hat
      */
     modifier onlyAuthorizedAdmin(uint256 targetHatId) {
-        require(isAuthorizedAdmin(msg.sender, targetHatId), "Not authorized admin for this hat");
+        if (!isAuthorizedAdmin(msg.sender, targetHatId)) revert NotAuthorizedAdmin();
         _;
     }
 
     /**
-     * @notice Check if an address is authorized to control a specific target hat
+     * @notice Check if an address is authorized to control a specific target hat (runtime check)
      * @param user The address to check
      * @param targetHatId The target hat ID
      * @return authorized Whether the user is authorized
      */
     function isAuthorizedAdmin(address user, uint256 targetHatId) public view returns (bool authorized) {
+        Layout storage l = _layout();
+
         // Super admin can control any hat
-        if (user == superAdmin) {
+        if (user == l.superAdmin) {
             return true;
         }
 
-        // Check if user is wearing any admin hat that has permission for this target hat
-        for (uint256 i = 0; i < adminHatIds.length; i++) {
-            uint256 adminHatId = adminHatIds[i];
-            if (adminPermissions[adminHatId][targetHatId] && hats.isWearerOfHat(user, adminHatId)) {
+        // Check all admin hats that the user currently wears
+        EnumerableSet.UintSet storage userHats = l.userAdminHats[user];
+        uint256 len = userHats.length();
+        for (uint256 i; i < len; ++i) {
+            uint256 adminHat = userHats.at(i);
+            if (l.adminHatActive[adminHat] && l.adminPermissions[adminHat][targetHatId]) {
                 return true;
             }
         }
@@ -162,8 +250,9 @@ contract EligibilityModule is IHatsEligibility {
         external
         onlyAuthorizedAdmin(hatId)
     {
-        wearerRules[wearer][hatId] = WearerRules(_eligible, _standing);
-        hasSpecificRules[wearer][hatId] = true;
+        Layout storage l = _layout();
+        l.wearerRules[wearer][hatId] = WearerRules(_packWearerFlags(_eligible, _standing));
+        l.hasSpecificWearerRules[wearer][hatId] = true;
         emit WearerEligibilityUpdated(wearer, hatId, _eligible, _standing, msg.sender);
     }
 
@@ -174,8 +263,21 @@ contract EligibilityModule is IHatsEligibility {
      * @param _standing Whether wearers are in good standing by default (true) or bad (false)
      */
     function setDefaultEligibility(uint256 hatId, bool _eligible, bool _standing) external onlyAuthorizedAdmin(hatId) {
-        defaultRules[hatId] = WearerRules(_eligible, _standing);
+        Layout storage l = _layout();
+        l.defaultRules[hatId] = WearerRules(_packWearerFlags(_eligible, _standing));
         emit DefaultEligibilityUpdated(hatId, _eligible, _standing, msg.sender);
+    }
+
+    /**
+     * @notice Clear specific rules for a wearer, reverting them to default rules
+     * @param wearer The address whose specific rules to clear
+     * @param hatId The hat ID to clear specific rules for
+     */
+    function clearWearerEligibility(address wearer, uint256 hatId) external onlyAuthorizedAdmin(hatId) {
+        Layout storage l = _layout();
+        delete l.wearerRules[wearer][hatId];
+        delete l.hasSpecificWearerRules[wearer][hatId];
+        emit WearerEligibilityUpdated(wearer, hatId, false, false, msg.sender);
     }
 
     /**
@@ -189,9 +291,11 @@ contract EligibilityModule is IHatsEligibility {
         external
         onlyAuthorizedAdmin(hatId)
     {
+        Layout storage l = _layout();
+        uint8 packedFlags = _packWearerFlags(_eligible, _standing);
         for (uint256 i = 0; i < wearers.length; i++) {
-            wearerRules[wearers[i]][hatId] = WearerRules(_eligible, _standing);
-            hasSpecificRules[wearers[i]][hatId] = true;
+            l.wearerRules[wearers[i]][hatId] = WearerRules(packedFlags);
+            l.hasSpecificWearerRules[wearers[i]][hatId] = true;
         }
         emit BulkWearerEligibilityUpdated(wearers, hatId, _eligible, _standing, msg.sender);
     }
@@ -202,21 +306,21 @@ contract EligibilityModule is IHatsEligibility {
      * @param isAdmin Whether this hat should be an admin (true) or not (false)
      */
     function setAdminHat(uint256 hatId, bool isAdmin) external onlySuperAdmin {
-        bool wasAdmin = adminHats[hatId];
-        adminHats[hatId] = isAdmin;
+        Layout storage l = _layout();
+        bool wasAdmin = l.adminHats[hatId];
+        l.adminHats[hatId] = isAdmin;
+        l.adminHatActive[hatId] = isAdmin;
 
         if (isAdmin && !wasAdmin) {
             // Adding new admin hat
-            adminHatIds.push(hatId);
+            l.adminHatIds.add(hatId);
         } else if (!isAdmin && wasAdmin) {
-            // Removing admin hat - find and remove from array
-            for (uint256 i = 0; i < adminHatIds.length; i++) {
-                if (adminHatIds[i] == hatId) {
-                    adminHatIds[i] = adminHatIds[adminHatIds.length - 1];
-                    adminHatIds.pop();
-                    break;
-                }
-            }
+            // Removing admin hat - find and remove from set
+            l.adminHatIds.remove(hatId);
+
+            // Clear all admin permissions for this hat
+            // Note: Individual users will lose access automatically via runtime check
+            // since _adminHatActive[hatId] is now false
         }
 
         emit AdminHatUpdated(hatId, isAdmin, msg.sender);
@@ -232,12 +336,62 @@ contract EligibilityModule is IHatsEligibility {
         external
         onlySuperAdmin
     {
-        require(adminHats[adminHatId], "Not an admin hat");
-        require(targetHatIds.length == canControl.length, "Array length mismatch");
+        Layout storage l = _layout();
+        if (!l.adminHats[adminHatId]) revert NotAnAdminHat();
+        if (targetHatIds.length != canControl.length) revert ArrayLengthMismatch();
 
         for (uint256 i = 0; i < targetHatIds.length; i++) {
-            adminPermissions[adminHatId][targetHatIds[i]] = canControl[i];
+            uint256 targetHatId = targetHatIds[i];
+
+            // Update the permission
+            l.adminPermissions[adminHatId][targetHatId] = canControl[i];
+
             emit AdminPermissionUpdated(adminHatId, targetHatIds[i], canControl[i], msg.sender);
+        }
+
+        // No sync needed - runtime check will use new permissions immediately
+    }
+
+    /**
+     * @notice Update a user's admin hat status based on current hat ownership
+     * @dev Should be called when a user gains or loses an admin hat
+     * @param user The user address
+     * @param adminHatId The admin hat ID to update
+     */
+    function updateUserAdminHat(address user, uint256 adminHatId) external onlySuperAdmin {
+        Layout storage l = _layout();
+        if (!l.adminHats[adminHatId]) revert NotAnAdminHat();
+        _updateUserAdminHat(user, adminHatId);
+    }
+
+    /**
+     * @notice Batch update multiple users' admin hat status
+     * @param users Array of user addresses
+     * @param adminHatIds Array of admin hat IDs (must match users length)
+     */
+    function batchUpdateUserAdminHats(address[] calldata users, uint256[] calldata adminHatIds)
+        external
+        onlySuperAdmin
+    {
+        Layout storage l = _layout();
+        if (users.length != adminHatIds.length) revert ArrayLengthMismatch();
+
+        for (uint256 i = 0; i < users.length; i++) {
+            if (!l.adminHats[adminHatIds[i]]) revert NotAnAdminHat();
+            _updateUserAdminHat(users[i], adminHatIds[i]);
+        }
+    }
+
+    /**
+     * @notice Update all admin hats for a specific user
+     * @param user The user address
+     */
+    function updateAllUserAdminHats(address user) external onlySuperAdmin {
+        Layout storage l = _layout();
+        // Check all admin hats in the system
+        for (uint256 i = 0; i < l.adminHatIds.length(); i++) {
+            uint256 adminHatId = l.adminHatIds.at(i);
+            _updateUserAdminHat(user, adminHatId);
         }
     }
 
@@ -252,12 +406,12 @@ contract EligibilityModule is IHatsEligibility {
         external
         onlySuperAdmin
     {
+        Layout storage l = _layout();
         bool enabled = quorum > 0;
-        vouchConfigs[hatId] = VouchConfig({
+        l.vouchConfigs[hatId] = VouchConfig({
             quorum: quorum,
             membershipHatId: membershipHatId,
-            enabled: enabled,
-            combineWithHierarchy: combineWithHierarchy
+            flags: _packVouchFlags(enabled, combineWithHierarchy)
         });
 
         emit VouchConfigSet(hatId, quorum, membershipHatId, enabled, combineWithHierarchy);
@@ -269,21 +423,17 @@ contract EligibilityModule is IHatsEligibility {
      * @param hatId The hat ID to vouch for
      */
     function vouchFor(address wearer, uint256 hatId) external {
-        VouchConfig memory config = vouchConfigs[hatId];
-        require(config.enabled, "Vouching not enabled for this hat");
-        require(hats.isWearerOfHat(msg.sender, config.membershipHatId), "Not authorized to vouch");
-        require(!vouchers[hatId][wearer][msg.sender], "Already vouched for this wearer");
+        Layout storage l = _layout();
+        VouchConfig memory config = l.vouchConfigs[hatId];
+        if (!_isVouchingEnabled(config.flags)) revert VouchingNotEnabled();
+        if (!l.hats.isWearerOfHat(msg.sender, config.membershipHatId)) revert NotAuthorizedToVouch();
+        if (l.vouchers[hatId][wearer][msg.sender]) revert AlreadyVouched();
 
         // Record the vouch
-        vouchers[hatId][wearer][msg.sender] = true;
-        currentVouchCount[hatId][wearer]++;
+        l.vouchers[hatId][wearer][msg.sender] = true;
+        l.currentVouchCount[hatId][wearer]++;
 
-        // Check if quorum is met
-        if (currentVouchCount[hatId][wearer] >= config.quorum) {
-            vouchApproved[hatId][wearer] = true;
-        }
-
-        emit Vouched(msg.sender, wearer, hatId, currentVouchCount[hatId][wearer]);
+        emit Vouched(msg.sender, wearer, hatId, l.currentVouchCount[hatId][wearer]);
     }
 
     /**
@@ -292,20 +442,16 @@ contract EligibilityModule is IHatsEligibility {
      * @param hatId The hat ID to revoke vouch for
      */
     function revokeVouch(address wearer, uint256 hatId) external {
-        VouchConfig memory config = vouchConfigs[hatId];
-        require(config.enabled, "Vouching not enabled for this hat");
-        require(vouchers[hatId][wearer][msg.sender], "Haven't vouched for this wearer");
+        Layout storage l = _layout();
+        VouchConfig memory config = l.vouchConfigs[hatId];
+        if (!_isVouchingEnabled(config.flags)) revert VouchingNotEnabled();
+        if (!l.vouchers[hatId][wearer][msg.sender]) revert HasNotVouched();
 
         // Remove the vouch
-        vouchers[hatId][wearer][msg.sender] = false;
-        currentVouchCount[hatId][wearer]--;
+        l.vouchers[hatId][wearer][msg.sender] = false;
+        l.currentVouchCount[hatId][wearer]--;
 
-        // Check if we need to revoke approval
-        if (currentVouchCount[hatId][wearer] < config.quorum) {
-            vouchApproved[hatId][wearer] = false;
-        }
-
-        emit VouchRevoked(msg.sender, wearer, hatId, currentVouchCount[hatId][wearer]);
+        emit VouchRevoked(msg.sender, wearer, hatId, l.currentVouchCount[hatId][wearer]);
     }
 
     /**
@@ -313,7 +459,8 @@ contract EligibilityModule is IHatsEligibility {
      * @param hatId The hat ID to reset vouches for
      */
     function resetVouches(uint256 hatId) external onlySuperAdmin {
-        delete vouchConfigs[hatId];
+        Layout storage l = _layout();
+        delete l.vouchConfigs[hatId];
         emit VouchConfigSet(hatId, 0, 0, false, false);
     }
 
@@ -326,8 +473,9 @@ contract EligibilityModule is IHatsEligibility {
      * @return standing bool (false = bad standing, true = good standing)
      */
     function getWearerStatus(address wearer, uint256 hatId) external view returns (bool eligible, bool standing) {
+        Layout storage l = _layout();
         // Check if vouching is enabled for this hat
-        VouchConfig memory config = vouchConfigs[hatId];
+        VouchConfig memory config = l.vouchConfigs[hatId];
 
         bool hierarchyEligible = false;
         bool hierarchyStanding = false;
@@ -335,35 +483,28 @@ contract EligibilityModule is IHatsEligibility {
         bool vouchStanding = false;
 
         // 1. Check hierarchy path (existing logic)
-        bool hasSpecific = hasSpecificRules[wearer][hatId];
-        if (hasSpecific) {
-            WearerRules memory rules = wearerRules[wearer][hatId];
-            hierarchyEligible = rules.eligible;
-            hierarchyStanding = rules.standing;
+        if (l.hasSpecificWearerRules[wearer][hatId]) {
+            // Specific rules exist for this wearer
+            WearerRules memory rules = l.wearerRules[wearer][hatId];
+            (hierarchyEligible, hierarchyStanding) = _unpackWearerFlags(rules.flags);
         } else {
-            WearerRules memory defaultRule = defaultRules[hatId];
-            hierarchyEligible = defaultRule.eligible;
-            hierarchyStanding = defaultRule.standing;
+            // Use default rules
+            WearerRules memory defaultRule = l.defaultRules[hatId];
+            (hierarchyEligible, hierarchyStanding) = _unpackWearerFlags(defaultRule.flags);
         }
 
         // 2. Check vouch path (if enabled)
-        if (config.enabled) {
-            // Check if wearer has been approved through vouching
-            if (vouchApproved[hatId][wearer]) {
+        if (_isVouchingEnabled(config.flags)) {
+            // Check if current vouch count meets quorum
+            if (l.currentVouchCount[hatId][wearer] >= config.quorum) {
                 vouchEligible = true;
                 vouchStanding = true;
-            } else {
-                // Check if current vouch count meets quorum
-                if (currentVouchCount[hatId][wearer] >= config.quorum) {
-                    vouchEligible = true;
-                    vouchStanding = true;
-                }
             }
         }
 
         // 3. Combine results based on configuration
-        if (config.enabled) {
-            if (config.combineWithHierarchy) {
+        if (_isVouchingEnabled(config.flags)) {
+            if (_shouldCombineWithHierarchy(config.flags)) {
                 // OR logic: either hierarchy OR vouching passes
                 eligible = hierarchyEligible || vouchEligible;
                 standing = hierarchyStanding || vouchStanding;
@@ -384,9 +525,10 @@ contract EligibilityModule is IHatsEligibility {
      * @param newSuperAdmin The new super admin address
      */
     function transferSuperAdmin(address newSuperAdmin) external onlySuperAdmin {
-        require(newSuperAdmin != address(0), "Zero address");
-        address oldSuperAdmin = superAdmin;
-        superAdmin = newSuperAdmin;
+        if (newSuperAdmin == address(0)) revert ZeroAddress();
+        Layout storage l = _layout();
+        address oldSuperAdmin = l.superAdmin;
+        l.superAdmin = newSuperAdmin;
         emit SuperAdminTransferred(oldSuperAdmin, newSuperAdmin);
     }
 
@@ -396,7 +538,7 @@ contract EligibilityModule is IHatsEligibility {
      * @return isAdmin Whether the hat is an admin hat
      */
     function isAdminHat(uint256 hatId) external view returns (bool isAdmin) {
-        return adminHats[hatId];
+        return _layout().adminHats[hatId];
     }
 
     /**
@@ -406,7 +548,8 @@ contract EligibilityModule is IHatsEligibility {
      * @return canControl Whether the admin hat can control the target hat
      */
     function canAdminControlHat(uint256 adminHatId, uint256 targetHatId) external view returns (bool canControl) {
-        return adminHats[adminHatId] && adminPermissions[adminHatId][targetHatId];
+        Layout storage l = _layout();
+        return l.adminHats[adminHatId] && l.adminPermissions[adminHatId][targetHatId];
     }
 
     /**
@@ -414,16 +557,62 @@ contract EligibilityModule is IHatsEligibility {
      * @return adminHats Array of all admin hat IDs
      */
     function getAdminHatIds() external view returns (uint256[] memory) {
-        return adminHatIds;
+        return _layout().adminHatIds.values();
     }
 
     /**
      * @notice Get vouch configuration for a hat
      * @param hatId The hat ID to get configuration for
-     * @return config The vouch configuration
+     * @return config The vouch configuration with unpacked boolean values
      */
     function getVouchConfig(uint256 hatId) external view returns (VouchConfig memory config) {
-        return vouchConfigs[hatId];
+        config = _layout().vouchConfigs[hatId];
+        // Note: The returned config contains packed flags - use helper functions to decode
+    }
+
+    /**
+     * @notice Check if vouching is enabled for a hat
+     * @param hatId The hat ID to check
+     * @return enabled Whether vouching is enabled
+     */
+    function isVouchingEnabled(uint256 hatId) external view returns (bool enabled) {
+        return _isVouchingEnabled(_layout().vouchConfigs[hatId].flags);
+    }
+
+    /**
+     * @notice Check if a hat combines hierarchy with vouching
+     * @param hatId The hat ID to check
+     * @return combineWithHierarchy Whether hierarchy is combined with vouching
+     */
+    function combinesWithHierarchy(uint256 hatId) external view returns (bool combineWithHierarchy) {
+        return _shouldCombineWithHierarchy(_layout().vouchConfigs[hatId].flags);
+    }
+
+    /**
+     * @notice Get unpacked wearer rules for debugging/inspection
+     * @param wearer The wearer address
+     * @param hatId The hat ID
+     * @return eligible Whether the wearer is eligible
+     * @return standing Whether the wearer has good standing
+     */
+    function getWearerRules(address wearer, uint256 hatId) external view returns (bool eligible, bool standing) {
+        Layout storage l = _layout();
+        if (l.hasSpecificWearerRules[wearer][hatId]) {
+            WearerRules memory rules = l.wearerRules[wearer][hatId];
+            return _unpackWearerFlags(rules.flags);
+        } else {
+            return _unpackWearerFlags(l.defaultRules[hatId].flags);
+        }
+    }
+
+    /**
+     * @notice Get unpacked default rules for a hat
+     * @param hatId The hat ID
+     * @return eligible Whether wearers are eligible by default
+     * @return standing Whether wearers have good standing by default
+     */
+    function getDefaultRules(uint256 hatId) external view returns (bool eligible, bool standing) {
+        return _unpackWearerFlags(_layout().defaultRules[hatId].flags);
     }
 
     /**
@@ -434,6 +623,182 @@ contract EligibilityModule is IHatsEligibility {
      * @return hasVouched Whether the voucher has vouched for the wearer
      */
     function hasVouched(uint256 hatId, address wearer, address voucher) external view returns (bool hasVouched) {
-        return vouchers[hatId][wearer][voucher];
+        return _layout().vouchers[hatId][wearer][voucher];
+    }
+
+    /**
+     * @notice Check if a user has admin rights for a specific target hat (same as isAuthorizedAdmin)
+     * @param user The user address
+     * @param targetHatId The target hat ID
+     * @return hasRights Whether the user has admin rights for the target hat
+     */
+    function hasAdminRights(address user, uint256 targetHatId) external view returns (bool hasRights) {
+        return isAuthorizedAdmin(user, targetHatId);
+    }
+
+    /**
+     * @notice Get all admin hats that a user currently has in their active set
+     * @param user The user address
+     * @return adminHatIds Array of admin hat IDs the user currently has
+     */
+    function getUserAdminHats(address user) external view returns (uint256[] memory adminHatIds) {
+        Layout storage l = _layout();
+        EnumerableSet.UintSet storage userHats = l.userAdminHats[user];
+        uint256 length = userHats.length();
+        adminHatIds = new uint256[](length);
+        for (uint256 i = 0; i < length; i++) {
+            adminHatIds[i] = userHats.at(i);
+        }
+    }
+
+    /**
+     * @notice Get the number of admin hats a user currently has
+     * @param user The user address
+     * @return count Number of admin hats the user currently has
+     */
+    function getUserAdminHatCount(address user) external view returns (uint256 count) {
+        return _layout().userAdminHats[user].length();
+    }
+
+    /**
+     * @notice Check if a user has a specific admin hat in their active set
+     * @param user The user address
+     * @param adminHatId The admin hat ID to check
+     * @return hasHat Whether the user has the admin hat
+     */
+    function userHasAdminHat(address user, uint256 adminHatId) external view returns (bool hasHat) {
+        return _layout().userAdminHats[user].contains(adminHatId);
+    }
+
+    /**
+     * @notice Check if an admin hat is currently active
+     * @param adminHatId The admin hat ID
+     * @return isActive Whether the admin hat is active
+     */
+    function isAdminHatActive(uint256 adminHatId) external view returns (bool isActive) {
+        return _layout().adminHatActive[adminHatId];
+    }
+
+    /**
+     * @notice Check if a wearer has specific rules set (explicitly configured)
+     * @param wearer The wearer address
+     * @param hatId The hat ID
+     * @return hasSpecific Whether the wearer has specific rules
+     */
+    function hasSpecificWearerRules(address wearer, uint256 hatId) external view returns (bool hasSpecific) {
+        return _layout().hasSpecificWearerRules[wearer][hatId];
+    }
+
+    /*═════════════════════════════════════ PUBLIC GETTERS ═════════════════════════════════════════*/
+
+    /// @notice Get the Hats Protocol contract
+    function hats() external view returns (IHats) {
+        return _layout().hats;
+    }
+
+    /// @notice Get the super admin address
+    function superAdmin() external view returns (address) {
+        return _layout().superAdmin;
+    }
+
+    /// @notice Get wearer rules for a specific wearer and hat
+    function wearerRules(address wearer, uint256 hatId) external view returns (WearerRules memory) {
+        return _layout().wearerRules[wearer][hatId];
+    }
+
+    /// @notice Get default rules for a specific hat
+    function defaultRules(uint256 hatId) external view returns (WearerRules memory) {
+        return _layout().defaultRules[hatId];
+    }
+
+    /// @notice Check if a hat is an admin hat (legacy compatibility)
+    function adminHats(uint256 hatId) external view returns (bool) {
+        return _layout().adminHats[hatId];
+    }
+
+    /// @notice Check admin permissions for a specific admin hat and target hat
+    function adminPermissions(uint256 adminHatId, uint256 targetHatId) external view returns (bool) {
+        return _layout().adminPermissions[adminHatId][targetHatId];
+    }
+
+    /// @notice Get vouch configuration for a specific hat
+    function vouchConfigs(uint256 hatId) external view returns (VouchConfig memory) {
+        return _layout().vouchConfigs[hatId];
+    }
+
+    /// @notice Check if a voucher has vouched for a wearer for a specific hat
+    function vouchers(uint256 hatId, address wearer, address voucher) external view returns (bool) {
+        return _layout().vouchers[hatId][wearer][voucher];
+    }
+
+    /// @notice Get current vouch count for a wearer for a specific hat
+    function currentVouchCount(uint256 hatId, address wearer) external view returns (uint32) {
+        return _layout().currentVouchCount[hatId][wearer];
+    }
+
+    /*═════════════════════════════════════ PURE VIEW HELPERS ═════════════════════════════════════*/
+
+    /// @notice Pack WearerRules boolean values into flags
+    /// @param eligible Whether the wearer is eligible
+    /// @param standing Whether the wearer is in good standing
+    /// @return flags Packed uint8 flags
+    function _packWearerFlags(bool eligible, bool standing) internal pure returns (uint8 flags) {
+        if (eligible) flags |= ELIGIBLE_FLAG;
+        if (standing) flags |= STANDING_FLAG;
+    }
+
+    /// @notice Unpack WearerRules flags into boolean values
+    /// @param flags Packed uint8 flags
+    /// @return eligible Whether the wearer is eligible
+    /// @return standing Whether the wearer is in good standing
+    function _unpackWearerFlags(uint8 flags) internal pure returns (bool eligible, bool standing) {
+        eligible = (flags & ELIGIBLE_FLAG) != 0;
+        standing = (flags & STANDING_FLAG) != 0;
+    }
+
+    /// @notice Pack VouchConfig boolean values into flags
+    /// @param enabled Whether vouching is enabled
+    /// @param combineWithHierarchy Whether to combine with hierarchy
+    /// @return flags Packed uint8 flags
+    function _packVouchFlags(bool enabled, bool combineWithHierarchy) internal pure returns (uint8 flags) {
+        if (enabled) flags |= ENABLED_FLAG;
+        if (combineWithHierarchy) flags |= COMBINE_HIERARCHY_FLAG;
+    }
+
+    /// @notice Unpack VouchConfig flags into boolean values
+    /// @param flags Packed uint8 flags
+    /// @return enabled Whether vouching is enabled
+    /// @return combineWithHierarchy Whether to combine with hierarchy
+    function _unpackVouchFlags(uint8 flags) internal pure returns (bool enabled, bool combineWithHierarchy) {
+        enabled = (flags & ENABLED_FLAG) != 0;
+        combineWithHierarchy = (flags & COMBINE_HIERARCHY_FLAG) != 0;
+    }
+
+    /// @notice Check if a wearer is eligible using packed flags
+    /// @param flags Packed uint8 flags
+    /// @return eligible Whether the wearer is eligible
+    function _isEligible(uint8 flags) internal pure returns (bool eligible) {
+        return (flags & ELIGIBLE_FLAG) != 0;
+    }
+
+    /// @notice Check if a wearer has good standing using packed flags
+    /// @param flags Packed uint8 flags
+    /// @return standing Whether the wearer is in good standing
+    function _hasGoodStanding(uint8 flags) internal pure returns (bool standing) {
+        return (flags & STANDING_FLAG) != 0;
+    }
+
+    /// @notice Check if vouching is enabled using packed flags
+    /// @param flags Packed uint8 flags
+    /// @return enabled Whether vouching is enabled
+    function _isVouchingEnabled(uint8 flags) internal pure returns (bool enabled) {
+        return (flags & ENABLED_FLAG) != 0;
+    }
+
+    /// @notice Check if hierarchy should be combined using packed flags
+    /// @param flags Packed uint8 flags
+    /// @return combineWithHierarchy Whether to combine with hierarchy
+    function _shouldCombineWithHierarchy(uint8 flags) internal pure returns (bool combineWithHierarchy) {
+        return (flags & COMBINE_HIERARCHY_FLAG) != 0;
     }
 }
