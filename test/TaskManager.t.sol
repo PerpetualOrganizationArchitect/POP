@@ -341,7 +341,7 @@ contract TaskManagerTest is Test {
 
         // assign pm1 retroactively
         vm.prank(executor);
-        tm.addProjectManager(FLOW_ID, pm1);
+        tm.setProjectManager(FLOW_ID, pm1, true);
 
         vm.prank(pm1);
         tm.createTask(1 ether, bytes("hash"), FLOW_ID, address(0), 0);
@@ -767,7 +767,7 @@ contract TaskManagerTest is Test {
 
         // Remove PM2 as project manager
         vm.prank(executor);
-        tm.removeProjectManager(MULTI_PM_ID, pm2);
+        tm.setProjectManager(MULTI_PM_ID, pm2, false);
 
         // PM2 can no longer create tasks (no longer a project manager and no role)
         vm.prank(pm2);
@@ -884,7 +884,7 @@ contract TaskManagerTest is Test {
 
         for (uint256 i = 0; i < pms.length; i++) {
             vm.prank(executor);
-            tm.addProjectManager(MEGA_ID, pms[i]);
+            tm.setProjectManager(MEGA_ID, pms[i], true);
         }
 
         // Create multiple members
