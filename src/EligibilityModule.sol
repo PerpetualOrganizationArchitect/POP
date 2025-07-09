@@ -50,6 +50,8 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         IHats hats;
         /// @notice The super admin who can manage admin hats and their permissions, the executor contract
         address superAdmin;
+        /// @notice The hat that this eligibility module wears for administrative purposes
+        uint256 eligibilityModuleAdminHat;
         /// @notice Store the rules for each wearer for each hat
         mapping(address => mapping(uint256 => WearerRules)) wearerRules;
         /// @notice Track whether specific wearer rules have been explicitly set (to distinguish from default)
@@ -180,6 +182,12 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
     /// @notice Emitted when a user loses an admin hat
     event UserAdminHatRemoved(address indexed user, uint256 indexed adminHatId);
+
+    /// @notice Emitted when the eligibility module admin hat is set
+    event EligibilityModuleAdminHatSet(uint256 indexed hatId);
+
+    /// @notice Emitted when a hat is automatically minted due to vouching
+    event HatAutoMinted(address indexed wearer, uint256 indexed hatId, uint32 vouchCount);
 
     /**
      * @notice Initialize the module with super admin and Hats contract
@@ -396,6 +404,28 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     }
 
     /**
+     * @notice Set the eligibility module admin hat (only during deployment)
+     * @param hatId The hat ID that this module will wear for admin purposes
+     */
+    function setEligibilityModuleAdminHat(uint256 hatId) external onlySuperAdmin {
+        Layout storage l = _layout();
+        l.eligibilityModuleAdminHat = hatId;
+        emit EligibilityModuleAdminHatSet(hatId);
+    }
+
+    /**
+     * @notice Mint a hat to a specific address (only callable by super admin or the module itself)
+     * @dev This allows the EligibilityModule to mint hats since it's now the admin of role hats
+     * @param hatId The hat ID to mint
+     * @param wearer The address to mint the hat to
+     */
+    function mintHatToAddress(uint256 hatId, address wearer) external onlySuperAdmin {
+        Layout storage l = _layout();
+        bool success = l.hats.mintHat(hatId, wearer);
+        require(success, "Hat minting failed");
+    }
+
+    /**
      * @notice Configure vouching system for a specific hat
      * @param hatId The hat ID to configure vouching for
      * @param quorum Number of vouches required (0 to disable)
@@ -434,6 +464,14 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         l.currentVouchCount[hatId][wearer]++;
 
         emit Vouched(msg.sender, wearer, hatId, l.currentVouchCount[hatId][wearer]);
+
+        // Auto-mint hat if quorum is reached and wearer doesn't already have it
+        if (l.currentVouchCount[hatId][wearer] >= config.quorum && !l.hats.isWearerOfHat(wearer, hatId)) {
+            bool success = l.hats.mintHat(hatId, wearer);
+            if (success) {
+                emit HatAutoMinted(wearer, hatId, l.currentVouchCount[hatId][wearer]);
+            }
+        }
     }
 
     /**
@@ -452,6 +490,18 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         l.currentVouchCount[hatId][wearer]--;
 
         emit VouchRevoked(msg.sender, wearer, hatId, l.currentVouchCount[hatId][wearer]);
+
+        // If vouching is the only path (not combined with hierarchy) and 
+        // vouch count drops below quorum, revoke the hat
+        if (!_shouldCombineWithHierarchy(config.flags) && 
+            l.currentVouchCount[hatId][wearer] < config.quorum && 
+            l.hats.isWearerOfHat(wearer, hatId)) {
+            // Check if the wearer doesn't have specific admin-granted eligibility
+            if (!l.hasSpecificWearerRules[wearer][hatId]) {
+                // Only revoke if they don't have admin-granted eligibility
+                l.hats.setHatWearerStatus(hatId, wearer, false, false);
+            }
+        }
     }
 
     /**
@@ -734,6 +784,11 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     /// @notice Get current vouch count for a wearer for a specific hat
     function currentVouchCount(uint256 hatId, address wearer) external view returns (uint32) {
         return _layout().currentVouchCount[hatId][wearer];
+    }
+
+    /// @notice Get the eligibility module admin hat ID
+    function eligibilityModuleAdminHat() external view returns (uint256) {
+        return _layout().eligibilityModuleAdminHat;
     }
 
     /*═════════════════════════════════════ PURE VIEW HELPERS ═════════════════════════════════════*/

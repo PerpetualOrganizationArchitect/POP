@@ -23,6 +23,7 @@ import "../src/PoaManager.sol";
 import "../src/OrgRegistry.sol";
 import {Deployer} from "../src/Deployer.sol";
 import {EligibilityModule} from "../src/EligibilityModule.sol";
+import {ToggleModule} from "../src/ToggleModule.sol";
 import {IExecutor} from "../src/Executor.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 
@@ -335,6 +336,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Deploy EligibilityModule implementation
         EligibilityModule eligibilityModuleImpl = new EligibilityModule();
+        
+        // Deploy ToggleModule implementation
+        ToggleModule toggleModuleImpl = new ToggleModule();
 
         vm.startPrank(poaAdmin);
         console.log("Current msg.sender:", msg.sender);
@@ -406,6 +410,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         poaManager.addContractType("EducationHub", address(eduHubImpl));
         poaManager.addContractType("UniversalAccountRegistry", address(accountRegImpl));
         poaManager.addContractType("EligibilityModule", address(eligibilityModuleImpl));
+        poaManager.addContractType("ToggleModule", address(toggleModuleImpl));
 
         /*–– global account registry instance ––*/
         // Get the beacon created by PoaManager for account registry
@@ -498,7 +503,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         (address executorAddr, uint32 count, bool boot, bool exists) = orgRegistry.orgOf(ORG_ID);
         assertEq(executorAddr, exec); // Should be the Executor contract address, not orgOwner
-        assertEq(count, 7); // Updated to 7 since we now deploy EligibilityModule as beacon proxy
+        assertEq(count, 8); // Updated to 8 since we now deploy EligibilityModule and ToggleModule as beacon proxies
         assertFalse(boot);
         assertTrue(exists);
 
@@ -1229,11 +1234,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             setup.eligibilityModule, candidate, setup.defaultRoleHat, true, true, "After reaching quorum"
         );
 
-        // Test that candidate can now receive the hat
-        vm.prank(setup.exec);
-        bool success = IHats(SEPOLIA_HATS).mintHat(setup.defaultRoleHat, candidate);
-        assertTrue(success, "Should successfully mint hat when vouched");
-        _assertWearingHat(candidate, setup.defaultRoleHat, true, "Candidate");
+        // Test that candidate is automatically wearing the hat after reaching quorum
+        _assertWearingHat(candidate, setup.defaultRoleHat, true, "Candidate after auto-mint");
     }
 
     function testVouchingSystemHybridMode() public {

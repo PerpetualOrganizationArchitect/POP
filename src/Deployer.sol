@@ -277,6 +277,15 @@ contract Deployer is Initializable, OwnableUpgradeable {
         emProxy = _deploy(orgId, "EligibilityModule", address(this), autoUp, customImpl, init, false);
     }
 
+    /*---------  ToggleModule  ---------*/
+    function _deployToggleModule(bytes32 orgId, address adminAddr, bool autoUp, address customImpl)
+        internal
+        returns (address tmProxy)
+    {
+        bytes memory init = abi.encodeWithSignature("initialize(address)", adminAddr);
+        tmProxy = _deploy(orgId, "ToggleModule", address(this), autoUp, customImpl, init, false);
+    }
+
     /*---------  HybridVoting  ---------*/
     function _deployHybridVoting(
         bytes32 orgId,
@@ -341,10 +350,10 @@ contract Deployer is Initializable, OwnableUpgradeable {
         eligibilityModule = EligibilityModule(eligibilityModuleAddress);
 
         // ─────────────────────────────────────────────────────────────
-        //  Deploy ToggleModule with Deployer as initial admin
+        //  Deploy ToggleModule with deployer as initial admin
         // ─────────────────────────────────────────────────────────────
-        toggleModule = new ToggleModule(address(this));
-        address toggleModuleAddress = address(toggleModule);
+        address toggleModuleAddress = _deployToggleModule(orgId, address(this), true, address(0));
+        toggleModule = ToggleModule(toggleModuleAddress);
 
         // ─────────────────────────────────────────────────────────────
         //  Mint the Top Hat *to this deployer* so we can configure
@@ -360,15 +369,37 @@ contract Deployer is Initializable, OwnableUpgradeable {
         toggleModule.setHatStatus(topHatId, true);
 
         // ─────────────────────────────────────────────────────────────
+        //  Create EligibilityModule Admin Hat
+        // ─────────────────────────────────────────────────────────────
+        uint256 eligibilityAdminHatId = hats.createHat(
+            topHatId, // admin = parent Top Hat
+            "ELIGIBILITY_ADMIN", // details
+            1, // supply = 1 (only the eligibility module should wear this)
+            eligibilityModuleAddress, // eligibility module
+            toggleModuleAddress, // toggle module
+            true, // mutable
+            "ELIGIBILITY_ADMIN" // data blob
+        );
+
+        // Configure and mint the eligibility admin hat to the eligibility module itself
+        eligibilityModule.setWearerEligibility(eligibilityModuleAddress, eligibilityAdminHatId, true, true);
+        toggleModule.setHatStatus(eligibilityAdminHatId, true);
+        hats.mintHat(eligibilityAdminHatId, eligibilityModuleAddress);
+
+        // Set the eligibility module's admin hat
+        eligibilityModule.setEligibilityModuleAdminHat(eligibilityAdminHatId);
+
+        // ─────────────────────────────────────────────────────────────
         //  Create & (optionally) mint child hats for each role
+        //  Now using EligibilityModule admin hat as admin so it can mint them
         // ─────────────────────────────────────────────────────────────
         uint256 len = roleNames.length;
         roleHatIds = new uint256[](len);
 
-        // Create hats one at a time instead of using batchCreateHats
+        // Create hats one at a time with EligibilityModule admin hat as admin
         for (uint256 i; i < len; ++i) {
             roleHatIds[i] = hats.createHat(
-                topHatId, // admin = parent Top Hat
+                eligibilityAdminHatId, // admin = EligibilityModule admin hat (not top hat)
                 roleNames[i], // details + placeholder URI
                 type(uint32).max, // unlimited supply
                 eligibilityModuleAddress, // eligibility module
@@ -382,8 +413,11 @@ contract Deployer is Initializable, OwnableUpgradeable {
             toggleModule.setHatStatus(roleHatIds[i], true);
 
             // Give the role hat to the Executor right away if flagged
+            // Now the EligibilityModule mints the hat since it's the admin
             if (roleCanVote[i]) {
-                hats.mintHat(roleHatIds[i], executorAddr);
+                // Call the EligibilityModule to mint the hat since it's the admin
+                // We can do this because the deployer is still the super admin at this point
+                eligibilityModule.mintHatToAddress(roleHatIds[i], executorAddr);
             }
         }
 
