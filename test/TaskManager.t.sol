@@ -316,7 +316,7 @@ contract TaskManagerTest is Test {
         // try lowering cap below spent
         vm.prank(executor);
         vm.expectRevert(ValidationLib.CapBelowCommitted.selector);
-        tm.updateProjectCap(BUD_ID, 1 ether);
+        tm.setConfig(TaskManager.ConfigKey.PROJECT_CAP, abi.encode(BUD_ID, 1 ether));
     }
 
     /*───────────────── TASK LIFECYCLE ───────────────────*/
@@ -341,7 +341,7 @@ contract TaskManagerTest is Test {
 
         // assign pm1 retroactively
         vm.prank(executor);
-        tm.setProjectManager(FLOW_ID, pm1, true);
+        tm.setConfig(TaskManager.ConfigKey.PROJECT_MANAGER, abi.encode(FLOW_ID, pm1, true));
 
         vm.prank(pm1);
         tm.createTask(1 ether, bytes("hash"), FLOW_ID, address(0), 0);
@@ -767,7 +767,7 @@ contract TaskManagerTest is Test {
 
         // Remove PM2 as project manager
         vm.prank(executor);
-        tm.setProjectManager(MULTI_PM_ID, pm2, false);
+        tm.setConfig(TaskManager.ConfigKey.PROJECT_MANAGER, abi.encode(MULTI_PM_ID, pm2, false));
 
         // PM2 can no longer create tasks (no longer a project manager and no role)
         vm.prank(pm2);
@@ -884,7 +884,7 @@ contract TaskManagerTest is Test {
 
         for (uint256 i = 0; i < pms.length; i++) {
             vm.prank(executor);
-            tm.setProjectManager(MEGA_ID, pms[i], true);
+            tm.setConfig(TaskManager.ConfigKey.PROJECT_MANAGER, abi.encode(MEGA_ID, pms[i], true));
         }
 
         // Create multiple members
@@ -3740,7 +3740,7 @@ contract TaskManagerBountyBudgetTest is Test {
     function test_BountyBudgetIndependentFromParticipationToken() public {
         // Set both participation token cap and bounty cap
         vm.prank(executor);
-        tm.updateProjectCap(BUDGET_PROJECT_ID, 2 ether);
+        tm.setConfig(TaskManager.ConfigKey.PROJECT_CAP, abi.encode(BUDGET_PROJECT_ID, 2 ether));
 
         vm.prank(executor);
         tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether));

@@ -57,7 +57,9 @@ contract TaskManager is Initializable, ContextUpgradeable {
         CREATOR_HAT_ALLOWED,
         ROLE_PERM,
         PROJECT_ROLE_PERM,
-        BOUNTY_CAP
+        BOUNTY_CAP,
+        PROJECT_MANAGER,
+        PROJECT_CAP
     }
 
     enum StorageKey {
@@ -269,24 +271,9 @@ contract TaskManager is Initializable, ContextUpgradeable {
         emit ProjectCreated(projectId, metadata, cap);
     }
 
-    function updateProjectCap(bytes32 pid, uint256 newCap) external onlyExecutor projectExists(pid) {
-        ValidationLib.requireValidCapAmount(newCap);
 
-        Layout storage l = _layout();
-        Project storage p = l._projects[pid];
-        ValidationLib.requireValidCap(newCap, p.spent);
 
-        uint256 old = p.cap;
-        p.cap = uint128(newCap);
-        emit ProjectCapUpdated(pid, old, newCap);
-    }
 
-    function setProjectManager(bytes32 pid, address mgr, bool isManager) external onlyExecutor projectExists(pid) {
-        mgr.requireNonZeroAddress();
-        Layout storage l = _layout();
-        l._projects[pid].managers[mgr] = isManager;
-        emit ProjectManagerUpdated(pid, mgr, isManager);
-    }
 
     function deleteProject(bytes32 pid, bytes calldata metadata) external onlyCreator {
         metadata.requireNonEmptyBytes();
@@ -678,6 +665,26 @@ contract TaskManager is Initializable, ContextUpgradeable {
             b.cap = uint128(newCap);
 
             emit BountyCapSet(pid, token, oldCap, newCap);
+        } else if (key == ConfigKey.PROJECT_MANAGER) {
+            (bytes32 pid, address mgr, bool isManager) = abi.decode(value, (bytes32, address, bool));
+            mgr.requireNonZeroAddress();
+            
+            Project storage p = l._projects[pid];
+            if (!p.exists) revert UnknownProject();
+            
+            p.managers[mgr] = isManager;
+            emit ProjectManagerUpdated(pid, mgr, isManager);
+        } else if (key == ConfigKey.PROJECT_CAP) {
+            (bytes32 pid, uint256 newCap) = abi.decode(value, (bytes32, uint256));
+            ValidationLib.requireValidCapAmount(newCap);
+
+            Project storage p = l._projects[pid];
+            if (!p.exists) revert UnknownProject();
+            ValidationLib.requireValidCap(newCap, p.spent);
+
+            uint256 old = p.cap;
+            p.cap = uint128(newCap);
+            emit ProjectCapUpdated(pid, old, newCap);
         }
     }
 
