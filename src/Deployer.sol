@@ -273,7 +273,8 @@ contract Deployer is Initializable, OwnableUpgradeable {
         internal
         returns (address emProxy)
     {
-        bytes memory init = abi.encodeWithSignature("initialize(address,address)", address(this), address(hats));
+        // Initialize without toggle module first since it doesn't exist yet
+        bytes memory init = abi.encodeWithSignature("initialize(address,address,address)", address(this), address(hats), address(0));
         emProxy = _deploy(orgId, "EligibilityModule", address(this), autoUp, customImpl, init, false);
     }
 
@@ -355,6 +356,12 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address toggleModuleAddress = _deployToggleModule(orgId, address(this), true, address(0));
         toggleModule = ToggleModule(toggleModuleAddress);
 
+        // Set the toggle module in the eligibility module now that both are deployed
+        eligibilityModule.setToggleModule(toggleModuleAddress);
+        
+        // Allow the eligibility module to control the toggle module
+        toggleModule.setEligibilityModule(eligibilityModuleAddress);
+
         // ─────────────────────────────────────────────────────────────
         //  Mint the Top Hat *to this deployer* so we can configure
         // ─────────────────────────────────────────────────────────────
@@ -396,28 +403,40 @@ contract Deployer is Initializable, OwnableUpgradeable {
         uint256 len = roleNames.length;
         roleHatIds = new uint256[](len);
 
-        // Create hats one at a time with EligibilityModule admin hat as admin
-        for (uint256 i; i < len; ++i) {
-            roleHatIds[i] = hats.createHat(
-                eligibilityAdminHatId, // admin = EligibilityModule admin hat (not top hat)
-                roleNames[i], // details + placeholder URI
+        // Create hats in reverse order so higher-level roles can admin lower-level roles
+        // This creates hierarchy: EligibilityAdminHat -> EXECUTIVE -> DEFAULT -> MEMBER...
+        for (uint256 i = len; i > 0; i--) {
+            uint256 idx = i - 1; // Convert to 0-based index
+            uint256 adminHatId;
+            
+            if (idx == len - 1) {
+                // Highest role (e.g., EXECUTIVE if len=2) is admin by eligibility admin hat
+                adminHatId = eligibilityAdminHatId;
+            } else {
+                // Lower roles are admin by the next higher role
+                adminHatId = roleHatIds[idx + 1];
+            }
+            
+            roleHatIds[idx] = hats.createHat(
+                adminHatId, // admin based on hierarchy
+                roleNames[idx], // details + placeholder URI
                 type(uint32).max, // unlimited supply
                 eligibilityModuleAddress, // eligibility module
                 toggleModuleAddress, // toggle module
                 true, // mutable
-                roleNames[i] // data blob (optional)
+                roleNames[idx] // data blob (optional)
             );
 
             // Configure role hat eligibility and toggle for the executor
-            eligibilityModule.setWearerEligibility(executorAddr, roleHatIds[i], true, true);
-            toggleModule.setHatStatus(roleHatIds[i], true);
+            eligibilityModule.setWearerEligibility(executorAddr, roleHatIds[idx], true, true);
+            toggleModule.setHatStatus(roleHatIds[idx], true);
 
             // Give the role hat to the Executor right away if flagged
             // Now the EligibilityModule mints the hat since it's the admin
-            if (roleCanVote[i]) {
+            if (roleCanVote[idx]) {
                 // Call the EligibilityModule to mint the hat since it's the admin
                 // We can do this because the deployer is still the super admin at this point
-                eligibilityModule.mintHatToAddress(roleHatIds[i], executorAddr);
+                eligibilityModule.mintHatToAddress(roleHatIds[idx], executorAddr);
             }
         }
 
@@ -434,26 +453,9 @@ contract Deployer is Initializable, OwnableUpgradeable {
         }
 
         // ─────────────────────────────────────────────────────────────
-        //  Set up admin hat system: EXECUTIVE role can control DEFAULT role
+        //  Admin permissions are now handled natively by the Hats tree structure
+        //  The eligibilityAdminHat is admin of all role hats created under it
         // ─────────────────────────────────────────────────────────────
-        if (roleHatIds.length >= 2) {
-            uint256 defaultRoleHat = roleHatIds[0]; // DEFAULT role hat
-            uint256 executiveRoleHat = roleHatIds[1]; // EXECUTIVE role hat
-
-            // Set the EXECUTIVE role hat as an admin hat
-            eligibilityModule.setAdminHat(executiveRoleHat, true);
-
-            // Give the EXECUTIVE role hat permission to control the DEFAULT role hat
-            uint256[] memory targetHats = new uint256[](1);
-            targetHats[0] = defaultRoleHat;
-            bool[] memory permissions = new bool[](1);
-            permissions[0] = true;
-
-            eligibilityModule.setAdminPermissions(executiveRoleHat, targetHats, permissions);
-
-            // Initialize admin rights for the executor who will be wearing the executive hat
-            eligibilityModule.updateUserAdminHat(executorAddr, executiveRoleHat);
-        }
 
         // ─────────────────────────────────────────────────────────────
         //  Transfer module admin rights to the Executor

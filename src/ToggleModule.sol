@@ -21,6 +21,8 @@ contract ToggleModule is Initializable {
     struct Layout {
         /// @notice The admin who can toggle hat status
         address admin;
+        /// @notice The eligibility module address that can also toggle hat status
+        address eligibilityModule;
         /// @notice Whether each hat is active or not
         /// @dev hatId => bool (true = active, false = inactive)
         mapping(uint256 => bool) hatActive;
@@ -60,10 +62,11 @@ contract ToggleModule is Initializable {
     }
 
     /**
-     * @dev Restricts certain calls so only the admin can perform them
+     * @dev Restricts certain calls so only the admin or eligibility module can perform them
      */
     modifier onlyAdmin() {
-        if (msg.sender != _layout().admin) revert NotToggleAdmin();
+        Layout storage l = _layout();
+        if (msg.sender != l.admin && msg.sender != l.eligibilityModule) revert NotToggleAdmin();
         _;
     }
 
@@ -98,6 +101,17 @@ contract ToggleModule is Initializable {
         address oldAdmin = l.admin;
         l.admin = newAdmin;
         emit AdminTransferred(oldAdmin, newAdmin);
+    }
+
+    /**
+     * @notice Set the eligibility module address that can also toggle hat status
+     * @param _eligibilityModule The eligibility module address
+     */
+    function setEligibilityModule(address _eligibilityModule) external {
+        Layout storage l = _layout();
+        // Only allow admin to set this, but don't use the modifier since eligibility module might not be set yet
+        if (msg.sender != l.admin) revert NotToggleAdmin();
+        l.eligibilityModule = _eligibilityModule;
     }
 
     /**
