@@ -82,7 +82,7 @@ contract MockERC20 is Test, IERC20 {
 }
 
 /*──────────────────── Test Suite ────────────────────*/
-contract TaskManagerTest is Test {
+abstract contract TaskManagerTestBase is Test {
     /* test actors */
     address creator1 = makeAddr("creator1");
     address creator2 = makeAddr("creator2");
@@ -95,6 +95,77 @@ contract TaskManagerTest is Test {
     uint256 constant PM_HAT = 2;
     uint256 constant MEMBER_HAT = 3;
 
+    TaskManager tm;
+    MockToken token;
+    MockHats hats;
+
+    function setHat(address who, uint256 hatId) internal {
+        hats.mintHat(hatId, who);
+    }
+
+    function _hatArr(uint256 hat) internal pure returns (uint256[] memory arr) {
+        arr = new uint256[](1);
+        arr[0] = hat;
+    }
+
+    function _addrArr(address who) internal pure returns (address[] memory arr) {
+        arr = new address[](1);
+        arr[0] = who;
+    }
+
+    function _defaultRoleHats()
+        internal
+        pure
+        returns (
+            uint256[] memory createHats,
+            uint256[] memory claimHats,
+            uint256[] memory reviewHats,
+            uint256[] memory assignHats
+        )
+    {
+        createHats = _hatArr(CREATOR_HAT);
+        claimHats = _hatArr(MEMBER_HAT);
+        reviewHats = _hatArr(PM_HAT);
+        assignHats = _hatArr(PM_HAT);
+    }
+
+    function _createDefaultProject(bytes memory name, uint256 cap) internal returns (bytes32 id) {
+        (
+            uint256[] memory createHats,
+            uint256[] memory claimHats,
+            uint256[] memory reviewHats,
+            uint256[] memory assignHats
+        ) = _defaultRoleHats();
+
+        vm.prank(creator1);
+        id = tm.createProject(name, cap, new address[](0), createHats, claimHats, reviewHats, assignHats);
+    }
+
+    function setUpBase() internal {
+        token = new MockToken();
+        hats = new MockHats();
+
+        setHat(creator1, CREATOR_HAT);
+        setHat(creator2, CREATOR_HAT);
+        setHat(pm1, PM_HAT);
+        setHat(member1, MEMBER_HAT);
+
+        tm = new TaskManager();
+        uint256[] memory creatorHats = _hatArr(CREATOR_HAT);
+
+        vm.prank(creator1);
+        tm.initialize(address(token), address(hats), creatorHats, executor);
+
+        vm.prank(executor);
+        tm.setConfig(
+            TaskManager.ConfigKey.ROLE_PERM, abi.encode(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN)
+        );
+        vm.prank(executor);
+        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MEMBER_HAT, TaskPerm.CLAIM));
+    }
+}
+
+contract TaskManagerTest is TaskManagerTestBase {
     /* project IDs - will be populated at runtime */
     bytes32 UNLIM_ID;
     bytes32 CAPPED_ID;
@@ -118,58 +189,14 @@ contract TaskManagerTest is Test {
     bytes32 EXECUTOR_BYPASS_ID;
     bytes32 SHOULD_FAIL_ID;
 
-    /* deployed contracts */
-    TaskManager tm;
-    MockToken token;
-    MockHats hats;
-
-    /* helpers */
-    function setHat(address who, uint256 hatId) internal {
-        hats.mintHat(hatId, who);
-    }
-
     function setUp() public {
-        token = new MockToken();
-        hats = new MockHats();
-
-        // give creator hat to two addresses, other hats to pm1 / member1
-        setHat(creator1, CREATOR_HAT);
-        setHat(creator2, CREATOR_HAT);
-        setHat(pm1, PM_HAT);
-        setHat(member1, MEMBER_HAT);
-
-        // initialize TaskManager
-        tm = new TaskManager();
-        uint256[] memory creatorHats = new uint256[](1);
-        creatorHats[0] = CREATOR_HAT;
-
-        vm.prank(creator1);
-        tm.initialize(address(token), address(hats), creatorHats, executor);
-
-        // Set up default global permissions
-        vm.prank(executor);
-        tm.setConfig(
-            TaskManager.ConfigKey.ROLE_PERM, abi.encode(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN)
-        );
-        vm.prank(executor);
-        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MEMBER_HAT, TaskPerm.CLAIM));
+        setUpBase();
     }
 
     /*───────────────── PROJECT SCENARIOS ───────────────*/
 
     function test_CreateUnlimitedProjectAndTaskByAnotherCreator() public {
-        // Create project with specific hat permissions
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = CREATOR_HAT;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = PM_HAT;
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
-
-        vm.prank(creator1);
-        UNLIM_ID = tm.createProject(bytes("UNLIM"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats);
+        UNLIM_ID = _createDefaultProject("UNLIM", 0);
 
         // creator2 creates a task (should succeed, cap == 0)
         vm.prank(creator2);
@@ -181,21 +208,12 @@ contract TaskManagerTest is Test {
     }
 
     function test_CreateCappedProjectAndBudgetEnforcement() public {
-        address[] memory managers = new address[](1);
-        managers[0] = pm1;
-
-        // Set up hat permissions
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = PM_HAT;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = PM_HAT;
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
+        address[] memory managers = _addrArr(pm1);
 
         vm.prank(creator1);
-        CAPPED_ID = tm.createProject(bytes("CAPPED"), 3 ether, managers, createHats, claimHats, reviewHats, assignHats);
+        CAPPED_ID = tm.createProject(
+            bytes("CAPPED"), 3 ether, managers, _hatArr(PM_HAT), _hatArr(MEMBER_HAT), _hatArr(PM_HAT), _hatArr(PM_HAT)
+        );
 
         // pm1 can create tasks until cap reached
         vm.prank(pm1);
@@ -220,18 +238,15 @@ contract TaskManagerTest is Test {
         setHat(customReviewer, customReviewHat);
 
         // Set up project with custom hat permissions
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = customCreateHat;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = customReviewHat;
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
-
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
-            bytes("CUSTOM_HATS"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+            bytes("CUSTOM_HATS"),
+            5 ether,
+            new address[](0),
+            _hatArr(customCreateHat),
+            _hatArr(MEMBER_HAT),
+            _hatArr(customReviewHat),
+            _hatArr(PM_HAT)
         );
 
         // Custom creator should be able to create tasks
@@ -265,18 +280,15 @@ contract TaskManagerTest is Test {
         tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(globalHat, TaskPerm.CREATE | TaskPerm.REVIEW));
 
         // Create project with different permissions for the same hat
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = globalHat;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = PM_HAT; // Note: globalHat not included here
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
-
         vm.prank(creator1);
         bytes32 projectId = tm.createProject(
-            bytes("OVERRIDE"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+            bytes("OVERRIDE"),
+            5 ether,
+            new address[](0),
+            _hatArr(globalHat),
+            _hatArr(MEMBER_HAT),
+            _hatArr(PM_HAT), // globalHat not included here
+            _hatArr(PM_HAT)
         );
 
         // Global user should be able to create (global permission)
@@ -297,18 +309,8 @@ contract TaskManagerTest is Test {
 
     function test_UpdateProjectCapLowerThanSpentShouldRevert() public {
         // Set up hat permissions
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = CREATOR_HAT;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = PM_HAT;
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
-
-        vm.prank(creator1);
-        BUD_ID =
-            tm.createProject(bytes("BUD"), 2 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
+        // simplified using helper
+        BUD_ID = _createDefaultProject("BUD", 2 ether);
 
         vm.prank(creator1);
         tm.createTask(2 ether, bytes("foo"), BUD_ID, address(0), 0);
@@ -322,22 +324,7 @@ contract TaskManagerTest is Test {
     /*───────────────── TASK LIFECYCLE ───────────────────*/
 
     function _prepareFlow() internal returns (uint256 id) {
-        // Set up hat permissions
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = CREATOR_HAT;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = PM_HAT;
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
-
-        vm.prank(creator1);
-        FLOW_ID =
-            tm.createProject(bytes("FLOW"), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
-
-        address[] memory mgr = new address[](1);
-        mgr[0] = pm1;
+        FLOW_ID = _createDefaultProject("FLOW", 5 ether);
 
         // assign pm1 retroactively
         vm.prank(executor);
@@ -374,18 +361,7 @@ contract TaskManagerTest is Test {
 
     function test_UpdateTaskBeforeClaimAdjustsBudget() public {
         // Set up hat permissions
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = CREATOR_HAT;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = PM_HAT;
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
-
-        vm.prank(creator1);
-        UPD_ID =
-            tm.createProject(bytes("UPD"), 3 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
+        UPD_ID = _createDefaultProject("UPD", 3 ether);
 
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("foo"), UPD_ID, address(0), 0);
@@ -415,19 +391,7 @@ contract TaskManagerTest is Test {
 
     function test_CancelTaskSpentUnderflowProtection() public {
         // Set up hat permissions
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = CREATOR_HAT;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = PM_HAT;
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
-
-        vm.prank(creator1);
-        bytes32 projectId = tm.createProject(
-            bytes("UNDERFLOW_TEST"), 2 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
-        );
+        bytes32 projectId = _createDefaultProject("UNDERFLOW_TEST", 2 ether);
 
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task1"), projectId, address(0), 0);
@@ -466,18 +430,7 @@ contract TaskManagerTest is Test {
 
     function test_CancelTaskRefundsSpent() public {
         // Set up hat permissions
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = CREATOR_HAT;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = PM_HAT;
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
-
-        vm.prank(creator1);
-        CAN_ID =
-            tm.createProject(bytes("CAN"), 2 ether, new address[](0), createHats, claimHats, reviewHats, assignHats);
+        CAN_ID = _createDefaultProject("CAN", 2 ether);
 
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("foo"), CAN_ID, address(0), 0);
@@ -497,18 +450,7 @@ contract TaskManagerTest is Test {
     /*───────────────── ACCESS CONTROL ───────────────────*/
 
     function test_CreateTaskByNonMemberReverts() public {
-        // Set up hat permissions
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = CREATOR_HAT;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = PM_HAT;
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
-
-        vm.prank(creator1);
-        ACC_ID = tm.createProject(bytes("ACC"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats);
+        ACC_ID = _createDefaultProject("ACC", 0);
 
         // outsider has no role and no permissions
         vm.prank(outsider);
@@ -2750,88 +2692,23 @@ contract TaskManagerTest is Test {
 
 /*───────────────── BOUNTY FUNCTIONALITY TESTS ────────────────────*/
 
-contract TaskManagerBountyTest is Test {
-    /* test actors */
-    address creator1 = makeAddr("creator1");
-    address creator2 = makeAddr("creator2");
-    address pm1 = makeAddr("pm1");
-    address member1 = makeAddr("member1");
-    address outsider = makeAddr("outsider");
-    address executor = makeAddr("executor");
-
-    uint256 constant CREATOR_HAT = 1;
-    uint256 constant PM_HAT = 2;
-    uint256 constant MEMBER_HAT = 3;
-
+contract TaskManagerBountyTest is TaskManagerTestBase {
     /* project IDs */
     bytes32 BOUNTY_PROJECT_ID;
     bytes32 DUAL_BOUNTY_PROJECT_ID;
     bytes32 NO_BOUNTY_PROJECT_ID;
 
-    /* deployed contracts */
-    TaskManager tm;
-    MockToken token;
     MockERC20 bountyToken1;
     MockERC20 bountyToken2;
-    MockHats hats;
-
-    /* helpers */
-    function setHat(address who, uint256 hatId) internal {
-        hats.mintHat(hatId, who);
-    }
 
     function setUp() public {
-        token = new MockToken();
+        setUpBase();
         bountyToken1 = new MockERC20();
         bountyToken2 = new MockERC20();
-        hats = new MockHats();
 
-        // give creator hat to two addresses, other hats to pm1 / member1
-        setHat(creator1, CREATOR_HAT);
-        setHat(creator2, CREATOR_HAT);
-        setHat(pm1, PM_HAT);
-        setHat(member1, MEMBER_HAT);
-
-        // initialize TaskManager
-        tm = new TaskManager();
-        uint256[] memory creatorHats = new uint256[](1);
-        creatorHats[0] = CREATOR_HAT;
-
-        vm.prank(creator1);
-        tm.initialize(address(token), address(hats), creatorHats, executor);
-
-        // Set up default global permissions
-        vm.prank(executor);
-        tm.setConfig(
-            TaskManager.ConfigKey.ROLE_PERM, abi.encode(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN)
-        );
-        vm.prank(executor);
-        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MEMBER_HAT, TaskPerm.CLAIM));
-
-        // Set up projects for testing
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = CREATOR_HAT;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = PM_HAT;
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
-
-        vm.prank(creator1);
-        BOUNTY_PROJECT_ID = tm.createProject(
-            bytes("BOUNTY_PROJECT"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
-        );
-
-        vm.prank(creator1);
-        DUAL_BOUNTY_PROJECT_ID = tm.createProject(
-            bytes("DUAL_BOUNTY_PROJECT"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
-        );
-
-        vm.prank(creator1);
-        NO_BOUNTY_PROJECT_ID = tm.createProject(
-            bytes("NO_BOUNTY_PROJECT"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
-        );
+        BOUNTY_PROJECT_ID = _createDefaultProject("BOUNTY_PROJECT", 10 ether);
+        DUAL_BOUNTY_PROJECT_ID = _createDefaultProject("DUAL_BOUNTY_PROJECT", 10 ether);
+        NO_BOUNTY_PROJECT_ID = _createDefaultProject("NO_BOUNTY_PROJECT", 10 ether);
 
         // Fund the bounty tokens to the TaskManager (simulating treasury)
         bountyToken1.mint(address(tm), 1000 ether);
@@ -3263,90 +3140,25 @@ contract TaskManagerBountyTest is Test {
 
 /*───────────────── BOUNTY BUDGET FUNCTIONALITY TESTS ────────────────────*/
 
-contract TaskManagerBountyBudgetTest is Test {
-    /* test actors */
-    address creator1 = makeAddr("creator1");
-    address creator2 = makeAddr("creator2");
-    address pm1 = makeAddr("pm1");
-    address member1 = makeAddr("member1");
-    address outsider = makeAddr("outsider");
-    address executor = makeAddr("executor");
-
-    uint256 constant CREATOR_HAT = 1;
-    uint256 constant PM_HAT = 2;
-    uint256 constant MEMBER_HAT = 3;
-
+contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
     /* project IDs */
     bytes32 BUDGET_PROJECT_ID;
     bytes32 MULTI_TOKEN_PROJECT_ID;
     bytes32 UNLIMITED_PROJECT_ID;
 
-    /* deployed contracts */
-    TaskManager tm;
-    MockToken token;
     MockERC20 bountyToken1;
     MockERC20 bountyToken2;
     MockERC20 bountyToken3;
-    MockHats hats;
-
-    /* helpers */
-    function setHat(address who, uint256 hatId) internal {
-        hats.mintHat(hatId, who);
-    }
 
     function setUp() public {
-        token = new MockToken();
+        setUpBase();
         bountyToken1 = new MockERC20();
         bountyToken2 = new MockERC20();
         bountyToken3 = new MockERC20();
-        hats = new MockHats();
 
-        // give creator hat to two addresses, other hats to pm1 / member1
-        setHat(creator1, CREATOR_HAT);
-        setHat(creator2, CREATOR_HAT);
-        setHat(pm1, PM_HAT);
-        setHat(member1, MEMBER_HAT);
-
-        // initialize TaskManager
-        tm = new TaskManager();
-        uint256[] memory creatorHats = new uint256[](1);
-        creatorHats[0] = CREATOR_HAT;
-
-        vm.prank(creator1);
-        tm.initialize(address(token), address(hats), creatorHats, executor);
-
-        // Set up default global permissions
-        vm.prank(executor);
-        tm.setConfig(
-            TaskManager.ConfigKey.ROLE_PERM, abi.encode(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN)
-        );
-        vm.prank(executor);
-        tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MEMBER_HAT, TaskPerm.CLAIM));
-
-        // Set up projects for testing
-        uint256[] memory createHats = new uint256[](1);
-        createHats[0] = CREATOR_HAT;
-        uint256[] memory claimHats = new uint256[](1);
-        claimHats[0] = MEMBER_HAT;
-        uint256[] memory reviewHats = new uint256[](1);
-        reviewHats[0] = PM_HAT;
-        uint256[] memory assignHats = new uint256[](1);
-        assignHats[0] = PM_HAT;
-
-        vm.prank(creator1);
-        BUDGET_PROJECT_ID = tm.createProject(
-            bytes("BUDGET_PROJECT"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
-        );
-
-        vm.prank(creator1);
-        MULTI_TOKEN_PROJECT_ID = tm.createProject(
-            bytes("MULTI_TOKEN_PROJECT"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
-        );
-
-        vm.prank(creator1);
-        UNLIMITED_PROJECT_ID = tm.createProject(
-            bytes("UNLIMITED_PROJECT"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats
-        );
+        BUDGET_PROJECT_ID = _createDefaultProject("BUDGET_PROJECT", 10 ether);
+        MULTI_TOKEN_PROJECT_ID = _createDefaultProject("MULTI_TOKEN_PROJECT", 10 ether);
+        UNLIMITED_PROJECT_ID = _createDefaultProject("UNLIMITED_PROJECT", 0);
 
         // Fund the bounty tokens to the TaskManager (simulating treasury)
         bountyToken1.mint(address(tm), 1000 ether);
