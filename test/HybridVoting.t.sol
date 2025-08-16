@@ -576,4 +576,222 @@ contract HybridVotingTest is Test {
         vm.prank(alice);
         hv.vote(id, idx, w);
     }
+
+    /* ───────────────────────── N-CLASS VOTING TESTS ───────────────────────── */
+
+    function testNClassConfiguration() public {
+        vm.startPrank(address(exec));
+        
+        // Create a 3-class configuration
+        HybridVoting.ClassConfig[] memory classes = new HybridVoting.ClassConfig[](3);
+        
+        // Class 0: Direct Democracy (30%)
+        uint256[] memory ddHats = new uint256[](1);
+        ddHats[0] = EXECUTIVE_HAT_ID;
+        classes[0] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.DIRECT,
+            slicePct: 30,
+            quadratic: false,
+            minBalance: 0,
+            asset: address(0),
+            hatIds: ddHats
+        });
+        
+        // Class 1: Token holders (50%)
+        uint256[] memory tokenHats = new uint256[](1);
+        tokenHats[0] = DEFAULT_HAT_ID;
+        classes[1] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.ERC20_BAL,
+            slicePct: 50,
+            quadratic: false,
+            minBalance: 1 ether,
+            asset: address(token),
+            hatIds: tokenHats
+        });
+        
+        // Class 2: Service providers (20%)
+        uint256[] memory serviceHats = new uint256[](1);
+        serviceHats[0] = CREATOR_HAT_ID;
+        classes[2] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.DIRECT,
+            slicePct: 20,
+            quadratic: false,
+            minBalance: 0,
+            asset: address(0),
+            hatIds: serviceHats
+        });
+        
+        hv.setClasses(classes);
+        vm.stopPrank();
+        
+        // Verify classes were set
+        HybridVoting.ClassConfig[] memory stored = hv.getClasses();
+        assertEq(stored.length, 3, "Should have 3 classes");
+        assertEq(uint8(stored[0].strategy), uint8(HybridVoting.ClassStrategy.DIRECT), "Class 0 should be DIRECT");
+        assertEq(stored[0].slicePct, 30, "Class 0 should be 30%");
+        assertEq(stored[1].slicePct, 50, "Class 1 should be 50%");
+        assertEq(stored[2].slicePct, 20, "Class 2 should be 20%");
+    }
+
+    function testNClassInvalidConfiguration() public {
+        vm.startPrank(address(exec));
+        
+        // Test: slices don't sum to 100
+        HybridVoting.ClassConfig[] memory classes = new HybridVoting.ClassConfig[](2);
+        uint256[] memory hats = new uint256[](0);
+        
+        classes[0] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.DIRECT,
+            slicePct: 40,
+            quadratic: false,
+            minBalance: 0,
+            asset: address(0),
+            hatIds: hats
+        });
+        
+        classes[1] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.DIRECT,
+            slicePct: 50, // Total would be 90, not 100
+            quadratic: false,
+            minBalance: 0,
+            asset: address(0),
+            hatIds: hats
+        });
+        
+        vm.expectRevert(HybridVoting.InvalidSliceSum.selector);
+        hv.setClasses(classes);
+        
+        // Test: too many classes
+        HybridVoting.ClassConfig[] memory tooMany = new HybridVoting.ClassConfig[](9);
+        for (uint256 i = 0; i < 9; i++) {
+            tooMany[i] = HybridVoting.ClassConfig({
+                strategy: HybridVoting.ClassStrategy.DIRECT,
+                slicePct: i == 0 ? 100 : 0,
+                quadratic: false,
+                minBalance: 0,
+                asset: address(0),
+                hatIds: hats
+            });
+        }
+        
+        vm.expectRevert(HybridVoting.TooManyClasses.selector);
+        hv.setClasses(tooMany);
+        
+        vm.stopPrank();
+    }
+
+    function testNClassVoting() public {
+        // Set up 2-class configuration (reproducing legacy hybrid)
+        vm.startPrank(address(exec));
+        
+        HybridVoting.ClassConfig[] memory classes = new HybridVoting.ClassConfig[](2);
+        
+        // Class 0: Direct Democracy (50%)
+        uint256[] memory ddHats = new uint256[](1);
+        ddHats[0] = EXECUTIVE_HAT_ID;
+        classes[0] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.DIRECT,
+            slicePct: 50,
+            quadratic: false,
+            minBalance: 0,
+            asset: address(0),
+            hatIds: ddHats
+        });
+        
+        // Class 1: Token holders (50%)
+        uint256[] memory tokenHats = new uint256[](2);
+        tokenHats[0] = DEFAULT_HAT_ID;
+        tokenHats[1] = EXECUTIVE_HAT_ID;
+        classes[1] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.ERC20_BAL,
+            slicePct: 50,
+            quadratic: true, // Enable quadratic for token class
+            minBalance: 1 ether,
+            asset: address(token),
+            hatIds: tokenHats
+        });
+        
+        hv.setClasses(classes);
+        vm.stopPrank();
+        
+        // Create proposal
+        uint256 id = _create();
+        
+        // Vote with alice (has both DD and token power)
+        _voteYES(alice);
+        
+        // Vote with bob (only token power, no DD)
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 1; // Vote NO
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+        vm.prank(bob);
+        hv.vote(id, idx, w);
+        
+        // Vote with carol (has both DD and token power)
+        _voteYES(carol);
+        
+        // Advance time and announce winner
+        vm.warp(block.timestamp + 16 minutes);
+        vm.prank(alice);
+        (uint256 win, bool ok) = hv.announceWinner(id);
+        
+        assertTrue(ok, "Quorum should be met");
+        assertEq(win, 0, "YES should win");
+    }
+
+    function testNClassProposalSnapshot() public {
+        // Set initial configuration
+        vm.startPrank(address(exec));
+        
+        HybridVoting.ClassConfig[] memory classes1 = new HybridVoting.ClassConfig[](1);
+        uint256[] memory hats = new uint256[](0);
+        classes1[0] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.DIRECT,
+            slicePct: 100,
+            quadratic: false,
+            minBalance: 0,
+            asset: address(0),
+            hatIds: hats
+        });
+        hv.setClasses(classes1);
+        vm.stopPrank();
+        
+        // Create proposal with first configuration
+        uint256 id1 = _create();
+        
+        // Change configuration
+        vm.startPrank(address(exec));
+        HybridVoting.ClassConfig[] memory classes2 = new HybridVoting.ClassConfig[](2);
+        classes2[0] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.DIRECT,
+            slicePct: 60,
+            quadratic: false,
+            minBalance: 0,
+            asset: address(0),
+            hatIds: hats
+        });
+        classes2[1] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.ERC20_BAL,
+            slicePct: 40,
+            quadratic: false,
+            minBalance: 1 ether,
+            asset: address(token),
+            hatIds: hats
+        });
+        hv.setClasses(classes2);
+        vm.stopPrank();
+        
+        // Create proposal with second configuration
+        uint256 id2 = _create();
+        
+        // Verify proposals have different snapshots
+        HybridVoting.ClassConfig[] memory snap1 = hv.getProposalClasses(id1);
+        HybridVoting.ClassConfig[] memory snap2 = hv.getProposalClasses(id2);
+        
+        assertEq(snap1.length, 1, "First proposal should have 1 class");
+        assertEq(snap2.length, 2, "Second proposal should have 2 classes");
+        assertEq(snap1[0].slicePct, 100, "First proposal class should be 100%");
+        assertEq(snap2[0].slicePct, 60, "Second proposal first class should be 60%");
+    }
 }

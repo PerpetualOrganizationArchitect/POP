@@ -9,6 +9,10 @@ import {IExecutor} from "./Executor.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
 
+interface IERC20Votes {
+    function getPastVotes(address account, uint256 blockNumber) external view returns (uint256);
+}
+
 /* ─────────────────── HybridVoting ─────────────────── */
 contract HybridVoting is Initializable {
     /* ─────── Errors ─────── */
@@ -27,56 +31,78 @@ contract HybridVoting is Initializable {
     error InvalidMetadata();
     error RoleNotAllowed();
     error Paused();
+    error InvalidClassCount();
+    error InvalidSliceSum();
+    error TooManyClasses();
+    error InvalidStrategy();
 
     /* ─────── Constants ─────── */
     uint8 public constant MAX_OPTIONS = 50;
     uint8 public constant MAX_CALLS = 20;
+    uint8 public constant MAX_CLASSES = 8;
     uint32 public constant MAX_DURATION = 43_200; /* 30 days */
     uint32 public constant MIN_DURATION = 10; /* 10 min   */
 
     /* ─────── Data Structures ─────── */
 
+    enum ClassStrategy { 
+        DIRECT,           // 1 person → 100 raw points
+        ERC20_BAL,        // balance (or sqrt) scaled
+        ERC20VOTES_PAST   // snapshot via getPastVotes(block)
+    }
+
+    struct ClassConfig {
+        ClassStrategy strategy;        // DIRECT / ERC20_BAL / ERC20VOTES_PAST
+        uint8 slicePct;                // 1..100; all classes must sum to 100
+        bool quadratic;                // only for token strategies
+        uint256 minBalance;            // sybil floor for token strategies
+        address asset;                 // ERC20 or ERC20Votes token (if required)
+        uint256[] hatIds;              // voter must wear ≥1 (union)
+    }
+
     struct PollOption {
-        uint128 ddRaw; // sum of DD raw points (0‑100 per voter)
-        uint128 ptRaw; // sum of PT raw points (power×weight)
+        uint128[] classRaw;            // length = classesSnapshot.length
     }
 
     struct Proposal {
         uint64 endTimestamp;
-        uint256 ddTotalRaw; // grows +100 per DD voter
-        uint256 ptTotalRaw; // grows +(ptPower×100) per PT voter
-        PollOption[] options;
+        uint256[] classTotalsRaw;      // Σ raw from each class (len = classesSnapshot.length)
+        PollOption[] options;          // each option has classRaw[i]
         mapping(address => bool) hasVoted;
         IExecutor.Call[][] batches;
-        uint256[] pollHatIds; // array of specific hat IDs for this poll
-        bool restricted; // if true only pollHatIds can vote
+        uint256[] pollHatIds;          // array of specific hat IDs for this poll
+        bool restricted;               // if true only pollHatIds can vote
         mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
+        ClassConfig[] classesSnapshot; // Snapshot the class config to freeze semantics for this proposal
+        uint256 snapshotBlock;         // only used by ERC20VOTES_PAST
     }
 
     /* ─────── ERC-7201 Storage ─────── */
-    /// @custom:storage-location erc7201:poa.hybridvoting.storage
+    /// @custom:storage-location erc7201:poa.hybridvoting.v2.storage
     struct Layout {
         /* Config / Storage */
-        IERC20 participationToken;
         IHats hats;
         IExecutor executor;
         mapping(address => bool) allowedTarget; // execution allow‑list
-        uint256[] votingHatIds; // enumeration array for voting hats
-        uint256[] democracyHatIds; // enumeration array for democracy hats
         uint256[] creatorHatIds; // enumeration array for creator hats
         uint8 quorumPct; // 1‑100
-        uint8 ddSharePct; // e.g. 50 = 50 %
-        bool quadraticVoting;
-        uint256 MIN_BAL; // min PT balance to participate
+        ClassConfig[] classes; // global N-class configuration
         /* Vote Bookkeeping */
         Proposal[] _proposals;
         /* Inline State */
         bool _paused; // Inline pausable state
         uint256 _lock; // Inline reentrancy guard state
+        /* Legacy fields for migration (can be removed later) */
+        IERC20 participationToken; // kept for compatibility during migration
+        uint256[] votingHatIds; // kept for compatibility during migration
+        uint256[] democracyHatIds; // kept for compatibility during migration
+        uint8 ddSharePct; // kept for compatibility during migration
+        bool quadraticVoting; // kept for compatibility during migration
+        uint256 MIN_BAL; // kept for compatibility during migration
     }
 
-    // keccak256("poa.hybridvoting.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x5ca2a7292ae8f852850852b5f984e5237d39f3240052e7ba31e27bf071bdb62b;
+    // keccak256("poa.hybridvoting.v2.storage") → unique, collision-free slot for v2
+    bytes32 private constant _STORAGE_SLOT = 0x7a3e8e3d8e9c8f7b6a5d4c3b2a1908070605040302010009080706050403020a;
 
     /* ─────── Storage Getter Enum ─────── */
     enum StorageKey {
@@ -96,7 +122,9 @@ contract HybridVoting is Initializable {
         POLL_HAT_ALLOWED,
         POLL_RESTRICTED,
         VERSION,
-        PROPOSALS_COUNT
+        PROPOSALS_COUNT,
+        CLASSES,
+        PROPOSAL_CLASSES
     }
 
     function _layout() private pure returns (Layout storage s) {
@@ -143,6 +171,7 @@ contract HybridVoting is Initializable {
     event QuadraticToggled(bool enabled);
     event MinBalanceSet(uint256 newMinBalance);
     event ProposalCleaned(uint256 id, uint256 cleaned);
+    event ClassesReplaced(uint256 version, bytes32 classesHash);
 
     /* ─────── Initialiser ─────── */
     constructor() initializer {}
@@ -170,55 +199,80 @@ contract HybridVoting is Initializable {
 
         Layout storage l = _layout();
         l.hats = IHats(hats_);
-        l.participationToken = IERC20(token_);
         l.executor = IExecutor(executor_);
         l._paused = false; // Initialize paused state
         l._lock = 0; // Initialize reentrancy guard state
 
         l.quorumPct = quorum_;
         emit QuorumSet(quorum_);
+        
+        // Store legacy fields for compatibility
+        l.participationToken = IERC20(token_);
         l.ddSharePct = ddShare_;
-        emit SplitSet(ddShare_);
         l.quadraticVoting = quadratic_;
-        emit QuadraticToggled(quadratic_);
         l.MIN_BAL = minBalance_;
-        emit MinBalanceSet(minBalance_);
 
-        _initializeHats(initialVotingHats, initialDemocracyHats, initialCreatorHats);
+        // Initialize creator hats
+        _initializeCreatorHats(initialCreatorHats);
         _initializeTargets(initialTargets);
+        
+        // Set up default two-class configuration from legacy parameters
+        if (ddShare_ > 0) {
+            // Class 0: Direct Democracy
+            ClassConfig memory ddClass;
+            ddClass.strategy = ClassStrategy.DIRECT;
+            ddClass.slicePct = ddShare_;
+            ddClass.quadratic = false;
+            ddClass.minBalance = 0;
+            ddClass.asset = address(0);
+            ddClass.hatIds = initialDemocracyHats;
+            l.classes.push(ddClass);
+            
+            // Store democracy hats in legacy field for compatibility
+            for (uint256 i; i < initialDemocracyHats.length;) {
+                l.democracyHatIds.push(initialDemocracyHats[i]);
+                unchecked { ++i; }
+            }
+        }
+        
+        if (ddShare_ < 100) {
+            // Class 1: Participation Token
+            ClassConfig memory ptClass;
+            ptClass.strategy = ClassStrategy.ERC20_BAL;
+            ptClass.slicePct = 100 - ddShare_;
+            ptClass.quadratic = quadratic_;
+            ptClass.minBalance = minBalance_;
+            ptClass.asset = token_;
+            ptClass.hatIds = initialVotingHats;
+            l.classes.push(ptClass);
+            
+            // Store voting hats in legacy field for compatibility
+            for (uint256 i; i < initialVotingHats.length;) {
+                l.votingHatIds.push(initialVotingHats[i]);
+                unchecked { ++i; }
+            }
+        }
+        
+        // Emit events for legacy compatibility
+        emit SplitSet(ddShare_);
+        emit QuadraticToggled(quadratic_);
+        emit MinBalanceSet(minBalance_);
+        
+        // Emit new class configuration event
+        bytes32 classesHash = keccak256(abi.encode(l.classes));
+        emit ClassesReplaced(block.number, classesHash);
+    }
+    
+    function _initializeCreatorHats(uint256[] calldata creatorHats) internal {
+        Layout storage l = _layout();
+        uint256 len = creatorHats.length;
+        for (uint256 i; i < len;) {
+            HatManager.setHatInArray(l.creatorHatIds, creatorHats[i], true);
+            unchecked { ++i; }
+        }
     }
 
     /* ─────── Internal Initialization Helpers ─────── */
-    function _initializeHats(
-        uint256[] calldata votingHats,
-        uint256[] calldata democracyHats,
-        uint256[] calldata creatorHats
-    ) internal {
-        Layout storage l = _layout();
-
-        uint256 len = votingHats.length;
-        for (uint256 i; i < len;) {
-            HatManager.setHatInArray(l.votingHatIds, votingHats[i], true);
-            unchecked {
-                ++i;
-            }
-        }
-        len = democracyHats.length;
-        for (uint256 i; i < len;) {
-            HatManager.setHatInArray(l.democracyHatIds, democracyHats[i], true);
-            unchecked {
-                ++i;
-            }
-        }
-        len = creatorHats.length;
-        for (uint256 i; i < len;) {
-            HatManager.setHatInArray(l.creatorHatIds, creatorHats[i], true);
-            unchecked {
-                ++i;
-            }
-        }
-    }
-
     function _initializeTargets(address[] calldata targets) internal {
         Layout storage l = _layout();
         uint256 len = targets.length;
@@ -264,6 +318,44 @@ contract HybridVoting is Initializable {
         }
 
         emit HatSet(hatType, h, ok);
+    }
+
+    /* ─────── N-Class Configuration ─────── */
+    function setClasses(ClassConfig[] calldata newClasses) external onlyExecutor {
+        if (newClasses.length == 0) revert InvalidClassCount();
+        if (newClasses.length > MAX_CLASSES) revert TooManyClasses();
+        
+        uint256 totalSlice;
+        for (uint256 i; i < newClasses.length;) {
+            ClassConfig calldata c = newClasses[i];
+            if (c.slicePct == 0 || c.slicePct > 100) revert InvalidSliceSum();
+            totalSlice += c.slicePct;
+            
+            if (c.strategy == ClassStrategy.ERC20_BAL || c.strategy == ClassStrategy.ERC20VOTES_PAST) {
+                if (c.asset == address(0)) revert ZeroAddress();
+            }
+            unchecked { ++i; }
+        }
+        
+        if (totalSlice != 100) revert InvalidSliceSum();
+        
+        Layout storage l = _layout();
+        delete l.classes;
+        for (uint256 i; i < newClasses.length;) {
+            l.classes.push(newClasses[i]);
+            unchecked { ++i; }
+        }
+        
+        bytes32 classesHash = keccak256(abi.encode(newClasses));
+        emit ClassesReplaced(block.number, classesHash);
+    }
+    
+    function getClasses() external view returns (ClassConfig[] memory) {
+        return _layout().classes;
+    }
+    
+    function getProposalClasses(uint256 id) external view exists(id) returns (ClassConfig[] memory) {
+        return _layout()._proposals[id].classesSnapshot;
     }
 
     /* ─────── Configuration Setters ─────── */
@@ -343,9 +435,22 @@ contract HybridVoting is Initializable {
         if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert DurationOutOfRange();
 
         Layout storage l = _layout();
+        if (l.classes.length == 0) revert InvalidClassCount();
+        
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
         Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
+        p.snapshotBlock = block.number > 0 ? block.number - 1 : 0;
+        
+        // Snapshot the classes configuration
+        uint256 classCount = l.classes.length;
+        for (uint256 i; i < classCount;) {
+            p.classesSnapshot.push(l.classes[i]);
+            unchecked { ++i; }
+        }
+        
+        // Initialize classTotalsRaw array
+        p.classTotalsRaw = new uint256[](classCount);
 
         uint256 id = l._proposals.length - 1;
         for (uint256 i; i < numOptions;) {
@@ -360,7 +465,9 @@ contract HybridVoting is Initializable {
                     }
                 }
             }
-            p.options.push(PollOption(0, 0));
+            // Initialize each option with classRaw array of correct length
+            PollOption storage opt = p.options.push();
+            opt.classRaw = new uint128[](classCount);
             p.batches.push(batches[i]);
             unchecked {
                 ++i;
@@ -381,14 +488,29 @@ contract HybridVoting is Initializable {
         if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert DurationOutOfRange();
 
         Layout storage l = _layout();
+        if (l.classes.length == 0) revert InvalidClassCount();
+        
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
         Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
         p.restricted = hatIds.length > 0;
+        p.snapshotBlock = block.number > 0 ? block.number - 1 : 0;
+        
+        // Snapshot the classes configuration
+        uint256 classCount = l.classes.length;
+        for (uint256 i; i < classCount;) {
+            p.classesSnapshot.push(l.classes[i]);
+            unchecked { ++i; }
+        }
+        
+        // Initialize classTotalsRaw array
+        p.classTotalsRaw = new uint256[](classCount);
 
         uint256 id = l._proposals.length - 1;
         for (uint256 i; i < numOptions;) {
-            p.options.push(PollOption(0, 0));
+            // Initialize each option with classRaw array of correct length
+            PollOption storage opt = p.options.push();
+            opt.classRaw = new uint128[](classCount);
             p.batches.push();
             unchecked {
                 ++i;
@@ -409,66 +531,92 @@ contract HybridVoting is Initializable {
     function vote(uint256 id, uint8[] calldata idxs, uint8[] calldata weights) external exists(id) whenNotPaused {
         if (idxs.length != weights.length) revert LengthMismatch();
         if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingExpired();
+        
         Layout storage l = _layout();
-        if (_msgSender() != address(l.executor)) {
-            bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
-            if (!canVote) revert RoleNotAllowed();
-        }
         Proposal storage p = l._proposals[id];
+        address voter = _msgSender();
+        
+        // Check poll-level restrictions
         if (p.restricted) {
             bool hasAllowedHat = false;
             uint256 len = p.pollHatIds.length;
             for (uint256 i = 0; i < len;) {
-                if (l.hats.isWearerOfHat(_msgSender(), p.pollHatIds[i])) {
+                if (l.hats.isWearerOfHat(voter, p.pollHatIds[i])) {
                     hasAllowedHat = true;
                     break;
                 }
-                unchecked {
-                    ++i;
-                }
+                unchecked { ++i; }
             }
             if (!hasAllowedHat) revert RoleNotAllowed();
         }
-        if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
-
-        /* collect raw powers */
-        bool hasDemocracyHat =
-            (_msgSender() == address(l.executor)) || HatManager.hasAnyHat(l.hats, l.democracyHatIds, _msgSender());
-
-        uint256 bal = l.participationToken.balanceOf(_msgSender());
-        // Use VotingMath for power calculation
-        (uint256 ddRawVoter, uint256 ptRawVoter) =
-            VotingMath.powersHybrid(hasDemocracyHat, bal, l.MIN_BAL, l.quadraticVoting);
-
-        /* weight sanity - use VotingMath */
+        
+        if (p.hasVoted[voter]) revert AlreadyVoted();
+        
+        // Validate weights
         VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: p.options.length}));
-
-        /* store raws - use VotingMath for deltas */
-        (uint256[] memory ddDeltas, uint256[] memory ptDeltas) =
-            VotingMath.deltasHybrid(ddRawVoter, ptRawVoter, idxs, weights);
-
+        
+        // Calculate raw power for each class
+        uint256 classCount = p.classesSnapshot.length;
+        uint256[] memory classRawPowers = new uint256[](classCount);
+        
+        for (uint256 c; c < classCount;) {
+            ClassConfig memory cls = p.classesSnapshot[c];
+            uint256 rawPower = _calculateClassPower(voter, cls, p.snapshotBlock);
+            classRawPowers[c] = rawPower;
+            p.classTotalsRaw[c] += rawPower;
+            unchecked { ++c; }
+        }
+        
+        // Accumulate deltas for each option
         uint256 len = weights.length;
         for (uint256 i; i < len;) {
             uint8 ix = idxs[i];
-            if (ddDeltas[i] > 0) {
-                uint256 newDD = p.options[ix].ddRaw + ddDeltas[i];
-                require(VotingMath.fitsUint128(newDD), "DD overflow");
-                p.options[ix].ddRaw = uint128(newDD);
+            uint8 weight = weights[i];
+            
+            for (uint256 c; c < classCount;) {
+                if (classRawPowers[c] > 0) {
+                    uint256 delta = (classRawPowers[c] * weight) / 100;
+                    if (delta > 0) {
+                        uint256 newVal = p.options[ix].classRaw[c] + delta;
+                        require(VotingMath.fitsUint128(newVal), "Class raw overflow");
+                        p.options[ix].classRaw[c] = uint128(newVal);
+                    }
+                }
+                unchecked { ++c; }
             }
-            if (ptDeltas[i] > 0) {
-                uint256 newPT = p.options[ix].ptRaw + ptDeltas[i];
-                require(VotingMath.fitsUint128(newPT), "PT overflow");
-                p.options[ix].ptRaw = uint128(newPT);
-            }
-            unchecked {
-                ++i;
-            }
+            unchecked { ++i; }
         }
-        p.ddTotalRaw += ddRawVoter;
-        p.ptTotalRaw += ptRawVoter;
-        p.hasVoted[_msgSender()] = true;
-
-        emit VoteCast(id, _msgSender(), idxs, weights);
+        
+        p.hasVoted[voter] = true;
+        emit VoteCast(id, voter, idxs, weights);
+    }
+    
+    function _calculateClassPower(address voter, ClassConfig memory cls, uint256 snapshotBlock) 
+        internal view returns (uint256) {
+        Layout storage l = _layout();
+        
+        // Check hat gating for this class
+        bool hasClassHat = (voter == address(l.executor)) || 
+            (cls.hatIds.length == 0) || 
+            HatManager.hasAnyHat(l.hats, cls.hatIds, voter);
+        
+        if (!hasClassHat) return 0;
+        
+        if (cls.strategy == ClassStrategy.DIRECT) {
+            return 100; // Direct democracy: 1 person = 100 raw points
+        } else if (cls.strategy == ClassStrategy.ERC20_BAL) {
+            uint256 balance = IERC20(cls.asset).balanceOf(voter);
+            if (balance < cls.minBalance) return 0;
+            uint256 power = cls.quadratic ? VotingMath.sqrt(balance) : balance;
+            return power * 100; // Scale to match existing system
+        } else if (cls.strategy == ClassStrategy.ERC20VOTES_PAST) {
+            uint256 pastVotes = IERC20Votes(cls.asset).getPastVotes(voter, snapshotBlock);
+            if (pastVotes < cls.minBalance) return 0;
+            uint256 power = cls.quadratic ? VotingMath.sqrt(pastVotes) : pastVotes;
+            return power * 100; // Scale to match existing system
+        }
+        
+        return 0;
     }
 
     /* ─────── Winner & execution ─────── */
@@ -482,36 +630,56 @@ contract HybridVoting is Initializable {
         Layout storage l = _layout();
         Proposal storage p = l._proposals[id];
 
-        if (p.ddTotalRaw == 0 && p.ptTotalRaw == 0) {
+        // Check if any votes were cast
+        bool hasVotes = false;
+        for (uint256 i; i < p.classTotalsRaw.length;) {
+            if (p.classTotalsRaw[i] > 0) {
+                hasVotes = true;
+                break;
+            }
+            unchecked { ++i; }
+        }
+        
+        if (!hasVotes) {
             emit Winner(id, 0, false);
             return (0, false);
         }
 
-        // Build arrays for VoteCalc
-        uint256 len = p.options.length;
-        uint256[] memory ddRaw = new uint256[](len);
-        uint256[] memory ptRaw = new uint256[](len);
-
-        for (uint256 i; i < len;) {
-            ddRaw[i] = p.options[i].ddRaw;
-            ptRaw[i] = p.options[i].ptRaw;
-            unchecked {
-                ++i;
+        // Build matrix for N-class winner calculation
+        uint256 numOptions = p.options.length;
+        uint256 numClasses = p.classesSnapshot.length;
+        uint256[][] memory perOptionPerClassRaw = new uint256[][](numOptions);
+        uint8[] memory slices = new uint8[](numClasses);
+        
+        for (uint256 opt; opt < numOptions;) {
+            perOptionPerClassRaw[opt] = new uint256[](numClasses);
+            for (uint256 cls; cls < numClasses;) {
+                perOptionPerClassRaw[opt][cls] = p.options[opt].classRaw[cls];
+                unchecked { ++cls; }
             }
+            unchecked { ++opt; }
+        }
+        
+        for (uint256 cls; cls < numClasses;) {
+            slices[cls] = p.classesSnapshot[cls].slicePct;
+            unchecked { ++cls; }
         }
 
-        // Use VotingMath to pick winner with two-slice logic
-        (winner, valid,,) =
-            VotingMath.pickWinnerTwoSlice(ddRaw, ptRaw, p.ddTotalRaw, p.ptTotalRaw, l.ddSharePct, l.quorumPct);
+        // Use VotingMath to pick winner with N-class logic
+        (winner, valid,,) = VotingMath.pickWinnerNSlices(
+            perOptionPerClassRaw,
+            p.classTotalsRaw,
+            slices,
+            l.quorumPct,
+            true // strict majority required
+        );
 
         IExecutor.Call[] storage batch = p.batches[winner];
         if (valid && batch.length > 0) {
-            uint256 len = batch.length;
-            for (uint256 i; i < len;) {
+            uint256 batchLen = batch.length;
+            for (uint256 i; i < batchLen;) {
                 if (!l.allowedTarget[batch[i].target]) revert InvalidTarget();
-                unchecked {
-                    ++i;
-                }
+                unchecked { ++i; }
             }
             l.executor.execute(id, batch);
         }
@@ -588,9 +756,15 @@ contract HybridVoting is Initializable {
             if (id >= l._proposals.length) revert InvalidProposal();
             return abi.encode(l._proposals[id].restricted);
         } else if (key == StorageKey.VERSION) {
-            return abi.encode("v1");
+            return abi.encode("v2");
         } else if (key == StorageKey.PROPOSALS_COUNT) {
             return abi.encode(l._proposals.length);
+        } else if (key == StorageKey.CLASSES) {
+            return abi.encode(l.classes);
+        } else if (key == StorageKey.PROPOSAL_CLASSES) {
+            uint256 id = abi.decode(params, (uint256));
+            if (id >= l._proposals.length) revert InvalidProposal();
+            return abi.encode(l._proposals[id].classesSnapshot);
         }
 
         revert InvalidIndex();
