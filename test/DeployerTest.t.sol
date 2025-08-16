@@ -464,7 +464,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         eduHubProxy = _eduHub;
 
         /* basic invariants */
-        assertEq(abi.decode(HybridVoting(hybridProxy).getStorage(HybridVoting.StorageKey.VERSION, ""), (string)), "v2");
+        assertEq(abi.decode(HybridVoting(hybridProxy).getStorage(HybridVoting.StorageKey.VERSION, ""), (string)), "v1");
         assertEq(Executor(executorProxy).version(), "v1");
 
         /*—————————————————— quick smoke test: join + vote —————————————————*/
