@@ -3,8 +3,6 @@ pragma solidity ^0.8.20;
 
 /*──────── OpenZeppelin v5.3 Upgradeables ────────*/
 import {Initializable} from "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import {ReentrancyGuardUpgradeable} from
-    "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {ContextUpgradeable} from "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -24,7 +22,7 @@ interface IParticipationToken is IERC20 {
 }
 
 /*────────────────────── Contract ───────────────────────*/
-contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgradeable {
+contract TaskManager is Initializable, ContextUpgradeable {
     using SafeERC20 for IERC20;
     using BudgetLib for BudgetLib.Budget;
     using ValidationLib for address;
@@ -59,7 +57,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         CREATOR_HAT_ALLOWED,
         ROLE_PERM,
         PROJECT_ROLE_PERM,
-        BOUNTY_CAP
+        BOUNTY_CAP,
+        PROJECT_MANAGER,
+        PROJECT_CAP
     }
 
     enum StorageKey {
@@ -136,8 +136,7 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
     event HatSet(HatType hatType, uint256 hat, bool allowed);
     event ProjectCreated(bytes32 indexed id, bytes metadata, uint256 cap);
     event ProjectCapUpdated(bytes32 indexed id, uint256 oldCap, uint256 newCap);
-    event ProjectManagerAdded(bytes32 indexed id, address indexed manager);
-    event ProjectManagerRemoved(bytes32 indexed id, address indexed manager);
+    event ProjectManagerUpdated(bytes32 indexed id, address indexed manager, bool isManager);
     event ProjectDeleted(bytes32 indexed id, bytes metadata);
     event ProjectRolePermSet(bytes32 indexed id, uint256 indexed hatId, uint8 mask);
     event BountyCapSet(bytes32 indexed projectId, address indexed token, uint256 oldCap, uint256 newCap);
@@ -172,7 +171,6 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         hatsAddress.requireNonZeroAddress();
         executorAddress.requireNonZeroAddress();
 
-        __ReentrancyGuard_init();
         __Context_init();
 
         Layout storage l = _layout();
@@ -221,10 +219,6 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         _;
     }
 
-    modifier canReview(bytes32 pid) {
-        _checkPerm(pid, TaskPerm.REVIEW);
-        _;
-    }
 
     modifier canAssign(bytes32 pid) {
         _checkPerm(pid, TaskPerm.ASSIGN);
@@ -258,11 +252,11 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
 
         /* managers */
         p.managers[_msgSender()] = true;
-        emit ProjectManagerAdded(projectId, _msgSender());
+        emit ProjectManagerUpdated(projectId, _msgSender(), true);
         for (uint256 i; i < managers.length;) {
             managers[i].requireNonZeroAddress();
             p.managers[managers[i]] = true;
-            emit ProjectManagerAdded(projectId, managers[i]);
+            emit ProjectManagerUpdated(projectId, managers[i], true);
             unchecked {
                 ++i;
             }
@@ -277,30 +271,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit ProjectCreated(projectId, metadata, cap);
     }
 
-    function updateProjectCap(bytes32 pid, uint256 newCap) external onlyExecutor projectExists(pid) {
-        ValidationLib.requireValidCapAmount(newCap);
 
-        Layout storage l = _layout();
-        Project storage p = l._projects[pid];
-        ValidationLib.requireValidCap(newCap, p.spent);
 
-        uint256 old = p.cap;
-        p.cap = uint128(newCap);
-        emit ProjectCapUpdated(pid, old, newCap);
-    }
 
-    function addProjectManager(bytes32 pid, address mgr) external onlyExecutor projectExists(pid) {
-        mgr.requireNonZeroAddress();
-        Layout storage l = _layout();
-        l._projects[pid].managers[mgr] = true;
-        emit ProjectManagerAdded(pid, mgr);
-    }
-
-    function removeProjectManager(bytes32 pid, address mgr) external onlyExecutor projectExists(pid) {
-        Layout storage l = _layout();
-        l._projects[pid].managers[mgr] = false;
-        emit ProjectManagerRemoved(pid, mgr);
-    }
 
     function deleteProject(bytes32 pid, bytes calldata metadata) external onlyCreator {
         metadata.requireNonEmptyBytes();
@@ -435,8 +408,9 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
         emit TaskSubmitted(id, metadata);
     }
 
-    function completeTask(uint256 id) external nonReentrant canReview(_layout()._tasks[id].projectId) {
+    function completeTask(uint256 id) external {
         Layout storage l = _layout();
+        _checkPerm(l._tasks[id].projectId, TaskPerm.REVIEW);
         Task storage t = _task(l, id);
         if (t.status != Status.SUBMITTED) revert AlreadyCompleted();
 
@@ -691,6 +665,26 @@ contract TaskManager is Initializable, ReentrancyGuardUpgradeable, ContextUpgrad
             b.cap = uint128(newCap);
 
             emit BountyCapSet(pid, token, oldCap, newCap);
+        } else if (key == ConfigKey.PROJECT_MANAGER) {
+            (bytes32 pid, address mgr, bool isManager) = abi.decode(value, (bytes32, address, bool));
+            mgr.requireNonZeroAddress();
+            
+            Project storage p = l._projects[pid];
+            if (!p.exists) revert UnknownProject();
+            
+            p.managers[mgr] = isManager;
+            emit ProjectManagerUpdated(pid, mgr, isManager);
+        } else if (key == ConfigKey.PROJECT_CAP) {
+            (bytes32 pid, uint256 newCap) = abi.decode(value, (bytes32, uint256));
+            ValidationLib.requireValidCapAmount(newCap);
+
+            Project storage p = l._projects[pid];
+            if (!p.exists) revert UnknownProject();
+            ValidationLib.requireValidCap(newCap, p.spent);
+
+            uint256 old = p.cap;
+            p.cap = uint128(newCap);
+            emit ProjectCapUpdated(pid, old, newCap);
         }
     }
 
