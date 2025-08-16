@@ -14,7 +14,7 @@ libs = ["lib"]
 via_ir = true
 optimize = true
 optimize_runs = 200
-ignored_error_codes = ["unused-var", "contract-size"]
+ignored_error_codes = ["unused-var"]
 bytecode_hash = "none"
 cbor_metadata = false
 
