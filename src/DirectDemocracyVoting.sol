@@ -371,7 +371,8 @@ contract DirectDemocracyVoting is Initializable {
         }
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
-        VotingMath.validateWeights(weights, idxs, p.options.length);
+        // Use VotingMath for weight validation
+        VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: p.options.length}));
 
         p.hasVoted[_msgSender()] = true;
         unchecked {
@@ -441,23 +442,24 @@ contract DirectDemocracyVoting is Initializable {
     function _calcWinner(uint256 id) internal view returns (uint256 win, bool ok) {
         Layout storage l = _layout();
         Proposal storage p = l._proposals[id];
-        uint96 hi;
-        uint96 second;
+
+        // Build option scores array for VoteCalc
         uint256 len = p.options.length;
+        uint256[] memory optionScores = new uint256[](len);
         for (uint256 i; i < len;) {
-            uint96 v = p.options[i].votes;
-            if (v > hi) {
-                second = hi;
-                hi = v;
-                win = i;
-            } else if (v > second) {
-                second = v;
-            }
+            optionScores[i] = p.options[i].votes;
             unchecked {
                 ++i;
             }
         }
-        ok = VotingMath.meetsQuorum(hi, second, p.totalWeight, l.quorumPercentage);
+
+        // Use VotingMath to pick winner with strict majority requirement
+        (win, ok,,) = VotingMath.pickWinnerMajority(
+            optionScores,
+            p.totalWeight,
+            l.quorumPercentage,
+            true // requireStrictMajority
+        );
     }
 
     function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
