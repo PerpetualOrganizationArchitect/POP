@@ -35,8 +35,6 @@ interface IEligibilityModuleEvents {
 
     event DefaultEligibilityUpdated(uint256 indexed hatId, bool eligible, bool standing, address indexed admin);
 
-
-
     event SuperAdminTransferred(address indexed oldSuperAdmin, address indexed newSuperAdmin);
 
     event Vouched(address indexed voucher, address indexed wearer, uint256 indexed hatId, uint32 newCount);
@@ -46,10 +44,14 @@ interface IEligibilityModuleEvents {
     event VouchConfigSet(
         uint256 indexed hatId, uint32 quorum, uint256 membershipHatId, bool enabled, bool combineWithHierarchy
     );
-    
+
     event HatCreatedWithEligibility(
-        address indexed creator, uint256 indexed parentHatId, uint256 indexed newHatId,
-        bool defaultEligible, bool defaultStanding, uint256 mintedCount
+        address indexed creator,
+        uint256 indexed parentHatId,
+        uint256 indexed newHatId,
+        bool defaultEligible,
+        bool defaultStanding,
+        uint256 mintedCount
     );
 }
 
@@ -221,7 +223,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Mint the hat to the user
         vm.prank(executor);
         IHats(SEPOLIA_HATS).mintHat(hatId, user);
-        
+
         // Set user join time for vouching tests
         vm.prank(executor);
         EligibilityModule(eligibilityModule).setUserJoinTime(user, block.timestamp - 3 days);
@@ -344,7 +346,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Deploy EligibilityModule implementation
         EligibilityModule eligibilityModuleImpl = new EligibilityModule();
-        
+
         // Deploy ToggleModule implementation
         ToggleModule toggleModuleImpl = new ToggleModule();
 
@@ -633,8 +635,12 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // The eligibility admin hat (created by deployer) is the admin of all role hats
 
         // Test admin relationships via Hats contract
-        assertTrue(IHats(SEPOLIA_HATS).isAdminOfHat(exec, defaultRoleHat), "Executor should be admin of default role hat");
-        assertTrue(IHats(SEPOLIA_HATS).isAdminOfHat(exec, executiveRoleHat), "Executor should be admin of executive role hat");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isAdminOfHat(exec, defaultRoleHat), "Executor should be admin of default role hat"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isAdminOfHat(exec, executiveRoleHat), "Executor should be admin of executive role hat"
+        );
 
         // Test that someone wearing the executive role hat can change eligibility
         // First, mint the executive role hat to voter1
@@ -642,9 +648,12 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Verify voter1 is wearing the executive role hat
         assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(voter1, executiveRoleHat), "voter1 should wear executive role hat");
-        
+
         // Verify admin hierarchy: voter1 wearing executive hat should be admin of default hat
-        assertTrue(IHats(SEPOLIA_HATS).isAdminOfHat(voter1, defaultRoleHat), "voter1 wearing executive hat should be admin of default hat");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isAdminOfHat(voter1, defaultRoleHat),
+            "voter1 wearing executive hat should be admin of default hat"
+        );
 
         // Now voter1 should be able to change eligibility for voter2's default role hat
         vm.prank(voter1);
@@ -653,13 +662,24 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Verify the eligibility was changed for voter2
         (bool eligible, bool standing) =
             EligibilityModule(eligibilityModuleAddr).getWearerStatus(voter2, defaultRoleHat);
-        assertFalse(IHats(SEPOLIA_HATS).isEligible(voter2, defaultRoleHat), "voter2's default role hat should be ineligible");
-        assertFalse(IHats(SEPOLIA_HATS).isInGoodStanding(voter2, defaultRoleHat), "voter2's default role hat should have bad standing");
+        assertFalse(
+            IHats(SEPOLIA_HATS).isEligible(voter2, defaultRoleHat), "voter2's default role hat should be ineligible"
+        );
+        assertFalse(
+            IHats(SEPOLIA_HATS).isInGoodStanding(voter2, defaultRoleHat),
+            "voter2's default role hat should have bad standing"
+        );
 
         // voter1's eligibility should be unaffected since it's per-wearer (should still have default eligibility)
         // Check eligibility via Hats contract for voter1 and defaultRoleHat
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(voter1, defaultRoleHat), "voter1's default role hat should still be default (eligible)");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(voter1, defaultRoleHat), "voter1's default role hat should still be default (good standing)");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(voter1, defaultRoleHat),
+            "voter1's default role hat should still be default (eligible)"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(voter1, defaultRoleHat),
+            "voter1's default role hat should still be default (good standing)"
+        );
 
         // Change voter2 back to eligible
         vm.prank(voter1);
@@ -667,8 +687,13 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Verify the eligibility was changed back for voter2
         // Check eligibility via Hats contract for voter2 and defaultRoleHat
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(voter2, defaultRoleHat), "voter2's default role hat should be eligible");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(voter2, defaultRoleHat), "voter2's default role hat should have good standing");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(voter2, defaultRoleHat), "voter2's default role hat should be eligible"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(voter2, defaultRoleHat),
+            "voter2's default role hat should have good standing"
+        );
 
         // Test that someone without the executive role hat cannot change eligibility
         vm.prank(voter2);
@@ -1025,7 +1050,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         uint256 memberRoleHat = orgRegistry.getRoleHat(ORG_ID, 2);
 
         address candidate = address(0x300);
-        
+
         // Set up users for vouching (need join times set)
         _setupUserForVouching(eligibilityModuleAddr, exec, voter1);
         _setupUserForVouching(eligibilityModuleAddr, exec, voter2);
@@ -1158,7 +1183,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         uint256 memberRoleHat = orgRegistry.getRoleHat(ORG_ID, 2);
 
         address candidate = address(0x500);
-        
+
         // Set up users for vouching (need join times set)
         _setupUserForVouching(eligibilityModuleAddr, exec, voter1);
         _setupUserForVouching(eligibilityModuleAddr, exec, candidate);
@@ -1256,7 +1281,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Should now work via hierarchy (default eligibility)
         assertTrue(IHats(SEPOLIA_HATS).isEligible(candidate, defaultRoleHat), "Should be eligible via hierarchy");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(candidate, defaultRoleHat), "Should have good standing via hierarchy");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(candidate, defaultRoleHat), "Should have good standing via hierarchy"
+        );
 
         // Vouching should fail when disabled
         vm.prank(exec);
@@ -1315,14 +1342,30 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, memberRoleHat, true, true);
 
         // Verify all settings took effect - check via Hats contract
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(testUser, defaultRoleHat), "Should be eligible for DEFAULT via Hats contract");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(testUser, defaultRoleHat), "Should have good standing for DEFAULT via Hats contract");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(testUser, defaultRoleHat), "Should be eligible for DEFAULT via Hats contract"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(testUser, defaultRoleHat),
+            "Should have good standing for DEFAULT via Hats contract"
+        );
 
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(testUser, executiveRoleHat), "Should be eligible for EXECUTIVE via Hats contract");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(testUser, executiveRoleHat), "Should have good standing for EXECUTIVE via Hats contract");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(testUser, executiveRoleHat),
+            "Should be eligible for EXECUTIVE via Hats contract"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(testUser, executiveRoleHat),
+            "Should have good standing for EXECUTIVE via Hats contract"
+        );
 
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(testUser, memberRoleHat), "Should be eligible for MEMBER via Hats contract");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(testUser, memberRoleHat), "Should have good standing for MEMBER via Hats contract");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(testUser, memberRoleHat), "Should be eligible for MEMBER via Hats contract"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(testUser, memberRoleHat),
+            "Should have good standing for MEMBER via Hats contract"
+        );
 
         // Test that super admin can configure vouching
         vm.prank(exec);
@@ -1336,17 +1379,29 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.prank(exec);
         bool mintSuccess = IHats(SEPOLIA_HATS).mintHat(defaultRoleHat, testUser);
         assertTrue(mintSuccess, "Should be able to mint hat to eligible user");
-        
+
         // Verify the user is wearing the hat via Hats contract
         assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(testUser, defaultRoleHat), "User should be wearing the hat");
-        
+
         // Test that eligibility is checked via Hats contract when minting
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(testUser, defaultRoleHat), "User should be eligible according to Hats contract");
-        
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(testUser, defaultRoleHat),
+            "User should be eligible according to Hats contract"
+        );
+
         // Test admin relationships via Hats contract
-        assertTrue(IHats(SEPOLIA_HATS).isAdminOfHat(exec, defaultRoleHat), "Executor should be admin of DEFAULT hat via Hats contract");
-        assertTrue(IHats(SEPOLIA_HATS).isAdminOfHat(exec, executiveRoleHat), "Executor should be admin of EXECUTIVE hat via Hats contract");
-        assertTrue(IHats(SEPOLIA_HATS).isAdminOfHat(exec, memberRoleHat), "Executor should be admin of MEMBER hat via Hats contract");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isAdminOfHat(exec, defaultRoleHat),
+            "Executor should be admin of DEFAULT hat via Hats contract"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isAdminOfHat(exec, executiveRoleHat),
+            "Executor should be admin of EXECUTIVE hat via Hats contract"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isAdminOfHat(exec, memberRoleHat),
+            "Executor should be admin of MEMBER hat via Hats contract"
+        );
 
         // Test that super admin can transfer super admin
         vm.prank(exec);
@@ -1360,11 +1415,20 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         EligibilityModule(eligibilityModuleAddr).setWearerEligibility(testUser, defaultRoleHat, false, false);
 
         // Check via Hats contract
-        assertFalse(IHats(SEPOLIA_HATS).isEligible(testUser, defaultRoleHat), "Should not be eligible after new super admin revokes");
-        assertFalse(IHats(SEPOLIA_HATS).isInGoodStanding(testUser, defaultRoleHat), "Should not have good standing after new super admin revokes");
-        
+        assertFalse(
+            IHats(SEPOLIA_HATS).isEligible(testUser, defaultRoleHat),
+            "Should not be eligible after new super admin revokes"
+        );
+        assertFalse(
+            IHats(SEPOLIA_HATS).isInGoodStanding(testUser, defaultRoleHat),
+            "Should not have good standing after new super admin revokes"
+        );
+
         // Also verify that the user is no longer wearing the hat
-        assertFalse(IHats(SEPOLIA_HATS).isWearerOfHat(testUser, defaultRoleHat), "Should not be wearing hat after eligibility revoked");
+        assertFalse(
+            IHats(SEPOLIA_HATS).isWearerOfHat(testUser, defaultRoleHat),
+            "Should not be wearing hat after eligibility revoked"
+        );
     }
 
     function testUnrestrictedHat() public {
@@ -1413,14 +1477,32 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         address randomUser3 = address(0x802);
 
         // Check that anyone can be eligible for the open hat via Hats contract
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(randomUser1, openRoleHat), "Random user 1 should be eligible for open hat via Hats contract");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(randomUser1, openRoleHat), "Random user 1 should have good standing for open hat via Hats contract");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(randomUser1, openRoleHat),
+            "Random user 1 should be eligible for open hat via Hats contract"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(randomUser1, openRoleHat),
+            "Random user 1 should have good standing for open hat via Hats contract"
+        );
 
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(randomUser2, openRoleHat), "Random user 2 should be eligible for open hat via Hats contract");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(randomUser2, openRoleHat), "Random user 2 should have good standing for open hat via Hats contract");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(randomUser2, openRoleHat),
+            "Random user 2 should be eligible for open hat via Hats contract"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(randomUser2, openRoleHat),
+            "Random user 2 should have good standing for open hat via Hats contract"
+        );
 
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(randomUser3, openRoleHat), "Random user 3 should be eligible for open hat via Hats contract");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(randomUser3, openRoleHat), "Random user 3 should have good standing for open hat via Hats contract");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(randomUser3, openRoleHat),
+            "Random user 3 should be eligible for open hat via Hats contract"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(randomUser3, openRoleHat),
+            "Random user 3 should have good standing for open hat via Hats contract"
+        );
 
         // 3. Test that the executor can mint the open hat to anyone
         vm.prank(exec);
@@ -1451,15 +1533,33 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         EligibilityModule(eligibilityModuleAddr).setWearerEligibility(randomUser1, openRoleHat, false, false);
 
         // randomUser1 should now be ineligible
-        assertFalse(IHats(SEPOLIA_HATS).isEligible(randomUser1, openRoleHat), "Random user 1 should now be ineligible after specific rule");
-        assertFalse(IHats(SEPOLIA_HATS).isInGoodStanding(randomUser1, openRoleHat), "Random user 1 should have bad standing after specific rule");
+        assertFalse(
+            IHats(SEPOLIA_HATS).isEligible(randomUser1, openRoleHat),
+            "Random user 1 should now be ineligible after specific rule"
+        );
+        assertFalse(
+            IHats(SEPOLIA_HATS).isInGoodStanding(randomUser1, openRoleHat),
+            "Random user 1 should have bad standing after specific rule"
+        );
 
         // But randomUser2 and randomUser3 should still be eligible (using default rules)
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(randomUser2, openRoleHat), "Random user 2 should still be eligible via default rules");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(randomUser2, openRoleHat), "Random user 2 should still have good standing via default rules");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(randomUser2, openRoleHat),
+            "Random user 2 should still be eligible via default rules"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(randomUser2, openRoleHat),
+            "Random user 2 should still have good standing via default rules"
+        );
 
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(randomUser3, openRoleHat), "Random user 3 should still be eligible via default rules");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(randomUser3, openRoleHat), "Random user 3 should still have good standing via default rules");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(randomUser3, openRoleHat),
+            "Random user 3 should still be eligible via default rules"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(randomUser3, openRoleHat),
+            "Random user 3 should still have good standing via default rules"
+        );
 
         // 5. Test that the super admin can make it even more open by removing the specific restriction
         vm.prank(exec);
@@ -1467,7 +1567,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Now randomUser1 should be eligible again
         assertTrue(IHats(SEPOLIA_HATS).isEligible(randomUser1, openRoleHat), "Random user 1 should be eligible again");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(randomUser1, openRoleHat), "Random user 1 should have good standing again");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(randomUser1, openRoleHat),
+            "Random user 1 should have good standing again"
+        );
 
         // 6. Demonstrate that we can create a hat that's completely unrestricted
         // by ensuring default eligibility is true and no specific rules or vouching
@@ -1476,35 +1579,41 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Any address should be eligible
         address veryRandomUser = address(0x999);
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(veryRandomUser, openRoleHat), "Any random user should be eligible for unrestricted hat");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(veryRandomUser, openRoleHat), "Any random user should have good standing for unrestricted hat");
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(veryRandomUser, openRoleHat),
+            "Any random user should be eligible for unrestricted hat"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(veryRandomUser, openRoleHat),
+            "Any random user should have good standing for unrestricted hat"
+        );
     }
 
     function testCreateHatWithEligibilityAndBatchMinting() public {
         // Create a test organization with marketing executive
         TestOrgSetup memory setup = _createTestOrg("Marketing DAO");
-        
+
         // Marketing executive is voter1
         address marketingExecutive = voter1;
         address marketingMember1 = voter2;
         address marketingMember2 = address(0x5);
         address marketingMember3 = address(0x6);
-        
+
         // Set up users for vouching
         _setupUserForVouching(setup.eligibilityModule, setup.exec, marketingExecutive);
         _setupUserForVouching(setup.eligibilityModule, setup.exec, marketingMember1);
         _setupUserForVouching(setup.eligibilityModule, setup.exec, marketingMember2);
         _setupUserForVouching(setup.eligibilityModule, setup.exec, marketingMember3);
-        
+
         // First, mint the executive role hat to the marketing executive
         _mintAdminHat(setup.exec, setup.eligibilityModule, setup.executiveRoleHat, marketingExecutive);
-        
+
         // Verify the marketing executive is wearing the executive role hat
         assertTrue(
             IHats(SEPOLIA_HATS).isWearerOfHat(marketingExecutive, setup.executiveRoleHat),
             "Marketing executive should wear executive role hat"
         );
-        
+
         // Marketing executive creates a new marketing hat for their team
         // (Executive role wearers are admins of the default role, so they can create child hats under it)
         vm.prank(marketingExecutive);
@@ -1522,99 +1631,99 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 wearerStandingFlags: new bool[](0)
             })
         );
-        
+
         // Verify the marketing hat was created
         assertTrue(marketingHatId > 0, "Marketing hat should be created");
-        
+
         // Test that the marketing hat has the correct default eligibility
-        assertTrue(IHats(SEPOLIA_HATS).isEligible(marketingMember1, marketingHatId), "Marketing members should be eligible by default");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(marketingMember1, marketingHatId), "Marketing members should have good standing by default");
-        
-        // Test single eligibility setting and minting separately 
+        assertTrue(
+            IHats(SEPOLIA_HATS).isEligible(marketingMember1, marketingHatId),
+            "Marketing members should be eligible by default"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(marketingMember1, marketingHatId),
+            "Marketing members should have good standing by default"
+        );
+
+        // Test single eligibility setting and minting separately
         address[] memory singleMember = new address[](1);
         singleMember[0] = marketingMember1;
         bool[] memory singleEligible = new bool[](1);
         singleEligible[0] = true;
         bool[] memory singleStanding = new bool[](1);
         singleStanding[0] = true;
-        
+
         // First set eligibility
         vm.prank(marketingExecutive);
         EligibilityModule(setup.eligibilityModule).batchSetWearerEligibility(
-            marketingHatId,
-            singleMember,
-            singleEligible,
-            singleStanding
+            marketingHatId, singleMember, singleEligible, singleStanding
         );
-        
+
         // Then mint the hat directly (marketing executive has admin rights)
         vm.prank(marketingExecutive);
         bool success = IHats(SEPOLIA_HATS).mintHat(marketingHatId, marketingMember1);
         assertTrue(success, "Hat minting should succeed");
-        
+
         // Verify member1 is wearing the marketing hat
         assertTrue(
             IHats(SEPOLIA_HATS).isWearerOfHat(marketingMember1, marketingHatId),
             "Marketing member 1 should be wearing marketing hat"
         );
-        
+
         // Test batch minting multiple members with different eligibility settings
         address[] memory multipleMembers = new address[](2);
         multipleMembers[0] = marketingMember2;
         multipleMembers[1] = marketingMember3;
-        
+
         bool[] memory multipleEligible = new bool[](2);
-        multipleEligible[0] = true;   // Member2 is eligible
-        multipleEligible[1] = false;  // Member3 is not eligible (maybe new hire)
-        
+        multipleEligible[0] = true; // Member2 is eligible
+        multipleEligible[1] = false; // Member3 is not eligible (maybe new hire)
+
         bool[] memory multipleStanding = new bool[](2);
-        multipleStanding[0] = true;   // Member2 has good standing
-        multipleStanding[1] = false;  // Member3 has poor standing
-        
+        multipleStanding[0] = true; // Member2 has good standing
+        multipleStanding[1] = false; // Member3 has poor standing
+
         // First set eligibility for multiple members
         vm.prank(marketingExecutive);
         EligibilityModule(setup.eligibilityModule).batchSetWearerEligibility(
-            marketingHatId,
-            multipleMembers,
-            multipleEligible,
-            multipleStanding
+            marketingHatId, multipleMembers, multipleEligible, multipleStanding
         );
-        
+
         // Then mint hats individually (only for eligible members)
         vm.prank(marketingExecutive);
         bool success2 = IHats(SEPOLIA_HATS).mintHat(marketingHatId, marketingMember2);
         assertTrue(success2, "Hat minting should succeed for eligible member");
-        
+
         // Try to mint for ineligible member3 - should fail
         vm.prank(marketingExecutive);
         vm.expectRevert(); // Should revert because member3 is not eligible
         IHats(SEPOLIA_HATS).mintHat(marketingHatId, marketingMember3);
-        
+
         // Verify member2 is wearing the marketing hat (eligible and good standing)
         assertTrue(
             IHats(SEPOLIA_HATS).isWearerOfHat(marketingMember2, marketingHatId),
             "Marketing member 2 should be wearing marketing hat"
         );
-        
+
         // Verify member3 is NOT wearing the marketing hat (ineligible)
         assertFalse(
             IHats(SEPOLIA_HATS).isWearerOfHat(marketingMember3, marketingHatId),
             "Marketing member 3 should NOT be wearing marketing hat (ineligible)"
         );
-        
+
         // Test creating another hat with initial batch minting
         address[] memory initialMembers = new address[](2);
         initialMembers[0] = marketingMember1;
         initialMembers[1] = marketingMember2;
-        
+
         bool[] memory initialEligible = new bool[](2);
         initialEligible[0] = true;
         initialEligible[1] = true;
-        
+
         bool[] memory initialStanding = new bool[](2);
         initialStanding[0] = true;
         initialStanding[1] = true;
-        
+
         vm.prank(marketingExecutive);
         uint256 campaignHatId = EligibilityModule(setup.eligibilityModule).createHatWithEligibility(
             EligibilityModule.CreateHatParams({
@@ -1630,10 +1739,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 wearerStandingFlags: initialStanding
             })
         );
-        
+
         // Verify the campaign hat was created
         assertTrue(campaignHatId > 0, "Campaign hat should be created");
-        
+
         // Verify both initial members are wearing the campaign hat
         assertTrue(
             IHats(SEPOLIA_HATS).isWearerOfHat(marketingMember1, campaignHatId),
@@ -1643,12 +1752,13 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             IHats(SEPOLIA_HATS).isWearerOfHat(marketingMember2, campaignHatId),
             "Marketing member 2 should be wearing campaign hat"
         );
-        
+
         // Verify member3 is NOT eligible for the campaign hat (default eligibility is false)
-        (bool eligible3, bool standing3) = EligibilityModule(setup.eligibilityModule).getWearerStatus(marketingMember3, campaignHatId);
+        (bool eligible3, bool standing3) =
+            EligibilityModule(setup.eligibilityModule).getWearerStatus(marketingMember3, campaignHatId);
         assertFalse(eligible3, "Member 3 should not be eligible for campaign hat by default");
         assertTrue(standing3, "Member 3 should have good standing by default");
-        
+
         // Test that only the marketing executive can create hats under their role
         vm.prank(marketingMember1);
         vm.expectRevert(abi.encodeWithSelector(EligibilityModule.NotAuthorizedAdmin.selector));
@@ -1666,16 +1776,17 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 wearerStandingFlags: new bool[](0)
             })
         );
-        
+
         // Test that marketing executive can manage eligibility of their created hats
         vm.prank(marketingExecutive);
         EligibilityModule(setup.eligibilityModule).setWearerEligibility(marketingMember3, campaignHatId, true, true);
-        
+
         // Verify member3 is now eligible for the campaign hat
-        (bool eligible3Updated, bool standing3Updated) = EligibilityModule(setup.eligibilityModule).getWearerStatus(marketingMember3, campaignHatId);
+        (bool eligible3Updated, bool standing3Updated) =
+            EligibilityModule(setup.eligibilityModule).getWearerStatus(marketingMember3, campaignHatId);
         assertTrue(eligible3Updated, "Member 3 should now be eligible for campaign hat");
         assertTrue(standing3Updated, "Member 3 should have good standing for campaign hat");
-        
+
         // Now marketing executive can set eligibility and mint the campaign hat to member3
         address[] memory member3Array = new address[](1);
         member3Array[0] = marketingMember3;
@@ -1683,21 +1794,18 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         member3Eligible[0] = true;
         bool[] memory member3Standing = new bool[](1);
         member3Standing[0] = true;
-        
+
         // Set eligibility first
         vm.prank(marketingExecutive);
         EligibilityModule(setup.eligibilityModule).batchSetWearerEligibility(
-            campaignHatId,
-            member3Array,
-            member3Eligible,
-            member3Standing
+            campaignHatId, member3Array, member3Eligible, member3Standing
         );
-        
+
         // Then mint the hat
         vm.prank(marketingExecutive);
         bool success3 = IHats(SEPOLIA_HATS).mintHat(campaignHatId, marketingMember3);
         assertTrue(success3, "Hat minting should succeed for member3");
-        
+
         // Verify member3 is now wearing the campaign hat
         assertTrue(
             IHats(SEPOLIA_HATS).isWearerOfHat(marketingMember3, campaignHatId),
@@ -1711,23 +1819,23 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         address executive = voter1;
         address member1 = voter2;
         address member2 = address(0x7);
-        
+
         // Setup executive
         _mintAdminHat(setup.exec, setup.eligibilityModule, setup.executiveRoleHat, executive);
-        
+
         // Option 1: Create hat and mint to members in ONE transaction
         address[] memory initialMembers = new address[](2);
         initialMembers[0] = member1;
         initialMembers[1] = member2;
-        
+
         bool[] memory initialEligible = new bool[](2);
         initialEligible[0] = true;
         initialEligible[1] = true;
-        
+
         bool[] memory initialStanding = new bool[](2);
         initialStanding[0] = true;
         initialStanding[1] = true;
-        
+
         vm.prank(executive);
         uint256 teamHatId = EligibilityModule(setup.eligibilityModule).createHatWithEligibility(
             EligibilityModule.CreateHatParams({
@@ -1743,7 +1851,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 wearerStandingFlags: initialStanding
             })
         );
-        
+
         // Verify both members are immediately wearing the hat
         assertTrue(
             IHats(SEPOLIA_HATS).isWearerOfHat(member1, teamHatId),
@@ -1753,12 +1861,15 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             IHats(SEPOLIA_HATS).isWearerOfHat(member2, teamHatId),
             "Member2 should be wearing hat after single transaction"
         );
-        
+
         // Verify default eligibility is false for others
         address randomUser = address(0x999);
-        assertFalse(IHats(SEPOLIA_HATS).isEligible(randomUser, teamHatId), "Random user should not be eligible by default");
-        assertTrue(IHats(SEPOLIA_HATS).isInGoodStanding(randomUser, teamHatId), "Random user should have good standing by default");
+        assertFalse(
+            IHats(SEPOLIA_HATS).isEligible(randomUser, teamHatId), "Random user should not be eligible by default"
+        );
+        assertTrue(
+            IHats(SEPOLIA_HATS).isInGoodStanding(randomUser, teamHatId),
+            "Random user should have good standing by default"
+        );
     }
-
-
 }

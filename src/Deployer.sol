@@ -274,7 +274,8 @@ contract Deployer is Initializable, OwnableUpgradeable {
         returns (address emProxy)
     {
         // Initialize without toggle module first since it doesn't exist yet
-        bytes memory init = abi.encodeWithSignature("initialize(address,address,address)", address(this), address(hats), address(0));
+        bytes memory init =
+            abi.encodeWithSignature("initialize(address,address,address)", address(this), address(hats), address(0));
         emProxy = _deploy(orgId, "EligibilityModule", address(this), autoUp, customImpl, init, false);
     }
 
@@ -358,7 +359,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
         // Set the toggle module in the eligibility module now that both are deployed
         eligibilityModule.setToggleModule(toggleModuleAddress);
-        
+
         // Allow the eligibility module to control the toggle module
         toggleModule.setEligibilityModule(eligibilityModuleAddress);
 
@@ -408,7 +409,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
         for (uint256 i = len; i > 0; i--) {
             uint256 idx = i - 1; // Convert to 0-based index
             uint256 adminHatId;
-            
+
             if (idx == len - 1) {
                 // Highest role (e.g., EXECUTIVE if len=2) is admin by eligibility admin hat
                 adminHatId = eligibilityAdminHatId;
@@ -416,7 +417,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
                 // Lower roles are admin by the next higher role
                 adminHatId = roleHatIds[idx + 1];
             }
-            
+
             roleHatIds[idx] = hats.createHat(
                 adminHatId, // admin based on hierarchy
                 roleNames[idx], // details + placeholder URI
