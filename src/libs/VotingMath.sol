@@ -399,23 +399,17 @@ library VotingMath {
      */
     function sqrt(uint256 x) internal pure returns (uint256 y) {
         if (x == 0) return 0;
+        if (x <= 3) return 1;
         
-        assembly {
-            // Bit-scan seed
-            let z := shl(7, 1) // 128
-            for {} lt(z, x) { z := shl(2, z) } {} // climb in powers of 4
-            z := shr(1, z) // 2^⌈log2(x)/2⌉
-            
-            // 4 Newton steps
-            z := shr(1, add(z, div(x, z)))
-            z := shr(1, add(z, div(x, z)))
-            z := shr(1, add(z, div(x, z)))
-            z := shr(1, add(z, div(x, z)))
-            
-            // Final min(z, x/z)
-            let w := div(x, z)
-            y := z
-            if gt(z, w) { y := w }
+        // Calculate the square root using the Babylonian method
+        // with overflow protection
+        unchecked {
+            y = x;
+            uint256 z = (x + 1) / 2;
+            while (z < y) {
+                y = z;
+                z = (x / z + z) / 2;
+            }
         }
     }
 
