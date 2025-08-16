@@ -9,10 +9,6 @@ import {IExecutor} from "./Executor.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
 
-interface IERC20Votes {
-    function getPastVotes(address account, uint256 blockNumber) external view returns (uint256);
-}
-
 /* ─────────────────── HybridVoting ─────────────────── */
 contract HybridVoting is Initializable {
     /* ─────── Errors ─────── */
@@ -47,16 +43,15 @@ contract HybridVoting is Initializable {
 
     enum ClassStrategy { 
         DIRECT,           // 1 person → 100 raw points
-        ERC20_BAL,        // balance (or sqrt) scaled
-        ERC20VOTES_PAST   // snapshot via getPastVotes(block)
+        ERC20_BAL         // balance (or sqrt) scaled
     }
 
     struct ClassConfig {
-        ClassStrategy strategy;        // DIRECT / ERC20_BAL / ERC20VOTES_PAST
+        ClassStrategy strategy;        // DIRECT / ERC20_BAL
         uint8 slicePct;                // 1..100; all classes must sum to 100
         bool quadratic;                // only for token strategies
         uint256 minBalance;            // sybil floor for token strategies
-        address asset;                 // ERC20 or ERC20Votes token (if required)
+        address asset;                 // ERC20 token (if required)
         uint256[] hatIds;              // voter must wear ≥1 (union)
     }
 
@@ -74,7 +69,6 @@ contract HybridVoting is Initializable {
         bool restricted;               // if true only pollHatIds can vote
         mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
         ClassConfig[] classesSnapshot; // Snapshot the class config to freeze semantics for this proposal
-        uint256 snapshotBlock;         // only used by ERC20VOTES_PAST
     }
 
     /* ─────── ERC-7201 Storage ─────── */
@@ -331,7 +325,7 @@ contract HybridVoting is Initializable {
             if (c.slicePct == 0 || c.slicePct > 100) revert InvalidSliceSum();
             totalSlice += c.slicePct;
             
-            if (c.strategy == ClassStrategy.ERC20_BAL || c.strategy == ClassStrategy.ERC20VOTES_PAST) {
+            if (c.strategy == ClassStrategy.ERC20_BAL) {
                 if (c.asset == address(0)) revert ZeroAddress();
             }
             unchecked { ++i; }
@@ -440,7 +434,6 @@ contract HybridVoting is Initializable {
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
         Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
-        p.snapshotBlock = block.number > 0 ? block.number - 1 : 0;
         
         // Snapshot the classes configuration
         uint256 classCount = l.classes.length;
@@ -494,7 +487,6 @@ contract HybridVoting is Initializable {
         Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
         p.restricted = hatIds.length > 0;
-        p.snapshotBlock = block.number > 0 ? block.number - 1 : 0;
         
         // Snapshot the classes configuration
         uint256 classCount = l.classes.length;
@@ -561,7 +553,7 @@ contract HybridVoting is Initializable {
         
         for (uint256 c; c < classCount;) {
             ClassConfig memory cls = p.classesSnapshot[c];
-            uint256 rawPower = _calculateClassPower(voter, cls, p.snapshotBlock);
+            uint256 rawPower = _calculateClassPower(voter, cls);
             classRawPowers[c] = rawPower;
             p.classTotalsRaw[c] += rawPower;
             unchecked { ++c; }
@@ -591,7 +583,7 @@ contract HybridVoting is Initializable {
         emit VoteCast(id, voter, idxs, weights);
     }
     
-    function _calculateClassPower(address voter, ClassConfig memory cls, uint256 snapshotBlock) 
+    function _calculateClassPower(address voter, ClassConfig memory cls) 
         internal view returns (uint256) {
         Layout storage l = _layout();
         
@@ -618,11 +610,6 @@ contract HybridVoting is Initializable {
             uint256 balance = IERC20(cls.asset).balanceOf(voter);
             if (balance < cls.minBalance) return 0;
             uint256 power = cls.quadratic ? VotingMath.sqrt(balance) : balance;
-            return power * 100; // Scale to match existing system
-        } else if (cls.strategy == ClassStrategy.ERC20VOTES_PAST) {
-            uint256 pastVotes = IERC20Votes(cls.asset).getPastVotes(voter, snapshotBlock);
-            if (pastVotes < cls.minBalance) return 0;
-            uint256 power = cls.quadratic ? VotingMath.sqrt(pastVotes) : pastVotes;
             return power * 100; // Scale to match existing system
         }
         
