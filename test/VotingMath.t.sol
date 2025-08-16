@@ -4,7 +4,20 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/libs/VotingMath.sol";
 
+// Helper contract to test library reverts
+contract VotingMathWrapper {
+    function validateWeights(VotingMath.Weights memory w) public pure {
+        VotingMath.validateWeights(w);
+    }
+}
+
 contract VotingMathTest is Test {
+    VotingMathWrapper wrapper;
+    
+    function setUp() public {
+        wrapper = new VotingMathWrapper();
+    }
+    
     /* ─────────── Test Weight Validation ─────────── */
     
     function testValidateWeights_ValidInput() public {
@@ -38,7 +51,7 @@ contract VotingMathTest is Test {
         weights[1] = 40; // Sum = 90, not 100
         
         vm.expectRevert(abi.encodeWithSelector(VotingMath.WeightSumNot100.selector, 90));
-        VotingMath.validateWeights(VotingMath.Weights({
+        wrapper.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 2
@@ -56,7 +69,7 @@ contract VotingMathTest is Test {
         weights[1] = 50;
         
         vm.expectRevert(VotingMath.DuplicateIndex.selector);
-        VotingMath.validateWeights(VotingMath.Weights({
+        wrapper.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 2
@@ -74,7 +87,7 @@ contract VotingMathTest is Test {
         weights[1] = 50;
         
         vm.expectRevert(VotingMath.InvalidIndex.selector);
-        VotingMath.validateWeights(VotingMath.Weights({
+        wrapper.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 2
@@ -92,7 +105,7 @@ contract VotingMathTest is Test {
         weights[1] = 0;
         
         vm.expectRevert(VotingMath.InvalidWeight.selector);
-        VotingMath.validateWeights(VotingMath.Weights({
+        wrapper.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 2
@@ -111,7 +124,7 @@ contract VotingMathTest is Test {
         weights[2] = 20;
         
         vm.expectRevert(VotingMath.LengthMismatch.selector);
-        VotingMath.validateWeights(VotingMath.Weights({
+        wrapper.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 3
@@ -357,6 +370,9 @@ contract VotingMathTest is Test {
     /* ─────────── Fuzz Tests ─────────── */
     
     function testFuzz_Sqrt(uint256 x) public {
+        // Bound the input to prevent overflow in verification
+        x = bound(x, 0, type(uint128).max);
+        
         uint256 result = VotingMath.sqrt(x);
         
         // Verify that result^2 <= x < (result+1)^2
@@ -366,11 +382,9 @@ contract VotingMathTest is Test {
         assertTrue(resultSquared <= x, "result^2 should be <= x");
         
         // Check upper bound (be careful with overflow)
-        if (result < type(uint256).max) {
+        if (result < type(uint128).max) {
             uint256 nextSquared = (result + 1) * (result + 1);
-            if (nextSquared > resultSquared) { // Check for overflow
-                assertTrue(x < nextSquared, "x should be < (result+1)^2");
-            }
+            assertTrue(x < nextSquared, "x should be < (result+1)^2");
         }
     }
     
