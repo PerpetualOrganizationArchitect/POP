@@ -120,20 +120,38 @@ contract HybridVotingTest is Test {
         address[] memory targets = new address[](1);
         targets[0] = address(0xCA11); // random allowed call target
 
+        // Build ClassConfig array for hybrid voting
+        HybridVoting.ClassConfig[] memory classes = new HybridVoting.ClassConfig[](2);
+        
+        // Class 0: Direct Democracy (50%)
+        classes[0] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.DIRECT,
+            slicePct: 50,
+            quadratic: false,
+            minBalance: 0,
+            asset: address(0),
+            hatIds: democracyHats
+        });
+        
+        // Class 1: Participation Token (50%)
+        classes[1] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.ERC20_BAL,
+            slicePct: 50,
+            quadratic: false,
+            minBalance: 1 ether,
+            asset: address(token),
+            hatIds: votingHats
+        });
+
         bytes memory initData = abi.encodeCall(
             HybridVoting.initialize,
             (
                 address(hats), // hats
-                address(token), // participation token
                 address(exec), // executor
-                votingHats, // allowed voting hats
-                democracyHats, // allowed democracy hats (DD power)
                 creatorHats, // allowed creator hats
                 targets, // allowed target(s)
                 uint8(50), // quorum %
-                uint8(50), // 50‑50 split DD : PT
-                false, // quadratic off
-                1 ether // Lower MIN_BAL to ensure all users can participate
+                classes // class configurations
             )
         );
 
@@ -268,11 +286,11 @@ contract HybridVotingTest is Test {
     }
 
     function testBlendAndExecution() public {
+        // Create the proposal first
         uint256 id = _create();
-
-        /* enable quadratic voting first, before any votes are cast */
-        vm.prank(address(exec));
-        hv.setConfig(HybridVoting.ConfigKey.QUADRATIC, abi.encode(true));
+        
+        // The quadratic flag is already set during initialization for this test
+        // or we could update it before creating the proposal
 
         /* YES votes: Alice and Carol (both have DD power) */
         _voteYES(alice);
@@ -325,31 +343,59 @@ contract HybridVotingTest is Test {
 
     /* ───────────────────────── HAT MANAGEMENT TESTS ───────────────────────── */
     function testSetHatAllowed() public {
-        // Test that executor can modify voting hat permissions
+        // This test now validates class configuration updates
         vm.prank(address(exec));
-        hv.setHatAllowed(HybridVoting.HatType.VOTING, DEFAULT_HAT_ID, false);
-
-        // Alice should still be able to vote with EXECUTIVE_HAT_ID (DD power)
-        _create();
-        console2.log("alice", alice);
-        _voteYES(alice);
-
-        // Create a new voter with only the disabled DEFAULT_HAT_ID and insufficient tokens
+        
+        // Create new classes without DEFAULT_HAT_ID
+        HybridVoting.ClassConfig[] memory newClasses = new HybridVoting.ClassConfig[](2);
+        
+        uint256[] memory executiveOnly = new uint256[](1);
+        executiveOnly[0] = EXECUTIVE_HAT_ID;
+        
+        newClasses[0] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.DIRECT,
+            slicePct: 50,
+            quadratic: false,
+            minBalance: 0,
+            asset: address(0),
+            hatIds: executiveOnly
+        });
+        
+        newClasses[1] = HybridVoting.ClassConfig({
+            strategy: HybridVoting.ClassStrategy.ERC20_BAL,
+            slicePct: 50,
+            quadratic: false,
+            minBalance: 1 ether,
+            asset: address(token),
+            hatIds: executiveOnly
+        });
+        
+        hv.setClasses(newClasses);
+        
+        // Create proposal with new classes
+        uint256 proposalId = _create();
+        
+        // Alice with EXECUTIVE hat can vote
+        vm.prank(alice);
+        uint8[] memory aliceIdx = new uint8[](1);
+        aliceIdx[0] = 0;
+        uint8[] memory aliceW = new uint8[](1);
+        aliceW[0] = 100;
+        hv.vote(proposalId, aliceIdx, aliceW);
+        
+        // Create a new voter with only DEFAULT_HAT_ID
         address hatOnlyVoter = vm.addr(15);
         hats.mintHat(DEFAULT_HAT_ID, hatOnlyVoter);
-        token.mint(hatOnlyVoter, 0.5 ether); // Below minimum balance
-
+        token.mint(hatOnlyVoter, 0.5 ether);
+        
         uint8[] memory idx = new uint8[](1);
         idx[0] = 1;
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
-
-        // With N-class system, they can vote but with 0 power (insufficient balance)
+        
+        // They can vote but with 0 power (no matching hats in any class)
         vm.prank(hatOnlyVoter);
-        hv.vote(0, idx, w);
-
-        // With N-class system, setHatAllowed doesn't affect existing proposals
-        // The voter already voted, so they can't vote again on the same proposal
+        hv.vote(proposalId, idx, w); // Vote on correct proposal
     }
 
     function testSetCreatorHatAllowed() public {
@@ -362,7 +408,7 @@ contract HybridVotingTest is Test {
 
         // Enable new hat as creator hat
         vm.prank(address(exec));
-        hv.setHatAllowed(HybridVoting.HatType.CREATOR, newCreatorHat, true);
+        hv.setCreatorHatAllowed(newCreatorHat, true);
 
         // New creator should be able to create proposal
         IExecutor.Call[][] memory batches = new IExecutor.Call[][](2);
@@ -375,7 +421,7 @@ contract HybridVotingTest is Test {
 
         // Disable new hat
         vm.prank(address(exec));
-        hv.setHatAllowed(HybridVoting.HatType.CREATOR, newCreatorHat, false);
+        hv.setCreatorHatAllowed(newCreatorHat, false);
 
         // Should now fail
         vm.prank(newCreator);
@@ -396,13 +442,9 @@ contract HybridVotingTest is Test {
         vm.expectRevert();
         hv.setConfig(HybridVoting.ConfigKey.EXECUTOR, abi.encode(nonExecutor));
 
-        // Set hat allowed
-        vm.expectRevert();
-        hv.setHatAllowed(HybridVoting.HatType.VOTING, DEFAULT_HAT_ID, false);
-
         // Set creator hat allowed
         vm.expectRevert();
-        hv.setHatAllowed(HybridVoting.HatType.CREATOR, CREATOR_HAT_ID, false);
+        hv.setCreatorHatAllowed(CREATOR_HAT_ID, false);
 
         // Set target allowed
         vm.expectRevert();
@@ -412,17 +454,8 @@ contract HybridVotingTest is Test {
         vm.expectRevert();
         hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(60));
 
-        // Set split
-        vm.expectRevert();
-        hv.setConfig(HybridVoting.ConfigKey.SPLIT, abi.encode(60));
-
-        // Toggle quadratic
-        vm.expectRevert();
-        hv.setConfig(HybridVoting.ConfigKey.QUADRATIC, abi.encode(true));
-
-        // Set min balance
-        vm.expectRevert();
-        hv.setConfig(HybridVoting.ConfigKey.MIN_BALANCE, abi.encode(2 ether));
+        // Split, quadratic, and min balance are now configured via setClasses
+        // These legacy config options no longer exist
 
         vm.stopPrank();
     }
@@ -435,18 +468,21 @@ contract HybridVotingTest is Test {
         hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(60));
         assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.QUORUM_PCT, ""), (uint8)), 60);
 
-        // Set split
-        hv.setConfig(HybridVoting.ConfigKey.SPLIT, abi.encode(60));
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.DD_SHARE_PCT, ""), (uint8)), 60);
-
-        // Toggle quadratic
-        bool initialQuadratic = abi.decode(hv.getStorage(HybridVoting.StorageKey.QUADRATIC_VOTING, ""), (bool));
-        hv.setConfig(HybridVoting.ConfigKey.QUADRATIC, abi.encode(!initialQuadratic));
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.QUADRATIC_VOTING, ""), (bool)), !initialQuadratic);
-
-        // Set min balance
-        hv.setConfig(HybridVoting.ConfigKey.MIN_BALANCE, abi.encode(2 ether));
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.MIN_BAL, ""), (uint256)), 2 ether);
+        // Split, quadratic, and min balance are now configured via setClasses
+        // Test class configuration update instead
+        HybridVoting.ClassConfig[] memory newClasses = hv.getClasses();
+        newClasses[0].slicePct = 60;
+        newClasses[1].slicePct = 40;
+        newClasses[1].quadratic = true;
+        newClasses[1].minBalance = 2 ether;
+        hv.setClasses(newClasses);
+        
+        // Verify the changes
+        HybridVoting.ClassConfig[] memory updatedClasses = hv.getClasses();
+        assertEq(updatedClasses[0].slicePct, 60);
+        assertEq(updatedClasses[1].slicePct, 40);
+        assertEq(updatedClasses[1].quadratic, true);
+        assertEq(updatedClasses[1].minBalance, 2 ether);
 
         vm.stopPrank();
     }

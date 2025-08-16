@@ -86,13 +86,6 @@ contract HybridVoting is Initializable {
         /* Inline State */
         bool _paused; // Inline pausable state
         uint256 _lock; // Inline reentrancy guard state
-        /* Legacy fields for migration (can be removed later) */
-        IERC20 participationToken; // kept for compatibility during migration
-        uint256[] votingHatIds; // kept for compatibility during migration
-        uint256[] democracyHatIds; // kept for compatibility during migration
-        uint8 ddSharePct; // kept for compatibility during migration
-        bool quadraticVoting; // kept for compatibility during migration
-        uint256 MIN_BAL; // kept for compatibility during migration
     }
 
     // keccak256("poa.hybridvoting.v2.storage") → unique, collision-free slot for v2
@@ -100,18 +93,10 @@ contract HybridVoting is Initializable {
 
     /* ─────── Storage Getter Enum ─────── */
     enum StorageKey {
-        PARTICIPATION_TOKEN,
         HATS,
         EXECUTOR,
         QUORUM_PCT,
-        DD_SHARE_PCT,
-        QUADRATIC_VOTING,
-        MIN_BAL,
-        VOTING_HATS,
-        DEMOCRACY_HATS,
         CREATOR_HATS,
-        VOTING_HAT_COUNT,
-        DEMOCRACY_HAT_COUNT,
         CREATOR_HAT_COUNT,
         POLL_HAT_ALLOWED,
         POLL_RESTRICTED,
@@ -161,9 +146,6 @@ contract HybridVoting is Initializable {
     event Winner(uint256 id, uint256 winningIdx, bool valid);
     event ExecutorUpdated(address newExec);
     event QuorumSet(uint8 pct);
-    event SplitSet(uint8 ddShare);
-    event QuadraticToggled(bool enabled);
-    event MinBalanceSet(uint256 newMinBalance);
     event ProposalCleaned(uint256 id, uint256 cleaned);
     event ClassesReplaced(uint256 version, bytes32 classesHash);
 
@@ -172,24 +154,20 @@ contract HybridVoting is Initializable {
 
     function initialize(
         address hats_,
-        address token_,
         address executor_,
-        uint256[] calldata initialVotingHats,
-        uint256[] calldata initialDemocracyHats,
         uint256[] calldata initialCreatorHats,
         address[] calldata initialTargets,
         uint8 quorum_,
-        uint8 ddShare_,
-        bool quadratic_,
-        uint256 minBalance_
+        ClassConfig[] calldata initialClasses
     ) external initializer {
-        if (hats_ == address(0) || token_ == address(0) || executor_ == address(0)) {
+        if (hats_ == address(0) || executor_ == address(0)) {
             revert ZeroAddress();
         }
+        
+        if (initialClasses.length == 0) revert InvalidClassCount();
+        if (initialClasses.length > MAX_CLASSES) revert TooManyClasses();
 
         VotingMath.validateQuorum(quorum_);
-        VotingMath.validateSplit(ddShare_);
-        VotingMath.validateMinBalance(minBalance_);
 
         Layout storage l = _layout();
         l.hats = IHats(hats_);
@@ -199,58 +177,27 @@ contract HybridVoting is Initializable {
 
         l.quorumPct = quorum_;
         emit QuorumSet(quorum_);
-        
-        // Store legacy fields for compatibility
-        l.participationToken = IERC20(token_);
-        l.ddSharePct = ddShare_;
-        l.quadraticVoting = quadratic_;
-        l.MIN_BAL = minBalance_;
 
-        // Initialize creator hats
+        // Initialize creator hats and targets
         _initializeCreatorHats(initialCreatorHats);
         _initializeTargets(initialTargets);
         
-        // Set up default two-class configuration from legacy parameters
-        if (ddShare_ > 0) {
-            // Class 0: Direct Democracy
-            ClassConfig memory ddClass;
-            ddClass.strategy = ClassStrategy.DIRECT;
-            ddClass.slicePct = ddShare_;
-            ddClass.quadratic = false;
-            ddClass.minBalance = 0;
-            ddClass.asset = address(0);
-            ddClass.hatIds = initialDemocracyHats;
-            l.classes.push(ddClass);
+        // Validate and set initial classes
+        uint256 totalSlice;
+        for (uint256 i; i < initialClasses.length;) {
+            ClassConfig calldata c = initialClasses[i];
+            if (c.slicePct == 0 || c.slicePct > 100) revert InvalidSliceSum();
+            totalSlice += c.slicePct;
             
-            // Store democracy hats in legacy field for compatibility
-            for (uint256 i; i < initialDemocracyHats.length;) {
-                l.democracyHatIds.push(initialDemocracyHats[i]);
-                unchecked { ++i; }
+            if (c.strategy == ClassStrategy.ERC20_BAL) {
+                if (c.asset == address(0)) revert ZeroAddress();
             }
+            
+            l.classes.push(initialClasses[i]);
+            unchecked { ++i; }
         }
         
-        if (ddShare_ < 100) {
-            // Class 1: Participation Token
-            ClassConfig memory ptClass;
-            ptClass.strategy = ClassStrategy.ERC20_BAL;
-            ptClass.slicePct = 100 - ddShare_;
-            ptClass.quadratic = quadratic_;
-            ptClass.minBalance = minBalance_;
-            ptClass.asset = token_;
-            ptClass.hatIds = initialVotingHats;
-            l.classes.push(ptClass);
-            
-            // Store voting hats in legacy field for compatibility
-            for (uint256 i; i < initialVotingHats.length;) {
-                l.votingHatIds.push(initialVotingHats[i]);
-                unchecked { ++i; }
-            }
-        }
-        
-        // Emit events for legacy compatibility
-        emit SplitSet(ddShare_);
-        emit QuadraticToggled(quadratic_);
-        emit MinBalanceSet(minBalance_);
+        if (totalSlice != 100) revert InvalidSliceSum();
         
         // Emit new class configuration event
         bytes32 classesHash = keccak256(abi.encode(l.classes));
@@ -294,24 +241,14 @@ contract HybridVoting is Initializable {
     }
 
     /* ─────── Hat Management ─────── */
-    enum HatType {
-        VOTING,
-        CREATOR,
-        DEMOCRACY
-    }
-
-    function setHatAllowed(HatType hatType, uint256 h, bool ok) external onlyExecutor {
+    function setCreatorHatAllowed(uint256 h, bool ok) external onlyExecutor {
         Layout storage l = _layout();
-
-        if (hatType == HatType.VOTING) {
-            HatManager.setHatInArray(l.votingHatIds, h, ok);
-        } else if (hatType == HatType.CREATOR) {
-            HatManager.setHatInArray(l.creatorHatIds, h, ok);
-        } else if (hatType == HatType.DEMOCRACY) {
-            HatManager.setHatInArray(l.democracyHatIds, h, ok);
-        }
-
-        emit HatSet(hatType, h, ok);
+        HatManager.setHatInArray(l.creatorHatIds, h, ok);
+        emit HatSet(HatType.CREATOR, h, ok);
+    }
+    
+    enum HatType {
+        CREATOR
     }
 
     /* ─────── N-Class Configuration ─────── */
@@ -355,9 +292,6 @@ contract HybridVoting is Initializable {
     /* ─────── Configuration Setters ─────── */
     enum ConfigKey {
         QUORUM,
-        SPLIT,
-        QUADRATIC,
-        MIN_BALANCE,
         TARGET_ALLOWED,
         EXECUTOR
     }
@@ -370,20 +304,6 @@ contract HybridVoting is Initializable {
             VotingMath.validateQuorum(q);
             l.quorumPct = q;
             emit QuorumSet(q);
-        } else if (key == ConfigKey.SPLIT) {
-            uint8 s = abi.decode(value, (uint8));
-            VotingMath.validateSplit(s);
-            l.ddSharePct = s;
-            emit SplitSet(s);
-        } else if (key == ConfigKey.QUADRATIC) {
-            bool enabled = abi.decode(value, (bool));
-            l.quadraticVoting = enabled;
-            emit QuadraticToggled(enabled);
-        } else if (key == ConfigKey.MIN_BALANCE) {
-            uint256 n = abi.decode(value, (uint256));
-            VotingMath.validateMinBalance(n);
-            l.MIN_BAL = n;
-            emit MinBalanceSet(n);
         } else if (key == ConfigKey.TARGET_ALLOWED) {
             (address target, bool allowed) = abi.decode(value, (address, bool));
             l.allowedTarget[target] = allowed;
@@ -718,30 +638,14 @@ contract HybridVoting is Initializable {
     function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
         Layout storage l = _layout();
 
-        if (key == StorageKey.PARTICIPATION_TOKEN) {
-            return abi.encode(l.participationToken);
-        } else if (key == StorageKey.HATS) {
+        if (key == StorageKey.HATS) {
             return abi.encode(l.hats);
         } else if (key == StorageKey.EXECUTOR) {
             return abi.encode(l.executor);
         } else if (key == StorageKey.QUORUM_PCT) {
             return abi.encode(l.quorumPct);
-        } else if (key == StorageKey.DD_SHARE_PCT) {
-            return abi.encode(l.ddSharePct);
-        } else if (key == StorageKey.QUADRATIC_VOTING) {
-            return abi.encode(l.quadraticVoting);
-        } else if (key == StorageKey.MIN_BAL) {
-            return abi.encode(l.MIN_BAL);
-        } else if (key == StorageKey.VOTING_HATS) {
-            return abi.encode(HatManager.getHatArray(l.votingHatIds));
-        } else if (key == StorageKey.DEMOCRACY_HATS) {
-            return abi.encode(HatManager.getHatArray(l.democracyHatIds));
         } else if (key == StorageKey.CREATOR_HATS) {
             return abi.encode(HatManager.getHatArray(l.creatorHatIds));
-        } else if (key == StorageKey.VOTING_HAT_COUNT) {
-            return abi.encode(HatManager.getHatCount(l.votingHatIds));
-        } else if (key == StorageKey.DEMOCRACY_HAT_COUNT) {
-            return abi.encode(HatManager.getHatCount(l.democracyHatIds));
         } else if (key == StorageKey.CREATOR_HAT_COUNT) {
             return abi.encode(HatManager.getHatCount(l.creatorHatIds));
         } else if (key == StorageKey.POLL_HAT_ALLOWED) {

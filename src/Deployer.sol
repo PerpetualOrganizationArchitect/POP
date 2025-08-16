@@ -32,18 +32,27 @@ interface IExecutorAdmin {
 
 /*── init‑selector helpers (reduce bytecode & safety) ────────────────────*/
 interface IHybridVotingInit {
+    enum ClassStrategy { 
+        DIRECT,
+        ERC20_BAL
+    }
+    
+    struct ClassConfig {
+        ClassStrategy strategy;
+        uint8 slicePct;
+        bool quadratic;
+        uint256 minBalance;
+        address asset;
+        uint256[] hatIds;
+    }
+    
     function initialize(
         address hats_,
-        address token_,
         address executor_,
-        uint256[] calldata initialVotingHats,
-        uint256[] calldata initialDemocracyHats,
         uint256[] calldata initialCreatorHats,
         address[] calldata targets,
         uint8 quorumPct,
-        uint8 ddSplit,
-        bool quadratic,
-        uint256 minBal
+        ClassConfig[] calldata initialClasses
     ) external;
 }
 
@@ -303,12 +312,12 @@ contract Deployer is Initializable, OwnableUpgradeable {
     ) internal returns (address hvProxy) {
         Layout storage l = _layout();
 
-        // Get the role hat IDs (we know there are at least 2: DEFAULT and EXECUTIVE)
+        // Get the role hat IDs
         uint256[] memory votingHats = new uint256[](2);
         votingHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
         votingHats[1] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
 
-        // For democracy hats, use only the EXECUTIVE role hat (gives DD voting power)
+        // For democracy hats, use only the EXECUTIVE role hat
         uint256[] memory democracyHats = new uint256[](1);
         democracyHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
 
@@ -319,19 +328,64 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address[] memory targets = new address[](1);
         targets[0] = executorAddr;
 
+        // Build ClassConfig array based on legacy parameters
+        IHybridVotingInit.ClassConfig[] memory classes;
+        
+        if (ddSplit == 100) {
+            // Pure Direct Democracy
+            classes = new IHybridVotingInit.ClassConfig[](1);
+            classes[0] = IHybridVotingInit.ClassConfig({
+                strategy: IHybridVotingInit.ClassStrategy.DIRECT,
+                slicePct: 100,
+                quadratic: false,
+                minBalance: 0,
+                asset: address(0),
+                hatIds: democracyHats
+            });
+        } else if (ddSplit == 0) {
+            // Pure Token Voting
+            classes = new IHybridVotingInit.ClassConfig[](1);
+            classes[0] = IHybridVotingInit.ClassConfig({
+                strategy: IHybridVotingInit.ClassStrategy.ERC20_BAL,
+                slicePct: 100,
+                quadratic: quadratic,
+                minBalance: minBal,
+                asset: token,
+                hatIds: votingHats
+            });
+        } else {
+            // Hybrid (two classes)
+            classes = new IHybridVotingInit.ClassConfig[](2);
+            
+            // Class 0: Direct Democracy
+            classes[0] = IHybridVotingInit.ClassConfig({
+                strategy: IHybridVotingInit.ClassStrategy.DIRECT,
+                slicePct: ddSplit,
+                quadratic: false,
+                minBalance: 0,
+                asset: address(0),
+                hatIds: democracyHats
+            });
+            
+            // Class 1: Participation Token
+            classes[1] = IHybridVotingInit.ClassConfig({
+                strategy: IHybridVotingInit.ClassStrategy.ERC20_BAL,
+                slicePct: 100 - ddSplit,
+                quadratic: quadratic,
+                minBalance: minBal,
+                asset: token,
+                hatIds: votingHats
+            });
+        }
+
         bytes memory init = abi.encodeWithSelector(
             IHybridVotingInit.initialize.selector,
             address(hats),
-            token,
             executorAddr,
-            votingHats,
-            democracyHats,
             creatorHats,
             targets,
             quorumPct,
-            ddSplit,
-            quadratic,
-            minBal
+            classes
         );
         hvProxy = _deploy(orgId, "HybridVoting", executorAddr, autoUp, customImpl, init, lastRegister);
     }
