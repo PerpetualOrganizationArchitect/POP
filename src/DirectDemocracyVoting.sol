@@ -8,7 +8,6 @@ import {IExecutor} from "./Executor.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
-import {VoteCalc} from "./libs/VoteCalc.sol";
 
 /* ──────────────────  Direct‑democracy governor  ─────────────────────── */
 contract DirectDemocracyVoting is Initializable {
@@ -372,8 +371,8 @@ contract DirectDemocracyVoting is Initializable {
         }
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
-        // Use VoteCalc for weight validation
-        VoteCalc.validateWeights(VoteCalc.Weights({
+        // Use VotingMath for weight validation
+        VotingMath.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: p.options.length
@@ -458,8 +457,8 @@ contract DirectDemocracyVoting is Initializable {
             }
         }
         
-        // Use VoteCalc to pick winner with strict majority requirement
-        (win, ok, , ) = VoteCalc.pickWinnerMajority(
+        // Use VotingMath to pick winner with strict majority requirement
+        (win, ok, , ) = VotingMath.pickWinnerMajority(
             optionScores,
             p.totalWeight,
             l.quorumPercentage,

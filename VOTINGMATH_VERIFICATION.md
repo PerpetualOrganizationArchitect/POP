@@ -1,8 +1,8 @@
-# VoteCalc Library Integration Verification
+# VotingMath Library Integration Verification
 
 ## ✅ Implementation Status
 
-All voting contracts have been successfully updated to use the new VoteCalc library.
+All voting contracts have been successfully updated to use the unified VotingMath library, which now includes all voting calculation logic previously split between VotingMath and VotingMath.
 
 ## 1. DirectDemocracyVoting Integration
 
@@ -10,7 +10,7 @@ All voting contracts have been successfully updated to use the new VoteCalc libr
 ```solidity
 // Before: VotingMath.validateWeights(weights, idxs, p.options.length);
 // After:
-VoteCalc.validateWeights(VoteCalc.Weights({
+VotingMath.validateWeights(VotingMath.Weights({
     idxs: idxs,
     weights: weights,
     optionsLen: p.options.length
@@ -22,7 +22,7 @@ VoteCalc.validateWeights(VoteCalc.Weights({
 ```solidity
 // Before: Complex inline loop with VotingMath.meetsQuorum
 // After:
-(win, ok, , ) = VoteCalc.pickWinnerMajority(
+(win, ok, , ) = VotingMath.pickWinnerMajority(
     optionScores,
     p.totalWeight,
     l.quorumPercentage,
@@ -37,13 +37,13 @@ VoteCalc.validateWeights(VoteCalc.Weights({
 ```solidity
 // Before: VotingMath.calculateVotingPower(bal, l.quadraticVoting);
 // After:
-uint256 power = VoteCalc.powerPT(bal, l.MIN_BAL, l.quadraticVoting);
+uint256 power = VotingMath.powerPT(bal, l.MIN_BAL, l.quadraticVoting);
 ```
 ✅ **Verified**: Correctly calculates voting power with min balance check
 
 ### Weight Validation (Line 418-422)
 ```solidity
-VoteCalc.validateWeights(VoteCalc.Weights({
+VotingMath.validateWeights(VotingMath.Weights({
     idxs: idxs,
     weights: weights,
     optionsLen: p.options.length
@@ -55,7 +55,7 @@ VoteCalc.validateWeights(VoteCalc.Weights({
 ```solidity
 // Before: Manual calculation in loop
 // After:
-uint256[] memory deltas = VoteCalc.deltasPT(power, idxs, weights);
+uint256[] memory deltas = VotingMath.deltasPT(power, idxs, weights);
 for (uint256 i; i < idxLen;) {
     uint256 newVotes = uint256(p.options[idxs[i]].votes) + deltas[i];
     VotingMath.checkOverflow(newVotes);
@@ -67,7 +67,7 @@ for (uint256 i; i < idxLen;) {
 
 ### Winner Calculation (Line 552-557)
 ```solidity
-(win, ok, , ) = VoteCalc.pickWinnerMajority(
+(win, ok, , ) = VotingMath.pickWinnerMajority(
     optionScores,
     p.totalWeight,
     l.quorumPercentage,
@@ -83,13 +83,13 @@ for (uint256 i; i < idxLen;) {
 // Before: VotingMath.calculateRawPowers
 // After:
 (uint256 ddRawVoter, uint256 ptRawVoter) =
-    VoteCalc.powersHybrid(hasDemocracyHat, bal, l.MIN_BAL, l.quadraticVoting);
+    VotingMath.powersHybrid(hasDemocracyHat, bal, l.MIN_BAL, l.quadraticVoting);
 ```
 ✅ **Verified**: Correctly calculates both DD and PT powers
 
 ### Weight Validation (Line 445-449)
 ```solidity
-VoteCalc.validateWeights(VoteCalc.Weights({
+VotingMath.validateWeights(VotingMath.Weights({
     idxs: idxs,
     weights: weights,
     optionsLen: p.options.length
@@ -100,18 +100,18 @@ VoteCalc.validateWeights(VoteCalc.Weights({
 ### Vote Delta Calculation (Line 452-469)
 ```solidity
 (uint256[] memory ddDeltas, uint256[] memory ptDeltas) = 
-    VoteCalc.deltasHybrid(ddRawVoter, ptRawVoter, idxs, weights);
+    VotingMath.deltasHybrid(ddRawVoter, ptRawVoter, idxs, weights);
 
 for (uint256 i; i < len;) {
     uint8 ix = idxs[i];
     if (ddDeltas[i] > 0) {
         uint256 newDD = p.options[ix].ddRaw + ddDeltas[i];
-        require(VoteCalc.fitsUint128(newDD), "DD overflow");
+        require(VotingMath.fitsUint128(newDD), "DD overflow");
         p.options[ix].ddRaw = uint128(newDD);
     }
     if (ptDeltas[i] > 0) {
         uint256 newPT = p.options[ix].ptRaw + ptDeltas[i];
-        require(VoteCalc.fitsUint128(newPT), "PT overflow");
+        require(VotingMath.fitsUint128(newPT), "PT overflow");
         p.options[ix].ptRaw = uint128(newPT);
     }
     unchecked { ++i; }
@@ -123,7 +123,7 @@ for (uint256 i; i < len;) {
 ```solidity
 // Before: Complex inline calculation with VotingMath helpers
 // After:
-(winner, valid, , ) = VoteCalc.pickWinnerTwoSlice(
+(winner, valid, , ) = VotingMath.pickWinnerTwoSlice(
     ddRaw,
     ptRaw,
     p.ddTotalRaw,
@@ -177,7 +177,7 @@ forge build --force
 
 ✅ **All integrations verified and working correctly**
 
-The VoteCalc library successfully:
+The VotingMath library successfully:
 - Maintains backward compatibility with existing voting logic
 - Provides a unified interface for all voting math operations
 - Reduces code duplication across the three voting contracts

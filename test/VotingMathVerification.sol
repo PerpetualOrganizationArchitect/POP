@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "../src/libs/VoteCalc.sol";
+import "../src/libs/VotingMath.sol";
 
 /**
- * @title VoteCalcVerification
- * @notice Simple contract to verify VoteCalc library functions work correctly
+ * @title VotingMathVerification
+ * @notice Simple contract to verify VotingMath library functions work correctly
  */
-contract VoteCalcVerification {
+contract VotingMathVerification {
     
     // Test 1: Validate weights correctly
     function testValidateWeights() public pure returns (bool) {
@@ -21,7 +21,7 @@ contract VoteCalcVerification {
         weights[1] = 30;
         weights[2] = 20;
         
-        VoteCalc.validateWeights(VoteCalc.Weights({
+        VotingMath.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 3
@@ -33,15 +33,15 @@ contract VoteCalcVerification {
     // Test 2: Power calculation for PT
     function testPowerPT() public pure returns (bool) {
         // Test linear voting
-        uint256 power1 = VoteCalc.powerPT(1000 ether, 100 ether, false);
+        uint256 power1 = VotingMath.powerPT(1000 ether, 100 ether, false);
         require(power1 == 1000 ether, "Linear power incorrect");
         
         // Test quadratic voting
-        uint256 power2 = VoteCalc.powerPT(100 ether, 10 ether, true);
+        uint256 power2 = VotingMath.powerPT(100 ether, 10 ether, true);
         require(power2 == 10 ether, "Quadratic power incorrect");
         
         // Test below minimum
-        uint256 power3 = VoteCalc.powerPT(50 ether, 100 ether, false);
+        uint256 power3 = VotingMath.powerPT(50 ether, 100 ether, false);
         require(power3 == 0, "Below min should be 0");
         
         return true;
@@ -50,12 +50,12 @@ contract VoteCalcVerification {
     // Test 3: Hybrid powers calculation
     function testPowersHybrid() public pure returns (bool) {
         // With democracy hat
-        (uint256 ddRaw1, uint256 ptRaw1) = VoteCalc.powersHybrid(true, 1000 ether, 100 ether, false);
+        (uint256 ddRaw1, uint256 ptRaw1) = VotingMath.powersHybrid(true, 1000 ether, 100 ether, false);
         require(ddRaw1 == 100, "DD raw should be 100");
         require(ptRaw1 == 1000 ether * 100, "PT raw incorrect");
         
         // Without democracy hat
-        (uint256 ddRaw2, uint256 ptRaw2) = VoteCalc.powersHybrid(false, 1000 ether, 100 ether, false);
+        (uint256 ddRaw2, uint256 ptRaw2) = VotingMath.powersHybrid(false, 1000 ether, 100 ether, false);
         require(ddRaw2 == 0, "DD raw should be 0");
         require(ptRaw2 == 1000 ether * 100, "PT raw incorrect");
         
@@ -72,13 +72,13 @@ contract VoteCalcVerification {
         weights[1] = 40;
         
         // Test PT deltas
-        uint256[] memory ptDeltas = VoteCalc.deltasPT(1000, idxs, weights);
+        uint256[] memory ptDeltas = VotingMath.deltasPT(1000, idxs, weights);
         require(ptDeltas[0] == 60000, "PT delta 0 incorrect");
         require(ptDeltas[1] == 40000, "PT delta 1 incorrect");
         
         // Test hybrid deltas
         (uint256[] memory ddDeltas, uint256[] memory ptDeltas2) = 
-            VoteCalc.deltasHybrid(100, 10000, idxs, weights);
+            VotingMath.deltasHybrid(100, 10000, idxs, weights);
         require(ddDeltas[0] == 60, "DD delta 0 incorrect");
         require(ddDeltas[1] == 40, "DD delta 1 incorrect");
         require(ptDeltas2[0] == 6000, "PT delta 0 incorrect");
@@ -95,7 +95,7 @@ contract VoteCalcVerification {
         scores[2] = 20;
         
         (uint256 win, bool ok, uint256 hi, uint256 second) = 
-            VoteCalc.pickWinnerMajority(scores, 100, 40, true);
+            VotingMath.pickWinnerMajority(scores, 100, 40, true);
         
         require(win == 1, "Winner should be option 1");
         require(ok == true, "Should meet quorum");
@@ -119,7 +119,7 @@ contract VoteCalcVerification {
         ptRaw[2] = 3000;
         
         (uint256 win, bool ok, , ) = 
-            VoteCalc.pickWinnerTwoSlice(ddRaw, ptRaw, 100, 6000, 50, 40);
+            VotingMath.pickWinnerTwoSlice(ddRaw, ptRaw, 100, 6000, 50, 40);
         
         require(win == 2, "Winner should be option 2");
         require(ok == true, "Should meet quorum");
@@ -129,23 +129,23 @@ contract VoteCalcVerification {
     
     // Test 7: Square root calculation
     function testSqrt() public pure returns (bool) {
-        require(VoteCalc.sqrt(0) == 0, "sqrt(0) != 0");
-        require(VoteCalc.sqrt(1) == 1, "sqrt(1) != 1");
-        require(VoteCalc.sqrt(4) == 2, "sqrt(4) != 2");
-        require(VoteCalc.sqrt(9) == 3, "sqrt(9) != 3");
-        require(VoteCalc.sqrt(100) == 10, "sqrt(100) != 10");
-        require(VoteCalc.sqrt(1 ether) == 1e9, "sqrt(1 ether) != 1e9");
+        require(VotingMath.sqrt(0) == 0, "sqrt(0) != 0");
+        require(VotingMath.sqrt(1) == 1, "sqrt(1) != 1");
+        require(VotingMath.sqrt(4) == 2, "sqrt(4) != 2");
+        require(VotingMath.sqrt(9) == 3, "sqrt(9) != 3");
+        require(VotingMath.sqrt(100) == 10, "sqrt(100) != 10");
+        require(VotingMath.sqrt(1 ether) == 1e9, "sqrt(1 ether) != 1e9");
         
         return true;
     }
     
     // Test 8: Overflow checks
     function testOverflowChecks() public pure returns (bool) {
-        require(VoteCalc.fitsUint128(type(uint128).max) == true, "uint128 max should fit");
-        require(VoteCalc.fitsUint128(uint256(type(uint128).max) + 1) == false, "uint128 max + 1 should not fit");
+        require(VotingMath.fitsUint128(type(uint128).max) == true, "uint128 max should fit");
+        require(VotingMath.fitsUint128(uint256(type(uint128).max) + 1) == false, "uint128 max + 1 should not fit");
         
-        require(VoteCalc.fitsUint96(type(uint96).max) == true, "uint96 max should fit");
-        require(VoteCalc.fitsUint96(uint256(type(uint96).max) + 1) == false, "uint96 max + 1 should not fit");
+        require(VotingMath.fitsUint96(type(uint96).max) == true, "uint96 max should fit");
+        require(VotingMath.fitsUint96(uint256(type(uint96).max) + 1) == false, "uint96 max + 1 should not fit");
         
         return true;
     }
