@@ -7,7 +7,7 @@ import "../src/libs/VotingMath.sol";
 contract VotingMathTest is Test {
     /* ─────────── Test Weight Validation ─────────── */
     
-    function testValidateWeights_ValidInput() public pure {
+    function testValidateWeights_ValidInput() public {
         uint8[] memory idxs = new uint8[](3);
         uint8[] memory weights = new uint8[](3);
         
@@ -120,7 +120,7 @@ contract VotingMathTest is Test {
     
     /* ─────────── Test Power Calculation ─────────── */
     
-    function testPowerPT_LinearVoting() public pure {
+    function testPowerPT_LinearVoting() public {
         uint256 balance = 1000 ether;
         uint256 minBal = 100 ether;
         
@@ -128,7 +128,7 @@ contract VotingMathTest is Test {
         assertEq(power, 1000 ether, "Linear power should equal balance");
     }
     
-    function testPowerPT_QuadraticVoting() public pure {
+    function testPowerPT_QuadraticVoting() public {
         uint256 balance = 100 ether;
         uint256 minBal = 10 ether;
         
@@ -137,7 +137,7 @@ contract VotingMathTest is Test {
         assertEq(power, 10 ether, "Quadratic power should be sqrt of balance");
     }
     
-    function testPowerPT_BelowMinBalance() public pure {
+    function testPowerPT_BelowMinBalance() public {
         uint256 balance = 50 ether;
         uint256 minBal = 100 ether;
         
@@ -145,7 +145,7 @@ contract VotingMathTest is Test {
         assertEq(power, 0, "Power should be 0 when below min balance");
     }
     
-    function testPowersHybrid_WithDemocracyHat() public pure {
+    function testPowersHybrid_WithDemocracyHat() public {
         uint256 balance = 1000 ether;
         uint256 minBal = 100 ether;
         
@@ -155,7 +155,7 @@ contract VotingMathTest is Test {
         assertEq(ptRaw, 1000 ether * 100, "PT raw should be balance * 100");
     }
     
-    function testPowersHybrid_WithoutDemocracyHat() public pure {
+    function testPowersHybrid_WithoutDemocracyHat() public {
         uint256 balance = 1000 ether;
         uint256 minBal = 100 ether;
         
@@ -167,7 +167,7 @@ contract VotingMathTest is Test {
     
     /* ─────────── Test Delta Calculations ─────────── */
     
-    function testDeltasPT() public pure {
+    function testDeltasPT() public {
         uint256 power = 1000;
         uint8[] memory idxs = new uint8[](3);
         uint8[] memory weights = new uint8[](3);
@@ -188,7 +188,7 @@ contract VotingMathTest is Test {
         assertEq(deltas[2], 20000, "Delta 2 should be power * weight[2]");
     }
     
-    function testDeltasHybrid() public pure {
+    function testDeltasHybrid() public {
         uint256 ddRaw = 100;
         uint256 ptRaw = 10000;
         uint8[] memory idxs = new uint8[](2);
@@ -215,7 +215,7 @@ contract VotingMathTest is Test {
     
     /* ─────────── Test Winner Picking ─────────── */
     
-    function testPickWinnerMajority_SimpleWinner() public pure {
+    function testPickWinnerMajority_SimpleWinner() public {
         uint256[] memory scores = new uint256[](3);
         scores[0] = 30;
         scores[1] = 50;
@@ -233,7 +233,7 @@ contract VotingMathTest is Test {
         assertEq(second, 30, "Second highest should be 30");
     }
     
-    function testPickWinnerMajority_QuorumNotMet() public pure {
+    function testPickWinnerMajority_QuorumNotMet() public {
         uint256[] memory scores = new uint256[](3);
         scores[0] = 10;
         scores[1] = 20;
@@ -249,7 +249,7 @@ contract VotingMathTest is Test {
         assertFalse(ok, "Should not meet quorum (20 * 100 = 2000, not > 2500)");
     }
     
-    function testPickWinnerMajority_TieWithStrictRequirement() public pure {
+    function testPickWinnerMajority_TieWithStrictRequirement() public {
         uint256[] memory scores = new uint256[](2);
         scores[0] = 50;
         scores[1] = 50;
@@ -263,7 +263,7 @@ contract VotingMathTest is Test {
         assertFalse(ok, "Should not be valid with tie and strict requirement");
     }
     
-    function testPickWinnerMajority_TieWithoutStrictRequirement() public pure {
+    function testPickWinnerMajority_TieWithoutStrictRequirement() public {
         uint256[] memory scores = new uint256[](2);
         scores[0] = 50;
         scores[1] = 50;
@@ -278,7 +278,7 @@ contract VotingMathTest is Test {
         assertEq(win, 0, "First option should win in tie");
     }
     
-    function testPickWinnerTwoSlice_SimpleCase() public pure {
+    function testPickWinnerTwoSlice_SimpleCase() public {
         uint256[] memory ddRaw = new uint256[](3);
         uint256[] memory ptRaw = new uint256[](3);
         
@@ -306,7 +306,7 @@ contract VotingMathTest is Test {
         assertTrue(ok, "Should meet quorum");
     }
     
-    function testPickWinnerTwoSlice_ZeroTotals() public pure {
+    function testPickWinnerTwoSlice_ZeroTotals() public {
         uint256[] memory ddRaw = new uint256[](2);
         uint256[] memory ptRaw = new uint256[](2);
         
@@ -326,7 +326,7 @@ contract VotingMathTest is Test {
     
     /* ─────────── Test Math Utilities ─────────── */
     
-    function testSqrt() public pure {
+    function testSqrt() public {
         assertEq(VotingMath.sqrt(0), 0, "sqrt(0) = 0");
         assertEq(VotingMath.sqrt(1), 1, "sqrt(1) = 1");
         assertEq(VotingMath.sqrt(4), 2, "sqrt(4) = 2");
@@ -340,14 +340,14 @@ contract VotingMathTest is Test {
         assertEq(VotingMath.sqrt(100 ether), 10 * 1e9, "sqrt(100 ether) = 10e9");
     }
     
-    function testFitsUint128() public pure {
+    function testFitsUint128() public {
         assertTrue(VotingMath.fitsUint128(0), "0 should fit");
         assertTrue(VotingMath.fitsUint128(type(uint128).max), "uint128 max should fit");
         assertFalse(VotingMath.fitsUint128(uint256(type(uint128).max) + 1), "uint128 max + 1 should not fit");
         assertFalse(VotingMath.fitsUint128(type(uint256).max), "uint256 max should not fit");
     }
     
-    function testFitsUint96() public pure {
+    function testFitsUint96() public {
         assertTrue(VotingMath.fitsUint96(0), "0 should fit");
         assertTrue(VotingMath.fitsUint96(type(uint96).max), "uint96 max should fit");
         assertFalse(VotingMath.fitsUint96(uint256(type(uint96).max) + 1), "uint96 max + 1 should not fit");
@@ -356,7 +356,7 @@ contract VotingMathTest is Test {
     
     /* ─────────── Fuzz Tests ─────────── */
     
-    function testFuzz_Sqrt(uint256 x) public pure {
+    function testFuzz_Sqrt(uint256 x) public {
         uint256 result = VotingMath.sqrt(x);
         
         // Verify that result^2 <= x < (result+1)^2
@@ -404,7 +404,7 @@ contract VotingMathTest is Test {
         uint256[5] memory rawScores,
         uint8 quorumPct,
         bool strictMajority
-    ) public pure {
+    ) public {
         vm.assume(quorumPct > 0 && quorumPct <= 100);
         
         uint256[] memory scores = new uint256[](5);
