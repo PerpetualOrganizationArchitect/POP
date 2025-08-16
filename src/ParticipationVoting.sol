@@ -8,6 +8,7 @@ import {IExecutor} from "./Executor.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
+import {VoteCalc} from "./libs/VoteCalc.sol";
 
 /// Participation‑weighted governor (power = balance or √balance)
 contract ParticipationVoting is Initializable {
@@ -391,7 +392,8 @@ contract ParticipationVoting is Initializable {
 
         uint256 bal = l.participationToken.balanceOf(_msgSender());
         VotingMath.checkMinBalance(bal, l.MIN_BAL);
-        uint256 power = VotingMath.calculateVotingPower(bal, l.quadraticVoting);
+        // Use VoteCalc for power calculation
+        uint256 power = VoteCalc.powerPT(bal, l.MIN_BAL, l.quadraticVoting);
         require(power > 0, "power=0");
 
         Proposal storage p = l._proposals[id];
@@ -412,34 +414,23 @@ contract ParticipationVoting is Initializable {
         }
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
-        uint256 seen;
-        uint256 sum;
-        uint256 idxLen = idxs.length;
-        for (uint256 i; i < idxLen;) {
-            uint8 ix = idxs[i];
-            if (ix >= p.options.length) revert InvalidIndex();
-            if ((seen >> ix) & 1 == 1) revert DuplicateIndex();
-            seen |= 1 << ix;
-
-            uint8 w = weights[i];
-            if (w > 100) revert InvalidWeight();
-            unchecked {
-                sum += w;
-            }
-            unchecked {
-                ++i;
-            }
-        }
-        if (sum != 100) revert WeightSumNot100(sum);
+        // Use VoteCalc for weight validation
+        VoteCalc.validateWeights(VoteCalc.Weights({
+            idxs: idxs,
+            weights: weights,
+            optionsLen: p.options.length
+        }));
 
         uint256 newTW = uint256(p.totalWeight) + power;
         VotingMath.checkOverflow(newTW);
         p.totalWeight = uint128(newTW);
         p.hasVoted[_msgSender()] = true;
 
+        // Use VoteCalc to calculate deltas
+        uint256[] memory deltas = VoteCalc.deltasPT(power, idxs, weights);
+        uint256 idxLen = idxs.length;
         for (uint256 i; i < idxLen;) {
-            uint256 add = power * weights[i];
-            uint256 newVotes = uint256(p.options[idxs[i]].votes) + add;
+            uint256 newVotes = uint256(p.options[idxs[i]].votes) + deltas[i];
             VotingMath.checkOverflow(newVotes);
             p.options[idxs[i]].votes = uint128(newVotes);
             unchecked {
@@ -546,22 +537,23 @@ contract ParticipationVoting is Initializable {
     function _calcWinner(uint256 id) internal view returns (uint256 win, bool ok) {
         Layout storage l = _layout();
         Proposal storage p = l._proposals[id];
-        uint128 high;
-        uint128 second;
+        
+        // Build option scores array for VoteCalc
         uint256 len = p.options.length;
+        uint256[] memory optionScores = new uint256[](len);
         for (uint256 i; i < len;) {
-            uint128 v = p.options[i].votes;
-            if (v > high) {
-                second = high;
-                high = v;
-                win = i;
-            } else if (v > second) {
-                second = v;
-            }
+            optionScores[i] = p.options[i].votes;
             unchecked {
                 ++i;
             }
         }
-        ok = (uint256(high) * 100 > uint256(p.totalWeight) * l.quorumPercentage) && (high > second);
+        
+        // Use VoteCalc to pick winner with strict majority requirement
+        (win, ok, , ) = VoteCalc.pickWinnerMajority(
+            optionScores,
+            p.totalWeight,
+            l.quorumPercentage,
+            true // requireStrictMajority
+        );
     }
 }
