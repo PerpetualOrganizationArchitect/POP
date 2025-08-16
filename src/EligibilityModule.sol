@@ -19,13 +19,17 @@ interface IToggleModule {
  *         Now supports optional N-Vouch eligibility system.
  */
 contract EligibilityModule is Initializable, IHatsEligibility {
-
     /*═══════════════════════════════════════════ ERRORS ═══════════════════════════════════════════*/
 
     error NotSuperAdmin();
     error NotAuthorizedAdmin();
     error ZeroAddress();
-
+    error InvalidQuorum();
+    error InvalidMembershipHat();
+    error CannotVouchForSelf();
+    error InvalidHatId();
+    error InvalidUser();
+    error InvalidJoinTime();
     error ArrayLengthMismatch();
     error VouchingNotEnabled();
     error NotAuthorizedToVouch();
@@ -43,7 +47,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
     /// @notice Configuration for vouching system per hat (optimized packing)
     struct VouchConfig {
-        uint32 quorum; // Number of vouches required  
+        uint32 quorum; // Number of vouches required
         uint256 membershipHatId; // Hat ID whose wearers can vouch
         uint8 flags; // Packed flags: bit 0 = enabled, bit 1 = combineWithHierarchy
     }
@@ -69,11 +73,11 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         // Slot 1: Core addresses (40 bytes + 24 bytes padding)
         IHats hats; // 20 bytes
         address superAdmin; // 20 bytes
-        
         // Slot 2: Module addresses + hat ID (20 + 20 + 32 = 72 bytes across 3 slots)
         address toggleModule; // 20 bytes
         uint256 eligibilityModuleAdminHat; // 32 bytes (separate slot)
-        
+        // Emergency pause state
+        bool _paused;
         // Mappings (separate slots each)
         mapping(address => mapping(uint256 => WearerRules)) wearerRules;
         mapping(address => mapping(uint256 => bool)) hasSpecificWearerRules;
@@ -81,7 +85,6 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         mapping(uint256 => VouchConfig) vouchConfigs;
         mapping(uint256 => mapping(address => mapping(address => bool))) vouchers;
         mapping(uint256 => mapping(address => uint32)) currentVouchCount;
-        
         // Rate limiting for vouching
         mapping(address => uint256) userJoinTime;
         mapping(address => mapping(uint256 => uint32)) dailyVouchCount; // user => day => count
@@ -97,15 +100,31 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         }
     }
 
+    /*═══════════════════════════════════════ REENTRANCY PROTECTION ═══════════════════════════════════*/
+
+    uint256 private _notEntered = 1;
+
+    modifier nonReentrant() {
+        require(_notEntered == 1, "ReentrancyGuard: reentrant call");
+        _notEntered = 2;
+        _;
+        _notEntered = 1;
+    }
+
+    modifier whenNotPaused() {
+        require(!_layout()._paused, "Contract is paused");
+        _;
+    }
+
     /*═══════════════════════════════════════ FLAG CONSTANTS ═══════════════════════════════════════*/
 
     uint8 private constant ELIGIBLE_FLAG = 0x01; // bit 0
     uint8 private constant STANDING_FLAG = 0x02; // bit 1
     uint8 private constant ENABLED_FLAG = 0x01; // bit 0
     uint8 private constant COMBINE_HIERARCHY_FLAG = 0x02; // bit 1
-    
+
     /*═══════════════════════════════════ RATE LIMITING CONSTANTS ═══════════════════════════════════*/
-    
+
     uint32 private constant MAX_DAILY_VOUCHES = 3;
     uint256 private constant NEW_USER_RESTRICTION_DAYS = 2;
     uint256 private constant SECONDS_PER_DAY = 86400;
@@ -133,9 +152,15 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     event EligibilityModuleAdminHatSet(uint256 indexed hatId);
     event HatAutoMinted(address indexed wearer, uint256 indexed hatId, uint32 vouchCount);
     event HatCreatedWithEligibility(
-        address indexed creator, uint256 indexed parentHatId, uint256 indexed newHatId,
-        bool defaultEligible, bool defaultStanding, uint256 mintedCount
+        address indexed creator,
+        uint256 indexed parentHatId,
+        uint256 indexed newHatId,
+        bool defaultEligible,
+        bool defaultStanding,
+        uint256 mintedCount
     );
+    event Paused(address indexed account);
+    event Unpaused(address indexed account);
 
     /*═════════════════════════════════════════ MODIFIERS ═════════════════════════════════════════*/
 
@@ -146,10 +171,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
     modifier onlyHatAdmin(uint256 targetHatId) {
         Layout storage l = _layout();
-        if (
-            msg.sender != l.superAdmin &&
-            !l.hats.isAdminOfHat(msg.sender, targetHatId)
-        ) revert NotAuthorizedAdmin();
+        if (msg.sender != l.superAdmin && !l.hats.isAdminOfHat(msg.sender, targetHatId)) revert NotAuthorizedAdmin();
         _;
     }
 
@@ -160,64 +182,83 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     }
 
     function initialize(address _superAdmin, address _hats, address _toggleModule) external initializer {
+        if (_superAdmin == address(0) || _hats == address(0)) revert ZeroAddress();
+
         Layout storage l = _layout();
         l.superAdmin = _superAdmin;
         l.hats = IHats(_hats);
         l.toggleModule = _toggleModule;
+        l._paused = false;
         emit EligibilityModuleInitialized(_superAdmin, _hats);
     }
 
-        /*═══════════════════════════════════ AUTHORIZATION LOGIC ═══════════════════════════════════════*/
+    /*═══════════════════════════════════ PAUSE MANAGEMENT ═══════════════════════════════════════*/
+
+    function pause() external onlySuperAdmin {
+        _layout()._paused = true;
+        emit Paused(msg.sender);
+    }
+
+    function unpause() external onlySuperAdmin {
+        _layout()._paused = false;
+        emit Unpaused(msg.sender);
+    }
+
+    function paused() external view returns (bool) {
+        return _layout()._paused;
+    }
+
+    /*═══════════════════════════════════ AUTHORIZATION LOGIC ═══════════════════════════════════════*/
 
     // Authorization is now handled natively by the Hats tree structure using onlyHatAdmin modifier
 
     /*═══════════════════════════════════ ELIGIBILITY MANAGEMENT ═══════════════════════════════════════*/
 
-    function setWearerEligibility(
-        address wearer, 
-        uint256 hatId, 
-        bool _eligible, 
-        bool _standing
-    ) external onlyHatAdmin(hatId) {
+    function setWearerEligibility(address wearer, uint256 hatId, bool _eligible, bool _standing)
+        external
+        onlyHatAdmin(hatId)
+        whenNotPaused
+    {
+        if (wearer == address(0)) revert ZeroAddress();
         _setWearerEligibilityInternal(wearer, hatId, _eligible, _standing);
     }
 
-    function setDefaultEligibility(
-        uint256 hatId, 
-        bool _eligible, 
-        bool _standing
-    ) external onlyHatAdmin(hatId) {
+    function setDefaultEligibility(uint256 hatId, bool _eligible, bool _standing)
+        external
+        onlyHatAdmin(hatId)
+        whenNotPaused
+    {
         Layout storage l = _layout();
         l.defaultRules[hatId] = WearerRules(_packWearerFlags(_eligible, _standing));
         emit DefaultEligibilityUpdated(hatId, _eligible, _standing, msg.sender);
     }
 
-    function clearWearerEligibility(
-        address wearer, 
-        uint256 hatId
-    ) external onlyHatAdmin(hatId) {
+    function clearWearerEligibility(address wearer, uint256 hatId) external onlyHatAdmin(hatId) whenNotPaused {
+        if (wearer == address(0)) revert ZeroAddress();
         Layout storage l = _layout();
         delete l.wearerRules[wearer][hatId];
         delete l.hasSpecificWearerRules[wearer][hatId];
         emit WearerEligibilityUpdated(wearer, hatId, false, false, msg.sender);
     }
 
-    function setBulkWearerEligibility(
-        address[] calldata wearers, 
-        uint256 hatId, 
-        bool _eligible, 
-        bool _standing
-    ) external onlyHatAdmin(hatId) {
+    function setBulkWearerEligibility(address[] calldata wearers, uint256 hatId, bool _eligible, bool _standing)
+        external
+        onlyHatAdmin(hatId)
+    {
+        uint256 length = wearers.length;
+        if (length == 0) revert ArrayLengthMismatch();
+
         uint8 packedFlags = _packWearerFlags(_eligible, _standing);
         Layout storage l = _layout();
-        
-        // Use unchecked for gas optimization
-        unchecked {
-            uint256 length = wearers.length;
-            for (uint256 i; i < length; ++i) {
-                address wearer = wearers[i];
-                l.wearerRules[wearer][hatId] = WearerRules(packedFlags);
-                l.hasSpecificWearerRules[wearer][hatId] = true;
+
+        // Use unchecked for gas optimization in the loop only
+        for (uint256 i; i < length;) {
+            address wearer = wearers[i];
+            if (wearer == address(0)) revert ZeroAddress();
+            l.wearerRules[wearer][hatId] = WearerRules(packedFlags);
+            l.hasSpecificWearerRules[wearer][hatId] = true;
+            unchecked {
+                ++i;
             }
         }
         emit BulkWearerEligibilityUpdated(wearers, hatId, _eligible, _standing, msg.sender);
@@ -245,7 +286,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         }
 
         Layout storage l = _layout();
-        
+
         // Use unchecked for gas optimization
         unchecked {
             for (uint256 i; i < length; ++i) {
@@ -259,9 +300,13 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
     /*═══════════════════════════════════ HAT CREATION ═══════════════════════════════════════*/
 
-    function createHatWithEligibility(CreateHatParams calldata params) external onlyHatAdmin(params.parentHatId) returns (uint256 newHatId) {
+    function createHatWithEligibility(CreateHatParams calldata params)
+        external
+        onlyHatAdmin(params.parentHatId)
+        returns (uint256 newHatId)
+    {
         Layout storage l = _layout();
-        
+
         // Create the new hat
         newHatId = l.hats.createHat(
             params.parentHatId,
@@ -272,22 +317,26 @@ contract EligibilityModule is Initializable, IHatsEligibility {
             params._mutable,
             params.imageURI
         );
-        
+
         // Set default eligibility rules
         l.defaultRules[newHatId] = WearerRules(_packWearerFlags(params.defaultEligible, params.defaultStanding));
-        
+
         // Automatically activate the hat
         IToggleModule(l.toggleModule).setHatStatus(newHatId, true);
-        
+
         emit DefaultEligibilityUpdated(newHatId, params.defaultEligible, params.defaultStanding, msg.sender);
-        
+
         // Handle initial minting if specified
         uint256 mintLength = params.mintToAddresses.length;
         if (mintLength > 0) {
-            _handleInitialMinting(newHatId, params.mintToAddresses, params.wearerEligibleFlags, params.wearerStandingFlags, mintLength);
+            _handleInitialMinting(
+                newHatId, params.mintToAddresses, params.wearerEligibleFlags, params.wearerStandingFlags, mintLength
+            );
         }
-        
-        emit HatCreatedWithEligibility(msg.sender, params.parentHatId, newHatId, params.defaultEligible, params.defaultStanding, mintLength);
+
+        emit HatCreatedWithEligibility(
+            msg.sender, params.parentHatId, newHatId, params.defaultEligible, params.defaultStanding, mintLength
+        );
     }
 
     /// @dev Internal function to handle initial minting logic
@@ -299,23 +348,23 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         uint256 length
     ) internal {
         Layout storage l = _layout();
-        
+
         // If specific eligibility flags provided, validate and set them
         if (eligibleFlags.length > 0) {
             if (length != eligibleFlags.length || length != standingFlags.length) {
                 revert ArrayLengthMismatch();
             }
-            
+
             // Set specific eligibility and mint
             unchecked {
                 for (uint256 i; i < length; ++i) {
                     address wearer = addresses[i];
                     l.wearerRules[wearer][hatId] = WearerRules(_packWearerFlags(eligibleFlags[i], standingFlags[i]));
                     l.hasSpecificWearerRules[wearer][hatId] = true;
-                    
+
                     bool success = l.hats.mintHat(hatId, wearer);
                     require(success, "Hat minting failed");
-                    
+
                     emit WearerEligibilityUpdated(wearer, hatId, eligibleFlags[i], standingFlags[i], msg.sender);
                 }
             }
@@ -329,10 +378,6 @@ contract EligibilityModule is Initializable, IHatsEligibility {
             }
         }
     }
-
-
-
-
 
     /*═══════════════════════════════════ MODULE MANAGEMENT ═══════════════════════════════════════*/
 
@@ -385,7 +430,10 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         emit VouchConfigSet(hatId, quorum, membershipHatId, enabled, combineWithHierarchy);
     }
 
-    function vouchFor(address wearer, uint256 hatId) external {
+    function vouchFor(address wearer, uint256 hatId) external whenNotPaused {
+        if (wearer == address(0)) revert ZeroAddress();
+        if (wearer == msg.sender) revert CannotVouchForSelf();
+
         Layout storage l = _layout();
         VouchConfig memory config = l.vouchConfigs[hatId];
         if (!_isVouchingEnabled(config.flags)) revert VouchingNotEnabled();
@@ -397,17 +445,14 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
         // Record the vouch
         l.vouchers[hatId][wearer][msg.sender] = true;
-        unchecked {
-            ++l.currentVouchCount[hatId][wearer];
-        }
+        uint32 newCount = l.currentVouchCount[hatId][wearer] + 1;
+        l.currentVouchCount[hatId][wearer] = newCount;
 
         // Update daily vouch count
         uint256 currentDay = block.timestamp / SECONDS_PER_DAY;
-        unchecked {
-            ++l.dailyVouchCount[msg.sender][currentDay];
-        }
+        uint32 dailyCount = l.dailyVouchCount[msg.sender][currentDay] + 1;
+        l.dailyVouchCount[msg.sender][currentDay] = dailyCount;
 
-        uint32 newCount = l.currentVouchCount[hatId][wearer];
         emit Vouched(msg.sender, wearer, hatId, newCount);
 
         // Auto-mint hat if quorum is reached and wearer doesn't already have it
@@ -421,19 +466,19 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
     function _checkVouchingRateLimit(address user) internal view {
         Layout storage l = _layout();
-        
+
         // Check if user has been around long enough to vouch
         uint256 joinTime = l.userJoinTime[user];
         if (joinTime == 0) {
             // User never set join time, treat as new user
             revert NewUserVouchingRestricted();
         }
-        
+
         uint256 daysSinceJoined = (block.timestamp - joinTime) / SECONDS_PER_DAY;
         if (daysSinceJoined < NEW_USER_RESTRICTION_DAYS) {
             revert NewUserVouchingRestricted();
         }
-        
+
         // Check daily vouch limit
         uint256 currentDay = block.timestamp / SECONDS_PER_DAY;
         if (l.dailyVouchCount[user][currentDay] >= MAX_DAILY_VOUCHES) {
@@ -441,7 +486,9 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         }
     }
 
-    function revokeVouch(address wearer, uint256 hatId) external {
+    function revokeVouch(address wearer, uint256 hatId) external whenNotPaused {
+        if (wearer == address(0)) revert ZeroAddress();
+
         Layout storage l = _layout();
         VouchConfig memory config = l.vouchConfigs[hatId];
         if (!_isVouchingEnabled(config.flags)) revert VouchingNotEnabled();
@@ -449,18 +496,20 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
         // Remove the vouch
         l.vouchers[hatId][wearer][msg.sender] = false;
-        unchecked {
-            --l.currentVouchCount[hatId][wearer];
-        }
+        uint32 newCount = l.currentVouchCount[hatId][wearer] - 1;
+        l.currentVouchCount[hatId][wearer] = newCount;
 
-        uint32 newCount = l.currentVouchCount[hatId][wearer];
+        uint256 currentDay = block.timestamp / SECONDS_PER_DAY;
+        uint32 dailyCount = l.dailyVouchCount[msg.sender][currentDay] - 1;
+        l.dailyVouchCount[msg.sender][currentDay] = dailyCount;
+
         emit VouchRevoked(msg.sender, wearer, hatId, newCount);
 
         // Handle hat revocation if needed
-        if (!_shouldCombineWithHierarchy(config.flags) && 
-            newCount < config.quorum && 
-            l.hats.isWearerOfHat(wearer, hatId) &&
-            !l.hasSpecificWearerRules[wearer][hatId]) {
+        if (
+            !_shouldCombineWithHierarchy(config.flags) && newCount < config.quorum
+                && l.hats.isWearerOfHat(wearer, hatId) && !l.hasSpecificWearerRules[wearer][hatId]
+        ) {
             l.hats.setHatWearerStatus(hatId, wearer, false, false);
         }
     }
@@ -482,11 +531,13 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         bool vouchStanding;
 
         // Check hierarchy path
+        WearerRules memory rules;
         if (l.hasSpecificWearerRules[wearer][hatId]) {
-            (hierarchyEligible, hierarchyStanding) = _unpackWearerFlags(l.wearerRules[wearer][hatId].flags);
+            rules = l.wearerRules[wearer][hatId];
         } else {
-            (hierarchyEligible, hierarchyStanding) = _unpackWearerFlags(l.defaultRules[hatId].flags);
+            rules = l.defaultRules[hatId];
         }
+        (hierarchyEligible, hierarchyStanding) = _unpackWearerFlags(rules.flags);
 
         // Check vouch path if enabled
         if (_isVouchingEnabled(config.flags) && l.currentVouchCount[hatId][wearer] >= config.quorum) {
@@ -507,11 +558,14 @@ contract EligibilityModule is Initializable, IHatsEligibility {
             eligible = hierarchyEligible;
             standing = hierarchyStanding;
         }
+
+        // If standing is false, eligibility MUST also be false per IHatsEligibility interface
+        if (!standing) {
+            eligible = false;
+        }
     }
 
     /*═════════════════════════════════════ VIEW FUNCTIONS ═════════════════════════════════════════*/
-
-
 
     function getVouchConfig(uint256 hatId) external view returns (VouchConfig memory) {
         return _layout().vouchConfigs[hatId];
@@ -562,14 +616,14 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
     function canUserVouch(address user) external view returns (bool) {
         Layout storage l = _layout();
-        
+
         // Check if user has been around long enough
         uint256 joinTime = l.userJoinTime[user];
         if (joinTime == 0) return false;
-        
+
         uint256 daysSinceJoined = (block.timestamp - joinTime) / SECONDS_PER_DAY;
         if (daysSinceJoined < NEW_USER_RESTRICTION_DAYS) return false;
-        
+
         // Check daily vouch limit
         uint256 currentDay = block.timestamp / SECONDS_PER_DAY;
         return l.dailyVouchCount[user][currentDay] < MAX_DAILY_VOUCHES;
@@ -596,8 +650,6 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     function defaultRules(uint256 hatId) external view returns (WearerRules memory) {
         return _layout().defaultRules[hatId];
     }
-
-
 
     function vouchConfigs(uint256 hatId) external view returns (VouchConfig memory) {
         return _layout().vouchConfigs[hatId];
