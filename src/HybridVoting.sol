@@ -8,7 +8,6 @@ import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {IExecutor} from "./Executor.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
-import {VoteCalc} from "./libs/VoteCalc.sol";
 
 /* ─────────────────── HybridVoting ─────────────────── */
 contract HybridVoting is Initializable {
@@ -437,32 +436,32 @@ contract HybridVoting is Initializable {
             (_msgSender() == address(l.executor)) || HatManager.hasAnyHat(l.hats, l.democracyHatIds, _msgSender());
 
         uint256 bal = l.participationToken.balanceOf(_msgSender());
-        // Use VoteCalc for power calculation
+        // Use VotingMath for power calculation
         (uint256 ddRawVoter, uint256 ptRawVoter) =
-            VoteCalc.powersHybrid(hasDemocracyHat, bal, l.MIN_BAL, l.quadraticVoting);
+            VotingMath.powersHybrid(hasDemocracyHat, bal, l.MIN_BAL, l.quadraticVoting);
 
-        /* weight sanity - use VoteCalc */
-        VoteCalc.validateWeights(VoteCalc.Weights({
+        /* weight sanity - use VotingMath */
+        VotingMath.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: p.options.length
         }));
 
-        /* store raws - use VoteCalc for deltas */
+        /* store raws - use VotingMath for deltas */
         (uint256[] memory ddDeltas, uint256[] memory ptDeltas) = 
-            VoteCalc.deltasHybrid(ddRawVoter, ptRawVoter, idxs, weights);
+            VotingMath.deltasHybrid(ddRawVoter, ptRawVoter, idxs, weights);
         
         uint256 len = weights.length;
         for (uint256 i; i < len;) {
             uint8 ix = idxs[i];
             if (ddDeltas[i] > 0) {
                 uint256 newDD = p.options[ix].ddRaw + ddDeltas[i];
-                require(VoteCalc.fitsUint128(newDD), "DD overflow");
+                require(VotingMath.fitsUint128(newDD), "DD overflow");
                 p.options[ix].ddRaw = uint128(newDD);
             }
             if (ptDeltas[i] > 0) {
                 uint256 newPT = p.options[ix].ptRaw + ptDeltas[i];
-                require(VoteCalc.fitsUint128(newPT), "PT overflow");
+                require(VotingMath.fitsUint128(newPT), "PT overflow");
                 p.options[ix].ptRaw = uint128(newPT);
             }
             unchecked {
@@ -505,8 +504,8 @@ contract HybridVoting is Initializable {
             }
         }
         
-        // Use VoteCalc to pick winner with two-slice logic
-        (winner, valid, , ) = VoteCalc.pickWinnerTwoSlice(
+        // Use VotingMath to pick winner with two-slice logic
+        (winner, valid, , ) = VotingMath.pickWinnerTwoSlice(
             ddRaw,
             ptRaw,
             p.ddTotalRaw,

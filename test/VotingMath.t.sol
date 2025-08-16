@@ -2,9 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
-import "../src/libs/VoteCalc.sol";
+import "../src/libs/VotingMath.sol";
 
-contract VoteCalcTest is Test {
+contract VotingMathTest is Test {
     /* ─────────── Test Weight Validation ─────────── */
     
     function testValidateWeights_ValidInput() public pure {
@@ -20,7 +20,7 @@ contract VoteCalcTest is Test {
         weights[2] = 20;
         
         // Should not revert for valid input
-        VoteCalc.validateWeights(VoteCalc.Weights({
+        VotingMath.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 3
@@ -37,8 +37,8 @@ contract VoteCalcTest is Test {
         weights[0] = 50;
         weights[1] = 40; // Sum = 90, not 100
         
-        vm.expectRevert(abi.encodeWithSelector(VoteCalc.WeightSumNot100.selector, 90));
-        VoteCalc.validateWeights(VoteCalc.Weights({
+        vm.expectRevert(abi.encodeWithSelector(VotingMath.WeightSumNot100.selector, 90));
+        VotingMath.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 2
@@ -55,8 +55,8 @@ contract VoteCalcTest is Test {
         weights[0] = 50;
         weights[1] = 50;
         
-        vm.expectRevert(VoteCalc.DuplicateIndex.selector);
-        VoteCalc.validateWeights(VoteCalc.Weights({
+        vm.expectRevert(VotingMath.DuplicateIndex.selector);
+        VotingMath.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 2
@@ -73,8 +73,8 @@ contract VoteCalcTest is Test {
         weights[0] = 50;
         weights[1] = 50;
         
-        vm.expectRevert(VoteCalc.InvalidIndex.selector);
-        VoteCalc.validateWeights(VoteCalc.Weights({
+        vm.expectRevert(VotingMath.InvalidIndex.selector);
+        VotingMath.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 2
@@ -91,8 +91,8 @@ contract VoteCalcTest is Test {
         weights[0] = 101; // Weight > 100
         weights[1] = 0;
         
-        vm.expectRevert(VoteCalc.InvalidWeight.selector);
-        VoteCalc.validateWeights(VoteCalc.Weights({
+        vm.expectRevert(VotingMath.InvalidWeight.selector);
+        VotingMath.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 2
@@ -110,8 +110,8 @@ contract VoteCalcTest is Test {
         weights[1] = 30;
         weights[2] = 20;
         
-        vm.expectRevert(VoteCalc.LengthMismatch.selector);
-        VoteCalc.validateWeights(VoteCalc.Weights({
+        vm.expectRevert(VotingMath.LengthMismatch.selector);
+        VotingMath.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: 3
@@ -124,7 +124,7 @@ contract VoteCalcTest is Test {
         uint256 balance = 1000 ether;
         uint256 minBal = 100 ether;
         
-        uint256 power = VoteCalc.powerPT(balance, minBal, false);
+        uint256 power = VotingMath.powerPT(balance, minBal, false);
         assertEq(power, 1000 ether, "Linear power should equal balance");
     }
     
@@ -132,7 +132,7 @@ contract VoteCalcTest is Test {
         uint256 balance = 100 ether;
         uint256 minBal = 10 ether;
         
-        uint256 power = VoteCalc.powerPT(balance, minBal, true);
+        uint256 power = VotingMath.powerPT(balance, minBal, true);
         // sqrt(100 ether) = 10 * sqrt(1 ether)
         assertEq(power, 10 ether, "Quadratic power should be sqrt of balance");
     }
@@ -141,7 +141,7 @@ contract VoteCalcTest is Test {
         uint256 balance = 50 ether;
         uint256 minBal = 100 ether;
         
-        uint256 power = VoteCalc.powerPT(balance, minBal, false);
+        uint256 power = VotingMath.powerPT(balance, minBal, false);
         assertEq(power, 0, "Power should be 0 when below min balance");
     }
     
@@ -149,7 +149,7 @@ contract VoteCalcTest is Test {
         uint256 balance = 1000 ether;
         uint256 minBal = 100 ether;
         
-        (uint256 ddRaw, uint256 ptRaw) = VoteCalc.powersHybrid(true, balance, minBal, false);
+        (uint256 ddRaw, uint256 ptRaw) = VotingMath.powersHybrid(true, balance, minBal, false);
         
         assertEq(ddRaw, 100, "DD raw should be 100 with democracy hat");
         assertEq(ptRaw, 1000 ether * 100, "PT raw should be balance * 100");
@@ -159,7 +159,7 @@ contract VoteCalcTest is Test {
         uint256 balance = 1000 ether;
         uint256 minBal = 100 ether;
         
-        (uint256 ddRaw, uint256 ptRaw) = VoteCalc.powersHybrid(false, balance, minBal, false);
+        (uint256 ddRaw, uint256 ptRaw) = VotingMath.powersHybrid(false, balance, minBal, false);
         
         assertEq(ddRaw, 0, "DD raw should be 0 without democracy hat");
         assertEq(ptRaw, 1000 ether * 100, "PT raw should be balance * 100");
@@ -180,7 +180,7 @@ contract VoteCalcTest is Test {
         weights[1] = 30;
         weights[2] = 20;
         
-        uint256[] memory deltas = VoteCalc.deltasPT(power, idxs, weights);
+        uint256[] memory deltas = VotingMath.deltasPT(power, idxs, weights);
         
         assertEq(deltas.length, 3, "Should return correct number of deltas");
         assertEq(deltas[0], 50000, "Delta 0 should be power * weight[0]");
@@ -201,7 +201,7 @@ contract VoteCalcTest is Test {
         weights[1] = 40;
         
         (uint256[] memory ddDeltas, uint256[] memory ptDeltas) = 
-            VoteCalc.deltasHybrid(ddRaw, ptRaw, idxs, weights);
+            VotingMath.deltasHybrid(ddRaw, ptRaw, idxs, weights);
         
         assertEq(ddDeltas.length, 2, "Should return correct number of DD deltas");
         assertEq(ptDeltas.length, 2, "Should return correct number of PT deltas");
@@ -225,7 +225,7 @@ contract VoteCalcTest is Test {
         uint8 quorumPct = 40;
         
         (uint256 win, bool ok, uint256 hi, uint256 second) = 
-            VoteCalc.pickWinnerMajority(scores, totalWeight, quorumPct, true);
+            VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, true);
         
         assertEq(win, 1, "Option 1 should win");
         assertTrue(ok, "Should meet quorum");
@@ -243,7 +243,7 @@ contract VoteCalcTest is Test {
         uint8 quorumPct = 25; // Requires > 25% of total weight
         
         (uint256 win, bool ok, , ) = 
-            VoteCalc.pickWinnerMajority(scores, totalWeight, quorumPct, true);
+            VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, true);
         
         assertEq(win, 1, "Option 1 should be winner candidate");
         assertFalse(ok, "Should not meet quorum (20 * 100 = 2000, not > 2500)");
@@ -258,7 +258,7 @@ contract VoteCalcTest is Test {
         uint8 quorumPct = 40;
         
         (uint256 win, bool ok, , ) = 
-            VoteCalc.pickWinnerMajority(scores, totalWeight, quorumPct, true);
+            VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, true);
         
         assertFalse(ok, "Should not be valid with tie and strict requirement");
     }
@@ -272,7 +272,7 @@ contract VoteCalcTest is Test {
         uint8 quorumPct = 40;
         
         (uint256 win, bool ok, , ) = 
-            VoteCalc.pickWinnerMajority(scores, totalWeight, quorumPct, false);
+            VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, false);
         
         assertTrue(ok, "Should be valid with tie when not strict");
         assertEq(win, 0, "First option should win in tie");
@@ -296,7 +296,7 @@ contract VoteCalcTest is Test {
         uint8 quorumPct = 40;
         
         (uint256 win, bool ok, uint256 hi, uint256 second) = 
-            VoteCalc.pickWinnerTwoSlice(ddRaw, ptRaw, ddTotalRaw, ptTotalRaw, ddSharePct, quorumPct);
+            VotingMath.pickWinnerTwoSlice(ddRaw, ptRaw, ddTotalRaw, ptTotalRaw, ddSharePct, quorumPct);
         
         // DD scaled: [15, 25, 10] (out of 50)
         // PT scaled: [16.67, 8.33, 25] (out of 50)
@@ -316,7 +316,7 @@ contract VoteCalcTest is Test {
         ptRaw[1] = 0;
         
         (uint256 win, bool ok, uint256 hi, uint256 second) = 
-            VoteCalc.pickWinnerTwoSlice(ddRaw, ptRaw, 0, 0, 50, 40);
+            VotingMath.pickWinnerTwoSlice(ddRaw, ptRaw, 0, 0, 50, 40);
         
         assertEq(win, 0, "Should return 0 as winner");
         assertFalse(ok, "Should not be valid with zero totals");
@@ -327,37 +327,37 @@ contract VoteCalcTest is Test {
     /* ─────────── Test Math Utilities ─────────── */
     
     function testSqrt() public pure {
-        assertEq(VoteCalc.sqrt(0), 0, "sqrt(0) = 0");
-        assertEq(VoteCalc.sqrt(1), 1, "sqrt(1) = 1");
-        assertEq(VoteCalc.sqrt(4), 2, "sqrt(4) = 2");
-        assertEq(VoteCalc.sqrt(9), 3, "sqrt(9) = 3");
-        assertEq(VoteCalc.sqrt(16), 4, "sqrt(16) = 4");
-        assertEq(VoteCalc.sqrt(100), 10, "sqrt(100) = 10");
-        assertEq(VoteCalc.sqrt(10000), 100, "sqrt(10000) = 100");
+        assertEq(VotingMath.sqrt(0), 0, "sqrt(0) = 0");
+        assertEq(VotingMath.sqrt(1), 1, "sqrt(1) = 1");
+        assertEq(VotingMath.sqrt(4), 2, "sqrt(4) = 2");
+        assertEq(VotingMath.sqrt(9), 3, "sqrt(9) = 3");
+        assertEq(VotingMath.sqrt(16), 4, "sqrt(16) = 4");
+        assertEq(VotingMath.sqrt(100), 10, "sqrt(100) = 10");
+        assertEq(VotingMath.sqrt(10000), 100, "sqrt(10000) = 100");
         
         // Test with ether units
-        assertEq(VoteCalc.sqrt(1 ether), 1e9, "sqrt(1 ether) = 1e9");
-        assertEq(VoteCalc.sqrt(100 ether), 10 * 1e9, "sqrt(100 ether) = 10e9");
+        assertEq(VotingMath.sqrt(1 ether), 1e9, "sqrt(1 ether) = 1e9");
+        assertEq(VotingMath.sqrt(100 ether), 10 * 1e9, "sqrt(100 ether) = 10e9");
     }
     
     function testFitsUint128() public pure {
-        assertTrue(VoteCalc.fitsUint128(0), "0 should fit");
-        assertTrue(VoteCalc.fitsUint128(type(uint128).max), "uint128 max should fit");
-        assertFalse(VoteCalc.fitsUint128(uint256(type(uint128).max) + 1), "uint128 max + 1 should not fit");
-        assertFalse(VoteCalc.fitsUint128(type(uint256).max), "uint256 max should not fit");
+        assertTrue(VotingMath.fitsUint128(0), "0 should fit");
+        assertTrue(VotingMath.fitsUint128(type(uint128).max), "uint128 max should fit");
+        assertFalse(VotingMath.fitsUint128(uint256(type(uint128).max) + 1), "uint128 max + 1 should not fit");
+        assertFalse(VotingMath.fitsUint128(type(uint256).max), "uint256 max should not fit");
     }
     
     function testFitsUint96() public pure {
-        assertTrue(VoteCalc.fitsUint96(0), "0 should fit");
-        assertTrue(VoteCalc.fitsUint96(type(uint96).max), "uint96 max should fit");
-        assertFalse(VoteCalc.fitsUint96(uint256(type(uint96).max) + 1), "uint96 max + 1 should not fit");
-        assertFalse(VoteCalc.fitsUint96(type(uint256).max), "uint256 max should not fit");
+        assertTrue(VotingMath.fitsUint96(0), "0 should fit");
+        assertTrue(VotingMath.fitsUint96(type(uint96).max), "uint96 max should fit");
+        assertFalse(VotingMath.fitsUint96(uint256(type(uint96).max) + 1), "uint96 max + 1 should not fit");
+        assertFalse(VotingMath.fitsUint96(type(uint256).max), "uint256 max should not fit");
     }
     
     /* ─────────── Fuzz Tests ─────────── */
     
     function testFuzz_Sqrt(uint256 x) public pure {
-        uint256 result = VoteCalc.sqrt(x);
+        uint256 result = VotingMath.sqrt(x);
         
         // Verify that result^2 <= x < (result+1)^2
         uint256 resultSquared = result * result;
@@ -393,7 +393,7 @@ contract VoteCalcTest is Test {
         weights[numOptions - 1] = uint8(remaining);
         
         // Should not revert for valid input
-        VoteCalc.validateWeights(VoteCalc.Weights({
+        VotingMath.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: numOptions
@@ -418,7 +418,7 @@ contract VoteCalcTest is Test {
         if (totalWeight == 0) totalWeight = 1; // Avoid division by zero
         
         (uint256 win, bool ok, uint256 hi, uint256 second) = 
-            VoteCalc.pickWinnerMajority(scores, totalWeight, quorumPct, strictMajority);
+            VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, strictMajority);
         
         // Verify winner has highest score
         if (hi > 0) {

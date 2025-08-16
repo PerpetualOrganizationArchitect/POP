@@ -8,7 +8,6 @@ import {IExecutor} from "./Executor.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
-import {VoteCalc} from "./libs/VoteCalc.sol";
 
 /// Participation‑weighted governor (power = balance or √balance)
 contract ParticipationVoting is Initializable {
@@ -392,8 +391,8 @@ contract ParticipationVoting is Initializable {
 
         uint256 bal = l.participationToken.balanceOf(_msgSender());
         VotingMath.checkMinBalance(bal, l.MIN_BAL);
-        // Use VoteCalc for power calculation
-        uint256 power = VoteCalc.powerPT(bal, l.MIN_BAL, l.quadraticVoting);
+        // Use VotingMath for power calculation
+        uint256 power = VotingMath.powerPT(bal, l.MIN_BAL, l.quadraticVoting);
         require(power > 0, "power=0");
 
         Proposal storage p = l._proposals[id];
@@ -414,8 +413,8 @@ contract ParticipationVoting is Initializable {
         }
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
-        // Use VoteCalc for weight validation
-        VoteCalc.validateWeights(VoteCalc.Weights({
+        // Use VotingMath for weight validation
+        VotingMath.validateWeights(VotingMath.Weights({
             idxs: idxs,
             weights: weights,
             optionsLen: p.options.length
@@ -426,8 +425,8 @@ contract ParticipationVoting is Initializable {
         p.totalWeight = uint128(newTW);
         p.hasVoted[_msgSender()] = true;
 
-        // Use VoteCalc to calculate deltas
-        uint256[] memory deltas = VoteCalc.deltasPT(power, idxs, weights);
+        // Use VotingMath to calculate deltas
+        uint256[] memory deltas = VotingMath.deltasPT(power, idxs, weights);
         uint256 idxLen = idxs.length;
         for (uint256 i; i < idxLen;) {
             uint256 newVotes = uint256(p.options[idxs[i]].votes) + deltas[i];
@@ -548,8 +547,8 @@ contract ParticipationVoting is Initializable {
             }
         }
         
-        // Use VoteCalc to pick winner with strict majority requirement
-        (win, ok, , ) = VoteCalc.pickWinnerMajority(
+        // Use VotingMath to pick winner with strict majority requirement
+        (win, ok, , ) = VotingMath.pickWinnerMajority(
             optionScores,
             p.totalWeight,
             l.quorumPercentage,
