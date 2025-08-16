@@ -268,6 +268,26 @@ contract Deployer is Initializable, OwnableUpgradeable {
         ehProxy = _deploy(orgId, "EducationHub", executorAddr, autoUp, customImpl, init, lastRegister);
     }
 
+    /*---------  EligibilityModule  ---------*/
+    function _deployEligibilityModule(bytes32 orgId, bool autoUp, address customImpl)
+        internal
+        returns (address emProxy)
+    {
+        // Initialize without toggle module first since it doesn't exist yet
+        bytes memory init =
+            abi.encodeWithSignature("initialize(address,address,address)", address(this), address(hats), address(0));
+        emProxy = _deploy(orgId, "EligibilityModule", address(this), autoUp, customImpl, init, false);
+    }
+
+    /*---------  ToggleModule  ---------*/
+    function _deployToggleModule(bytes32 orgId, address adminAddr, bool autoUp, address customImpl)
+        internal
+        returns (address tmProxy)
+    {
+        bytes memory init = abi.encodeWithSignature("initialize(address)", adminAddr);
+        tmProxy = _deploy(orgId, "ToggleModule", address(this), autoUp, customImpl, init, false);
+    }
+
     /*---------  HybridVoting  ---------*/
     function _deployHybridVoting(
         bytes32 orgId,
@@ -326,16 +346,22 @@ contract Deployer is Initializable, OwnableUpgradeable {
         require(roleNames.length == roleCanVote.length, "HATS_SETUP: array mismatch");
 
         // ─────────────────────────────────────────────────────────────
-        //  Deploy EligibilityModule with Deployer as initial admin
+        //  Deploy EligibilityModule with Deployer as initial super admin
         // ─────────────────────────────────────────────────────────────
-        eligibilityModule = new EligibilityModule(address(this));
-        address eligibilityModuleAddress = address(eligibilityModule);
+        address eligibilityModuleAddress = _deployEligibilityModule(orgId, true, address(0));
+        eligibilityModule = EligibilityModule(eligibilityModuleAddress);
 
         // ─────────────────────────────────────────────────────────────
-        //  Deploy ToggleModule with Deployer as initial admin
+        //  Deploy ToggleModule with deployer as initial admin
         // ─────────────────────────────────────────────────────────────
-        toggleModule = new ToggleModule(address(this));
-        address toggleModuleAddress = address(toggleModule);
+        address toggleModuleAddress = _deployToggleModule(orgId, address(this), true, address(0));
+        toggleModule = ToggleModule(toggleModuleAddress);
+
+        // Set the toggle module in the eligibility module now that both are deployed
+        eligibilityModule.setToggleModule(toggleModuleAddress);
+
+        // Allow the eligibility module to control the toggle module
+        toggleModule.setEligibilityModule(eligibilityModuleAddress);
 
         // ─────────────────────────────────────────────────────────────
         //  Mint the Top Hat *to this deployer* so we can configure
@@ -346,35 +372,72 @@ contract Deployer is Initializable, OwnableUpgradeable {
             "" //image uri
         );
 
-        // Configure Top Hat eligibility and toggle
-        eligibilityModule.setHatRules(topHatId, true, true);
+        // Configure Top Hat eligibility and toggle (for the executor initially)
+        eligibilityModule.setWearerEligibility(address(this), topHatId, true, true);
         toggleModule.setHatStatus(topHatId, true);
 
         // ─────────────────────────────────────────────────────────────
+        //  Create EligibilityModule Admin Hat
+        // ─────────────────────────────────────────────────────────────
+        uint256 eligibilityAdminHatId = hats.createHat(
+            topHatId, // admin = parent Top Hat
+            "ELIGIBILITY_ADMIN", // details
+            1, // supply = 1 (only the eligibility module should wear this)
+            eligibilityModuleAddress, // eligibility module
+            toggleModuleAddress, // toggle module
+            true, // mutable
+            "ELIGIBILITY_ADMIN" // data blob
+        );
+
+        // Configure and mint the eligibility admin hat to the eligibility module itself
+        eligibilityModule.setWearerEligibility(eligibilityModuleAddress, eligibilityAdminHatId, true, true);
+        toggleModule.setHatStatus(eligibilityAdminHatId, true);
+        hats.mintHat(eligibilityAdminHatId, eligibilityModuleAddress);
+
+        // Set the eligibility module's admin hat
+        eligibilityModule.setEligibilityModuleAdminHat(eligibilityAdminHatId);
+
+        // ─────────────────────────────────────────────────────────────
         //  Create & (optionally) mint child hats for each role
+        //  Now using EligibilityModule admin hat as admin so it can mint them
         // ─────────────────────────────────────────────────────────────
         uint256 len = roleNames.length;
         roleHatIds = new uint256[](len);
 
-        // Create hats one at a time instead of using batchCreateHats
-        for (uint256 i; i < len; ++i) {
-            roleHatIds[i] = hats.createHat(
-                topHatId, // admin = parent Top Hat
-                roleNames[i], // details + placeholder URI
+        // Create hats in reverse order so higher-level roles can admin lower-level roles
+        // This creates hierarchy: EligibilityAdminHat -> EXECUTIVE -> DEFAULT -> MEMBER...
+        for (uint256 i = len; i > 0; i--) {
+            uint256 idx = i - 1; // Convert to 0-based index
+            uint256 adminHatId;
+
+            if (idx == len - 1) {
+                // Highest role (e.g., EXECUTIVE if len=2) is admin by eligibility admin hat
+                adminHatId = eligibilityAdminHatId;
+            } else {
+                // Lower roles are admin by the next higher role
+                adminHatId = roleHatIds[idx + 1];
+            }
+
+            roleHatIds[idx] = hats.createHat(
+                adminHatId, // admin based on hierarchy
+                roleNames[idx], // details + placeholder URI
                 type(uint32).max, // unlimited supply
                 eligibilityModuleAddress, // eligibility module
                 toggleModuleAddress, // toggle module
                 true, // mutable
-                roleNames[i] // data blob (optional)
+                roleNames[idx] // data blob (optional)
             );
 
-            // Configure role hat eligibility and toggle
-            eligibilityModule.setHatRules(roleHatIds[i], true, true);
-            toggleModule.setHatStatus(roleHatIds[i], true);
+            // Configure role hat eligibility and toggle for the executor
+            eligibilityModule.setWearerEligibility(executorAddr, roleHatIds[idx], true, true);
+            toggleModule.setHatStatus(roleHatIds[idx], true);
 
             // Give the role hat to the Executor right away if flagged
-            if (roleCanVote[i]) {
-                hats.mintHat(roleHatIds[i], executorAddr);
+            // Now the EligibilityModule mints the hat since it's the admin
+            if (roleCanVote[idx]) {
+                // Call the EligibilityModule to mint the hat since it's the admin
+                // We can do this because the deployer is still the super admin at this point
+                eligibilityModule.mintHatToAddress(roleHatIds[idx], executorAddr);
             }
         }
 
@@ -383,9 +446,22 @@ contract Deployer is Initializable, OwnableUpgradeable {
         hats.transferHat(topHatId, address(this), executorAddr);
 
         // ─────────────────────────────────────────────────────────────
+        //  Set default eligibility for all hats so minting works
+        // ─────────────────────────────────────────────────────────────
+        eligibilityModule.setDefaultEligibility(topHatId, true, true);
+        for (uint256 i = 0; i < roleHatIds.length; i++) {
+            eligibilityModule.setDefaultEligibility(roleHatIds[i], true, true);
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  Admin permissions are now handled natively by the Hats tree structure
+        //  The eligibilityAdminHat is admin of all role hats created under it
+        // ─────────────────────────────────────────────────────────────
+
+        // ─────────────────────────────────────────────────────────────
         //  Transfer module admin rights to the Executor
         // ─────────────────────────────────────────────────────────────
-        eligibilityModule.transferAdmin(executorAddr);
+        eligibilityModule.transferSuperAdmin(executorAddr);
         toggleModule.transferAdmin(executorAddr);
 
         // ─────────────────────────────────────────────────────────────
