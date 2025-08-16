@@ -766,7 +766,7 @@ contract HybridVoting is Initializable {
             if (id >= l._proposals.length) revert InvalidProposal();
             return abi.encode(l._proposals[id].restricted);
         } else if (key == StorageKey.VERSION) {
-            return abi.encode("v2");
+            return abi.encode("v1");
         } else if (key == StorageKey.PROPOSALS_COUNT) {
             return abi.encode(l._proposals.length);
         } else if (key == StorageKey.CLASSES) {
