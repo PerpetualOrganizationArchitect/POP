@@ -68,7 +68,7 @@ library VotingMath {
     }
 
     /* ─────────── Weight Validation (New Struct Version) ─────────── */
-    
+
     /**
      * @notice Validates weight distribution across options (struct version)
      * @param w Weight struct containing indices, weights, and option count
@@ -77,25 +77,25 @@ library VotingMath {
     function validateWeights(Weights memory w) internal pure {
         uint256 len = w.idxs.length;
         if (len == 0 || len != w.weights.length) revert LengthMismatch();
-        
+
         uint256 seen;
         uint256 sum;
-        
+
         unchecked {
             for (uint256 i; i < len; ++i) {
                 uint256 ix = w.idxs[i];
                 if (ix >= w.optionsLen) revert InvalidIndex();
-                
+
                 uint8 wt = w.weights[i];
                 if (wt > 100) revert InvalidWeight();
-                
+
                 if ((seen >> ix) & 1 == 1) revert DuplicateIndex();
                 seen |= 1 << ix;
-                
+
                 sum += wt;
             }
         }
-        
+
         if (sum != 100) revert WeightSumNot100(sum);
     }
 
@@ -159,19 +159,18 @@ library VotingMath {
      * @notice Calculate voting powers for hybrid voting
      * @param hasDemocracyHat Whether voter has democracy hat
      * @param bal Token balance
-     * @param minBal Minimum balance required  
+     * @param minBal Minimum balance required
      * @param quadratic Whether to use quadratic voting
      * @return ddRaw Direct democracy raw power
      * @return ptRaw Participation token raw power
      */
-    function powersHybrid(
-        bool hasDemocracyHat,
-        uint256 bal,
-        uint256 minBal,
-        bool quadratic
-    ) internal pure returns (uint256 ddRaw, uint256 ptRaw) {
+    function powersHybrid(bool hasDemocracyHat, uint256 bal, uint256 minBal, bool quadratic)
+        internal
+        pure
+        returns (uint256 ddRaw, uint256 ptRaw)
+    {
         if (hasDemocracyHat) ddRaw = 100; // one unit per eligible voter
-        
+
         uint256 p = powerPT(bal, minBal, quadratic);
         if (p > 0) ptRaw = p * 100; // match existing scaling
     }
@@ -203,7 +202,7 @@ library VotingMath {
     }
 
     /* ─────────── Accumulation Helpers ─────────── */
-    
+
     /**
      * @notice Calculate vote deltas for participation token voting
      * @param power Voter's voting power
@@ -212,11 +211,13 @@ library VotingMath {
      * @return adds Vote increments per option
      */
     function deltasPT(uint256 power, uint8[] memory idxs, uint8[] memory weights)
-        internal pure returns (uint256[] memory adds)
+        internal
+        pure
+        returns (uint256[] memory adds)
     {
         uint256 len = idxs.length;
         adds = new uint256[](len);
-        
+
         unchecked {
             for (uint256 i; i < len; ++i) {
                 adds[i] = power * uint256(weights[i]);
@@ -234,12 +235,14 @@ library VotingMath {
      * @return ptAdds PT vote increments per option
      */
     function deltasHybrid(uint256 ddRaw, uint256 ptRaw, uint8[] memory idxs, uint8[] memory weights)
-        internal pure returns (uint256[] memory ddAdds, uint256[] memory ptAdds)
+        internal
+        pure
+        returns (uint256[] memory ddAdds, uint256[] memory ptAdds)
     {
         uint256 len = idxs.length;
         ddAdds = new uint256[](len);
         ptAdds = new uint256[](len);
-        
+
         unchecked {
             for (uint256 i; i < len; ++i) {
                 ddAdds[i] = (ddRaw * weights[i]) / 100;
@@ -323,7 +326,7 @@ library VotingMath {
         bool requireStrictMajority
     ) internal pure returns (uint256 win, bool ok, uint256 hi, uint256 second) {
         uint256 len = optionScores.length;
-        
+
         for (uint256 i; i < len; ++i) {
             uint256 v = optionScores[i];
             if (v > hi) {
@@ -334,13 +337,13 @@ library VotingMath {
                 second = v;
             }
         }
-        
+
         if (hi == 0) return (win, false, hi, second);
-        
+
         // Quorum check: hi * 100 > totalWeight * quorumPct
         bool quorumMet = (hi * 100 > totalWeight * quorumPct);
         bool meetsMargin = requireStrictMajority ? (hi > second) : (hi >= second);
-        
+
         ok = quorumMet && meetsMargin;
     }
 
@@ -366,16 +369,16 @@ library VotingMath {
         uint8 quorumPct
     ) internal pure returns (uint256 win, bool ok, uint256 hi, uint256 second) {
         if (ddTotalRaw == 0 && ptTotalRaw == 0) return (0, false, 0, 0);
-        
+
         uint256 len = ddRaw.length;
-        uint256 sliceDD = ddSharePct;         // out of 100
+        uint256 sliceDD = ddSharePct; // out of 100
         uint256 slicePT = 100 - ddSharePct;
-        
+
         for (uint256 i; i < len; ++i) {
             uint256 sDD = (ddTotalRaw == 0) ? 0 : (ddRaw[i] * sliceDD) / ddTotalRaw;
             uint256 sPT = (ptTotalRaw == 0) ? 0 : (ptRaw[i] * slicePT) / ptTotalRaw;
             uint256 tot = sDD + sPT; // both scaled to [0..100]
-            
+
             if (tot > hi) {
                 second = hi;
                 hi = tot;
@@ -384,7 +387,7 @@ library VotingMath {
                 second = tot;
             }
         }
-        
+
         // Quorum interpreted on the final scaled total (max 100)
         // Requires strict margin for hybrid voting
         ok = (hi > second) && (hi >= quorumPct);
@@ -400,7 +403,7 @@ library VotingMath {
     function sqrt(uint256 x) internal pure returns (uint256 y) {
         if (x == 0) return 0;
         if (x <= 3) return 1;
-        
+
         // Calculate the square root using the Babylonian method
         // with overflow protection
         unchecked {

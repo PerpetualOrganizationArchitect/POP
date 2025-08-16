@@ -414,11 +414,7 @@ contract ParticipationVoting is Initializable {
         if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
 
         // Use VotingMath for weight validation
-        VotingMath.validateWeights(VotingMath.Weights({
-            idxs: idxs,
-            weights: weights,
-            optionsLen: p.options.length
-        }));
+        VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: p.options.length}));
 
         uint256 newTW = uint256(p.totalWeight) + power;
         VotingMath.checkOverflow(newTW);
@@ -536,7 +532,7 @@ contract ParticipationVoting is Initializable {
     function _calcWinner(uint256 id) internal view returns (uint256 win, bool ok) {
         Layout storage l = _layout();
         Proposal storage p = l._proposals[id];
-        
+
         // Build option scores array for VoteCalc
         uint256 len = p.options.length;
         uint256[] memory optionScores = new uint256[](len);
@@ -546,9 +542,9 @@ contract ParticipationVoting is Initializable {
                 ++i;
             }
         }
-        
+
         // Use VotingMath to pick winner with strict majority requirement
-        (win, ok, , ) = VotingMath.pickWinnerMajority(
+        (win, ok,,) = VotingMath.pickWinnerMajority(
             optionScores,
             p.totalWeight,
             l.quorumPercentage,
