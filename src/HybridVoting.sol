@@ -441,16 +441,12 @@ contract HybridVoting is Initializable {
             VotingMath.powersHybrid(hasDemocracyHat, bal, l.MIN_BAL, l.quadraticVoting);
 
         /* weight sanity - use VotingMath */
-        VotingMath.validateWeights(VotingMath.Weights({
-            idxs: idxs,
-            weights: weights,
-            optionsLen: p.options.length
-        }));
+        VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: p.options.length}));
 
         /* store raws - use VotingMath for deltas */
-        (uint256[] memory ddDeltas, uint256[] memory ptDeltas) = 
+        (uint256[] memory ddDeltas, uint256[] memory ptDeltas) =
             VotingMath.deltasHybrid(ddRawVoter, ptRawVoter, idxs, weights);
-        
+
         uint256 len = weights.length;
         for (uint256 i; i < len;) {
             uint8 ix = idxs[i];
@@ -495,7 +491,7 @@ contract HybridVoting is Initializable {
         uint256 len = p.options.length;
         uint256[] memory ddRaw = new uint256[](len);
         uint256[] memory ptRaw = new uint256[](len);
-        
+
         for (uint256 i; i < len;) {
             ddRaw[i] = p.options[i].ddRaw;
             ptRaw[i] = p.options[i].ptRaw;
@@ -503,16 +499,10 @@ contract HybridVoting is Initializable {
                 ++i;
             }
         }
-        
+
         // Use VotingMath to pick winner with two-slice logic
-        (winner, valid, , ) = VotingMath.pickWinnerTwoSlice(
-            ddRaw,
-            ptRaw,
-            p.ddTotalRaw,
-            p.ptTotalRaw,
-            l.ddSharePct,
-            l.quorumPct
-        );
+        (winner, valid,,) =
+            VotingMath.pickWinnerTwoSlice(ddRaw, ptRaw, p.ddTotalRaw, p.ptTotalRaw, l.ddSharePct, l.quorumPct);
 
         IExecutor.Call[] storage batch = p.batches[winner];
         if (valid && batch.length > 0) {

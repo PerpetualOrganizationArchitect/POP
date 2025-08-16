@@ -219,7 +219,6 @@ contract TaskManager is Initializable, ContextUpgradeable {
         _;
     }
 
-
     modifier canAssign(bytes32 pid) {
         _checkPerm(pid, TaskPerm.ASSIGN);
         _;
@@ -270,10 +269,6 @@ contract TaskManager is Initializable, ContextUpgradeable {
 
         emit ProjectCreated(projectId, metadata, cap);
     }
-
-
-
-
 
     function deleteProject(bytes32 pid, bytes calldata metadata) external onlyCreator {
         metadata.requireNonEmptyBytes();
@@ -668,10 +663,10 @@ contract TaskManager is Initializable, ContextUpgradeable {
         } else if (key == ConfigKey.PROJECT_MANAGER) {
             (bytes32 pid, address mgr, bool isManager) = abi.decode(value, (bytes32, address, bool));
             mgr.requireNonZeroAddress();
-            
+
             Project storage p = l._projects[pid];
             if (!p.exists) revert UnknownProject();
-            
+
             p.managers[mgr] = isManager;
             emit ProjectManagerUpdated(pid, mgr, isManager);
         } else if (key == ConfigKey.PROJECT_CAP) {
