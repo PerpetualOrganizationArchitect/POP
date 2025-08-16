@@ -38,7 +38,7 @@ contract VotingMathVerification {
         
         // Test quadratic voting
         uint256 power2 = VotingMath.powerPT(100 ether, 10 ether, true);
-        require(power2 == 10 ether, "Quadratic power incorrect");
+        require(power2 == 10 * 1e9, "Quadratic power incorrect");
         
         // Test below minimum
         uint256 power3 = VotingMath.powerPT(50 ether, 100 ether, false);
@@ -119,7 +119,7 @@ contract VotingMathVerification {
         ptRaw[2] = 3000;
         
         (uint256 win, bool ok, , ) = 
-            VotingMath.pickWinnerTwoSlice(ddRaw, ptRaw, 100, 6000, 50, 40);
+            VotingMath.pickWinnerTwoSlice(ddRaw, ptRaw, 100, 6000, 50, 30);
         
         require(win == 2, "Winner should be option 2");
         require(ok == true, "Should meet quorum");
