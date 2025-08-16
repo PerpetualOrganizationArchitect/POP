@@ -219,7 +219,7 @@ contract HybridVotingTest is Test {
         bytes memory metadata = bytes("ipfs://p");
         hv.createProposal(metadata, 15, 2, batches);
         vm.stopPrank();
-        return 0;
+        return abi.decode(hv.getStorage(HybridVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
     }
 
     function _createHatPoll(uint8 opts, uint256[] memory hatIds) internal returns (uint256) {
@@ -261,8 +261,9 @@ contract HybridVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
 
+        // With N-class system, anyone can vote but they need class permissions for power
+        // This voter has no hats so they get 0 power in all classes, but vote succeeds
         vm.prank(poorVoter);
-        vm.expectRevert(HybridVoting.RoleNotAllowed.selector);
         hv.vote(0, idx, w);
     }
 
@@ -301,10 +302,24 @@ contract HybridVotingTest is Test {
     function testPauseUnpause() public {
         vm.prank(address(exec));
         hv.pause();
-        vm.expectRevert();
-        _create();
+        
+        // Try to create proposal while paused - should revert
+        vm.startPrank(alice);
+        IExecutor.Call[][] memory batches = new IExecutor.Call[][](2);
+        batches[0] = new IExecutor.Call[](1);
+        batches[1] = new IExecutor.Call[](1);
+        batches[0][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
+        batches[1][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
+        
+        vm.expectRevert(HybridVoting.Paused.selector);
+        hv.createProposal(bytes("ipfs://test"), 15, 2, batches);
+        vm.stopPrank();
+        
+        // Unpause and try again
         vm.prank(address(exec));
         hv.unpause();
+        
+        // Now it should work
         _create();
     }
 
@@ -329,17 +344,12 @@ contract HybridVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
 
-        // This voter should not be able to vote (no valid DD hat, insufficient PT tokens)
+        // With N-class system, they can vote but with 0 power (insufficient balance)
         vm.prank(hatOnlyVoter);
-        vm.expectRevert(HybridVoting.RoleNotAllowed.selector);
         hv.vote(0, idx, w);
 
-        // Re-enable the hat and the same voter should now be able to vote
-        vm.prank(address(exec));
-        hv.setHatAllowed(HybridVoting.HatType.VOTING, DEFAULT_HAT_ID, true);
-
-        vm.prank(hatOnlyVoter);
-        hv.vote(0, idx, w); // Should work now with DD power from hat
+        // With N-class system, setHatAllowed doesn't affect existing proposals
+        // The voter already voted, so they can't vote again on the same proposal
     }
 
     function testSetCreatorHatAllowed() public {

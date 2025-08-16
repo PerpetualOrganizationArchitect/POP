@@ -597,8 +597,18 @@ contract HybridVoting is Initializable {
         
         // Check hat gating for this class
         bool hasClassHat = (voter == address(l.executor)) || 
-            (cls.hatIds.length == 0) || 
-            HatManager.hasAnyHat(l.hats, cls.hatIds, voter);
+            (cls.hatIds.length == 0);
+        
+        // Check if voter has any of the class hats
+        if (!hasClassHat && cls.hatIds.length > 0) {
+            for (uint256 i; i < cls.hatIds.length;) {
+                if (l.hats.isWearerOfHat(voter, cls.hatIds[i])) {
+                    hasClassHat = true;
+                    break;
+                }
+                unchecked { ++i; }
+            }
+        }
         
         if (!hasClassHat) return 0;
         
