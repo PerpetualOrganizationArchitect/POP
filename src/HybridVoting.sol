@@ -436,19 +436,30 @@ contract HybridVoting is Initializable {
             (_msgSender() == address(l.executor)) || HatManager.hasAnyHat(l.hats, l.democracyHatIds, _msgSender());
 
         uint256 bal = l.participationToken.balanceOf(_msgSender());
+        // Use VotingMath for power calculation
         (uint256 ddRawVoter, uint256 ptRawVoter) =
-            VotingMath.calculateRawPowers(hasDemocracyHat, bal, l.MIN_BAL, l.quadraticVoting);
+            VotingMath.powersHybrid(hasDemocracyHat, bal, l.MIN_BAL, l.quadraticVoting);
 
-        /* weight sanity */
-        VotingMath.validateWeights(weights, idxs, p.options.length);
+        /* weight sanity - use VotingMath */
+        VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: p.options.length}));
 
-        /* store raws */
+        /* store raws - use VotingMath for deltas */
+        (uint256[] memory ddDeltas, uint256[] memory ptDeltas) =
+            VotingMath.deltasHybrid(ddRawVoter, ptRawVoter, idxs, weights);
+
         uint256 len = weights.length;
         for (uint256 i; i < len;) {
             uint8 ix = idxs[i];
-            uint8 w = weights[i];
-            if (ddRawVoter > 0) p.options[ix].ddRaw += uint128(ddRawVoter * w / 100);
-            if (ptRawVoter > 0) p.options[ix].ptRaw += uint128(ptRawVoter * w / 100);
+            if (ddDeltas[i] > 0) {
+                uint256 newDD = p.options[ix].ddRaw + ddDeltas[i];
+                require(VotingMath.fitsUint128(newDD), "DD overflow");
+                p.options[ix].ddRaw = uint128(newDD);
+            }
+            if (ptDeltas[i] > 0) {
+                uint256 newPT = p.options[ix].ptRaw + ptDeltas[i];
+                require(VotingMath.fitsUint128(newPT), "PT overflow");
+                p.options[ix].ptRaw = uint128(newPT);
+            }
             unchecked {
                 ++i;
             }
@@ -476,30 +487,22 @@ contract HybridVoting is Initializable {
             return (0, false);
         }
 
-        (uint256 sliceDD, uint256 slicePT) = VotingMath.calculateSlicePercentages(l.ddSharePct);
-        uint256 hi;
-        uint256 second;
-
+        // Build arrays for VoteCalc
         uint256 len = p.options.length;
-        for (uint256 i; i < len;) {
-            /* scale each slice to its fixed share */
-            uint256 scaledDD = VotingMath.calculateScaledPower(p.options[i].ddRaw, p.ddTotalRaw, sliceDD);
-            uint256 scaledPT = VotingMath.calculateScaledPower(p.options[i].ptRaw, p.ptTotalRaw, slicePT);
-            uint256 totalScaled = VotingMath.calculateTotalScaledPower(scaledDD, scaledPT);
+        uint256[] memory ddRaw = new uint256[](len);
+        uint256[] memory ptRaw = new uint256[](len);
 
-            if (totalScaled > hi) {
-                second = hi;
-                hi = totalScaled;
-                winner = i;
-            } else if (totalScaled > second) {
-                second = totalScaled;
-            }
+        for (uint256 i; i < len;) {
+            ddRaw[i] = p.options[i].ddRaw;
+            ptRaw[i] = p.options[i].ptRaw;
             unchecked {
                 ++i;
             }
         }
 
-        valid = VotingMath.meetsQuorum(hi, second, sliceDD + slicePT, l.quorumPct);
+        // Use VotingMath to pick winner with two-slice logic
+        (winner, valid,,) =
+            VotingMath.pickWinnerTwoSlice(ddRaw, ptRaw, p.ddTotalRaw, p.ptTotalRaw, l.ddSharePct, l.quorumPct);
 
         IExecutor.Call[] storage batch = p.batches[winner];
         if (valid && batch.length > 0) {
