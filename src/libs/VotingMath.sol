@@ -251,45 +251,6 @@ library VotingMath {
         }
     }
 
-    /* ─────────── Scaling Functions ─────────── */
-
-    /**
-     * @notice Calculate scaled voting power for an option
-     * @param rawVotes Raw votes for the option
-     * @param totalRaw Total raw votes
-     * @param slicePercentage Percentage slice for this voting type
-     * @return scaled The scaled voting power
-     */
-    function calculateScaledPower(uint256 rawVotes, uint256 totalRaw, uint256 slicePercentage)
-        internal
-        pure
-        returns (uint256 scaled)
-    {
-        if (totalRaw == 0) return 0;
-        return (rawVotes * slicePercentage) / totalRaw;
-    }
-
-    /**
-     * @notice Calculate total scaled power from DD and PT components
-     * @param scaledDD Scaled direct democracy power
-     * @param scaledPT Scaled participation token power
-     * @return total The total scaled power
-     */
-    function calculateTotalScaledPower(uint256 scaledDD, uint256 scaledPT) internal pure returns (uint256 total) {
-        return scaledDD + scaledPT;
-    }
-
-    /**
-     * @notice Calculate slice percentages for DD and PT voting
-     * @param ddSharePct Direct democracy share percentage
-     * @return sliceDD DD slice percentage
-     * @return slicePT PT slice percentage
-     */
-    function calculateSlicePercentages(uint8 ddSharePct) internal pure returns (uint256 sliceDD, uint256 slicePT) {
-        sliceDD = ddSharePct;
-        slicePT = 100 - ddSharePct;
-    }
-
     /* ─────────── Winner & Quorum Functions ─────────── */
 
     /**
