@@ -329,67 +329,8 @@ contract Deployer is Initializable, OwnableUpgradeable {
     }
     
     /*---------  Helper Functions  ---------*/
-    function _buildLegacyPlaceholderClasses(
-        uint8 ddSplit,
-        bool quadratic,
-        uint256 minBal
-    ) internal pure returns (IHybridVotingInit.ClassConfig[] memory) {
-        // Build classes with empty hat arrays - they'll be filled in later
-        uint256[] memory emptyHats = new uint256[](0);
-        
-        IHybridVotingInit.ClassConfig[] memory classes;
-        
-        if (ddSplit == 100) {
-            // Pure Direct Democracy
-            classes = new IHybridVotingInit.ClassConfig[](1);
-            classes[0] = IHybridVotingInit.ClassConfig({
-                strategy: IHybridVotingInit.ClassStrategy.DIRECT,
-                slicePct: 100,
-                quadratic: false,
-                minBalance: 0,
-                asset: address(0),
-                hatIds: emptyHats
-            });
-        } else if (ddSplit == 0) {
-            // Pure Token Voting
-            classes = new IHybridVotingInit.ClassConfig[](1);
-            classes[0] = IHybridVotingInit.ClassConfig({
-                strategy: IHybridVotingInit.ClassStrategy.ERC20_BAL,
-                slicePct: 100,
-                quadratic: quadratic,
-                minBalance: minBal,
-                asset: address(0), // Will be set later
-                hatIds: emptyHats
-            });
-        } else {
-            // Hybrid (two classes)
-            classes = new IHybridVotingInit.ClassConfig[](2);
-            
-            // Class 0: Direct Democracy
-            classes[0] = IHybridVotingInit.ClassConfig({
-                strategy: IHybridVotingInit.ClassStrategy.DIRECT,
-                slicePct: ddSplit,
-                quadratic: false,
-                minBalance: 0,
-                asset: address(0),
-                hatIds: emptyHats
-            });
-            
-            // Class 1: Participation Token
-            classes[1] = IHybridVotingInit.ClassConfig({
-                strategy: IHybridVotingInit.ClassStrategy.ERC20_BAL,
-                slicePct: 100 - ddSplit,
-                quadratic: quadratic,
-                minBalance: minBal,
-                asset: address(0), // Will be set later
-                hatIds: emptyHats
-            });
-        }
-        
-        return classes;
-    }
     
-    function _finalizeClassesForDeployment(
+    function _updateClassesWithTokenAndHats(
         IHybridVotingInit.ClassConfig[] memory classes,
         address token,
         bytes32 orgId
@@ -612,52 +553,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
         return _deployFullOrgInternal(params);
     }
-    
-    // Legacy compatibility function for tests
-    function deployFullOrgLegacy(
-        bytes32 orgId,
-        string calldata orgName,
-        address registryAddr,
-        bool autoUpgrade,
-        uint8 quorumPct,
-        uint8 ddSplit,
-        bool quadratic,
-        uint256 minBal,
-        string[] calldata roleNames,
-        string[] calldata roleImages,
-        bool[] calldata roleCanVote
-    )
-        external
-        returns (
-            address hybridVoting,
-            address executorAddr,
-            address quickJoin,
-            address participationToken,
-            address taskManager,
-            address educationHub
-        )
-    {
-        // Build placeholder classes - will be updated with actual hat IDs later
-        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyPlaceholderClasses(
-            ddSplit,
-            quadratic,
-            minBal
-        );
-        
-        DeploymentParams memory params = DeploymentParams({
-            orgId: orgId,
-            orgName: orgName,
-            registryAddr: registryAddr,
-            autoUpgrade: autoUpgrade,
-            quorumPct: quorumPct,
-            votingClasses: classes,
-            roleNames: roleNames,
-            roleImages: roleImages,
-            roleCanVote: roleCanVote
-        });
-
-        return _deployFullOrgInternal(params);
-    }
 
     function _deployFullOrgInternal(DeploymentParams memory params)
         internal
@@ -710,8 +605,8 @@ contract Deployer is Initializable, OwnableUpgradeable {
         IParticipationToken(participationToken).setEducationHub(educationHub);
 
         /* 9. HybridVoting governor */
-        // Update token address and hat IDs in voting classes
-        IHybridVotingInit.ClassConfig[] memory finalClasses = _finalizeClassesForDeployment(
+        // Update token address in voting classes if needed  
+        IHybridVotingInit.ClassConfig[] memory finalClasses = _updateClassesWithTokenAndHats(
             params.votingClasses,
             participationToken,
             params.orgId
