@@ -71,21 +71,7 @@ contract HybridVoting is Initializable {
 
     // keccak256("poa.hybridvoting.v2.storage") → unique, collision-free slot for v2
     bytes32 private constant _STORAGE_SLOT = 0x7a3e8e3d8e9c8f7b6a5d4c3b2a1908070605040302010009080706050403020a;
-    
-    /* ─────── Storage Key Enum ─────── */
-    enum StorageKey {
-        PROPOSALS_COUNT,
-        QUORUM_PCT,
-        IS_TARGET_ALLOWED,
-        CREATOR_HATS,
-        POLL_RESTRICTED,
-        POLL_HAT_ALLOWED,
-        EXECUTOR,
-        HATS,
-        CLASSES,
-        PROPOSAL_CLASSES,
-        VERSION
-    }
+
 
     function _layout() private pure returns (Layout storage s) {
         assembly {
@@ -627,50 +613,40 @@ contract HybridVoting is Initializable {
     //     emit ProposalCleaned(id, cleaned);
     // }
 
-    /* ─────── Unified Storage Getter ─────── */
-    function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
-        Layout storage l = _layout();
-        
-        if (key == StorageKey.PROPOSALS_COUNT) {
-            return abi.encode(l._proposals.length);
-        } else if (key == StorageKey.QUORUM_PCT) {
-            return abi.encode(l.quorumPct);
-        } else if (key == StorageKey.IS_TARGET_ALLOWED) {
-            address target = abi.decode(params, (address));
-            return abi.encode(l.allowedTarget[target]);
-        } else if (key == StorageKey.CREATOR_HATS) {
-            return abi.encode(HatManager.getHatArray(l.creatorHatIds));
-        } else if (key == StorageKey.POLL_RESTRICTED) {
-            uint256 id = abi.decode(params, (uint256));
-            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
-            return abi.encode(l._proposals[id].restricted);
-        } else if (key == StorageKey.POLL_HAT_ALLOWED) {
-            (uint256 id, uint256 hat) = abi.decode(params, (uint256, uint256));
-            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
-            return abi.encode(l._proposals[id].pollHatAllowed[hat]);
-        } else if (key == StorageKey.EXECUTOR) {
-            return abi.encode(l.executor);
-        } else if (key == StorageKey.HATS) {
-            return abi.encode(l.hats);
-        } else if (key == StorageKey.CLASSES) {
-            return abi.encode(l.classes);
-        } else if (key == StorageKey.PROPOSAL_CLASSES) {
-            uint256 id = abi.decode(params, (uint256));
-            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
-            return abi.encode(l._proposals[id].classesSnapshot);
-        } else if (key == StorageKey.VERSION) {
-            return abi.encode("v1");
-        }
-        
-        revert VotingErrors.InvalidIndex();
-    }
-    
-    /* ─────── Convenience Functions (keep for backward compatibility) ─────── */
+    /* ─────── Targeted View Functions ─────── */
     function proposalsCount() external view returns (uint256) {
         return _layout()._proposals.length;
     }
     
     function quorumPct() external view returns (uint8) {
         return _layout().quorumPct;
+    }
+    
+    function isTargetAllowed(address target) external view returns (bool) {
+        return _layout().allowedTarget[target];
+    }
+    
+    function creatorHats() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().creatorHatIds);
+    }
+    
+    function pollRestricted(uint256 id) external view exists(id) returns (bool) {
+        return _layout()._proposals[id].restricted;
+    }
+    
+    function pollHatAllowed(uint256 id, uint256 hat) external view exists(id) returns (bool) {
+        return _layout()._proposals[id].pollHatAllowed[hat];
+    }
+    
+    function executor() external view returns (address) {
+        return address(_layout().executor);
+    }
+    
+    function hats() external view returns (address) {
+        return address(_layout().hats);
+    }
+    
+    function version() external pure returns (string memory) {
+        return "v1";
     }
 }

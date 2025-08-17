@@ -6,12 +6,12 @@ import {ParticipationVoting} from "../ParticipationVoting.sol";
 contract ParticipationVotingLens {
     
     function getVotingHatCount(ParticipationVoting voting) external view returns (uint256) {
-        uint256[] memory hats = abi.decode(voting.getStorage(ParticipationVoting.StorageKey.VOTING_HATS, ""), (uint256[]));
+        uint256[] memory hats = voting.votingHats();
         return hats.length;
     }
     
     function getCreatorHatCount(ParticipationVoting voting) external view returns (uint256) {
-        uint256[] memory hats = abi.decode(voting.getStorage(ParticipationVoting.StorageKey.CREATOR_HATS, ""), (uint256[]));
+        uint256[] memory hats = voting.creatorHats();
         return hats.length;
     }
     
@@ -22,7 +22,7 @@ contract ParticipationVotingLens {
     {
         bool[] memory allowed = new bool[](hatIds.length);
         for (uint256 i = 0; i < hatIds.length; i++) {
-            allowed[i] = abi.decode(voting.getStorage(ParticipationVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(proposalId, hatIds[i])), (bool));
+            allowed[i] = voting.pollHatAllowed(proposalId, hatIds[i]);
         }
         return allowed;
     }
@@ -37,9 +37,9 @@ contract ParticipationVotingLens {
             uint8 quorumPercentage
         ) 
     {
-        participationToken = abi.decode(voting.getStorage(ParticipationVoting.StorageKey.PARTICIPATION_TOKEN, ""), (address));
-        quadraticVoting = abi.decode(voting.getStorage(ParticipationVoting.StorageKey.QUADRATIC_VOTING, ""), (bool));
-        minBalance = abi.decode(voting.getStorage(ParticipationVoting.StorageKey.MIN_BALANCE, ""), (uint256));
+        participationToken = voting.participationToken();
+        quadraticVoting = voting.quadraticVoting();
+        minBalance = voting.minBalance();
         quorumPercentage = voting.quorumPercentage();
     }
 }
