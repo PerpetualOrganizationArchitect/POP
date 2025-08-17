@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/libs/HatManager.sol";
 import "../src/DirectDemocracyVoting.sol";
+import {VotingErrors} from "../src/libs/VotingErrors.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {MockHats} from "./mocks/MockHats.sol";
@@ -176,7 +177,7 @@ contract HatManagerTest is Test {
         weights[0] = 100;
 
         vm.prank(voter);
-        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         dd.vote(0, idx, weights);
     }
 
@@ -229,13 +230,13 @@ contract HatManagerTest is Test {
     function testUnauthorizedHatManagement() public {
         // Non-executor should not be able to manage hats
         vm.prank(voter);
-        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         dd.setConfig(
             DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.VOTING, 999, true)
         );
 
         vm.prank(creator);
-        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         dd.setConfig(
             DirectDemocracyVoting.ConfigKey.HAT_ALLOWED, abi.encode(DirectDemocracyVoting.HatType.CREATOR, 999, true)
         );

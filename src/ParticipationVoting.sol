@@ -8,29 +8,10 @@ import {IExecutor} from "./Executor.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
+import {VotingErrors} from "./libs/VotingErrors.sol";
 
 /// Participation‑weighted governor (power = balance or √balance)
 contract ParticipationVoting is Initializable {
-    /* ─────────────── Errors ─────────────── */
-    error Unauthorized();
-    error AlreadyVoted();
-    error InvalidProposal();
-    error VotingExpired();
-    error VotingOpen();
-    error WeightSumNot100(uint256);
-    error InvalidIndex();
-    error LengthMismatch();
-    error InvalidWeight();
-    error DurationOutOfRange();
-    error DuplicateIndex();
-    error TooManyOptions();
-    error TooManyCalls();
-    error TargetNotAllowed();
-    error TargetSelf();
-    error ZeroAddress();
-    error Overflow();
-    error InvalidMetadata();
-    error RoleNotAllowed();
 
     /* ───────────── Constants ───────────── */
     uint8 public constant MAX_OPTIONS = 50;
@@ -164,7 +145,7 @@ contract ParticipationVoting is Initializable {
     }
 
     modifier onlyExecutor() {
-        if (_msgSender() != address(_layout().executor)) revert Unauthorized();
+        if (_msgSender() != address(_layout().executor)) revert VotingErrors.Unauthorized();
         _;
     }
 
@@ -183,7 +164,7 @@ contract ParticipationVoting is Initializable {
         uint256 minBalance_
     ) external initializer {
         if (hats_ == address(0) || token_ == address(0) || executor_ == address(0)) {
-            revert ZeroAddress();
+            revert VotingErrors.ZeroAddress();
         }
         VotingMath.validateQuorum(quorumPct);
         VotingMath.validateMinBalance(minBalance_);
@@ -254,12 +235,12 @@ contract ParticipationVoting is Initializable {
             emit MinBalanceSet(n);
         } else if (key == ConfigKey.TARGET_ALLOWED) {
             (address target, bool allowed) = abi.decode(value, (address, bool));
-            if (target == address(0)) revert ZeroAddress();
+            if (target == address(0)) revert VotingErrors.ZeroAddress();
             l.allowedTarget[target] = allowed;
             emit TargetAllowed(target, allowed);
         } else if (key == ConfigKey.EXECUTOR) {
             address newExecutor = abi.decode(value, (address));
-            if (newExecutor == address(0)) revert ZeroAddress();
+            if (newExecutor == address(0)) revert VotingErrors.ZeroAddress();
             l.executor = IExecutor(newExecutor);
             emit ExecutorUpdated(newExecutor);
         } else if (key == ConfigKey.HAT_ALLOWED) {
@@ -280,23 +261,23 @@ contract ParticipationVoting is Initializable {
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
             bool canCreate = HatManager.hasAnyHat(l.hats, l.creatorHatIds, _msgSender());
-            if (!canCreate) revert Unauthorized();
+            if (!canCreate) revert VotingErrors.Unauthorized();
         }
         _;
     }
 
     modifier exists(uint256 id) {
-        if (id >= _layout()._proposals.length) revert InvalidProposal();
+        if (id >= _layout()._proposals.length) revert VotingErrors.InvalidProposal();
         _;
     }
 
     modifier notExpired(uint256 id) {
-        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingExpired();
+        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingErrors.VotingExpired();
         _;
     }
 
     modifier isExpired(uint256 id) {
-        if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingOpen();
+        if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingErrors.VotingOpen();
         _;
     }
 
@@ -307,10 +288,10 @@ contract ParticipationVoting is Initializable {
         uint8 numOptions,
         IExecutor.Call[][] calldata optionBatches
     ) external onlyCreator whenNotPaused {
-        if (metadata.length == 0) revert InvalidMetadata();
-        if (numOptions == 0 || numOptions != optionBatches.length) revert LengthMismatch();
-        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
-        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
+        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
+        if (numOptions == 0 || numOptions != optionBatches.length) revert VotingErrors.LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
+        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert VotingErrors.DurationOutOfRange();
 
         Layout storage l = _layout();
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
@@ -321,10 +302,10 @@ contract ParticipationVoting is Initializable {
         for (uint256 i; i < numOptions;) {
             uint256 batchLen = optionBatches[i].length;
             if (batchLen > 0) {
-                if (batchLen > MAX_CALLS) revert TooManyCalls();
+                if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
                 for (uint256 j; j < batchLen;) {
-                    if (!l.allowedTarget[optionBatches[i][j].target]) revert TargetNotAllowed();
-                    if (optionBatches[i][j].target == address(this)) revert TargetSelf();
+                    if (!l.allowedTarget[optionBatches[i][j].target]) revert VotingErrors.TargetNotAllowed();
+                    if (optionBatches[i][j].target == address(this)) revert VotingErrors.TargetSelf();
                     unchecked {
                         ++j;
                     }
@@ -345,10 +326,10 @@ contract ParticipationVoting is Initializable {
         onlyCreator
         whenNotPaused
     {
-        if (metadata.length == 0) revert InvalidMetadata();
-        if (numOptions == 0) revert LengthMismatch();
-        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
-        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
+        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
+        if (numOptions == 0) revert VotingErrors.LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
+        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert VotingErrors.DurationOutOfRange();
 
         Layout storage l = _layout();
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
@@ -385,9 +366,9 @@ contract ParticipationVoting is Initializable {
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
             bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
-            if (!canVote) revert Unauthorized();
+            if (!canVote) revert VotingErrors.Unauthorized();
         }
-        if (idxs.length != weights.length) revert LengthMismatch();
+        if (idxs.length != weights.length) revert VotingErrors.LengthMismatch();
 
         uint256 bal = l.participationToken.balanceOf(_msgSender());
         VotingMath.checkMinBalance(bal, l.MIN_BAL);
@@ -409,9 +390,9 @@ contract ParticipationVoting is Initializable {
                     ++i;
                 }
             }
-            if (!hasAllowedHat) revert RoleNotAllowed();
+            if (!hasAllowedHat) revert VotingErrors.RoleNotAllowed();
         }
-        if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
+        if (p.hasVoted[_msgSender()]) revert VotingErrors.AlreadyVoted();
 
         // Use VotingMath for weight validation
         VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: p.options.length}));
@@ -451,8 +432,8 @@ contract ParticipationVoting is Initializable {
         if (valid && batch.length > 0) {
             uint256 len = batch.length;
             for (uint256 i; i < len;) {
-                if (batch[i].target == address(this)) revert TargetSelf();
-                if (!l.allowedTarget[batch[i].target]) revert TargetNotAllowed();
+                if (batch[i].target == address(this)) revert VotingErrors.TargetSelf();
+                if (!l.allowedTarget[batch[i].target]) revert VotingErrors.TargetNotAllowed();
                 unchecked {
                     ++i;
                 }
@@ -510,11 +491,11 @@ contract ParticipationVoting is Initializable {
             return abi.encode(HatManager.getHatCount(l.creatorHatIds));
         } else if (key == StorageKey.POLL_HAT_ALLOWED) {
             (uint256 id, uint256 hat) = abi.decode(params, (uint256, uint256));
-            if (id >= l._proposals.length) revert InvalidProposal();
+            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
             return abi.encode(l._proposals[id].pollHatAllowed[hat]);
         } else if (key == StorageKey.POLL_RESTRICTED) {
             uint256 id = abi.decode(params, (uint256));
-            if (id >= l._proposals.length) revert InvalidProposal();
+            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
             return abi.encode(l._proposals[id].restricted);
         } else if (key == StorageKey.VERSION) {
             return abi.encode("v1");
@@ -525,7 +506,7 @@ contract ParticipationVoting is Initializable {
             return abi.encode(l.allowedTarget[target]);
         }
 
-        revert InvalidIndex();
+        revert VotingErrors.InvalidIndex();
     }
 
     /* ───────────── View helpers ───────────── */
