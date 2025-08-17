@@ -301,25 +301,13 @@ contract Deployer is Initializable, OwnableUpgradeable {
     function _deployHybridVoting(
         bytes32 orgId,
         address executorAddr,
-        address token,
         bool autoUp,
         address customImpl,
         bool lastRegister,
         uint8 quorumPct,
-        uint8 ddSplit,
-        bool quadratic,
-        uint256 minBal
+        IHybridVotingInit.ClassConfig[] memory classes
     ) internal returns (address hvProxy) {
         Layout storage l = _layout();
-
-        // Get the role hat IDs
-        uint256[] memory votingHats = new uint256[](2);
-        votingHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
-        votingHats[1] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
-
-        // For democracy hats, use only the EXECUTIVE role hat
-        uint256[] memory democracyHats = new uint256[](1);
-        democracyHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
 
         // For creator hats, use the EXECUTIVE role hat
         uint256[] memory creatorHats = new uint256[](1);
@@ -328,7 +316,27 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address[] memory targets = new address[](1);
         targets[0] = executorAddr;
 
-        // Build ClassConfig array based on legacy parameters
+        bytes memory init = abi.encodeWithSelector(
+            IHybridVotingInit.initialize.selector,
+            address(hats),
+            executorAddr,
+            creatorHats,
+            targets,
+            quorumPct,
+            classes
+        );
+        hvProxy = _deploy(orgId, "HybridVoting", executorAddr, autoUp, customImpl, init, lastRegister);
+    }
+    
+    /*---------  Helper Functions  ---------*/
+    function _buildLegacyPlaceholderClasses(
+        uint8 ddSplit,
+        bool quadratic,
+        uint256 minBal
+    ) internal pure returns (IHybridVotingInit.ClassConfig[] memory) {
+        // Build classes with empty hat arrays - they'll be filled in later
+        uint256[] memory emptyHats = new uint256[](0);
+        
         IHybridVotingInit.ClassConfig[] memory classes;
         
         if (ddSplit == 100) {
@@ -340,7 +348,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
                 quadratic: false,
                 minBalance: 0,
                 asset: address(0),
-                hatIds: democracyHats
+                hatIds: emptyHats
             });
         } else if (ddSplit == 0) {
             // Pure Token Voting
@@ -350,8 +358,8 @@ contract Deployer is Initializable, OwnableUpgradeable {
                 slicePct: 100,
                 quadratic: quadratic,
                 minBalance: minBal,
-                asset: token,
-                hatIds: votingHats
+                asset: address(0), // Will be set later
+                hatIds: emptyHats
             });
         } else {
             // Hybrid (two classes)
@@ -364,7 +372,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
                 quadratic: false,
                 minBalance: 0,
                 asset: address(0),
-                hatIds: democracyHats
+                hatIds: emptyHats
             });
             
             // Class 1: Participation Token
@@ -373,21 +381,52 @@ contract Deployer is Initializable, OwnableUpgradeable {
                 slicePct: 100 - ddSplit,
                 quadratic: quadratic,
                 minBalance: minBal,
-                asset: token,
-                hatIds: votingHats
+                asset: address(0), // Will be set later
+                hatIds: emptyHats
             });
         }
+        
+        return classes;
+    }
+    
+    function _finalizeClassesForDeployment(
+        IHybridVotingInit.ClassConfig[] memory classes,
+        address token,
+        bytes32 orgId
+    ) internal view returns (IHybridVotingInit.ClassConfig[] memory) {
+        Layout storage l = _layout();
+        
+        // Get the role hat IDs now that they've been created
+        uint256[] memory votingHats = new uint256[](2);
+        votingHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
+        votingHats[1] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
 
-        bytes memory init = abi.encodeWithSelector(
-            IHybridVotingInit.initialize.selector,
-            address(hats),
-            executorAddr,
-            creatorHats,
-            targets,
-            quorumPct,
-            classes
-        );
-        hvProxy = _deploy(orgId, "HybridVoting", executorAddr, autoUp, customImpl, init, lastRegister);
+        // For democracy hats, use only the EXECUTIVE role hat
+        uint256[] memory democracyHats = new uint256[](1);
+        democracyHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
+        
+        // Create a new array with updated configurations
+        IHybridVotingInit.ClassConfig[] memory finalClasses = new IHybridVotingInit.ClassConfig[](classes.length);
+        
+        for (uint256 i = 0; i < classes.length; i++) {
+            finalClasses[i] = classes[i];
+            
+            // Update token address for ERC20_BAL strategies
+            if (finalClasses[i].strategy == IHybridVotingInit.ClassStrategy.ERC20_BAL) {
+                if (finalClasses[i].asset == address(0)) {
+                    finalClasses[i].asset = token;
+                }
+                // For token voting, use voting hats (both DEFAULT and EXECUTIVE)
+                finalClasses[i].hatIds = votingHats;
+            } 
+            // Update hat IDs for DIRECT strategies
+            else if (finalClasses[i].strategy == IHybridVotingInit.ClassStrategy.DIRECT) {
+                // For direct democracy, use democracy hats (only EXECUTIVE)
+                finalClasses[i].hatIds = democracyHats;
+            }
+        }
+        
+        return finalClasses;
     }
 
     function _setupHatsTree(
@@ -532,15 +571,50 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address registryAddr;
         bool autoUpgrade;
         uint8 quorumPct;
-        uint8 ddSplit;
-        bool quadratic;
-        uint256 minBal;
+        IHybridVotingInit.ClassConfig[] votingClasses;
         string[] roleNames;
         string[] roleImages;
         bool[] roleCanVote;
     }
 
     function deployFullOrg(
+        bytes32 orgId,
+        string calldata orgName,
+        address registryAddr,
+        bool autoUpgrade,
+        uint8 quorumPct,
+        IHybridVotingInit.ClassConfig[] calldata votingClasses,
+        string[] calldata roleNames,
+        string[] calldata roleImages,
+        bool[] calldata roleCanVote
+    )
+        external
+        returns (
+            address hybridVoting,
+            address executorAddr,
+            address quickJoin,
+            address participationToken,
+            address taskManager,
+            address educationHub
+        )
+    {
+        DeploymentParams memory params = DeploymentParams({
+            orgId: orgId,
+            orgName: orgName,
+            registryAddr: registryAddr,
+            autoUpgrade: autoUpgrade,
+            quorumPct: quorumPct,
+            votingClasses: votingClasses,
+            roleNames: roleNames,
+            roleImages: roleImages,
+            roleCanVote: roleCanVote
+        });
+
+        return _deployFullOrgInternal(params);
+    }
+    
+    // Legacy compatibility function for tests
+    function deployFullOrgLegacy(
         bytes32 orgId,
         string calldata orgName,
         address registryAddr,
@@ -563,15 +637,20 @@ contract Deployer is Initializable, OwnableUpgradeable {
             address educationHub
         )
     {
+        // Build placeholder classes - will be updated with actual hat IDs later
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyPlaceholderClasses(
+            ddSplit,
+            quadratic,
+            minBal
+        );
+        
         DeploymentParams memory params = DeploymentParams({
             orgId: orgId,
             orgName: orgName,
             registryAddr: registryAddr,
             autoUpgrade: autoUpgrade,
             quorumPct: quorumPct,
-            ddSplit: ddSplit,
-            quadratic: quadratic,
-            minBal: minBal,
+            votingClasses: classes,
             roleNames: roleNames,
             roleImages: roleImages,
             roleCanVote: roleCanVote
@@ -631,17 +710,21 @@ contract Deployer is Initializable, OwnableUpgradeable {
         IParticipationToken(participationToken).setEducationHub(educationHub);
 
         /* 9. HybridVoting governor */
+        // Update token address and hat IDs in voting classes
+        IHybridVotingInit.ClassConfig[] memory finalClasses = _finalizeClassesForDeployment(
+            params.votingClasses,
+            participationToken,
+            params.orgId
+        );
+        
         hybridVoting = _deployHybridVoting(
             params.orgId,
             executorAddr,
-            participationToken,
             params.autoUpgrade,
             address(0),
             true,
             params.quorumPct,
-            params.ddSplit,
-            params.quadratic,
-            params.minBal
+            finalClasses
         );
 
         /* authorize QuickJoin to mint hats (before setting voting contract as caller) */
