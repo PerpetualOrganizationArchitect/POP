@@ -6,6 +6,7 @@ import "forge-std/Test.sol";
 
 /* target */
 import {HybridVoting} from "../src/HybridVoting.sol";
+import {VotingErrors} from "../src/libs/VotingErrors.sol";
 
 /* OpenZeppelin */
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -205,7 +206,7 @@ contract HybridVotingTest is Test {
         batches[1] = new IExecutor.Call[](0);
 
         bytes memory metadata = bytes("ipfs://test");
-        vm.expectRevert(HybridVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         hv.createProposal(metadata, 30, 2, batches);
 
         vm.stopPrank();
@@ -329,7 +330,7 @@ contract HybridVotingTest is Test {
         batches[0][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
         batches[1][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
         
-        vm.expectRevert(HybridVoting.Paused.selector);
+        vm.expectRevert(VotingErrors.Paused.selector);
         hv.createProposal(bytes("ipfs://test"), 15, 2, batches);
         vm.stopPrank();
         
@@ -425,7 +426,7 @@ contract HybridVotingTest is Test {
 
         // Should now fail
         vm.prank(newCreator);
-        vm.expectRevert(HybridVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         hv.createProposal(bytes("ipfs://test2"), 15, 2, batches);
     }
 
@@ -599,7 +600,7 @@ contract HybridVotingTest is Test {
 
         // First test: voter with valid hat but not the specific poll hat should get RoleNotAllowed
         vm.prank(alice);
-        vm.expectRevert(HybridVoting.RoleNotAllowed.selector);
+        vm.expectRevert(VotingErrors.RoleNotAllowed.selector);
         hv.vote(id, idx, w);
 
         // Second test: voter with correct hat should succeed
@@ -704,7 +705,7 @@ contract HybridVotingTest is Test {
             hatIds: hats
         });
         
-        vm.expectRevert(HybridVoting.InvalidSliceSum.selector);
+        vm.expectRevert(VotingErrors.InvalidSliceSum.selector);
         hv.setClasses(classes);
         
         // Test: too many classes
@@ -720,7 +721,7 @@ contract HybridVotingTest is Test {
             });
         }
         
-        vm.expectRevert(HybridVoting.TooManyClasses.selector);
+        vm.expectRevert(VotingErrors.TooManyClasses.selector);
         hv.setClasses(tooMany);
         
         vm.stopPrank();
@@ -1210,7 +1211,7 @@ contract HybridVotingTest is Test {
         
         // Try to set empty classes array (should revert)
         HybridVoting.ClassConfig[] memory emptyClasses = new HybridVoting.ClassConfig[](0);
-        vm.expectRevert(HybridVoting.InvalidClassCount.selector);
+        vm.expectRevert(VotingErrors.InvalidClassCount.selector);
         hv.setClasses(emptyClasses);
         
         vm.stopPrank();
