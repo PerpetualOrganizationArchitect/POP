@@ -531,7 +531,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         eduHubProxy = _eduHub;
 
         /* basic invariants */
-        assertEq(abi.decode(HybridVoting(hybridProxy).getStorage(HybridVoting.StorageKey.VERSION, ""), (string)), "v1");
+        assertEq(HybridVoting(hybridProxy).version(), "v1");
         assertEq(Executor(executorProxy).version(), "v1");
 
         /*—————————————————— quick smoke test: join + vote —————————————————*/
@@ -556,7 +556,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         batches[1] = new IExecutor.Call[](0);
 
         vm.prank(voter1);
-        HybridVoting(hybridProxy).createProposal("ipfs://test", 60, optNumber, batches);
+        uint256[] memory hatIds = new uint256[](0);
+        HybridVoting(hybridProxy).createProposal("ipfs://test", 60, optNumber, batches, hatIds);
 
         /* vote YES */
         uint8[] memory idxList = new uint8[](1);

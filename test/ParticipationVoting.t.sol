@@ -101,14 +101,14 @@ contract PVotingTest is Test {
             b[i] = new IExecutor.Call[](0);
         }
         vm.prank(creator);
-        pv.createProposal("meta", 10, opts, b);
-        return abi.decode(pv.getStorage(ParticipationVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
+        pv.createProposal("meta", 10, opts, b, new uint256[](0));
+        return pv.proposalsCount() - 1;
     }
 
     function _createHatPoll(uint8 opts, uint256[] memory hatIds) internal returns (uint256) {
         vm.prank(creator);
-        pv.createHatPoll("meta", 10, opts, hatIds);
-        return abi.decode(pv.getStorage(ParticipationVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
+        pv.createProposal("meta", 10, opts, new IExecutor.Call[][](opts), hatIds);
+        return pv.proposalsCount() - 1;
     }
 
     function testInitializeZeroAddress() public {
@@ -163,7 +163,7 @@ contract PVotingTest is Test {
         address newExec = address(0x9);
         vm.prank(address(exec));
         pv.setConfig(ParticipationVoting.ConfigKey.EXECUTOR, abi.encode(newExec));
-        assertEq(address(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.EXECUTOR, ""), (address))), newExec);
+        assertEq(pv.executor(), newExec);
     }
 
     function testSetExecutorUnauthorized() public {
@@ -186,8 +186,8 @@ contract PVotingTest is Test {
         b[0] = new IExecutor.Call[](0);
         // Creator should still be able to create (different permission)
         vm.prank(creator);
-        pv.createProposal("m", 10, 1, b);
-        assertEq(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)), 1);
+        pv.createProposal("m", 10, 1, b, new uint256[](0));
+        assertEq(pv.proposalsCount(), 1);
 
         // But voting should fail
         uint8[] memory idx = new uint8[](1);
@@ -225,8 +225,8 @@ contract PVotingTest is Test {
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
         b[0] = new IExecutor.Call[](0);
         vm.prank(newCreator);
-        pv.createProposal("m", 10, 1, b);
-        assertEq(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)), 1);
+        pv.createProposal("m", 10, 1, b, new uint256[](0));
+        assertEq(pv.proposalsCount(), 1);
 
         // Disable new hat
         vm.prank(address(exec));
@@ -237,7 +237,7 @@ contract PVotingTest is Test {
         // Should now fail
         vm.prank(newCreator);
         vm.expectRevert(VotingErrors.Unauthorized.selector);
-        pv.createProposal("m", 10, 1, b);
+        pv.createProposal("m", 10, 1, b, new uint256[](0));
     }
 
     function testVoterCannotCreateProposal() public {
@@ -246,20 +246,20 @@ contract PVotingTest is Test {
         b[0] = new IExecutor.Call[](0);
         vm.prank(voter);
         vm.expectRevert(VotingErrors.Unauthorized.selector);
-        pv.createProposal("m", 10, 1, b);
+        pv.createProposal("m", 10, 1, b, new uint256[](0));
     }
 
     function testSetTargetAllowed() public {
         address tgt = address(0xdead);
         vm.prank(address(exec));
         pv.setConfig(ParticipationVoting.ConfigKey.TARGET_ALLOWED, abi.encode(tgt, true));
-        assertTrue(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.ALLOWED_TARGET, abi.encode(tgt)), (bool)));
+        assertTrue(pv.isTargetAllowed(tgt));
     }
 
     function testSetQuorum() public {
         vm.prank(address(exec));
         pv.setConfig(ParticipationVoting.ConfigKey.QUORUM, abi.encode(80));
-        assertEq(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.QUORUM_PERCENTAGE, ""), (uint8)), 80);
+        assertEq(pv.quorumPercentage(), 80);
     }
 
     function testSetQuorumBad() public {
@@ -274,16 +274,16 @@ contract PVotingTest is Test {
     }
 
     function testToggleQuadratic() public {
-        assertFalse(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.QUADRATIC_VOTING, ""), (bool)));
+        assertFalse(pv.quadraticVoting());
         vm.prank(address(exec));
         pv.setConfig(ParticipationVoting.ConfigKey.QUADRATIC, abi.encode(true));
-        assertTrue(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.QUADRATIC_VOTING, ""), (bool)));
+        assertTrue(pv.quadraticVoting());
     }
 
     function testSetMinBalance() public {
         vm.prank(address(exec));
         pv.setConfig(ParticipationVoting.ConfigKey.MIN_BALANCE, abi.encode(5 ether));
-        assertEq(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.MIN_BAL, ""), (uint256)), 5 ether);
+        assertEq(pv.minBalance(), 5 ether);
     }
 
     function testCreateProposalBasic() public {
@@ -293,8 +293,8 @@ contract PVotingTest is Test {
         b[0] = new IExecutor.Call[](1);
         b[0][0] = IExecutor.Call({target: address(0xdead), value: 0, data: ""});
         vm.prank(creator);
-        pv.createProposal("hello", 10, 1, b);
-        assertEq(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)), 1);
+        pv.createProposal("hello", 10, 1, b, new uint256[](0));
+        assertEq(pv.proposalsCount(), 1);
     }
 
     function testCreateProposalMetadataEmpty() public {
@@ -302,7 +302,7 @@ contract PVotingTest is Test {
         b[0] = new IExecutor.Call[](0);
         vm.prank(creator);
         vm.expectRevert(VotingErrors.InvalidMetadata.selector);
-        pv.createProposal("", 10, 1, b);
+        pv.createProposal("", 10, 1, b, new uint256[](0));
     }
 
     function testCreateProposalDurationOutOfRange() public {
@@ -310,7 +310,7 @@ contract PVotingTest is Test {
         b[0] = new IExecutor.Call[](0);
         vm.prank(creator);
         vm.expectRevert(VotingErrors.DurationOutOfRange.selector);
-        pv.createProposal("m", 5, 1, b);
+        pv.createProposal("m", 5, 1, b, new uint256[](0));
     }
 
     function testCreateProposalTooManyOptions() public {
@@ -321,7 +321,7 @@ contract PVotingTest is Test {
         }
         vm.prank(creator);
         vm.expectRevert(VotingErrors.TooManyOptions.selector);
-        pv.createProposal("m", 10, n, b);
+        pv.createProposal("m", 10, n, b, new uint256[](0));
     }
 
     function testCreateProposalBadBatch() public {
@@ -330,7 +330,7 @@ contract PVotingTest is Test {
         b[0][0] = IExecutor.Call({target: address(0xdead), value: 0, data: ""});
         vm.prank(creator);
         vm.expectRevert(VotingErrors.TargetNotAllowed.selector);
-        pv.createProposal("m", 10, 1, b);
+        pv.createProposal("m", 10, 1, b, new uint256[](0));
     }
 
     function testVoteBasic() public {
@@ -448,7 +448,7 @@ contract PVotingTest is Test {
         b[0][0] = IExecutor.Call({target: address(this), value: 0, data: ""});
         b[1] = new IExecutor.Call[](0);
         vm.prank(creator);
-        pv.createProposal("m", 10, 2, b);
+        pv.createProposal("m", 10, 2, b, new uint256[](0));
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
         uint8[] memory w = new uint8[](1);
@@ -493,15 +493,9 @@ contract PVotingTest is Test {
         );
 
         uint256 id = _createHatPoll(2, hatIds);
-        assertTrue(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
-        assertTrue(
-            abi.decode(pv.getStorage(ParticipationVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, HAT_ID)), (bool))
-        );
-        assertFalse(
-            abi.decode(
-                pv.getStorage(ParticipationVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, CREATOR_HAT_ID)), (bool)
-            )
-        );
+        assertTrue(pv.pollRestricted(id));
+        assertTrue(pv.pollHatAllowed(id, HAT_ID));
+        assertFalse(pv.pollHatAllowed(id, CREATOR_HAT_ID));
     }
 
     function testHatPollRestrictions() public {
@@ -532,7 +526,7 @@ contract PVotingTest is Test {
         // Empty hat IDs should create unrestricted poll
         uint256[] memory hatIds = new uint256[](0);
         uint256 id = _createHatPoll(1, hatIds);
-        assertFalse(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
+        assertFalse(pv.pollRestricted(id));
 
         // Anyone with voting hat should be able to vote
         uint8[] memory idx = new uint8[](1);
