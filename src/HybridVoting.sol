@@ -8,29 +8,10 @@ import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {IExecutor} from "./Executor.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
+import {VotingErrors} from "./libs/VotingErrors.sol";
 
 /* ─────────────────── HybridVoting ─────────────────── */
 contract HybridVoting is Initializable {
-    /* ─────── Errors ─────── */
-    error Unauthorized();
-    error AlreadyVoted();
-    error InvalidProposal();
-    error VotingExpired();
-    error VotingOpen();
-    error InvalidIndex();
-    error LengthMismatch();
-    error DurationOutOfRange();
-    error TooManyOptions();
-    error TooManyCalls();
-    error InvalidTarget();
-    error ZeroAddress();
-    error InvalidMetadata();
-    error RoleNotAllowed();
-    error Paused();
-    error InvalidClassCount();
-    error InvalidSliceSum();
-    error TooManyClasses();
-    error InvalidStrategy();
 
     /* ─────── Constants ─────── */
     uint8 public constant MAX_OPTIONS = 50;
@@ -121,7 +102,7 @@ contract HybridVoting is Initializable {
 
     /* ─────────── Inline Pausable Implementation ─────────── */
     modifier whenNotPaused() {
-        if (_layout()._paused) revert Paused();
+        if (_layout()._paused) revert VotingErrors.Paused();
         _;
     }
 
@@ -161,11 +142,11 @@ contract HybridVoting is Initializable {
         ClassConfig[] calldata initialClasses
     ) external initializer {
         if (hats_ == address(0) || executor_ == address(0)) {
-            revert ZeroAddress();
+            revert VotingErrors.ZeroAddress();
         }
         
-        if (initialClasses.length == 0) revert InvalidClassCount();
-        if (initialClasses.length > MAX_CLASSES) revert TooManyClasses();
+        if (initialClasses.length == 0) revert VotingErrors.InvalidClassCount();
+        if (initialClasses.length > MAX_CLASSES) revert VotingErrors.TooManyClasses();
 
         VotingMath.validateQuorum(quorum_);
 
@@ -186,18 +167,18 @@ contract HybridVoting is Initializable {
         uint256 totalSlice;
         for (uint256 i; i < initialClasses.length;) {
             ClassConfig calldata c = initialClasses[i];
-            if (c.slicePct == 0 || c.slicePct > 100) revert InvalidSliceSum();
+            if (c.slicePct == 0 || c.slicePct > 100) revert VotingErrors.InvalidSliceSum();
             totalSlice += c.slicePct;
             
             if (c.strategy == ClassStrategy.ERC20_BAL) {
-                if (c.asset == address(0)) revert ZeroAddress();
+                if (c.asset == address(0)) revert VotingErrors.ZeroAddress();
             }
             
             l.classes.push(initialClasses[i]);
             unchecked { ++i; }
         }
         
-        if (totalSlice != 100) revert InvalidSliceSum();
+        if (totalSlice != 100) revert VotingErrors.InvalidSliceSum();
         
         // Emit new class configuration event
         bytes32 classesHash = keccak256(abi.encode(l.classes));
@@ -228,7 +209,7 @@ contract HybridVoting is Initializable {
 
     /* ─────── Governance setters (executor‑gated) ─────── */
     modifier onlyExecutor() {
-        if (_msgSender() != address(_layout().executor)) revert Unauthorized();
+        if (_msgSender() != address(_layout().executor)) revert VotingErrors.Unauthorized();
         _;
     }
 
@@ -253,22 +234,22 @@ contract HybridVoting is Initializable {
 
     /* ─────── N-Class Configuration ─────── */
     function setClasses(ClassConfig[] calldata newClasses) external onlyExecutor {
-        if (newClasses.length == 0) revert InvalidClassCount();
-        if (newClasses.length > MAX_CLASSES) revert TooManyClasses();
+        if (newClasses.length == 0) revert VotingErrors.InvalidClassCount();
+        if (newClasses.length > MAX_CLASSES) revert VotingErrors.TooManyClasses();
         
         uint256 totalSlice;
         for (uint256 i; i < newClasses.length;) {
             ClassConfig calldata c = newClasses[i];
-            if (c.slicePct == 0 || c.slicePct > 100) revert InvalidSliceSum();
+            if (c.slicePct == 0 || c.slicePct > 100) revert VotingErrors.InvalidSliceSum();
             totalSlice += c.slicePct;
             
             if (c.strategy == ClassStrategy.ERC20_BAL) {
-                if (c.asset == address(0)) revert ZeroAddress();
+                if (c.asset == address(0)) revert VotingErrors.ZeroAddress();
             }
             unchecked { ++i; }
         }
         
-        if (totalSlice != 100) revert InvalidSliceSum();
+        if (totalSlice != 100) revert VotingErrors.InvalidSliceSum();
         
         Layout storage l = _layout();
         delete l.classes;
@@ -310,7 +291,7 @@ contract HybridVoting is Initializable {
             emit TargetAllowed(target, allowed);
         } else if (key == ConfigKey.EXECUTOR) {
             address newExecutor = abi.decode(value, (address));
-            if (newExecutor == address(0)) revert ZeroAddress();
+            if (newExecutor == address(0)) revert VotingErrors.ZeroAddress();
             l.executor = IExecutor(newExecutor);
             emit ExecutorUpdated(newExecutor);
         }
@@ -321,18 +302,18 @@ contract HybridVoting is Initializable {
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
             bool canCreate = HatManager.hasAnyHat(l.hats, l.creatorHatIds, _msgSender());
-            if (!canCreate) revert Unauthorized();
+            if (!canCreate) revert VotingErrors.Unauthorized();
         }
         _;
     }
 
     modifier exists(uint256 id) {
-        if (id >= _layout()._proposals.length) revert InvalidProposal();
+        if (id >= _layout()._proposals.length) revert VotingErrors.InvalidProposal();
         _;
     }
 
     modifier isExpired(uint256 id) {
-        if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingOpen();
+        if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingErrors.VotingOpen();
         _;
     }
 
@@ -343,13 +324,13 @@ contract HybridVoting is Initializable {
         uint8 numOptions,
         IExecutor.Call[][] calldata batches
     ) external onlyCreator whenNotPaused {
-        if (metadata.length == 0) revert InvalidMetadata();
-        if (numOptions == 0 || numOptions != batches.length) revert LengthMismatch();
-        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
-        if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert DurationOutOfRange();
+        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
+        if (numOptions == 0 || numOptions != batches.length) revert VotingErrors.LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
+        if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert VotingErrors.DurationOutOfRange();
 
         Layout storage l = _layout();
-        if (l.classes.length == 0) revert InvalidClassCount();
+        if (l.classes.length == 0) revert VotingErrors.InvalidClassCount();
         
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
         Proposal storage p = l._proposals.push();
@@ -369,10 +350,10 @@ contract HybridVoting is Initializable {
         for (uint256 i; i < numOptions;) {
             uint256 batchLen = batches[i].length;
             if (batchLen > 0) {
-                if (batchLen > MAX_CALLS) revert TooManyCalls();
+                if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
                 for (uint256 j; j < batchLen;) {
-                    if (!l.allowedTarget[batches[i][j].target]) revert InvalidTarget();
-                    if (batches[i][j].target == address(this)) revert InvalidTarget();
+                    if (!l.allowedTarget[batches[i][j].target]) revert VotingErrors.InvalidTarget();
+                    if (batches[i][j].target == address(this)) revert VotingErrors.InvalidTarget();
                     unchecked {
                         ++j;
                     }
@@ -395,13 +376,13 @@ contract HybridVoting is Initializable {
         onlyCreator
         whenNotPaused
     {
-        if (metadata.length == 0) revert InvalidMetadata();
-        if (numOptions == 0) revert LengthMismatch();
-        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
-        if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert DurationOutOfRange();
+        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
+        if (numOptions == 0) revert VotingErrors.LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
+        if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert VotingErrors.DurationOutOfRange();
 
         Layout storage l = _layout();
-        if (l.classes.length == 0) revert InvalidClassCount();
+        if (l.classes.length == 0) revert VotingErrors.InvalidClassCount();
         
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
         Proposal storage p = l._proposals.push();
@@ -441,8 +422,8 @@ contract HybridVoting is Initializable {
 
     /* ─────── Voting ─────── */
     function vote(uint256 id, uint8[] calldata idxs, uint8[] calldata weights) external exists(id) whenNotPaused {
-        if (idxs.length != weights.length) revert LengthMismatch();
-        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingExpired();
+        if (idxs.length != weights.length) revert VotingErrors.LengthMismatch();
+        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingErrors.VotingExpired();
         
         Layout storage l = _layout();
         Proposal storage p = l._proposals[id];
@@ -459,10 +440,10 @@ contract HybridVoting is Initializable {
                 }
                 unchecked { ++i; }
             }
-            if (!hasAllowedHat) revert RoleNotAllowed();
+            if (!hasAllowedHat) revert VotingErrors.RoleNotAllowed();
         }
         
-        if (p.hasVoted[voter]) revert AlreadyVoted();
+        if (p.hasVoted[voter]) revert VotingErrors.AlreadyVoted();
         
         // Validate weights
         VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: p.options.length}));
@@ -595,7 +576,7 @@ contract HybridVoting is Initializable {
         if (valid && batch.length > 0) {
             uint256 batchLen = batch.length;
             for (uint256 i; i < batchLen;) {
-                if (!l.allowedTarget[batch[i].target]) revert InvalidTarget();
+                if (!l.allowedTarget[batch[i].target]) revert VotingErrors.InvalidTarget();
                 unchecked { ++i; }
             }
             l.executor.execute(id, batch);
@@ -650,11 +631,11 @@ contract HybridVoting is Initializable {
             return abi.encode(HatManager.getHatCount(l.creatorHatIds));
         } else if (key == StorageKey.POLL_HAT_ALLOWED) {
             (uint256 id, uint256 hat) = abi.decode(params, (uint256, uint256));
-            if (id >= l._proposals.length) revert InvalidProposal();
+            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
             return abi.encode(l._proposals[id].pollHatAllowed[hat]);
         } else if (key == StorageKey.POLL_RESTRICTED) {
             uint256 id = abi.decode(params, (uint256));
-            if (id >= l._proposals.length) revert InvalidProposal();
+            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
             return abi.encode(l._proposals[id].restricted);
         } else if (key == StorageKey.VERSION) {
             return abi.encode("v1");
@@ -664,10 +645,10 @@ contract HybridVoting is Initializable {
             return abi.encode(l.classes);
         } else if (key == StorageKey.PROPOSAL_CLASSES) {
             uint256 id = abi.decode(params, (uint256));
-            if (id >= l._proposals.length) revert InvalidProposal();
+            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
             return abi.encode(l._proposals[id].classesSnapshot);
         }
 
-        revert InvalidIndex();
+        revert VotingErrors.InvalidIndex();
     }
 }

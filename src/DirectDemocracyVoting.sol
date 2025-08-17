@@ -8,30 +8,10 @@ import {IExecutor} from "./Executor.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
+import {VotingErrors} from "./libs/VotingErrors.sol";
 
 /* ──────────────────  Direct‑democracy governor  ─────────────────────── */
 contract DirectDemocracyVoting is Initializable {
-    /* ─────────── Errors ─────────── */
-    error Unauthorized();
-    error AlreadyVoted();
-    error InvalidProposal();
-    error VotingExpired();
-    error VotingOpen();
-    error WeightSumNot100(uint256);
-    error InvalidIndex();
-    error LengthMismatch();
-    error InvalidWeight();
-    error DurationOutOfRange();
-    error DuplicateIndex();
-    error TooManyOptions();
-    error TooManyCalls();
-    error TargetNotAllowed();
-    error TargetSelf();
-    error EmptyBatch();
-    error ZeroAddress();
-    error InvalidMetadata();
-    error RoleNotAllowed();
-    error InvalidQuorum();
 
     /* ─────────── Constants ─────────── */
     bytes4 public constant MODULE_ID = 0x6464766f; /* "ddvo"  */
@@ -163,7 +143,7 @@ contract DirectDemocracyVoting is Initializable {
         uint8 quorumPct
     ) external initializer {
         if (hats_ == address(0) || executor_ == address(0)) {
-            revert ZeroAddress();
+            revert VotingErrors.ZeroAddress();
         }
         VotingMath.validateQuorum(quorumPct);
 
@@ -201,7 +181,7 @@ contract DirectDemocracyVoting is Initializable {
 
     /* ─────────── Admin (executor‑gated) ─────────── */
     modifier onlyExecutor() {
-        if (_msgSender() != address(_layout().executor)) revert Unauthorized();
+        if (_msgSender() != address(_layout().executor)) revert VotingErrors.Unauthorized();
         _;
     }
 
@@ -222,7 +202,7 @@ contract DirectDemocracyVoting is Initializable {
             emit QuorumPercentageSet(q);
         } else if (key == ConfigKey.EXECUTOR) {
             address newExecutor = abi.decode(value, (address));
-            if (newExecutor == address(0)) revert ZeroAddress();
+            if (newExecutor == address(0)) revert VotingErrors.ZeroAddress();
             l.executor = IExecutor(newExecutor);
             emit ExecutorUpdated(newExecutor);
         } else if (key == ConfigKey.TARGET_ALLOWED) {
@@ -245,23 +225,23 @@ contract DirectDemocracyVoting is Initializable {
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
             bool canCreate = HatManager.hasAnyHat(l.hats, l.creatorHatIds, _msgSender());
-            if (!canCreate) revert Unauthorized();
+            if (!canCreate) revert VotingErrors.Unauthorized();
         }
         _;
     }
 
     modifier exists(uint256 id) {
-        if (id >= _layout()._proposals.length) revert InvalidProposal();
+        if (id >= _layout()._proposals.length) revert VotingErrors.InvalidProposal();
         _;
     }
 
     modifier notExpired(uint256 id) {
-        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingExpired();
+        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingErrors.VotingExpired();
         _;
     }
 
     modifier isExpired(uint256 id) {
-        if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingOpen();
+        if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingErrors.VotingOpen();
         _;
     }
 
@@ -272,10 +252,10 @@ contract DirectDemocracyVoting is Initializable {
         uint8 numOptions,
         IExecutor.Call[][] calldata batches
     ) external onlyCreator whenNotPaused {
-        if (metadata.length == 0) revert InvalidMetadata();
-        if (numOptions == 0 || numOptions != batches.length) revert LengthMismatch();
-        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
-        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
+        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
+        if (numOptions == 0 || numOptions != batches.length) revert VotingErrors.LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
+        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert VotingErrors.DurationOutOfRange();
 
         Layout storage l = _layout();
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
@@ -286,10 +266,10 @@ contract DirectDemocracyVoting is Initializable {
         for (uint256 i; i < numOptions;) {
             uint256 batchLen = batches[i].length;
             if (batchLen > 0) {
-                if (batchLen > MAX_CALLS) revert TooManyCalls();
+                if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
                 for (uint256 j; j < batchLen;) {
-                    if (!l.allowedTarget[batches[i][j].target]) revert TargetNotAllowed();
-                    if (batches[i][j].target == address(this)) revert TargetSelf();
+                    if (!l.allowedTarget[batches[i][j].target]) revert VotingErrors.TargetNotAllowed();
+                    if (batches[i][j].target == address(this)) revert VotingErrors.TargetSelf();
                     unchecked {
                         ++j;
                     }
@@ -310,10 +290,10 @@ contract DirectDemocracyVoting is Initializable {
         onlyCreator
         whenNotPaused
     {
-        if (metadata.length == 0) revert InvalidMetadata();
-        if (numOptions == 0) revert LengthMismatch();
-        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
-        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert DurationOutOfRange();
+        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
+        if (numOptions == 0) revert VotingErrors.LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
+        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert VotingErrors.DurationOutOfRange();
 
         Layout storage l = _layout();
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
@@ -347,11 +327,11 @@ contract DirectDemocracyVoting is Initializable {
         notExpired(id)
         whenNotPaused
     {
-        if (idxs.length != weights.length) revert LengthMismatch();
+        if (idxs.length != weights.length) revert VotingErrors.LengthMismatch();
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
             bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
-            if (!canVote) revert Unauthorized();
+            if (!canVote) revert VotingErrors.Unauthorized();
         }
         Proposal storage p = l._proposals[id];
         if (p.restricted) {
@@ -367,9 +347,9 @@ contract DirectDemocracyVoting is Initializable {
                     ++i;
                 }
             }
-            if (!hasAllowedHat) revert RoleNotAllowed();
+            if (!hasAllowedHat) revert VotingErrors.RoleNotAllowed();
         }
-        if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
+        if (p.hasVoted[_msgSender()]) revert VotingErrors.AlreadyVoted();
 
         // Use VotingMath for weight validation
         VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: p.options.length}));
@@ -405,8 +385,8 @@ contract DirectDemocracyVoting is Initializable {
         if (valid && batch.length > 0) {
             uint256 len = batch.length;
             for (uint256 i; i < len;) {
-                if (batch[i].target == address(this)) revert TargetSelf();
-                if (!l.allowedTarget[batch[i].target]) revert TargetNotAllowed();
+                if (batch[i].target == address(this)) revert VotingErrors.TargetSelf();
+                if (!l.allowedTarget[batch[i].target]) revert VotingErrors.TargetNotAllowed();
                 unchecked {
                     ++i;
                 }
@@ -480,11 +460,11 @@ contract DirectDemocracyVoting is Initializable {
             return abi.encode(HatManager.getHatCount(l.creatorHatIds));
         } else if (key == StorageKey.POLL_HAT_ALLOWED) {
             (uint256 id, uint256 hat) = abi.decode(params, (uint256, uint256));
-            if (id >= l._proposals.length) revert InvalidProposal();
+            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
             return abi.encode(l._proposals[id].pollHatAllowed[hat]);
         } else if (key == StorageKey.POLL_RESTRICTED) {
             uint256 id = abi.decode(params, (uint256));
-            if (id >= l._proposals.length) revert InvalidProposal();
+            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
             return abi.encode(l._proposals[id].restricted);
         } else if (key == StorageKey.VERSION) {
             return abi.encode("v1");
@@ -494,6 +474,6 @@ contract DirectDemocracyVoting is Initializable {
             address target = abi.decode(params, (address));
             return abi.encode(l.allowedTarget[target]);
         }
-        revert InvalidIndex();
+        revert VotingErrors.InvalidIndex();
     }
 }
