@@ -124,7 +124,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         bool[] memory voting = new bool[](2);
         voting[0] = true;
         voting[1] = true;
-        (hybrid, exec, qj, token, tm, hub) = deployer.deployFullOrg(
+        (hybrid, exec, qj, token, tm, hub) = deployer.deployFullOrgLegacy(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
         vm.stopPrank();
@@ -151,7 +151,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
         voting[2] = true;
 
-        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub) = deployer.deployFullOrg(
+        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub) = deployer.deployFullOrgLegacy(
             ORG_ID, orgName, accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
@@ -180,7 +180,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[0] = true;
         voting[1] = true;
 
-        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub) = deployer.deployFullOrg(
+        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub) = deployer.deployFullOrgLegacy(
             ORG_ID, orgName, accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
@@ -449,7 +449,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         (address _hybrid, address _executor, address _quickJoin, address _token, address _taskMgr, address _eduHub) =
-        deployer.deployFullOrg(
+        deployer.deployFullOrgLegacy(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
@@ -544,7 +544,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         bool[] memory voting = new bool[](2);
         voting[0] = true;
         voting[1] = true;
-        deployer.deployFullOrg(
+        deployer.deployFullOrgLegacy(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
         vm.stopPrank();
@@ -562,7 +562,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[0] = true;
         voting[1] = true;
 
-        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrgLegacy(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
@@ -615,7 +615,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[0] = true;
         voting[1] = true;
 
-        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrgLegacy(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
@@ -856,7 +856,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[0] = true;
         voting[1] = true;
 
-        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrgLegacy(
             ORG_ID, "Events Test DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
@@ -1035,7 +1035,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
         voting[2] = true;
 
-        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrgLegacy(
             ORG_ID, "Vouch Error Test DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
@@ -1168,7 +1168,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
         voting[2] = true;
 
-        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrgLegacy(
             ORG_ID, "Vouch Events Test DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
@@ -1233,7 +1233,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
         voting[2] = true;
 
-        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrgLegacy(
             ORG_ID, "Vouch Disable Test DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
@@ -1309,7 +1309,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
         voting[2] = true;
 
-        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrgLegacy(
             ORG_ID, "SuperAdmin Test DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
@@ -1446,7 +1446,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
         voting[2] = true;
 
-        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
+        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrgLegacy(
             ORG_ID, "Unrestricted Hat Test DAO", accountRegProxy, true, 50, 50, false, 4 ether, names, images, voting
         );
 
