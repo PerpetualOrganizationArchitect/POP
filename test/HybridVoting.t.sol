@@ -330,7 +330,7 @@ contract HybridVotingTest is Test {
         batches[0][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
         batches[1][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
         
-        vm.expectRevert(HybridVoting.Paused.selector);
+        vm.expectRevert(VotingErrors.Paused.selector);
         hv.createProposal(bytes("ipfs://test"), 15, 2, batches);
         vm.stopPrank();
         
@@ -705,7 +705,7 @@ contract HybridVotingTest is Test {
             hatIds: hats
         });
         
-        vm.expectRevert(HybridVoting.InvalidSliceSum.selector);
+        vm.expectRevert(VotingErrors.InvalidSliceSum.selector);
         hv.setClasses(classes);
         
         // Test: too many classes
@@ -721,7 +721,7 @@ contract HybridVotingTest is Test {
             });
         }
         
-        vm.expectRevert(HybridVoting.TooManyClasses.selector);
+        vm.expectRevert(VotingErrors.TooManyClasses.selector);
         hv.setClasses(tooMany);
         
         vm.stopPrank();
@@ -1211,7 +1211,7 @@ contract HybridVotingTest is Test {
         
         // Try to set empty classes array (should revert)
         HybridVoting.ClassConfig[] memory emptyClasses = new HybridVoting.ClassConfig[](0);
-        vm.expectRevert(HybridVoting.InvalidClassCount.selector);
+        vm.expectRevert(VotingErrors.InvalidClassCount.selector);
         hv.setClasses(emptyClasses);
         
         vm.stopPrank();
