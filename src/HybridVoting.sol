@@ -234,8 +234,8 @@ contract HybridVoting is Initializable {
 
     /* ─────── N-Class Configuration ─────── */
     function setClasses(ClassConfig[] calldata newClasses) external onlyExecutor {
-        if (newClasses.length == 0) revert InvalidClassCount();
-        if (newClasses.length > MAX_CLASSES) revert TooManyClasses();
+        if (newClasses.length == 0) revert VotingErrors.InvalidClassCount();
+        if (newClasses.length > MAX_CLASSES) revert VotingErrors.TooManyClasses();
         
         uint256 totalSlice;
         for (uint256 i; i < newClasses.length;) {
