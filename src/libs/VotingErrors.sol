@@ -25,4 +25,8 @@ library VotingErrors {
     error InvalidQuorum();
     error Paused();
     error Overflow();
+    error InvalidClassCount();
+    error InvalidSliceSum();
+    error TooManyClasses();
+    error InvalidStrategy();
 }
