@@ -186,12 +186,13 @@ contract HybridVotingTest is Test {
 
         // Convert string to bytes for metadata
         bytes memory metadata = bytes("ipfs://test");
-        hv.createProposal(metadata, 30, 2, batches);
+        uint256[] memory hatIds = new uint256[](0);
+        hv.createProposal(metadata, 30, 2, batches, hatIds);
 
         vm.stopPrank();
 
         assertEq(
-            abi.decode(hv.getStorage(HybridVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)),
+            hv.proposalsCount(),
             1,
             "should store proposal"
         );
@@ -206,8 +207,9 @@ contract HybridVotingTest is Test {
         batches[1] = new IExecutor.Call[](0);
 
         bytes memory metadata = bytes("ipfs://test");
+        uint256[] memory hatIds = new uint256[](0);
         vm.expectRevert(VotingErrors.Unauthorized.selector);
-        hv.createProposal(metadata, 30, 2, batches);
+        hv.createProposal(metadata, 30, 2, batches, hatIds);
 
         vm.stopPrank();
     }
@@ -236,15 +238,17 @@ contract HybridVotingTest is Test {
 
         // Convert string to bytes for metadata
         bytes memory metadata = bytes("ipfs://p");
-        hv.createProposal(metadata, 15, 2, batches);
+        uint256[] memory hatIds = new uint256[](0);
+        hv.createProposal(metadata, 15, 2, batches, hatIds);
         vm.stopPrank();
-        return abi.decode(hv.getStorage(HybridVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
+        return hv.proposalsCount() - 1;
     }
 
     function _createHatPoll(uint8 opts, uint256[] memory hatIds) internal returns (uint256) {
         vm.prank(alice);
-        hv.createHatPoll(bytes("ipfs://test"), 15, opts, hatIds);
-        return abi.decode(hv.getStorage(HybridVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
+        IExecutor.Call[][] memory batches = new IExecutor.Call[][](0);
+        hv.createProposal(bytes("ipfs://test"), 15, opts, batches, hatIds);
+        return hv.proposalsCount() - 1;
     }
 
     function _voteYES(address voter) internal {
@@ -330,8 +334,9 @@ contract HybridVotingTest is Test {
         batches[0][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
         batches[1][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
         
+        uint256[] memory hatIds = new uint256[](0);
         vm.expectRevert(VotingErrors.Paused.selector);
-        hv.createProposal(bytes("ipfs://test"), 15, 2, batches);
+        hv.createProposal(bytes("ipfs://test"), 15, 2, batches, hatIds);
         vm.stopPrank();
         
         // Unpause and try again
@@ -417,8 +422,9 @@ contract HybridVotingTest is Test {
         batches[1] = new IExecutor.Call[](0);
 
         vm.prank(newCreator);
-        hv.createProposal(bytes("ipfs://test"), 15, 2, batches);
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)), 1);
+        uint256[] memory hatIds = new uint256[](0);
+        hv.createProposal(bytes("ipfs://test"), 15, 2, batches, hatIds);
+        assertEq(hv.proposalsCount(), 1);
 
         // Disable new hat
         vm.prank(address(exec));
@@ -427,7 +433,7 @@ contract HybridVotingTest is Test {
         // Should now fail
         vm.prank(newCreator);
         vm.expectRevert(VotingErrors.Unauthorized.selector);
-        hv.createProposal(bytes("ipfs://test2"), 15, 2, batches);
+        hv.createProposal(bytes("ipfs://test2"), 15, 2, batches, hatIds);
     }
 
     /* ───────────────────────── UNAUTHORIZED ACCESS TESTS ───────────────────────── */
@@ -467,7 +473,7 @@ contract HybridVotingTest is Test {
 
         // Set quorum
         hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(60));
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.QUORUM_PCT, ""), (uint8)), 60);
+        assertEq(hv.quorumPct(), 60);
 
         // Split, quadratic, and min balance are now configured via setClasses
         // Test class configuration update instead
@@ -504,7 +510,7 @@ contract HybridVotingTest is Test {
         // New executor should have permissions
         vm.prank(newExecutor);
         hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(70));
-        assertEq(abi.decode(hv.getStorage(HybridVoting.StorageKey.QUORUM_PCT, ""), (uint8)), 70);
+        assertEq(hv.quorumPct(), 70);
     }
 
     // function testCleanup() public {
@@ -574,15 +580,9 @@ contract HybridVotingTest is Test {
         );
 
         uint256 id = _createHatPoll(2, hatIds);
-        assertTrue(abi.decode(hv.getStorage(HybridVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
-        assertTrue(
-            abi.decode(
-                hv.getStorage(HybridVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, EXECUTIVE_HAT_ID)), (bool)
-            )
-        );
-        assertFalse(
-            abi.decode(hv.getStorage(HybridVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, DEFAULT_HAT_ID)), (bool))
-        );
+        assertTrue(hv.pollRestricted(id));
+        assertTrue(hv.pollHatAllowed(id, EXECUTIVE_HAT_ID));
+        assertFalse(hv.pollHatAllowed(id, DEFAULT_HAT_ID));
     }
 
     function testHatPollRestrictions() public {
@@ -613,7 +613,7 @@ contract HybridVotingTest is Test {
         // Empty hat IDs should create unrestricted poll
         uint256[] memory hatIds = new uint256[](0);
         uint256 id = _createHatPoll(1, hatIds);
-        assertFalse(abi.decode(hv.getStorage(HybridVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
+        assertFalse(hv.pollRestricted(id));
 
         // Anyone with voting hat should be able to vote
         uint8[] memory idx = new uint8[](1);

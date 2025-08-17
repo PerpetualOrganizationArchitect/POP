@@ -63,14 +63,14 @@ contract DDVotingTest is Test {
             b[i] = new IExecutor.Call[](0);
         }
         vm.prank(creator);
-        dd.createProposal("meta", 10, opts, b);
-        return abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
+        dd.createProposal("meta", 10, opts, b, new uint256[](0));
+        return dd.proposalsCount() - 1;
     }
 
     function _createHatPoll(uint8 opts, uint256[] memory hatIds) internal returns (uint256) {
         vm.prank(creator);
-        dd.createHatPoll("meta", 10, opts, hatIds);
-        return abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
+        dd.createProposal("meta", 10, opts, new IExecutor.Call[][](0), hatIds);
+        return dd.proposalsCount() - 1;
     }
 
     function testInitializeZeroAddress() public {
@@ -113,7 +113,7 @@ contract DDVotingTest is Test {
         address newExec = address(0x9);
         vm.prank(address(exec));
         dd.setConfig(DirectDemocracyVoting.ConfigKey.EXECUTOR, abi.encode(newExec));
-        assertEq(address(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.EXECUTOR, ""), (address))), newExec);
+        assertEq(dd.executor(), newExec);
     }
 
     function testSetExecutorUnauthorized() public {
@@ -136,8 +136,8 @@ contract DDVotingTest is Test {
         b[0] = new IExecutor.Call[](0);
         // Creator should still be able to create (different permission)
         vm.prank(creator);
-        dd.createProposal("m", 10, 1, b);
-        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)), 1);
+        dd.createProposal("m", 10, 1, b, new uint256[](0));
+        assertEq(dd.proposalsCount(), 1);
 
         // But voting should fail
         uint8[] memory idx = new uint8[](1);
@@ -176,8 +176,8 @@ contract DDVotingTest is Test {
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
         b[0] = new IExecutor.Call[](0);
         vm.prank(newCreator);
-        dd.createProposal("m", 10, 1, b);
-        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)), 1);
+        dd.createProposal("m", 10, 1, b, new uint256[](0));
+        assertEq(dd.proposalsCount(), 1);
 
         // Disable new hat
         vm.prank(address(exec));
@@ -189,7 +189,7 @@ contract DDVotingTest is Test {
         // Should now fail
         vm.prank(newCreator);
         vm.expectRevert(VotingErrors.Unauthorized.selector);
-        dd.createProposal("m", 10, 1, b);
+        dd.createProposal("m", 10, 1, b, new uint256[](0));
     }
 
     function testVoterCannotCreateProposal() public {
@@ -198,20 +198,20 @@ contract DDVotingTest is Test {
         b[0] = new IExecutor.Call[](0);
         vm.prank(voter);
         vm.expectRevert(VotingErrors.Unauthorized.selector);
-        dd.createProposal("m", 10, 1, b);
+        dd.createProposal("m", 10, 1, b, new uint256[](0));
     }
 
     function testSetTargetAllowed() public {
         address tgt = address(0xdead);
         vm.prank(address(exec));
         dd.setConfig(DirectDemocracyVoting.ConfigKey.TARGET_ALLOWED, abi.encode(tgt, true));
-        assertTrue(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.ALLOWED_TARGET, abi.encode(tgt)), (bool)));
+        assertTrue(dd.isTargetAllowed(tgt));
     }
 
     function testSetQuorum() public {
         vm.prank(address(exec));
         dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(80));
-        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.QUORUM_PERCENTAGE, ""), (uint8)), 80);
+        assertEq(dd.quorumPercentage(), 80);
     }
 
     function testSetQuorumBad() public {
@@ -232,8 +232,8 @@ contract DDVotingTest is Test {
         b[0] = new IExecutor.Call[](1);
         b[0][0] = IExecutor.Call({target: address(0xdead), value: 0, data: ""});
         vm.prank(creator);
-        dd.createProposal("hello", 10, 1, b);
-        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)), 1);
+        dd.createProposal("hello", 10, 1, b, new uint256[](0));
+        assertEq(dd.proposalsCount(), 1);
     }
 
     function testCreateProposalMetadataEmpty() public {
@@ -241,7 +241,7 @@ contract DDVotingTest is Test {
         b[0] = new IExecutor.Call[](0);
         vm.prank(creator);
         vm.expectRevert(VotingErrors.InvalidMetadata.selector);
-        dd.createProposal("", 10, 1, b);
+        dd.createProposal("", 10, 1, b, new uint256[](0));
     }
 
     function testCreateProposalDurationOutOfRange() public {
@@ -249,7 +249,7 @@ contract DDVotingTest is Test {
         b[0] = new IExecutor.Call[](0);
         vm.prank(creator);
         vm.expectRevert(VotingErrors.DurationOutOfRange.selector);
-        dd.createProposal("m", 5, 1, b);
+        dd.createProposal("m", 5, 1, b, new uint256[](0));
     }
 
     function testCreateProposalTooManyOptions() public {
@@ -260,7 +260,7 @@ contract DDVotingTest is Test {
         }
         vm.prank(creator);
         vm.expectRevert(VotingErrors.TooManyOptions.selector);
-        dd.createProposal("m", 10, n, b);
+        dd.createProposal("m", 10, n, b, new uint256[](0));
     }
 
     function testCreateProposalBadBatch() public {
@@ -269,7 +269,7 @@ contract DDVotingTest is Test {
         b[0][0] = IExecutor.Call({target: address(0xdead), value: 0, data: ""});
         vm.prank(creator);
         vm.expectRevert(VotingErrors.TargetNotAllowed.selector);
-        dd.createProposal("m", 10, 1, b);
+        dd.createProposal("m", 10, 1, b, new uint256[](0));
     }
 
     function testVoteBasic() public {
@@ -410,10 +410,8 @@ contract DDVotingTest is Test {
         );
 
         uint256 id = _createHatPoll(1, hatIds);
-        assertTrue(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
-        assertTrue(
-            abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, HAT_ID)), (bool))
-        );
+        assertTrue(dd.pollRestricted(id));
+        assertTrue(dd.pollHatAllowed(id, HAT_ID));
     }
 
     function testAnnounceWinner() public {
@@ -422,7 +420,7 @@ contract DDVotingTest is Test {
         b[0] = new IExecutor.Call[](0); // empty batch
         b[1] = new IExecutor.Call[](0); // empty batch
         vm.prank(creator);
-        dd.createProposal("m", 10, 2, b);
+        dd.createProposal("m", 10, 2, b, new uint256[](0));
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
         uint8[] memory w = new uint8[](1);
@@ -502,9 +500,8 @@ contract DDVotingTest is Test {
 
         // Create the election proposal
         vm.prank(creator);
-        dd.createProposal("Election: Choose new executive leader", 60, 3, batches);
-        uint256 proposalId =
-            abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
+        dd.createProposal("Election: Choose new executive leader", 60, 3, batches, new uint256[](0));
+        uint256 proposalId = dd.proposalsCount() - 1;
 
         // Verify no candidates have the hat initially
         assertFalse(hats.isWearerOfHat(alice, executiveHatId));
@@ -577,9 +574,8 @@ contract DDVotingTest is Test {
 
         // Create the election proposal
         vm.prank(creator);
-        dd.createProposal("Election: Choose executive with different privileges", 60, 2, batches);
-        uint256 proposalId =
-            abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.PROPOSALS_COUNT, ""), (uint256)) - 1;
+        dd.createProposal("Election: Choose executive with different privileges", 60, 2, batches, new uint256[](0));
+        uint256 proposalId = dd.proposalsCount() - 1;
 
         // Vote for Alice (option 0) who gets both hats
         uint8[] memory idx = new uint8[](1);
