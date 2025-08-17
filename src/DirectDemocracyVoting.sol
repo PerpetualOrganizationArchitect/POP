@@ -32,20 +32,6 @@ contract DirectDemocracyVoting is Initializable {
         HAT_ALLOWED
     }
 
-    enum StorageKey {
-        HATS,
-        EXECUTOR,
-        QUORUM_PERCENTAGE,
-        VOTING_HATS,
-        CREATOR_HATS,
-        VOTING_HAT_COUNT,
-        CREATOR_HAT_COUNT,
-        POLL_HAT_ALLOWED,
-        POLL_RESTRICTED,
-        VERSION,
-        PROPOSALS_COUNT,
-        ALLOWED_TARGET
-    }
 
     /* ─────────── Data Structures ─────────── */
     struct PollOption {
@@ -245,79 +231,102 @@ contract DirectDemocracyVoting is Initializable {
         _;
     }
 
+    /* ─────── Internal Helper Functions ─────── */
+    function _validateDuration(uint32 minutesDuration) internal pure {
+        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) {
+            revert VotingErrors.DurationOutOfRange();
+        }
+    }
+
+    function _validateTargets(IExecutor.Call[] calldata batch, Layout storage l) internal view {
+        uint256 batchLen = batch.length;
+        if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
+        for (uint256 j; j < batchLen;) {
+            if (!l.allowedTarget[batch[j].target]) revert VotingErrors.TargetNotAllowed();
+            if (batch[j].target == address(this)) revert VotingErrors.TargetSelf();
+            unchecked { ++j; }
+        }
+    }
+
+    function _initProposal(
+        bytes calldata metadata,
+        uint32 minutesDuration,
+        uint8 numOptions,
+        IExecutor.Call[][] calldata batches,
+        uint256[] calldata hatIds
+    ) internal returns (uint256) {
+        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
+        if (numOptions == 0) revert VotingErrors.LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
+        _validateDuration(minutesDuration);
+
+        Layout storage l = _layout();
+        
+        bool isExecuting = false;
+        if (batches.length > 0) {
+            if (numOptions != batches.length) revert VotingErrors.LengthMismatch();
+            for (uint256 i; i < numOptions;) {
+                if (batches[i].length > 0) {
+                    isExecuting = true;
+                    _validateTargets(batches[i], l);
+                }
+                unchecked { ++i; }
+            }
+        }
+        
+        uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
+        Proposal storage p = l._proposals.push();
+        p.endTimestamp = endTs;
+        p.restricted = hatIds.length > 0;
+        
+        uint256 id = l._proposals.length - 1;
+        
+        for (uint256 i; i < numOptions;) {
+            p.options.push(PollOption(0));
+            unchecked { ++i; }
+        }
+        
+        if (isExecuting) {
+            for (uint256 i; i < numOptions;) {
+                p.batches.push(batches[i]);
+                unchecked { ++i; }
+            }
+        } else {
+            for (uint256 i; i < numOptions;) {
+                p.batches.push();
+                unchecked { ++i; }
+            }
+        }
+        
+        if (hatIds.length > 0) {
+            uint256 hatLen = hatIds.length;
+            for (uint256 i; i < hatLen;) {
+                p.pollHatIds.push(hatIds[i]);
+                p.pollHatAllowed[hatIds[i]] = true;
+                unchecked { ++i; }
+            }
+        }
+        
+        return id;
+    }
+
     /* ────────── Proposal Creation ────────── */
     function createProposal(
         bytes calldata metadata,
         uint32 minutesDuration,
         uint8 numOptions,
-        IExecutor.Call[][] calldata batches
+        IExecutor.Call[][] calldata batches,
+        uint256[] calldata hatIds
     ) external onlyCreator whenNotPaused {
-        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
-        if (numOptions == 0 || numOptions != batches.length) revert VotingErrors.LengthMismatch();
-        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
-        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert VotingErrors.DurationOutOfRange();
-
-        Layout storage l = _layout();
-        uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
-        Proposal storage p = l._proposals.push();
-        p.endTimestamp = endTs;
-
-        uint256 id = l._proposals.length - 1;
-        for (uint256 i; i < numOptions;) {
-            uint256 batchLen = batches[i].length;
-            if (batchLen > 0) {
-                if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
-                for (uint256 j; j < batchLen;) {
-                    if (!l.allowedTarget[batches[i][j].target]) revert VotingErrors.TargetNotAllowed();
-                    if (batches[i][j].target == address(this)) revert VotingErrors.TargetSelf();
-                    unchecked {
-                        ++j;
-                    }
-                }
-            }
-            p.options.push(PollOption(0));
-            p.batches.push(batches[i]);
-            unchecked {
-                ++i;
-            }
+        uint256 id = _initProposal(metadata, minutesDuration, numOptions, batches, hatIds);
+        
+        uint64 endTs = _layout()._proposals[id].endTimestamp;
+        
+        if (hatIds.length > 0) {
+            emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
+        } else {
+            emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
         }
-        emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
-    }
-
-    /// @notice Create a poll restricted to certain hats. Execution is disabled.
-    function createHatPoll(bytes calldata metadata, uint32 minutesDuration, uint8 numOptions, uint256[] calldata hatIds)
-        external
-        onlyCreator
-        whenNotPaused
-    {
-        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
-        if (numOptions == 0) revert VotingErrors.LengthMismatch();
-        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
-        if (minutesDuration < MIN_DURATION_MIN || minutesDuration > MAX_DURATION_MIN) revert VotingErrors.DurationOutOfRange();
-
-        Layout storage l = _layout();
-        uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
-        Proposal storage p = l._proposals.push();
-        p.endTimestamp = endTs;
-        p.restricted = hatIds.length > 0;
-
-        uint256 id = l._proposals.length - 1;
-        for (uint256 i; i < numOptions;) {
-            p.options.push(PollOption(0));
-            p.batches.push();
-            unchecked {
-                ++i;
-            }
-        }
-        uint256 len = hatIds.length;
-        for (uint256 i; i < len;) {
-            p.pollHatIds.push(hatIds[i]);
-            p.pollHatAllowed[hatIds[i]] = true;
-            unchecked {
-                ++i;
-            }
-        }
-        emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
     }
 
     /* ─────────── Voting ─────────── */
@@ -337,8 +346,8 @@ contract DirectDemocracyVoting is Initializable {
         if (p.restricted) {
             bool hasAllowedHat = false;
             // Check if user has any of the poll-specific hats
-            uint256 len = p.pollHatIds.length;
-            for (uint256 i = 0; i < len;) {
+            uint256 pollHatLen = p.pollHatIds.length;
+            for (uint256 i = 0; i < pollHatLen;) {
                 if (l.hats.isWearerOfHat(_msgSender(), p.pollHatIds[i])) {
                     hasAllowedHat = true;
                     break;
@@ -442,38 +451,52 @@ contract DirectDemocracyVoting is Initializable {
         );
     }
 
-    function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
-        Layout storage l = _layout();
-        if (key == StorageKey.HATS) {
-            return abi.encode(l.hats);
-        } else if (key == StorageKey.EXECUTOR) {
-            return abi.encode(l.executor);
-        } else if (key == StorageKey.QUORUM_PERCENTAGE) {
-            return abi.encode(l.quorumPercentage);
-        } else if (key == StorageKey.VOTING_HATS) {
-            return abi.encode(HatManager.getHatArray(l.votingHatIds));
-        } else if (key == StorageKey.CREATOR_HATS) {
-            return abi.encode(HatManager.getHatArray(l.creatorHatIds));
-        } else if (key == StorageKey.VOTING_HAT_COUNT) {
-            return abi.encode(HatManager.getHatCount(l.votingHatIds));
-        } else if (key == StorageKey.CREATOR_HAT_COUNT) {
-            return abi.encode(HatManager.getHatCount(l.creatorHatIds));
-        } else if (key == StorageKey.POLL_HAT_ALLOWED) {
-            (uint256 id, uint256 hat) = abi.decode(params, (uint256, uint256));
-            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
-            return abi.encode(l._proposals[id].pollHatAllowed[hat]);
-        } else if (key == StorageKey.POLL_RESTRICTED) {
-            uint256 id = abi.decode(params, (uint256));
-            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
-            return abi.encode(l._proposals[id].restricted);
-        } else if (key == StorageKey.VERSION) {
-            return abi.encode("v1");
-        } else if (key == StorageKey.PROPOSALS_COUNT) {
-            return abi.encode(l._proposals.length);
-        } else if (key == StorageKey.ALLOWED_TARGET) {
-            address target = abi.decode(params, (address));
-            return abi.encode(l.allowedTarget[target]);
-        }
-        revert VotingErrors.InvalidIndex();
+    /* ─────────── Targeted View Functions ─────────── */
+    function proposalsCount() external view returns (uint256) {
+        return _layout()._proposals.length;
+    }
+    
+    function quorumPercentage() external view returns (uint8) {
+        return _layout().quorumPercentage;
+    }
+    
+    function isTargetAllowed(address target) external view returns (bool) {
+        return _layout().allowedTarget[target];
+    }
+    
+    function executor() external view returns (address) {
+        return address(_layout().executor);
+    }
+    
+    function hats() external view returns (address) {
+        return address(_layout().hats);
+    }
+    
+    function votingHats() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().votingHatIds);
+    }
+    
+    function creatorHats() external view returns (uint256[] memory) {
+        return HatManager.getHatArray(_layout().creatorHatIds);
+    }
+    
+    function votingHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().votingHatIds);
+    }
+    
+    function creatorHatCount() external view returns (uint256) {
+        return HatManager.getHatCount(_layout().creatorHatIds);
+    }
+    
+    function pollRestricted(uint256 id) external view exists(id) returns (bool) {
+        return _layout()._proposals[id].restricted;
+    }
+    
+    function pollHatAllowed(uint256 id, uint256 hat) external view exists(id) returns (bool) {
+        return _layout()._proposals[id].pollHatAllowed[hat];
+    }
+    
+    function version() external pure returns (string memory) {
+        return "v1";
     }
 }
