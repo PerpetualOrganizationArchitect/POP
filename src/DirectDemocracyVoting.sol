@@ -66,6 +66,22 @@ contract DirectDemocracyVoting is Initializable {
     // keccak256("poa.directdemocracy.storage") → unique, collision-free slot
     bytes32 private constant _STORAGE_SLOT = 0x1da04eb4a741346cdb49b5da943a0c13e79399ef962f913efcd36d95ee6d7c38;
 
+    /* ─────── Storage Key Enum ─────── */
+    enum StorageKey {
+        PROPOSALS_COUNT,
+        QUORUM_PCT,
+        IS_TARGET_ALLOWED,
+        EXECUTOR,
+        HATS,
+        VOTING_HATS,
+        CREATOR_HATS,
+        VOTING_HAT_COUNT,
+        CREATOR_HAT_COUNT,
+        POLL_RESTRICTED,
+        POLL_HAT_ALLOWED,
+        VERSION
+    }
+
     function _layout() private pure returns (Layout storage s) {
         assembly {
             s.slot := _STORAGE_SLOT
@@ -427,6 +443,44 @@ contract DirectDemocracyVoting is Initializable {
     //     emit ProposalCleaned(id, cleaned);
     // }
 
+    /* ─────── Unified Storage Getter ─────── */
+    function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
+        Layout storage l = _layout();
+        
+        if (key == StorageKey.PROPOSALS_COUNT) {
+            return abi.encode(l._proposals.length);
+        } else if (key == StorageKey.QUORUM_PCT) {
+            return abi.encode(l.quorumPercentage);
+        } else if (key == StorageKey.IS_TARGET_ALLOWED) {
+            address target = abi.decode(params, (address));
+            return abi.encode(l.allowedTarget[target]);
+        } else if (key == StorageKey.EXECUTOR) {
+            return abi.encode(l.executor);
+        } else if (key == StorageKey.HATS) {
+            return abi.encode(l.hats);
+        } else if (key == StorageKey.VOTING_HATS) {
+            return abi.encode(HatManager.getHatArray(l.votingHatIds));
+        } else if (key == StorageKey.CREATOR_HATS) {
+            return abi.encode(HatManager.getHatArray(l.creatorHatIds));
+        } else if (key == StorageKey.VOTING_HAT_COUNT) {
+            return abi.encode(HatManager.getHatCount(l.votingHatIds));
+        } else if (key == StorageKey.CREATOR_HAT_COUNT) {
+            return abi.encode(HatManager.getHatCount(l.creatorHatIds));
+        } else if (key == StorageKey.POLL_RESTRICTED) {
+            uint256 id = abi.decode(params, (uint256));
+            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
+            return abi.encode(l._proposals[id].restricted);
+        } else if (key == StorageKey.POLL_HAT_ALLOWED) {
+            (uint256 id, uint256 hat) = abi.decode(params, (uint256, uint256));
+            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
+            return abi.encode(l._proposals[id].pollHatAllowed[hat]);
+        } else if (key == StorageKey.VERSION) {
+            return abi.encode("v1");
+        }
+        
+        revert VotingErrors.InvalidIndex();
+    }
+
     /* ─────────── View helpers ─────────── */
     function _calcWinner(uint256 id) internal view returns (uint256 win, bool ok) {
         Layout storage l = _layout();
@@ -451,52 +505,12 @@ contract DirectDemocracyVoting is Initializable {
         );
     }
 
-    /* ─────────── Targeted View Functions ─────────── */
+    /* ─────── Convenience Functions (keep for backward compatibility) ─────── */
     function proposalsCount() external view returns (uint256) {
         return _layout()._proposals.length;
     }
     
-    function quorumPercentage() external view returns (uint8) {
+    function quorumPct() external view returns (uint8) {
         return _layout().quorumPercentage;
-    }
-    
-    function isTargetAllowed(address target) external view returns (bool) {
-        return _layout().allowedTarget[target];
-    }
-    
-    function executor() external view returns (address) {
-        return address(_layout().executor);
-    }
-    
-    function hats() external view returns (address) {
-        return address(_layout().hats);
-    }
-    
-    function votingHats() external view returns (uint256[] memory) {
-        return HatManager.getHatArray(_layout().votingHatIds);
-    }
-    
-    function creatorHats() external view returns (uint256[] memory) {
-        return HatManager.getHatArray(_layout().creatorHatIds);
-    }
-    
-    function votingHatCount() external view returns (uint256) {
-        return HatManager.getHatCount(_layout().votingHatIds);
-    }
-    
-    function creatorHatCount() external view returns (uint256) {
-        return HatManager.getHatCount(_layout().creatorHatIds);
-    }
-    
-    function pollRestricted(uint256 id) external view exists(id) returns (bool) {
-        return _layout()._proposals[id].restricted;
-    }
-    
-    function pollHatAllowed(uint256 id, uint256 hat) external view exists(id) returns (bool) {
-        return _layout()._proposals[id].pollHatAllowed[hat];
-    }
-    
-    function version() external pure returns (string memory) {
-        return "v1";
     }
 }

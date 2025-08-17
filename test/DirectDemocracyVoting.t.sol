@@ -113,7 +113,7 @@ contract DDVotingTest is Test {
         address newExec = address(0x9);
         vm.prank(address(exec));
         dd.setConfig(DirectDemocracyVoting.ConfigKey.EXECUTOR, abi.encode(newExec));
-        assertEq(dd.executor(), newExec);
+        assertEq(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.EXECUTOR, ""), (address)), newExec);
     }
 
     function testSetExecutorUnauthorized() public {
@@ -205,13 +205,13 @@ contract DDVotingTest is Test {
         address tgt = address(0xdead);
         vm.prank(address(exec));
         dd.setConfig(DirectDemocracyVoting.ConfigKey.TARGET_ALLOWED, abi.encode(tgt, true));
-        assertTrue(dd.isTargetAllowed(tgt));
+        assertTrue(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.IS_TARGET_ALLOWED, abi.encode(tgt)), (bool)));
     }
 
     function testSetQuorum() public {
         vm.prank(address(exec));
         dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(80));
-        assertEq(dd.quorumPercentage(), 80);
+        assertEq(dd.quorumPct(), 80);
     }
 
     function testSetQuorumBad() public {
@@ -410,8 +410,8 @@ contract DDVotingTest is Test {
         );
 
         uint256 id = _createHatPoll(1, hatIds);
-        assertTrue(dd.pollRestricted(id));
-        assertTrue(dd.pollHatAllowed(id, HAT_ID));
+        assertTrue(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
+        assertTrue(abi.decode(dd.getStorage(DirectDemocracyVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, HAT_ID)), (bool)));
     }
 
     function testAnnounceWinner() public {
