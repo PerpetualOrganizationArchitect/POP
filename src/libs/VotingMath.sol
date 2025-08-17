@@ -251,45 +251,6 @@ library VotingMath {
         }
     }
 
-    /* ─────────── Scaling Functions ─────────── */
-
-    /**
-     * @notice Calculate scaled voting power for an option
-     * @param rawVotes Raw votes for the option
-     * @param totalRaw Total raw votes
-     * @param slicePercentage Percentage slice for this voting type
-     * @return scaled The scaled voting power
-     */
-    function calculateScaledPower(uint256 rawVotes, uint256 totalRaw, uint256 slicePercentage)
-        internal
-        pure
-        returns (uint256 scaled)
-    {
-        if (totalRaw == 0) return 0;
-        return (rawVotes * slicePercentage) / totalRaw;
-    }
-
-    /**
-     * @notice Calculate total scaled power from DD and PT components
-     * @param scaledDD Scaled direct democracy power
-     * @param scaledPT Scaled participation token power
-     * @return total The total scaled power
-     */
-    function calculateTotalScaledPower(uint256 scaledDD, uint256 scaledPT) internal pure returns (uint256 total) {
-        return scaledDD + scaledPT;
-    }
-
-    /**
-     * @notice Calculate slice percentages for DD and PT voting
-     * @param ddSharePct Direct democracy share percentage
-     * @return sliceDD DD slice percentage
-     * @return slicePT PT slice percentage
-     */
-    function calculateSlicePercentages(uint8 ddSharePct) internal pure returns (uint256 sliceDD, uint256 slicePT) {
-        sliceDD = ddSharePct;
-        slicePT = 100 - ddSharePct;
-    }
-
     /* ─────────── Winner & Quorum Functions ─────────── */
 
     /**
@@ -391,6 +352,72 @@ library VotingMath {
         // Quorum interpreted on the final scaled total (max 100)
         // Requires strict margin for hybrid voting
         ok = (hi > second) && (hi >= quorumPct);
+    }
+
+    /**
+     * @notice Determine winner for N-class voting
+     * @param perOptionPerClassRaw [option][class] raw vote matrix
+     * @param totalsRaw [class] total raw votes per class
+     * @param slices [class] slice percentages (must sum to 100)
+     * @param quorumPct Required quorum percentage (1-100)
+     * @param strict Whether to require strict majority (winner > second)
+     * @return win Winning option index
+     * @return ok Whether quorum is met and winner is valid
+     * @return hi Highest combined score
+     * @return second Second highest combined score
+     */
+    function pickWinnerNSlices(
+        uint256[][] memory perOptionPerClassRaw,
+        uint256[] memory totalsRaw,
+        uint8[] memory slices,
+        uint8 quorumPct,
+        bool strict
+    ) internal pure returns (uint256 win, bool ok, uint256 hi, uint256 second) {
+        uint256 numOptions = perOptionPerClassRaw.length;
+        if (numOptions == 0) return (0, false, 0, 0);
+        
+        uint256 numClasses = slices.length;
+        
+        // Calculate combined scores for each option
+        for (uint256 opt; opt < numOptions; ++opt) {
+            uint256 score;
+            
+            for (uint256 cls; cls < numClasses; ++cls) {
+                if (totalsRaw[cls] > 0) {
+                    // Calculate this class's contribution to the option's score
+                    uint256 classContribution = (perOptionPerClassRaw[opt][cls] * slices[cls]) / totalsRaw[cls];
+                    score += classContribution;
+                }
+            }
+            
+            // Track winner and second place
+            if (score > hi) {
+                second = hi;
+                hi = score;
+                win = opt;
+            } else if (score > second) {
+                second = score;
+            }
+        }
+        
+        // Check quorum and margin requirements
+        bool quorumMet = hi >= quorumPct;
+        bool meetsMargin = strict ? (hi > second) : (hi >= second);
+        ok = quorumMet && meetsMargin;
+    }
+
+    /**
+     * @notice Validate class slices sum to 100
+     * @param slices Array of slice percentages
+     */
+    function validateClassSlices(uint8[] memory slices) internal pure {
+        if (slices.length == 0) revert InvalidQuorum();
+        uint256 sum;
+        for (uint256 i; i < slices.length; ++i) {
+            if (slices[i] == 0 || slices[i] > 100) revert InvalidSplit();
+            sum += slices[i];
+        }
+        if (sum != 100) revert InvalidSplit();
     }
 
     /* ─────────── Math Utilities ─────────── */
