@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/ParticipationVoting.sol";
 import "../src/libs/VotingMath.sol";
+import {VotingErrors} from "../src/libs/VotingErrors.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {MockHats} from "./mocks/MockHats.sol";
@@ -120,7 +121,7 @@ contract PVotingTest is Test {
             ParticipationVoting.initialize,
             (address(0), address(hats), address(t), h, ch, new address[](0), 50, false, 1 ether)
         );
-        vm.expectRevert(ParticipationVoting.ZeroAddress.selector);
+        vm.expectRevert(VotingErrors.ZeroAddress.selector);
         new ERC1967Proxy(address(impl), data);
     }
 
@@ -154,7 +155,7 @@ contract PVotingTest is Test {
     }
 
     function testPauseUnauthorized() public {
-        vm.expectRevert(ParticipationVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         pv.pause();
     }
 
@@ -166,13 +167,13 @@ contract PVotingTest is Test {
     }
 
     function testSetExecutorUnauthorized() public {
-        vm.expectRevert(ParticipationVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         pv.setConfig(ParticipationVoting.ConfigKey.EXECUTOR, abi.encode(address(0x9)));
     }
 
     function testSetExecutorZero() public {
         vm.prank(address(exec));
-        vm.expectRevert(ParticipationVoting.ZeroAddress.selector);
+        vm.expectRevert(VotingErrors.ZeroAddress.selector);
         pv.setConfig(ParticipationVoting.ConfigKey.EXECUTOR, abi.encode(address(0)));
     }
 
@@ -194,7 +195,7 @@ contract PVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
         vm.prank(voter);
-        vm.expectRevert(ParticipationVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         pv.vote(0, idx, w);
 
         // Re-enable voting
@@ -235,7 +236,7 @@ contract PVotingTest is Test {
 
         // Should now fail
         vm.prank(newCreator);
-        vm.expectRevert(ParticipationVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         pv.createProposal("m", 10, 1, b);
     }
 
@@ -244,7 +245,7 @@ contract PVotingTest is Test {
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
         b[0] = new IExecutor.Call[](0);
         vm.prank(voter);
-        vm.expectRevert(ParticipationVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         pv.createProposal("m", 10, 1, b);
     }
 
@@ -268,7 +269,7 @@ contract PVotingTest is Test {
     }
 
     function testSetQuorumUnauthorized() public {
-        vm.expectRevert(ParticipationVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         pv.setConfig(ParticipationVoting.ConfigKey.QUORUM, abi.encode(80));
     }
 
@@ -300,7 +301,7 @@ contract PVotingTest is Test {
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
         b[0] = new IExecutor.Call[](0);
         vm.prank(creator);
-        vm.expectRevert(ParticipationVoting.InvalidMetadata.selector);
+        vm.expectRevert(VotingErrors.InvalidMetadata.selector);
         pv.createProposal("", 10, 1, b);
     }
 
@@ -308,7 +309,7 @@ contract PVotingTest is Test {
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
         b[0] = new IExecutor.Call[](0);
         vm.prank(creator);
-        vm.expectRevert(ParticipationVoting.DurationOutOfRange.selector);
+        vm.expectRevert(VotingErrors.DurationOutOfRange.selector);
         pv.createProposal("m", 5, 1, b);
     }
 
@@ -319,7 +320,7 @@ contract PVotingTest is Test {
             b[i] = new IExecutor.Call[](0);
         }
         vm.prank(creator);
-        vm.expectRevert(ParticipationVoting.TooManyOptions.selector);
+        vm.expectRevert(VotingErrors.TooManyOptions.selector);
         pv.createProposal("m", 10, n, b);
     }
 
@@ -328,7 +329,7 @@ contract PVotingTest is Test {
         b[0] = new IExecutor.Call[](1);
         b[0][0] = IExecutor.Call({target: address(0xdead), value: 0, data: ""});
         vm.prank(creator);
-        vm.expectRevert(ParticipationVoting.TargetNotAllowed.selector);
+        vm.expectRevert(VotingErrors.TargetNotAllowed.selector);
         pv.createProposal("m", 10, 1, b);
     }
 
@@ -350,7 +351,7 @@ contract PVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
         vm.prank(voter);
-        vm.expectRevert(ParticipationVoting.VotingExpired.selector);
+        vm.expectRevert(VotingErrors.VotingExpired.selector);
         pv.vote(id, idx, w);
     }
 
@@ -362,7 +363,7 @@ contract PVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
         vm.prank(voter);
-        vm.expectRevert(ParticipationVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         pv.vote(id, idx, w);
     }
 
@@ -389,7 +390,7 @@ contract PVotingTest is Test {
         vm.prank(voter);
         pv.vote(id, idx, w);
         vm.prank(voter);
-        vm.expectRevert(ParticipationVoting.AlreadyVoted.selector);
+        vm.expectRevert(VotingErrors.AlreadyVoted.selector);
         pv.vote(id, idx, w);
     }
 
@@ -413,7 +414,7 @@ contract PVotingTest is Test {
         w[0] = 50;
         w[1] = 50;
         vm.prank(voter);
-        vm.expectRevert(ParticipationVoting.DuplicateIndex.selector);
+        vm.expectRevert(VotingErrors.DuplicateIndex.selector);
         pv.vote(id, idx, w);
     }
 
@@ -424,7 +425,7 @@ contract PVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 150;
         vm.prank(voter);
-        vm.expectRevert(ParticipationVoting.InvalidWeight.selector);
+        vm.expectRevert(VotingErrors.InvalidWeight.selector);
         pv.vote(id, idx, w);
     }
 
@@ -435,7 +436,7 @@ contract PVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 40;
         vm.prank(voter);
-        vm.expectRevert(abi.encodeWithSelector(ParticipationVoting.WeightSumNot100.selector, 40));
+        vm.expectRevert(abi.encodeWithSelector(VotingErrors.WeightSumNot100.selector, 40));
         pv.vote(id, idx, w);
     }
 
@@ -463,7 +464,7 @@ contract PVotingTest is Test {
 
     function testAnnounceWinnerOpen() public {
         _createSimple(1);
-        vm.expectRevert(ParticipationVoting.VotingOpen.selector);
+        vm.expectRevert(VotingErrors.VotingOpen.selector);
         pv.announceWinner(0);
     }
 
@@ -518,7 +519,7 @@ contract PVotingTest is Test {
 
         // First test: voter with valid hat but not the specific poll hat should get RoleNotAllowed
         vm.prank(voter);
-        vm.expectRevert(ParticipationVoting.RoleNotAllowed.selector);
+        vm.expectRevert(VotingErrors.RoleNotAllowed.selector);
         pv.vote(id, idx, w);
 
         // Second test: voter with correct hat should succeed

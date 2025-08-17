@@ -8,25 +8,10 @@ import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {IExecutor} from "./Executor.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
+import {VotingErrors} from "./libs/VotingErrors.sol";
 
 /* ─────────────────── HybridVoting ─────────────────── */
 contract HybridVoting is Initializable {
-    /* ─────── Errors ─────── */
-    error Unauthorized();
-    error AlreadyVoted();
-    error InvalidProposal();
-    error VotingExpired();
-    error VotingOpen();
-    error InvalidIndex();
-    error LengthMismatch();
-    error DurationOutOfRange();
-    error TooManyOptions();
-    error TooManyCalls();
-    error InvalidTarget();
-    error ZeroAddress();
-    error InvalidMetadata();
-    error RoleNotAllowed();
-    error Paused();
 
     /* ─────── Constants ─────── */
     uint8 public constant MAX_OPTIONS = 50;
@@ -114,7 +99,7 @@ contract HybridVoting is Initializable {
 
     /* ─────────── Inline Pausable Implementation ─────────── */
     modifier whenNotPaused() {
-        if (_layout()._paused) revert Paused();
+        if (_layout()._paused) revert VotingErrors.Paused();
         _;
     }
 
@@ -161,7 +146,7 @@ contract HybridVoting is Initializable {
         uint256 minBalance_
     ) external initializer {
         if (hats_ == address(0) || token_ == address(0) || executor_ == address(0)) {
-            revert ZeroAddress();
+            revert VotingErrors.ZeroAddress();
         }
 
         VotingMath.validateQuorum(quorum_);
@@ -233,7 +218,7 @@ contract HybridVoting is Initializable {
 
     /* ─────── Governance setters (executor‑gated) ─────── */
     modifier onlyExecutor() {
-        if (_msgSender() != address(_layout().executor)) revert Unauthorized();
+        if (_msgSender() != address(_layout().executor)) revert VotingErrors.Unauthorized();
         _;
     }
 
@@ -304,7 +289,7 @@ contract HybridVoting is Initializable {
             emit TargetAllowed(target, allowed);
         } else if (key == ConfigKey.EXECUTOR) {
             address newExecutor = abi.decode(value, (address));
-            if (newExecutor == address(0)) revert ZeroAddress();
+            if (newExecutor == address(0)) revert VotingErrors.ZeroAddress();
             l.executor = IExecutor(newExecutor);
             emit ExecutorUpdated(newExecutor);
         }
@@ -315,18 +300,18 @@ contract HybridVoting is Initializable {
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
             bool canCreate = HatManager.hasAnyHat(l.hats, l.creatorHatIds, _msgSender());
-            if (!canCreate) revert Unauthorized();
+            if (!canCreate) revert VotingErrors.Unauthorized();
         }
         _;
     }
 
     modifier exists(uint256 id) {
-        if (id >= _layout()._proposals.length) revert InvalidProposal();
+        if (id >= _layout()._proposals.length) revert VotingErrors.InvalidProposal();
         _;
     }
 
     modifier isExpired(uint256 id) {
-        if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingOpen();
+        if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingErrors.VotingOpen();
         _;
     }
 
@@ -337,10 +322,10 @@ contract HybridVoting is Initializable {
         uint8 numOptions,
         IExecutor.Call[][] calldata batches
     ) external onlyCreator whenNotPaused {
-        if (metadata.length == 0) revert InvalidMetadata();
-        if (numOptions == 0 || numOptions != batches.length) revert LengthMismatch();
-        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
-        if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert DurationOutOfRange();
+        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
+        if (numOptions == 0 || numOptions != batches.length) revert VotingErrors.LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
+        if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert VotingErrors.DurationOutOfRange();
 
         Layout storage l = _layout();
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
@@ -351,10 +336,10 @@ contract HybridVoting is Initializable {
         for (uint256 i; i < numOptions;) {
             uint256 batchLen = batches[i].length;
             if (batchLen > 0) {
-                if (batchLen > MAX_CALLS) revert TooManyCalls();
+                if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
                 for (uint256 j; j < batchLen;) {
-                    if (!l.allowedTarget[batches[i][j].target]) revert InvalidTarget();
-                    if (batches[i][j].target == address(this)) revert InvalidTarget();
+                    if (!l.allowedTarget[batches[i][j].target]) revert VotingErrors.InvalidTarget();
+                    if (batches[i][j].target == address(this)) revert VotingErrors.InvalidTarget();
                     unchecked {
                         ++j;
                     }
@@ -375,10 +360,10 @@ contract HybridVoting is Initializable {
         onlyCreator
         whenNotPaused
     {
-        if (metadata.length == 0) revert InvalidMetadata();
-        if (numOptions == 0) revert LengthMismatch();
-        if (numOptions > MAX_OPTIONS) revert TooManyOptions();
-        if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert DurationOutOfRange();
+        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
+        if (numOptions == 0) revert VotingErrors.LengthMismatch();
+        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
+        if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) revert VotingErrors.DurationOutOfRange();
 
         Layout storage l = _layout();
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
@@ -407,12 +392,12 @@ contract HybridVoting is Initializable {
 
     /* ─────── Voting ─────── */
     function vote(uint256 id, uint8[] calldata idxs, uint8[] calldata weights) external exists(id) whenNotPaused {
-        if (idxs.length != weights.length) revert LengthMismatch();
-        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingExpired();
+        if (idxs.length != weights.length) revert VotingErrors.LengthMismatch();
+        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingErrors.VotingExpired();
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
             bool canVote = HatManager.hasAnyHat(l.hats, l.votingHatIds, _msgSender());
-            if (!canVote) revert RoleNotAllowed();
+            if (!canVote) revert VotingErrors.RoleNotAllowed();
         }
         Proposal storage p = l._proposals[id];
         if (p.restricted) {
@@ -427,9 +412,9 @@ contract HybridVoting is Initializable {
                     ++i;
                 }
             }
-            if (!hasAllowedHat) revert RoleNotAllowed();
+            if (!hasAllowedHat) revert VotingErrors.RoleNotAllowed();
         }
-        if (p.hasVoted[_msgSender()]) revert AlreadyVoted();
+        if (p.hasVoted[_msgSender()]) revert VotingErrors.AlreadyVoted();
 
         /* collect raw powers */
         bool hasDemocracyHat =
@@ -508,7 +493,7 @@ contract HybridVoting is Initializable {
         if (valid && batch.length > 0) {
             uint256 len = batch.length;
             for (uint256 i; i < len;) {
-                if (!l.allowedTarget[batch[i].target]) revert InvalidTarget();
+                if (!l.allowedTarget[batch[i].target]) revert VotingErrors.InvalidTarget();
                 unchecked {
                     ++i;
                 }
@@ -581,11 +566,11 @@ contract HybridVoting is Initializable {
             return abi.encode(HatManager.getHatCount(l.creatorHatIds));
         } else if (key == StorageKey.POLL_HAT_ALLOWED) {
             (uint256 id, uint256 hat) = abi.decode(params, (uint256, uint256));
-            if (id >= l._proposals.length) revert InvalidProposal();
+            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
             return abi.encode(l._proposals[id].pollHatAllowed[hat]);
         } else if (key == StorageKey.POLL_RESTRICTED) {
             uint256 id = abi.decode(params, (uint256));
-            if (id >= l._proposals.length) revert InvalidProposal();
+            if (id >= l._proposals.length) revert VotingErrors.InvalidProposal();
             return abi.encode(l._proposals[id].restricted);
         } else if (key == StorageKey.VERSION) {
             return abi.encode("v1");
@@ -593,6 +578,6 @@ contract HybridVoting is Initializable {
             return abi.encode(l._proposals.length);
         }
 
-        revert InvalidIndex();
+        revert VotingErrors.InvalidIndex();
     }
 }

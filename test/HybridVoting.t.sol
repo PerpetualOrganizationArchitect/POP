@@ -6,6 +6,7 @@ import "forge-std/Test.sol";
 
 /* target */
 import {HybridVoting} from "../src/HybridVoting.sol";
+import {VotingErrors} from "../src/libs/VotingErrors.sol";
 
 /* OpenZeppelin */
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -187,7 +188,7 @@ contract HybridVotingTest is Test {
         batches[1] = new IExecutor.Call[](0);
 
         bytes memory metadata = bytes("ipfs://test");
-        vm.expectRevert(HybridVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         hv.createProposal(metadata, 30, 2, batches);
 
         vm.stopPrank();
@@ -262,7 +263,7 @@ contract HybridVotingTest is Test {
         w[0] = 100;
 
         vm.prank(poorVoter);
-        vm.expectRevert(HybridVoting.RoleNotAllowed.selector);
+        vm.expectRevert(VotingErrors.RoleNotAllowed.selector);
         hv.vote(0, idx, w);
     }
 
@@ -331,7 +332,7 @@ contract HybridVotingTest is Test {
 
         // This voter should not be able to vote (no valid DD hat, insufficient PT tokens)
         vm.prank(hatOnlyVoter);
-        vm.expectRevert(HybridVoting.RoleNotAllowed.selector);
+        vm.expectRevert(VotingErrors.RoleNotAllowed.selector);
         hv.vote(0, idx, w);
 
         // Re-enable the hat and the same voter should now be able to vote
@@ -369,7 +370,7 @@ contract HybridVotingTest is Test {
 
         // Should now fail
         vm.prank(newCreator);
-        vm.expectRevert(HybridVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         hv.createProposal(bytes("ipfs://test2"), 15, 2, batches);
     }
 
@@ -553,7 +554,7 @@ contract HybridVotingTest is Test {
 
         // First test: voter with valid hat but not the specific poll hat should get RoleNotAllowed
         vm.prank(alice);
-        vm.expectRevert(HybridVoting.RoleNotAllowed.selector);
+        vm.expectRevert(VotingErrors.RoleNotAllowed.selector);
         hv.vote(id, idx, w);
 
         // Second test: voter with correct hat should succeed

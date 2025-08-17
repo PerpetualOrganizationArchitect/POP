@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/DirectDemocracyVoting.sol";
 import "../src/libs/VotingMath.sol";
+import {VotingErrors} from "../src/libs/VotingErrors.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {MockHats} from "./mocks/MockHats.sol";
@@ -80,7 +81,7 @@ contract DDVotingTest is Test {
         ch[0] = CREATOR_HAT_ID;
         bytes memory data =
             abi.encodeCall(DirectDemocracyVoting.initialize, (address(0), address(exec), h, ch, new address[](0), 50));
-        vm.expectRevert(DirectDemocracyVoting.ZeroAddress.selector);
+        vm.expectRevert(VotingErrors.ZeroAddress.selector);
         new ERC1967Proxy(address(impl), data);
     }
 
@@ -104,7 +105,7 @@ contract DDVotingTest is Test {
     }
 
     function testPauseUnauthorized() public {
-        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         dd.pause();
     }
 
@@ -116,13 +117,13 @@ contract DDVotingTest is Test {
     }
 
     function testSetExecutorUnauthorized() public {
-        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         dd.setConfig(DirectDemocracyVoting.ConfigKey.EXECUTOR, abi.encode(address(0x9)));
     }
 
     function testSetExecutorZero() public {
         vm.prank(address(exec));
-        vm.expectRevert(DirectDemocracyVoting.ZeroAddress.selector);
+        vm.expectRevert(VotingErrors.ZeroAddress.selector);
         dd.setConfig(DirectDemocracyVoting.ConfigKey.EXECUTOR, abi.encode(address(0)));
     }
 
@@ -144,7 +145,7 @@ contract DDVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
         vm.prank(voter);
-        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         dd.vote(0, idx, w);
 
         // Re-enable voting
@@ -187,7 +188,7 @@ contract DDVotingTest is Test {
 
         // Should now fail
         vm.prank(newCreator);
-        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         dd.createProposal("m", 10, 1, b);
     }
 
@@ -196,7 +197,7 @@ contract DDVotingTest is Test {
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
         b[0] = new IExecutor.Call[](0);
         vm.prank(voter);
-        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         dd.createProposal("m", 10, 1, b);
     }
 
@@ -220,7 +221,7 @@ contract DDVotingTest is Test {
     }
 
     function testSetQuorumUnauthorized() public {
-        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(80));
     }
 
@@ -239,7 +240,7 @@ contract DDVotingTest is Test {
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
         b[0] = new IExecutor.Call[](0);
         vm.prank(creator);
-        vm.expectRevert(DirectDemocracyVoting.InvalidMetadata.selector);
+        vm.expectRevert(VotingErrors.InvalidMetadata.selector);
         dd.createProposal("", 10, 1, b);
     }
 
@@ -247,7 +248,7 @@ contract DDVotingTest is Test {
         IExecutor.Call[][] memory b = new IExecutor.Call[][](1);
         b[0] = new IExecutor.Call[](0);
         vm.prank(creator);
-        vm.expectRevert(DirectDemocracyVoting.DurationOutOfRange.selector);
+        vm.expectRevert(VotingErrors.DurationOutOfRange.selector);
         dd.createProposal("m", 5, 1, b);
     }
 
@@ -258,7 +259,7 @@ contract DDVotingTest is Test {
             b[i] = new IExecutor.Call[](0);
         }
         vm.prank(creator);
-        vm.expectRevert(DirectDemocracyVoting.TooManyOptions.selector);
+        vm.expectRevert(VotingErrors.TooManyOptions.selector);
         dd.createProposal("m", 10, n, b);
     }
 
@@ -267,7 +268,7 @@ contract DDVotingTest is Test {
         b[0] = new IExecutor.Call[](1);
         b[0][0] = IExecutor.Call({target: address(0xdead), value: 0, data: ""});
         vm.prank(creator);
-        vm.expectRevert(DirectDemocracyVoting.TargetNotAllowed.selector);
+        vm.expectRevert(VotingErrors.TargetNotAllowed.selector);
         dd.createProposal("m", 10, 1, b);
     }
 
@@ -289,7 +290,7 @@ contract DDVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
         vm.prank(voter);
-        vm.expectRevert(DirectDemocracyVoting.VotingExpired.selector);
+        vm.expectRevert(VotingErrors.VotingExpired.selector);
         dd.vote(id, idx, w);
     }
 
@@ -301,7 +302,7 @@ contract DDVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 100;
         vm.prank(voter);
-        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         dd.vote(id, idx, w);
     }
 
@@ -314,7 +315,7 @@ contract DDVotingTest is Test {
         vm.prank(voter);
         dd.vote(id, idx, w);
         vm.prank(voter);
-        vm.expectRevert(DirectDemocracyVoting.AlreadyVoted.selector);
+        vm.expectRevert(VotingErrors.AlreadyVoted.selector);
         dd.vote(id, idx, w);
     }
 
@@ -338,7 +339,7 @@ contract DDVotingTest is Test {
         w[0] = 50;
         w[1] = 50;
         vm.prank(voter);
-        vm.expectRevert(DirectDemocracyVoting.DuplicateIndex.selector);
+        vm.expectRevert(VotingErrors.DuplicateIndex.selector);
         dd.vote(id, idx, w);
     }
 
@@ -349,7 +350,7 @@ contract DDVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 150;
         vm.prank(voter);
-        vm.expectRevert(DirectDemocracyVoting.InvalidWeight.selector);
+        vm.expectRevert(VotingErrors.InvalidWeight.selector);
         dd.vote(id, idx, w);
     }
 
@@ -360,7 +361,7 @@ contract DDVotingTest is Test {
         uint8[] memory w = new uint8[](1);
         w[0] = 40;
         vm.prank(voter);
-        vm.expectRevert(abi.encodeWithSelector(DirectDemocracyVoting.WeightSumNot100.selector, 40));
+        vm.expectRevert(abi.encodeWithSelector(VotingErrors.WeightSumNot100.selector, 40));
         dd.vote(id, idx, w);
     }
 
@@ -380,7 +381,7 @@ contract DDVotingTest is Test {
         // First test: voter with no hat should get Unauthorized
         address noHatVoter = address(0x3);
         vm.prank(noHatVoter);
-        vm.expectRevert(DirectDemocracyVoting.Unauthorized.selector);
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
         dd.vote(id, idx, w);
 
         // Second test: voter with valid hat but not the specific poll hat should get RoleNotAllowed
@@ -388,7 +389,7 @@ contract DDVotingTest is Test {
         // Give them a valid voting hat (HAT_ID) but not the specific hat for this poll
         hats.mintHat(HAT_ID, wrongHatVoter);
         vm.prank(wrongHatVoter);
-        vm.expectRevert(DirectDemocracyVoting.RoleNotAllowed.selector);
+        vm.expectRevert(VotingErrors.RoleNotAllowed.selector);
         dd.vote(id, idx, w);
 
         // Third test: voter with correct hat should succeed
@@ -436,7 +437,7 @@ contract DDVotingTest is Test {
 
     function testAnnounceWinnerOpen() public {
         _createSimple(1);
-        vm.expectRevert(DirectDemocracyVoting.VotingOpen.selector);
+        vm.expectRevert(VotingErrors.VotingOpen.selector);
         dd.announceWinner(0);
     }
 
