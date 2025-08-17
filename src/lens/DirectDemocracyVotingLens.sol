@@ -10,8 +10,8 @@ contract DirectDemocracyVotingLens {
         view 
         returns (uint256[] memory hats, uint256 count) 
     {
-        hats = voting.votingHats();
-        count = voting.votingHatCount();
+        hats = abi.decode(voting.getStorage(DirectDemocracyVoting.StorageKey.VOTING_HATS, ""), (uint256[]));
+        count = hats.length;
     }
     
     function getAllCreatorHats(DirectDemocracyVoting voting) 
@@ -19,8 +19,8 @@ contract DirectDemocracyVotingLens {
         view 
         returns (uint256[] memory hats, uint256 count) 
     {
-        hats = voting.creatorHats();
-        count = voting.creatorHatCount();
+        hats = abi.decode(voting.getStorage(DirectDemocracyVoting.StorageKey.CREATOR_HATS, ""), (uint256[]));
+        count = hats.length;
     }
     
     function getAllProposalHatIds(DirectDemocracyVoting voting, uint256 proposalId, uint256[] calldata hatIds) 
@@ -30,7 +30,7 @@ contract DirectDemocracyVotingLens {
     {
         bool[] memory allowed = new bool[](hatIds.length);
         for (uint256 i = 0; i < hatIds.length; i++) {
-            allowed[i] = voting.pollHatAllowed(proposalId, hatIds[i]);
+            allowed[i] = abi.decode(voting.getStorage(DirectDemocracyVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(proposalId, hatIds[i])), (bool));
         }
         return allowed;
     }
@@ -45,9 +45,9 @@ contract DirectDemocracyVotingLens {
             uint256 proposalCount
         ) 
     {
-        executor = voting.executor();
-        hats = voting.hats();
-        quorumPercentage = voting.quorumPercentage();
+        executor = abi.decode(voting.getStorage(DirectDemocracyVoting.StorageKey.EXECUTOR, ""), (address));
+        hats = abi.decode(voting.getStorage(DirectDemocracyVoting.StorageKey.HATS, ""), (address));
+        quorumPercentage = voting.quorumPct();
         proposalCount = voting.proposalsCount();
     }
 }
