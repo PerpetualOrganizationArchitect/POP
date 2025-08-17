@@ -6,7 +6,7 @@ import {HybridVoting} from "../HybridVoting.sol";
 contract HybridVotingLens {
     
     function getCreatorHatCount(HybridVoting voting) external view returns (uint256) {
-        uint256[] memory hats = abi.decode(voting.getStorage(HybridVoting.StorageKey.CREATOR_HATS, ""), (uint256[]));
+        uint256[] memory hats = voting.creatorHats();
         return hats.length;
     }
     
@@ -25,7 +25,7 @@ contract HybridVotingLens {
     {
         bool[] memory allowed = new bool[](hatIds.length);
         for (uint256 i = 0; i < hatIds.length; i++) {
-            allowed[i] = abi.decode(voting.getStorage(HybridVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(proposalId, hatIds[i])), (bool));
+            allowed[i] = voting.pollHatAllowed(proposalId, hatIds[i]);
         }
         return allowed;
     }
@@ -33,7 +33,6 @@ contract HybridVotingLens {
     function isProposalActive(HybridVoting voting, uint256 id) external view returns (bool) {
         // Would need endTimestamp exposed from HybridVoting
         // This is a placeholder showing the lens pattern
-        bool restricted = abi.decode(voting.getStorage(HybridVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool));
-        return restricted || !restricted;
+        return voting.pollRestricted(id) || !voting.pollRestricted(id);
     }
 }

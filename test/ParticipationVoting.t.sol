@@ -163,7 +163,7 @@ contract PVotingTest is Test {
         address newExec = address(0x9);
         vm.prank(address(exec));
         pv.setConfig(ParticipationVoting.ConfigKey.EXECUTOR, abi.encode(newExec));
-        assertEq(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.EXECUTOR, ""), (address)), newExec);
+        assertEq(pv.executor(), newExec);
     }
 
     function testSetExecutorUnauthorized() public {
@@ -253,7 +253,7 @@ contract PVotingTest is Test {
         address tgt = address(0xdead);
         vm.prank(address(exec));
         pv.setConfig(ParticipationVoting.ConfigKey.TARGET_ALLOWED, abi.encode(tgt, true));
-        assertTrue(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.IS_TARGET_ALLOWED, abi.encode(tgt)), (bool)));
+        assertTrue(pv.isTargetAllowed(tgt));
     }
 
     function testSetQuorum() public {
@@ -274,16 +274,16 @@ contract PVotingTest is Test {
     }
 
     function testToggleQuadratic() public {
-        assertFalse(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.QUADRATIC_VOTING, ""), (bool)));
+        assertFalse(pv.quadraticVoting());
         vm.prank(address(exec));
         pv.setConfig(ParticipationVoting.ConfigKey.QUADRATIC, abi.encode(true));
-        assertTrue(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.QUADRATIC_VOTING, ""), (bool)));
+        assertTrue(pv.quadraticVoting());
     }
 
     function testSetMinBalance() public {
         vm.prank(address(exec));
         pv.setConfig(ParticipationVoting.ConfigKey.MIN_BALANCE, abi.encode(5 ether));
-        assertEq(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.MIN_BALANCE, ""), (uint256)), 5 ether);
+        assertEq(pv.minBalance(), 5 ether);
     }
 
     function testCreateProposalBasic() public {
@@ -493,9 +493,9 @@ contract PVotingTest is Test {
         );
 
         uint256 id = _createHatPoll(2, hatIds);
-        assertTrue(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
-        assertTrue(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, HAT_ID)), (bool)));
-        assertFalse(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.POLL_HAT_ALLOWED, abi.encode(id, CREATOR_HAT_ID)), (bool)));
+        assertTrue(pv.pollRestricted(id));
+        assertTrue(pv.pollHatAllowed(id, HAT_ID));
+        assertFalse(pv.pollHatAllowed(id, CREATOR_HAT_ID));
     }
 
     function testHatPollRestrictions() public {
@@ -526,7 +526,7 @@ contract PVotingTest is Test {
         // Empty hat IDs should create unrestricted poll
         uint256[] memory hatIds = new uint256[](0);
         uint256 id = _createHatPoll(1, hatIds);
-        assertFalse(abi.decode(pv.getStorage(ParticipationVoting.StorageKey.POLL_RESTRICTED, abi.encode(id)), (bool)));
+        assertFalse(pv.pollRestricted(id));
 
         // Anyone with voting hat should be able to vote
         uint8[] memory idx = new uint8[](1);
