@@ -1,4 +1,4 @@
-// SPDX‑License‑Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
 /*  OpenZeppelin v5.3 Upgradeables  */
@@ -9,6 +9,9 @@ import {IExecutor} from "./Executor.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
 import {VotingErrors} from "./libs/VotingErrors.sol";
+import {HybridVotingProposals} from "./libs/HybridVotingProposals.sol";
+import {HybridVotingCore} from "./libs/HybridVotingCore.sol";
+import {HybridVotingConfig} from "./libs/HybridVotingConfig.sol";
 
 /* ─────────────────── HybridVoting ─────────────────── */
 contract HybridVoting is Initializable {
@@ -107,14 +110,8 @@ contract HybridVoting is Initializable {
     /* ─────── Events ─────── */
     event HatSet(HatType hatType, uint256 hat, bool allowed);
     event TargetAllowed(address target, bool allowed);
-    event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created);
-    event NewHatProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created, uint256[] hatIds);
-    event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
-    event Winner(uint256 id, uint256 winningIdx, bool valid);
     event ExecutorUpdated(address newExec);
     event QuorumSet(uint8 pct);
-    event ProposalCleaned(uint256 id, uint256 cleaned);
-    event ClassesReplaced(uint256 version, bytes32 classesHash);
 
     /* ─────── Initialiser ─────── */
     constructor() initializer {}
@@ -130,9 +127,6 @@ contract HybridVoting is Initializable {
         if (hats_ == address(0) || executor_ == address(0)) {
             revert VotingErrors.ZeroAddress();
         }
-        
-        if (initialClasses.length == 0) revert VotingErrors.InvalidClassCount();
-        if (initialClasses.length > MAX_CLASSES) revert VotingErrors.TooManyClasses();
 
         VotingMath.validateQuorum(quorum_);
 
@@ -149,26 +143,8 @@ contract HybridVoting is Initializable {
         _initializeCreatorHats(initialCreatorHats);
         _initializeTargets(initialTargets);
         
-        // Validate and set initial classes
-        uint256 totalSlice;
-        for (uint256 i; i < initialClasses.length;) {
-            ClassConfig calldata c = initialClasses[i];
-            if (c.slicePct == 0 || c.slicePct > 100) revert VotingErrors.InvalidSliceSum();
-            totalSlice += c.slicePct;
-            
-            if (c.strategy == ClassStrategy.ERC20_BAL) {
-                if (c.asset == address(0)) revert VotingErrors.ZeroAddress();
-            }
-            
-            l.classes.push(initialClasses[i]);
-            unchecked { ++i; }
-        }
-        
-        if (totalSlice != 100) revert VotingErrors.InvalidSliceSum();
-        
-        // Emit new class configuration event
-        bytes32 classesHash = keccak256(abi.encode(l.classes));
-        emit ClassesReplaced(block.number, classesHash);
+        // Use library for class initialization
+        HybridVotingConfig.validateAndInitClasses(initialClasses);
     }
     
     function _initializeCreatorHats(uint256[] calldata creatorHats) internal {
@@ -220,32 +196,7 @@ contract HybridVoting is Initializable {
 
     /* ─────── N-Class Configuration ─────── */
     function setClasses(ClassConfig[] calldata newClasses) external onlyExecutor {
-        if (newClasses.length == 0) revert VotingErrors.InvalidClassCount();
-        if (newClasses.length > MAX_CLASSES) revert VotingErrors.TooManyClasses();
-        
-        uint256 totalSlice;
-        for (uint256 i; i < newClasses.length;) {
-            ClassConfig calldata c = newClasses[i];
-            if (c.slicePct == 0 || c.slicePct > 100) revert VotingErrors.InvalidSliceSum();
-            totalSlice += c.slicePct;
-            
-            if (c.strategy == ClassStrategy.ERC20_BAL) {
-                if (c.asset == address(0)) revert VotingErrors.ZeroAddress();
-            }
-            unchecked { ++i; }
-        }
-        
-        if (totalSlice != 100) revert VotingErrors.InvalidSliceSum();
-        
-        Layout storage l = _layout();
-        delete l.classes;
-        for (uint256 i; i < newClasses.length;) {
-            l.classes.push(newClasses[i]);
-            unchecked { ++i; }
-        }
-        
-        bytes32 classesHash = keccak256(abi.encode(newClasses));
-        emit ClassesReplaced(block.number, classesHash);
+        HybridVotingConfig.setClasses(newClasses);
     }
     
     function getClasses() external view returns (ClassConfig[] memory) {
@@ -303,102 +254,6 @@ contract HybridVoting is Initializable {
         _;
     }
 
-    /* ─────── Internal Helper Functions ─────── */
-    function _validateDuration(uint32 minutesDuration) internal pure {
-        if (minutesDuration < MIN_DURATION || minutesDuration > MAX_DURATION) {
-            revert VotingErrors.DurationOutOfRange();
-        }
-    }
-
-    function _validateTargets(IExecutor.Call[] calldata batch, Layout storage l) internal view {
-        uint256 batchLen = batch.length;
-        if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
-        for (uint256 j; j < batchLen;) {
-            if (!l.allowedTarget[batch[j].target]) revert VotingErrors.InvalidTarget();
-            if (batch[j].target == address(this)) revert VotingErrors.InvalidTarget();
-            unchecked { ++j; }
-        }
-    }
-
-    function _snapshotClasses(Proposal storage p, Layout storage l) internal {
-        uint256 classCount = l.classes.length;
-        for (uint256 i; i < classCount;) {
-            p.classesSnapshot.push(l.classes[i]);
-            unchecked { ++i; }
-        }
-        p.classTotalsRaw = new uint256[](classCount);
-    }
-
-    function _initOptions(Proposal storage p, uint8 numOptions, uint256 classCount) internal {
-        for (uint256 i; i < numOptions;) {
-            PollOption storage opt = p.options.push();
-            opt.classRaw = new uint128[](classCount);
-            unchecked { ++i; }
-        }
-    }
-
-    function _initProposal(
-        bytes calldata metadata,
-        uint32 minutesDuration,
-        uint8 numOptions,
-        IExecutor.Call[][] calldata batches,
-        uint256[] calldata hatIds
-    ) internal returns (uint256) {
-        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
-        if (numOptions == 0) revert VotingErrors.LengthMismatch();
-        if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
-        _validateDuration(minutesDuration);
-
-        Layout storage l = _layout();
-        if (l.classes.length == 0) revert VotingErrors.InvalidClassCount();
-        
-        bool isExecuting = false;
-        if (batches.length > 0) {
-            if (numOptions != batches.length) revert VotingErrors.LengthMismatch();
-            for (uint256 i; i < numOptions;) {
-                if (batches[i].length > 0) {
-                    isExecuting = true;
-                    _validateTargets(batches[i], l);
-                }
-                unchecked { ++i; }
-            }
-        }
-        
-        uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
-        Proposal storage p = l._proposals.push();
-        p.endTimestamp = endTs;
-        p.restricted = hatIds.length > 0;
-        
-        _snapshotClasses(p, l);
-        uint256 classCount = l.classes.length;
-        _initOptions(p, numOptions, classCount);
-        
-        uint256 id = l._proposals.length - 1;
-        
-        if (isExecuting) {
-            for (uint256 i; i < numOptions;) {
-                p.batches.push(batches[i]);
-                unchecked { ++i; }
-            }
-        } else {
-            for (uint256 i; i < numOptions;) {
-                p.batches.push();
-                unchecked { ++i; }
-            }
-        }
-        
-        if (hatIds.length > 0) {
-            uint256 len = hatIds.length;
-            for (uint256 i; i < len;) {
-                p.pollHatIds.push(hatIds[i]);
-                p.pollHatAllowed[hatIds[i]] = true;
-                unchecked { ++i; }
-            }
-        }
-        
-        return id;
-    }
-
     /* ─────── Proposal creation ─────── */
     function createProposal(
         bytes calldata metadata,
@@ -407,112 +262,12 @@ contract HybridVoting is Initializable {
         IExecutor.Call[][] calldata batches,
         uint256[] calldata hatIds
     ) external onlyCreator whenNotPaused {
-        uint256 id = _initProposal(metadata, minutesDuration, numOptions, batches, hatIds);
-        
-        uint64 endTs = _layout()._proposals[id].endTimestamp;
-        
-        if (hatIds.length > 0) {
-            emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
-        } else {
-            emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
-        }
+        HybridVotingProposals.createProposal(metadata, minutesDuration, numOptions, batches, hatIds);
     }
 
     /* ─────── Voting ─────── */
     function vote(uint256 id, uint8[] calldata idxs, uint8[] calldata weights) external exists(id) whenNotPaused {
-        if (idxs.length != weights.length) revert VotingErrors.LengthMismatch();
-        if (block.timestamp > _layout()._proposals[id].endTimestamp) revert VotingErrors.VotingExpired();
-        
-        Layout storage l = _layout();
-        Proposal storage p = l._proposals[id];
-        address voter = _msgSender();
-        
-        // Check poll-level restrictions
-        if (p.restricted) {
-            bool hasAllowedHat = false;
-            uint256 len = p.pollHatIds.length;
-            for (uint256 i = 0; i < len;) {
-                if (l.hats.isWearerOfHat(voter, p.pollHatIds[i])) {
-                    hasAllowedHat = true;
-                    break;
-                }
-                unchecked { ++i; }
-            }
-            if (!hasAllowedHat) revert VotingErrors.RoleNotAllowed();
-        }
-        
-        if (p.hasVoted[voter]) revert VotingErrors.AlreadyVoted();
-        
-        // Validate weights
-        VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: p.options.length}));
-        
-        // Calculate raw power for each class
-        uint256 classCount = p.classesSnapshot.length;
-        uint256[] memory classRawPowers = new uint256[](classCount);
-        
-        for (uint256 c; c < classCount;) {
-            ClassConfig memory cls = p.classesSnapshot[c];
-            uint256 rawPower = _calculateClassPower(voter, cls);
-            classRawPowers[c] = rawPower;
-            p.classTotalsRaw[c] += rawPower;
-            unchecked { ++c; }
-        }
-        
-        // Accumulate deltas for each option
-        uint256 len = weights.length;
-        for (uint256 i; i < len;) {
-            uint8 ix = idxs[i];
-            uint8 weight = weights[i];
-            
-            for (uint256 c; c < classCount;) {
-                if (classRawPowers[c] > 0) {
-                    uint256 delta = (classRawPowers[c] * weight) / 100;
-                    if (delta > 0) {
-                        uint256 newVal = p.options[ix].classRaw[c] + delta;
-                        require(VotingMath.fitsUint128(newVal), "Class raw overflow");
-                        p.options[ix].classRaw[c] = uint128(newVal);
-                    }
-                }
-                unchecked { ++c; }
-            }
-            unchecked { ++i; }
-        }
-        
-        p.hasVoted[voter] = true;
-        emit VoteCast(id, voter, idxs, weights);
-    }
-    
-    function _calculateClassPower(address voter, ClassConfig memory cls) 
-        internal view returns (uint256) {
-        Layout storage l = _layout();
-        
-        // Check hat gating for this class
-        bool hasClassHat = (voter == address(l.executor)) || 
-            (cls.hatIds.length == 0);
-        
-        // Check if voter has any of the class hats
-        if (!hasClassHat && cls.hatIds.length > 0) {
-            for (uint256 i; i < cls.hatIds.length;) {
-                if (l.hats.isWearerOfHat(voter, cls.hatIds[i])) {
-                    hasClassHat = true;
-                    break;
-                }
-                unchecked { ++i; }
-            }
-        }
-        
-        if (!hasClassHat) return 0;
-        
-        if (cls.strategy == ClassStrategy.DIRECT) {
-            return 100; // Direct democracy: 1 person = 100 raw points
-        } else if (cls.strategy == ClassStrategy.ERC20_BAL) {
-            uint256 balance = IERC20(cls.asset).balanceOf(voter);
-            if (balance < cls.minBalance) return 0;
-            uint256 power = cls.quadratic ? VotingMath.sqrt(balance) : balance;
-            return power * 100; // Scale to match existing system
-        }
-        
-        return 0;
+        HybridVotingCore.vote(id, idxs, weights);
     }
 
     /* ─────── Winner & execution ─────── */
@@ -523,95 +278,8 @@ contract HybridVoting is Initializable {
         whenNotPaused
         returns (uint256 winner, bool valid)
     {
-        Layout storage l = _layout();
-        Proposal storage p = l._proposals[id];
-
-        // Check if any votes were cast
-        bool hasVotes = false;
-        for (uint256 i; i < p.classTotalsRaw.length;) {
-            if (p.classTotalsRaw[i] > 0) {
-                hasVotes = true;
-                break;
-            }
-            unchecked { ++i; }
-        }
-        
-        if (!hasVotes) {
-            emit Winner(id, 0, false);
-            return (0, false);
-        }
-
-        // Build matrix for N-class winner calculation
-        uint256 numOptions = p.options.length;
-        uint256 numClasses = p.classesSnapshot.length;
-        uint256[][] memory perOptionPerClassRaw = new uint256[][](numOptions);
-        uint8[] memory slices = new uint8[](numClasses);
-        
-        for (uint256 opt; opt < numOptions;) {
-            perOptionPerClassRaw[opt] = new uint256[](numClasses);
-            for (uint256 cls; cls < numClasses;) {
-                perOptionPerClassRaw[opt][cls] = p.options[opt].classRaw[cls];
-                unchecked { ++cls; }
-            }
-            unchecked { ++opt; }
-        }
-        
-        for (uint256 cls; cls < numClasses;) {
-            slices[cls] = p.classesSnapshot[cls].slicePct;
-            unchecked { ++cls; }
-        }
-
-        // Use VotingMath to pick winner with N-class logic
-        (winner, valid,,) = VotingMath.pickWinnerNSlices(
-            perOptionPerClassRaw,
-            p.classTotalsRaw,
-            slices,
-            l.quorumPct,
-            true // strict majority required
-        );
-
-        IExecutor.Call[] storage batch = p.batches[winner];
-        if (valid && batch.length > 0) {
-            uint256 batchLen = batch.length;
-            for (uint256 i; i < batchLen;) {
-                if (!l.allowedTarget[batch[i].target]) revert VotingErrors.InvalidTarget();
-                unchecked { ++i; }
-            }
-            l.executor.execute(id, batch);
-        }
-        emit Winner(id, winner, valid);
+        return HybridVotingCore.announceWinner(id);
     }
-
-    /* ─────── Cleanup (storage‑refund helper) ─────── */
-    // function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
-    //     Layout storage l = _layout();
-    //     Proposal storage p = l._proposals[id];
-
-    //     // nothing to do?
-    //     require(p.batches.length > 0 || voters.length > 0, "nothing");
-
-    //     uint256 cleaned;
-    //     // cap loop to stay well below the 4 million refund limit
-    //     uint256 len = voters.length;
-    //     for (uint256 i; i < len && i < 4_000;) {
-    //         if (p.hasVoted[voters[i]]) {
-    //             delete p.hasVoted[voters[i]];
-    //             unchecked {
-    //                 ++cleaned;
-    //             }
-    //         }
-    //         unchecked {
-    //             ++i;
-    //         }
-    //     }
-
-    //     // once all voters are wiped you can also clear the call‑batches
-    //     if (cleaned == 0 && p.batches.length > 0) {
-    //         delete p.batches;
-    //     }
-
-    //     emit ProposalCleaned(id, cleaned);
-    // }
 
     /* ─────── Targeted View Functions ─────── */
     function proposalsCount() external view returns (uint256) {
