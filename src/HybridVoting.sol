@@ -15,7 +15,6 @@ import {HybridVotingConfig} from "./libs/HybridVotingConfig.sol";
 
 /* ─────────────────── HybridVoting ─────────────────── */
 contract HybridVoting is Initializable {
-
     /* ─────── Constants ─────── */
     uint8 public constant MAX_OPTIONS = 50;
     uint8 public constant MAX_CALLS = 20;
@@ -25,32 +24,33 @@ contract HybridVoting is Initializable {
 
     /* ─────── Data Structures ─────── */
 
-    enum ClassStrategy { 
-        DIRECT,           // 1 person → 100 raw points
-        ERC20_BAL         // balance (or sqrt) scaled
+    enum ClassStrategy {
+        DIRECT, // 1 person → 100 raw points
+        ERC20_BAL // balance (or sqrt) scaled
+
     }
 
     struct ClassConfig {
-        ClassStrategy strategy;        // DIRECT / ERC20_BAL
-        uint8 slicePct;                // 1..100; all classes must sum to 100
-        bool quadratic;                // only for token strategies
-        uint256 minBalance;            // sybil floor for token strategies
-        address asset;                 // ERC20 token (if required)
-        uint256[] hatIds;              // voter must wear ≥1 (union)
+        ClassStrategy strategy; // DIRECT / ERC20_BAL
+        uint8 slicePct; // 1..100; all classes must sum to 100
+        bool quadratic; // only for token strategies
+        uint256 minBalance; // sybil floor for token strategies
+        address asset; // ERC20 token (if required)
+        uint256[] hatIds; // voter must wear ≥1 (union)
     }
 
     struct PollOption {
-        uint128[] classRaw;            // length = classesSnapshot.length
+        uint128[] classRaw; // length = classesSnapshot.length
     }
 
     struct Proposal {
         uint64 endTimestamp;
-        uint256[] classTotalsRaw;      // Σ raw from each class (len = classesSnapshot.length)
-        PollOption[] options;          // each option has classRaw[i]
+        uint256[] classTotalsRaw; // Σ raw from each class (len = classesSnapshot.length)
+        PollOption[] options; // each option has classRaw[i]
         mapping(address => bool) hasVoted;
         IExecutor.Call[][] batches;
-        uint256[] pollHatIds;          // array of specific hat IDs for this poll
-        bool restricted;               // if true only pollHatIds can vote
+        uint256[] pollHatIds; // array of specific hat IDs for this poll
+        bool restricted; // if true only pollHatIds can vote
         mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
         ClassConfig[] classesSnapshot; // Snapshot the class config to freeze semantics for this proposal
     }
@@ -74,7 +74,6 @@ contract HybridVoting is Initializable {
 
     // keccak256("poa.hybridvoting.v2.storage") → unique, collision-free slot for v2
     bytes32 private constant _STORAGE_SLOT = 0x7a3e8e3d8e9c8f7b6a5d4c3b2a1908070605040302010009080706050403020a;
-
 
     function _layout() private pure returns (Layout storage s) {
         assembly {
@@ -142,17 +141,19 @@ contract HybridVoting is Initializable {
         // Initialize creator hats and targets
         _initializeCreatorHats(initialCreatorHats);
         _initializeTargets(initialTargets);
-        
+
         // Use library for class initialization
         HybridVotingConfig.validateAndInitClasses(initialClasses);
     }
-    
+
     function _initializeCreatorHats(uint256[] calldata creatorHats) internal {
         Layout storage l = _layout();
         uint256 len = creatorHats.length;
         for (uint256 i; i < len;) {
             HatManager.setHatInArray(l.creatorHatIds, creatorHats[i], true);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -189,7 +190,7 @@ contract HybridVoting is Initializable {
         HatManager.setHatInArray(l.creatorHatIds, h, ok);
         emit HatSet(HatType.CREATOR, h, ok);
     }
-    
+
     enum HatType {
         CREATOR
     }
@@ -198,11 +199,11 @@ contract HybridVoting is Initializable {
     function setClasses(ClassConfig[] calldata newClasses) external onlyExecutor {
         HybridVotingConfig.setClasses(newClasses);
     }
-    
+
     function getClasses() external view returns (ClassConfig[] memory) {
         return _layout().classes;
     }
-    
+
     function getProposalClasses(uint256 id) external view exists(id) returns (ClassConfig[] memory) {
         return _layout()._proposals[id].classesSnapshot;
     }
@@ -285,35 +286,35 @@ contract HybridVoting is Initializable {
     function proposalsCount() external view returns (uint256) {
         return _layout()._proposals.length;
     }
-    
+
     function quorumPct() external view returns (uint8) {
         return _layout().quorumPct;
     }
-    
+
     function isTargetAllowed(address target) external view returns (bool) {
         return _layout().allowedTarget[target];
     }
-    
+
     function creatorHats() external view returns (uint256[] memory) {
         return HatManager.getHatArray(_layout().creatorHatIds);
     }
-    
+
     function pollRestricted(uint256 id) external view exists(id) returns (bool) {
         return _layout()._proposals[id].restricted;
     }
-    
+
     function pollHatAllowed(uint256 id, uint256 hat) external view exists(id) returns (bool) {
         return _layout()._proposals[id].pollHatAllowed[hat];
     }
-    
+
     function executor() external view returns (address) {
         return address(_layout().executor);
     }
-    
+
     function hats() external view returns (address) {
         return address(_layout().hats);
     }
-    
+
     function version() external pure returns (string memory) {
         return "v1";
     }
