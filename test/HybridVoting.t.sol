@@ -7,6 +7,7 @@ import "forge-std/Test.sol";
 /* target */
 import {HybridVoting} from "../src/HybridVoting.sol";
 import {VotingErrors} from "../src/libs/VotingErrors.sol";
+import {HybridVotingProposals} from "../src/libs/HybridVotingProposals.sol";
 
 /* OpenZeppelin */
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -575,7 +576,7 @@ contract HybridVotingTest is Test {
 
         // Expect the NewHatProposal event to be emitted
         vm.expectEmit(true, true, true, true);
-        emit HybridVoting.NewHatProposal(
+        emit HybridVotingProposals.NewHatProposal(
             0, bytes("ipfs://test"), 2, uint64(block.timestamp + 15 minutes), uint64(block.timestamp), hatIds
         );
 
