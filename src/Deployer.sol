@@ -74,6 +74,8 @@ error EmptyInit();
 error UnsupportedType();
 error BeaconProbeFail();
 error OrgExistsMismatch();
+error InitFailed();
+error ArrayLengthMismatch();
 
 /*───────────────────────────  Deployer  ───────────────────────────────*/
 contract Deployer is Initializable, OwnableUpgradeable {
@@ -152,12 +154,28 @@ contract Deployer is Initializable, OwnableUpgradeable {
             beacon = address(new UpgradeableBeacon(impl, moduleOwner));
         }
 
-        /* 2. create proxy */
-        proxy = address(new BeaconProxy(beacon, initData));
+        /* 2. Two-step deployment to prevent reentrancy:
+           First create proxy WITHOUT initialization to avoid reentrancy window */
+        proxy = address(new BeaconProxy(beacon, ""));
 
-        /* 3. book‑keeping in OrgRegistry */
+        /* 3. Register in OrgRegistry BEFORE initialization
+           This ensures registry knows about the contract before any init code runs */
         bytes32 typeId = keccak256(bytes(typeName));
         l.orgRegistry.registerOrgContract(orgId, typeId, proxy, beacon, autoUpgrade, moduleOwner, lastRegister);
+
+        /* 4. Now safely initialize the proxy after registration is complete
+           This prevents reentrancy and ensures consistent state */
+        (bool success, bytes memory returnData) = proxy.call(initData);
+        if (!success) {
+            // If initialization fails, bubble up the revert reason
+            if (returnData.length > 0) {
+                assembly {
+                    revert(add(32, returnData), mload(returnData))
+                }
+            } else {
+                revert InitFailed();
+            }
+        }
 
         emit ContractDeployed(orgId, typeId, proxy, beacon, autoUpgrade, moduleOwner);
     }
@@ -375,7 +393,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
         string[] memory roleNames,
         bool[] memory roleCanVote
     ) internal returns (uint256 topHatId, uint256[] memory roleHatIds) {
-        require(roleNames.length == roleCanVote.length, "HATS_SETUP: array mismatch");
+        if (roleNames.length != roleCanVote.length) revert ArrayLengthMismatch();
 
         // ─────────────────────────────────────────────────────────────
         //  Deploy EligibilityModule with Deployer as initial super admin
