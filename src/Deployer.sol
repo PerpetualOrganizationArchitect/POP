@@ -86,8 +86,6 @@ contract Deployer is Initializable, OwnableUpgradeable {
     }
 
     IHats public hats;
-    EligibilityModule public eligibilityModule;
-    ToggleModule public toggleModule;
 
     // keccak256("poa.deployer.storage") to get a unique, collision-free slot
     bytes32 private constant _STORAGE_SLOT = 0x4f6cf4b446a382b8bde8d35e8ca59cc30d80d9a326b56d1a5212b27a0198fc7f;
@@ -383,13 +381,13 @@ contract Deployer is Initializable, OwnableUpgradeable {
         //  Deploy EligibilityModule with Deployer as initial super admin
         // ─────────────────────────────────────────────────────────────
         address eligibilityModuleAddress = _deployEligibilityModule(orgId, true, address(0));
-        eligibilityModule = EligibilityModule(eligibilityModuleAddress);
+        EligibilityModule eligibilityModule = EligibilityModule(eligibilityModuleAddress);
 
         // ─────────────────────────────────────────────────────────────
         //  Deploy ToggleModule with deployer as initial admin
         // ─────────────────────────────────────────────────────────────
         address toggleModuleAddress = _deployToggleModule(orgId, address(this), true, address(0));
-        toggleModule = ToggleModule(toggleModuleAddress);
+        ToggleModule toggleModule = ToggleModule(toggleModuleAddress);
 
         // Set the toggle module in the eligibility module now that both are deployed
         eligibilityModule.setToggleModule(toggleModuleAddress);
@@ -653,6 +651,19 @@ contract Deployer is Initializable, OwnableUpgradeable {
     // Public getter for orgRegistry
     function orgRegistry() external view returns (address) {
         return address(_layout().orgRegistry);
+    }
+
+    /* ─────────── Module Getters ─────────── */
+    function getEligibilityModule(bytes32 orgId) external view returns (address) {
+        Layout storage l = _layout();
+        bytes32 typeId = keccak256(bytes("EligibilityModule"));
+        return l.orgRegistry.getOrgContract(orgId, typeId);
+    }
+
+    function getToggleModule(bytes32 orgId) external view returns (address) {
+        Layout storage l = _layout();
+        bytes32 typeId = keccak256(bytes("ToggleModule"));
+        return l.orgRegistry.getOrgContract(orgId, typeId);
     }
 
     /* ─────────── Version ─────────── */
