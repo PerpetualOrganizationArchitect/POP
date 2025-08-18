@@ -75,6 +75,7 @@ error UnsupportedType();
 error BeaconProbeFail();
 error OrgExistsMismatch();
 error InitFailed();
+error ArrayLengthMismatch();
 
 /*───────────────────────────  Deployer  ───────────────────────────────*/
 contract Deployer is Initializable, OwnableUpgradeable {
@@ -394,7 +395,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
         string[] memory roleNames,
         bool[] memory roleCanVote
     ) internal returns (uint256 topHatId, uint256[] memory roleHatIds) {
-        require(roleNames.length == roleCanVote.length, "HATS_SETUP: array mismatch");
+        if (roleNames.length != roleCanVote.length) revert ArrayLengthMismatch();
 
         // ─────────────────────────────────────────────────────────────
         //  Deploy EligibilityModule with Deployer as initial super admin
