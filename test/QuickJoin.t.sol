@@ -266,8 +266,4 @@ contract QuickJoinTest is Test {
         vm.expectRevert(QuickJoin.OnlyMasterDeploy.selector);
         qj.quickJoinWithUserMasterDeploy(user1);
     }
-
-    function testVersion() public {
-        assertEq(qj.version(), "v1");
-    }
 }

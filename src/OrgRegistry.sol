@@ -309,9 +309,4 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     function getRoleHat(bytes32 orgId, uint256 roleIndex) external view returns (uint256) {
         return _layout().roleHatOf[orgId][roleIndex];
     }
-
-    /* ─────────── Version ─────────── */
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
 }

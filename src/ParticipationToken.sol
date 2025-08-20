@@ -305,9 +305,4 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
     function isApproverHat(uint256 hatId) external view returns (bool) {
         return HatManager.isHatInArray(_layout().approverHatIds, hatId);
     }
-
-    /*───────── Version helper ─────────*/
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
 }

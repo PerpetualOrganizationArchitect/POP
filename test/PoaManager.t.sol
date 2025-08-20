@@ -6,9 +6,7 @@ import "../src/PoaManager.sol";
 import "../src/ImplementationRegistry.sol";
 
 contract DummyImpl {
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
+    // Mock implementation for testing
 }
 
 contract PoaManagerTest is Test {

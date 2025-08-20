@@ -153,9 +153,4 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
 
     /* accept ETH for payable calls within a batch */
     receive() external payable {}
-
-    /* ───────────── Version ───────────── */
-    function version() external pure virtual returns (string memory) {
-        return "v1";
-    }
 }
