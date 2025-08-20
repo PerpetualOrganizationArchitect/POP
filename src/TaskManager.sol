@@ -29,12 +29,9 @@ contract TaskManager is Initializable, ContextUpgradeable {
     using ValidationLib for bytes;
 
     /*──────── Errors ───────*/
-    error UnknownTask();
-    error UnknownProject();
+    error NotFound();
+    error BadStatus();
     error NotCreator();
-    error AlreadyClaimed();
-    error AlreadySubmitted();
-    error AlreadyCompleted();
     error NotClaimer();
     error NotExecutor();
     error Unauthorized();
@@ -60,24 +57,6 @@ contract TaskManager is Initializable, ContextUpgradeable {
         BOUNTY_CAP,
         PROJECT_MANAGER,
         PROJECT_CAP
-    }
-
-    enum StorageKey {
-        HATS,
-        EXECUTOR,
-        CREATOR_HATS,
-        CREATOR_HAT_COUNT,
-        PERMISSION_HATS,
-        PERMISSION_HAT_COUNT,
-        VERSION,
-        TASK_INFO,
-        TASK_FULL_INFO,
-        PROJECT_INFO,
-        TASK_APPLICANTS,
-        TASK_APPLICATION,
-        TASK_APPLICANT_COUNT,
-        HAS_APPLIED_FOR_TASK,
-        BOUNTY_BUDGET
     }
 
     /*──────── Data Types ────*/
@@ -190,38 +169,31 @@ contract TaskManager is Initializable, ContextUpgradeable {
         emit ExecutorUpdated(executorAddress);
     }
 
-    /*──────── Modifiers ─────*/
-    modifier onlyCreator() {
+    /*──────── Internal Check Functions ─────*/
+    function _requireCreator() internal view {
         Layout storage l = _layout();
         address s = _msgSender();
         if (!_hasCreatorHat(s) && s != l.executor) revert NotCreator();
-        _;
     }
 
-    modifier projectExists(bytes32 pid) {
-        if (!_layout()._projects[pid].exists) revert UnknownProject();
-        _;
+    function _requireProjectExists(bytes32 pid) internal view {
+        if (!_layout()._projects[pid].exists) revert NotFound();
     }
 
-    modifier onlyExecutor() {
+    function _requireExecutor() internal view {
         if (_msgSender() != _layout().executor) revert NotExecutor();
-        _;
     }
 
-    modifier canCreate(bytes32 pid) {
+    function _requireCanCreate(bytes32 pid) internal view {
         _checkPerm(pid, TaskPerm.CREATE);
-        _;
     }
 
-    modifier canClaim(uint256 tid) {
-        Layout storage l = _layout();
-        _checkPerm(l._tasks[tid].projectId, TaskPerm.CLAIM);
-        _;
+    function _requireCanClaim(uint256 tid) internal view {
+        _checkPerm(_layout()._tasks[tid].projectId, TaskPerm.CLAIM);
     }
 
-    modifier canAssign(bytes32 pid) {
+    function _requireCanAssign(bytes32 pid) internal view {
         _checkPerm(pid, TaskPerm.ASSIGN);
-        _;
     }
 
     /*──────── Project Logic ─────*/
@@ -240,7 +212,8 @@ contract TaskManager is Initializable, ContextUpgradeable {
         uint256[] calldata claimHats,
         uint256[] calldata reviewHats,
         uint256[] calldata assignHats
-    ) external onlyCreator returns (bytes32 projectId) {
+    ) external returns (bytes32 projectId) {
+        _requireCreator();
         ValidationLib.requireValidProjectParams(metadata, cap);
 
         Layout storage l = _layout();
@@ -270,32 +243,28 @@ contract TaskManager is Initializable, ContextUpgradeable {
         emit ProjectCreated(projectId, metadata, cap);
     }
 
-    function deleteProject(bytes32 pid, bytes calldata metadata) external onlyCreator {
+    function deleteProject(bytes32 pid, bytes calldata metadata) external {
+        _requireCreator();
         metadata.requireNonEmptyBytes();
         Layout storage l = _layout();
         Project storage p = l._projects[pid];
-        if (!p.exists) revert UnknownProject();
+        if (!p.exists) revert NotFound();
 
         delete l._projects[pid];
         emit ProjectDeleted(pid, metadata);
     }
 
     /*──────── Task Logic ───────*/
-    function createTask(uint256 payout, bytes calldata meta, bytes32 pid, address bountyToken, uint256 bountyPayout)
-        external
-        canCreate(pid)
-    {
-        _createTask(payout, meta, pid, false, bountyToken, bountyPayout);
-    }
-
-    function createApplicationTask(
+    function createTask(
         uint256 payout,
         bytes calldata meta,
         bytes32 pid,
         address bountyToken,
-        uint256 bountyPayout
-    ) external canCreate(pid) {
-        _createTask(payout, meta, pid, true, bountyToken, bountyPayout);
+        uint256 bountyPayout,
+        bool requiresApplication
+    ) external {
+        _requireCanCreate(pid);
+        _createTask(payout, meta, pid, requiresApplication, bountyToken, bountyPayout);
     }
 
     function _createTask(
@@ -310,7 +279,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
         ValidationLib.requireValidTaskParams(payout, meta, bountyToken, bountyPayout);
 
         Project storage p = l._projects[pid];
-        if (!p.exists) revert UnknownProject();
+        if (!p.exists) revert NotFound();
 
         // Update participation token budget
         uint256 newSpent = p.spent + payout;
@@ -336,12 +305,13 @@ contract TaskManager is Initializable, ContextUpgradeable {
         bytes calldata newMetadata,
         address newBountyToken,
         uint256 newBountyPayout
-    ) external canCreate(_layout()._tasks[id].projectId) {
+    ) external {
+        _requireCanCreate(_layout()._tasks[id].projectId);
         Layout storage l = _layout();
         ValidationLib.requireValidTaskParams(newPayout, newMetadata, newBountyToken, newBountyPayout);
 
         Task storage t = _task(l, id);
-        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+        if (t.status != Status.UNCLAIMED) revert BadStatus();
 
         Project storage p = l._projects[t.projectId];
 
@@ -369,10 +339,11 @@ contract TaskManager is Initializable, ContextUpgradeable {
         emit TaskUpdated(id, newPayout, newBountyToken, newBountyPayout, newMetadata);
     }
 
-    function claimTask(uint256 id) external canClaim(id) {
+    function claimTask(uint256 id) external {
+        _requireCanClaim(id);
         Layout storage l = _layout();
         Task storage t = _task(l, id);
-        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+        if (t.status != Status.UNCLAIMED) revert BadStatus();
         if (t.requiresApplication) revert RequiresApplication();
 
         t.status = Status.CLAIMED;
@@ -380,12 +351,13 @@ contract TaskManager is Initializable, ContextUpgradeable {
         emit TaskClaimed(id, _msgSender());
     }
 
-    function assignTask(uint256 id, address assignee) external canAssign(_layout()._tasks[id].projectId) {
+    function assignTask(uint256 id, address assignee) external {
+        _requireCanAssign(_layout()._tasks[id].projectId);
         assignee.requireNonZeroAddress();
         Layout storage l = _layout();
 
         Task storage t = _task(l, id);
-        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+        if (t.status != Status.UNCLAIMED) revert BadStatus();
 
         t.status = Status.CLAIMED;
         t.claimer = assignee;
@@ -395,7 +367,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
     function submitTask(uint256 id, bytes calldata metadata) external {
         Layout storage l = _layout();
         Task storage t = _task(l, id);
-        if (t.status != Status.CLAIMED) revert AlreadySubmitted();
+        if (t.status != Status.CLAIMED) revert BadStatus();
         if (t.claimer != _msgSender()) revert NotClaimer();
         metadata.requireNonEmptyBytes();
 
@@ -407,7 +379,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
         Layout storage l = _layout();
         _checkPerm(l._tasks[id].projectId, TaskPerm.REVIEW);
         Task storage t = _task(l, id);
-        if (t.status != Status.SUBMITTED) revert AlreadyCompleted();
+        if (t.status != Status.SUBMITTED) revert BadStatus();
 
         t.status = Status.COMPLETED;
         l.token.mint(t.claimer, uint256(t.payout));
@@ -420,10 +392,11 @@ contract TaskManager is Initializable, ContextUpgradeable {
         emit TaskCompleted(id, _msgSender());
     }
 
-    function cancelTask(uint256 id) external canCreate(_layout()._tasks[id].projectId) {
+    function cancelTask(uint256 id) external {
+        _requireCanCreate(_layout()._tasks[id].projectId);
         Layout storage l = _layout();
         Task storage t = _task(l, id);
-        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+        if (t.status != Status.UNCLAIMED) revert BadStatus();
 
         Project storage p = l._projects[t.projectId];
         if (p.spent < t.payout) revert BudgetLib.SpentUnderflow();
@@ -452,10 +425,11 @@ contract TaskManager is Initializable, ContextUpgradeable {
      * @param id Task ID to apply for
      * @param applicationHash IPFS hash of the application/submission
      */
-    function applyForTask(uint256 id, bytes32 applicationHash) external canClaim(id) {
+    function applyForTask(uint256 id, bytes32 applicationHash) external {
+        _requireCanClaim(id);
         Layout storage l = _layout();
         Task storage t = _task(l, id);
-        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+        if (t.status != Status.UNCLAIMED) revert BadStatus();
         ValidationLib.requireValidApplicationHash(applicationHash);
         if (!t.requiresApplication) revert NoApplicationRequired();
 
@@ -476,10 +450,11 @@ contract TaskManager is Initializable, ContextUpgradeable {
      * @param id Task ID
      * @param applicant Address of the applicant to approve
      */
-    function approveApplication(uint256 id, address applicant) external canAssign(_layout()._tasks[id].projectId) {
+    function approveApplication(uint256 id, address applicant) external {
+        _requireCanAssign(_layout()._tasks[id].projectId);
         Layout storage l = _layout();
         Task storage t = _task(l, id);
-        if (t.status != Status.UNCLAIMED) revert AlreadyClaimed();
+        if (t.status != Status.UNCLAIMED) revert BadStatus();
         if (l.taskApplications[id][applicant] == bytes32(0)) revert NotApplicant();
 
         t.status = Status.CLAIMED;
@@ -502,20 +477,10 @@ contract TaskManager is Initializable, ContextUpgradeable {
         bytes32 pid,
         address assignee,
         address bountyToken,
-        uint256 bountyPayout
+        uint256 bountyPayout,
+        bool requiresApplication
     ) external returns (uint256 taskId) {
-        return _createAndAssignTask(payout, meta, pid, assignee, false, bountyToken, bountyPayout);
-    }
-
-    function createAndAssignApplicationTask(
-        uint256 payout,
-        bytes calldata meta,
-        bytes32 pid,
-        address assignee,
-        address bountyToken,
-        uint256 bountyPayout
-    ) external returns (uint256 taskId) {
-        return _createAndAssignTask(payout, meta, pid, assignee, true, bountyToken, bountyPayout);
+        return _createAndAssignTask(payout, meta, pid, assignee, requiresApplication, bountyToken, bountyPayout);
     }
 
     function _createAndAssignTask(
@@ -543,7 +508,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
         ValidationLib.requireValidTaskParams(payout, meta, bountyToken, bountyPayout);
 
         Project storage p = l._projects[pid];
-        if (!p.exists) revert UnknownProject();
+        if (!p.exists) revert NotFound();
 
         uint256 newSpent = p.spent + payout;
         if (p.cap != 0 && newSpent > p.cap) revert BudgetLib.BudgetExceeded();
@@ -565,125 +530,68 @@ contract TaskManager is Initializable, ContextUpgradeable {
         emit TaskAssigned(taskId, assignee, sender);
     }
 
-    /*──────── Unified Storage Getter ─────── */
-    function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
+    /*──────── Config Setter (Optimized) ─────── */
+    function setConfig(ConfigKey key, bytes calldata value) external {
+        _requireExecutor();
         Layout storage l = _layout();
-
-        if (key == StorageKey.HATS) {
-            return abi.encode(l.hats);
-        } else if (key == StorageKey.EXECUTOR) {
-            return abi.encode(l.executor);
-        } else if (key == StorageKey.CREATOR_HATS) {
-            return abi.encode(HatManager.getHatArray(l.creatorHatIds));
-        } else if (key == StorageKey.CREATOR_HAT_COUNT) {
-            return abi.encode(HatManager.getHatCount(l.creatorHatIds));
-        } else if (key == StorageKey.PERMISSION_HATS) {
-            return abi.encode(HatManager.getHatArray(l.permissionHatIds));
-        } else if (key == StorageKey.PERMISSION_HAT_COUNT) {
-            return abi.encode(HatManager.getHatCount(l.permissionHatIds));
-        } else if (key == StorageKey.VERSION) {
-            return abi.encode("v1");
-        } else if (key == StorageKey.TASK_INFO) {
-            uint256 id = abi.decode(params, (uint256));
-            Task storage t = _task(l, id);
-            return abi.encode(t.payout, t.status, t.claimer, t.projectId, t.requiresApplication);
-        } else if (key == StorageKey.TASK_FULL_INFO) {
-            uint256 id = abi.decode(params, (uint256));
-            Task storage t = _task(l, id);
-            return abi.encode(
-                t.payout, t.bountyPayout, t.bountyToken, t.status, t.claimer, t.projectId, t.requiresApplication
-            );
-        } else if (key == StorageKey.PROJECT_INFO) {
-            bytes32 pid = abi.decode(params, (bytes32));
-            Project storage p = l._projects[pid];
-            if (!p.exists) revert UnknownProject();
-            return abi.encode(p.cap, p.spent, p.managers[_msgSender()]);
-        } else if (key == StorageKey.TASK_APPLICANTS) {
-            uint256 id = abi.decode(params, (uint256));
-            return abi.encode(l.taskApplicants[id]);
-        } else if (key == StorageKey.TASK_APPLICATION) {
-            (uint256 id, address applicant) = abi.decode(params, (uint256, address));
-            return abi.encode(l.taskApplications[id][applicant]);
-        } else if (key == StorageKey.TASK_APPLICANT_COUNT) {
-            uint256 id = abi.decode(params, (uint256));
-            return abi.encode(l.taskApplicants[id].length);
-        } else if (key == StorageKey.HAS_APPLIED_FOR_TASK) {
-            (uint256 id, address applicant) = abi.decode(params, (uint256, address));
-            return abi.encode(l.taskApplications[id][applicant]);
-        } else if (key == StorageKey.BOUNTY_BUDGET) {
-            (bytes32 pid, address token) = abi.decode(params, (bytes32, address));
-            token.requireNonZeroAddress();
-            Project storage p = l._projects[pid];
-            if (!p.exists) revert UnknownProject();
-            BudgetLib.Budget storage b = p.bountyBudgets[token];
-            return abi.encode(b.cap, b.spent);
-        }
-
-        revert InvalidIndex();
-    }
-
-    /*──────── Unified Config Setter ─────── */
-    function setConfig(ConfigKey key, bytes calldata value) external onlyExecutor {
-        Layout storage l = _layout();
-
+        
         if (key == ConfigKey.EXECUTOR) {
             address newExecutor = abi.decode(value, (address));
             newExecutor.requireNonZeroAddress();
             l.executor = newExecutor;
             emit ExecutorUpdated(newExecutor);
-        } else if (key == ConfigKey.CREATOR_HAT_ALLOWED) {
+            return;
+        }
+        
+        if (key == ConfigKey.CREATOR_HAT_ALLOWED) {
             (uint256 hat, bool allowed) = abi.decode(value, (uint256, bool));
             HatManager.setHatInArray(l.creatorHatIds, hat, allowed);
             emit HatSet(HatType.CREATOR, hat, allowed);
-        } else if (key == ConfigKey.ROLE_PERM) {
+            return;
+        }
+        
+        if (key == ConfigKey.ROLE_PERM) {
             (uint256 hatId, uint8 mask) = abi.decode(value, (uint256, uint8));
             l.rolePermGlobal[hatId] = mask;
-
-            // Track that this hat has permissions
-            if (mask != 0) {
-                HatManager.setHatInArray(l.permissionHatIds, hatId, true);
-            } else {
-                HatManager.setHatInArray(l.permissionHatIds, hatId, false);
+            HatManager.setHatInArray(l.permissionHatIds, hatId, mask != 0);
+            return;
+        }
+        
+        // Project-related configs - consolidate common logic
+        bytes32 pid;
+        if (key >= ConfigKey.BOUNTY_CAP) {
+            assembly { pid := calldataload(add(value.offset, 0x20)) }
+            Project storage p = l._projects[pid];
+            if (!p.exists) revert NotFound();
+            
+            if (key == ConfigKey.BOUNTY_CAP) {
+                (, address token, uint256 newCap) = abi.decode(value, (bytes32, address, uint256));
+                token.requireNonZeroAddress();
+                ValidationLib.requireValidCapAmount(newCap);
+                BudgetLib.Budget storage b = p.bountyBudgets[token];
+                ValidationLib.requireValidCap(newCap, b.spent);
+                uint256 oldCap = b.cap;
+                b.cap = uint128(newCap);
+                emit BountyCapSet(pid, token, oldCap, newCap);
+            } else if (key == ConfigKey.PROJECT_MANAGER) {
+                (, address mgr, bool isManager) = abi.decode(value, (bytes32, address, bool));
+                mgr.requireNonZeroAddress();
+                p.managers[mgr] = isManager;
+                emit ProjectManagerUpdated(pid, mgr, isManager);
+            } else if (key == ConfigKey.PROJECT_CAP) {
+                (, uint256 newCap) = abi.decode(value, (bytes32, uint256));
+                ValidationLib.requireValidCapAmount(newCap);
+                ValidationLib.requireValidCap(newCap, p.spent);
+                uint256 old = p.cap;
+                p.cap = uint128(newCap);
+                emit ProjectCapUpdated(pid, old, newCap);
             }
-        } else if (key == ConfigKey.BOUNTY_CAP) {
-            (bytes32 pid, address token, uint256 newCap) = abi.decode(value, (bytes32, address, uint256));
-            token.requireNonZeroAddress();
-            ValidationLib.requireValidCapAmount(newCap);
-
-            Project storage p = l._projects[pid];
-            if (!p.exists) revert UnknownProject();
-
-            BudgetLib.Budget storage b = p.bountyBudgets[token];
-            ValidationLib.requireValidCap(newCap, b.spent);
-
-            uint256 oldCap = b.cap;
-            b.cap = uint128(newCap);
-
-            emit BountyCapSet(pid, token, oldCap, newCap);
-        } else if (key == ConfigKey.PROJECT_MANAGER) {
-            (bytes32 pid, address mgr, bool isManager) = abi.decode(value, (bytes32, address, bool));
-            mgr.requireNonZeroAddress();
-
-            Project storage p = l._projects[pid];
-            if (!p.exists) revert UnknownProject();
-
-            p.managers[mgr] = isManager;
-            emit ProjectManagerUpdated(pid, mgr, isManager);
-        } else if (key == ConfigKey.PROJECT_CAP) {
-            (bytes32 pid, uint256 newCap) = abi.decode(value, (bytes32, uint256));
-            ValidationLib.requireValidCapAmount(newCap);
-
-            Project storage p = l._projects[pid];
-            if (!p.exists) revert UnknownProject();
-            ValidationLib.requireValidCap(newCap, p.spent);
-
-            uint256 old = p.cap;
-            p.cap = uint128(newCap);
-            emit ProjectCapUpdated(pid, old, newCap);
         }
     }
 
-    function setProjectRolePerm(bytes32 pid, uint256 hatId, uint8 mask) external onlyCreator projectExists(pid) {
+    function setProjectRolePerm(bytes32 pid, uint256 hatId, uint8 mask) external {
+        _requireCreator();
+        _requireProjectExists(pid);
         Layout storage l = _layout();
         l.rolePermProj[pid][hatId] = mask;
 
@@ -767,7 +675,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
 
     /*──────── Utils / View ────*/
     function _task(Layout storage l, uint256 id) private view returns (Task storage t) {
-        if (id >= l.nextTaskId) revert UnknownTask();
+        if (id >= l.nextTaskId) revert NotFound();
         t = l._tasks[id];
     }
 }

@@ -2,11 +2,11 @@
   "lib/hats-protocol": {
     "rev": "cccb71a061cdb9095af7d11dfdb47026993d8c4e"
   },
-  "lib/forge-std": {
-    "rev": "3b20d60d14b343ee4f908cb8079495c07f5e8981"
-  },
   "lib/openzeppelin-contracts": {
     "rev": "4a67c6f3ab2be41487889a020c99e11dedbd6eb4"
+  },
+  "lib/forge-std": {
+    "rev": "3b20d60d14b343ee4f908cb8079495c07f5e8981"
   },
   "lib/openzeppelin-contracts-upgradeable": {
     "rev": "62164b46517484f5b734d2c0e7e647de058685bf"
