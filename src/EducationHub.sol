@@ -323,9 +323,4 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     function isMemberHat(uint256 hatId) external view returns (bool) {
         return HatManager.isHatInArray(_layout().memberHatIds, hatId);
     }
-
-    /*────────── Version ───────*/
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
 }

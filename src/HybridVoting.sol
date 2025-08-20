@@ -314,8 +314,4 @@ contract HybridVoting is Initializable {
     function hats() external view returns (address) {
         return address(_layout().hats);
     }
-
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
 }

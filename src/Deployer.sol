@@ -695,9 +695,4 @@ contract Deployer is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeab
         bytes32 typeId = keccak256(bytes("ToggleModule"));
         return l.orgRegistry.getOrgContract(orgId, typeId);
     }
-
-    /* ─────────── Version ─────────── */
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
 }
