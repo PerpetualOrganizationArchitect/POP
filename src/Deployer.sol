@@ -1,4 +1,4 @@
-// SPDX‑License‑Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 /*───────────────────────────  OpenZeppelin  ───────────────────────────*/
@@ -6,9 +6,11 @@ import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {EligibilityModule} from "./EligibilityModule.sol";
 import {ToggleModule} from "./ToggleModule.sol";
+import {SwitchableBeacon} from "./SwitchableBeacon.sol";
 
 /*────────────────────────────── Core deps ──────────────────────────────*/
 import "./OrgRegistry.sol";
@@ -32,11 +34,11 @@ interface IExecutorAdmin {
 
 /*── init‑selector helpers (reduce bytecode & safety) ────────────────────*/
 interface IHybridVotingInit {
-    enum ClassStrategy { 
+    enum ClassStrategy {
         DIRECT,
         ERC20_BAL
     }
-    
+
     struct ClassConfig {
         ClassStrategy strategy;
         uint8 slicePct;
@@ -45,7 +47,7 @@ interface IHybridVotingInit {
         address asset;
         uint256[] hatIds;
     }
-    
+
     function initialize(
         address hats_,
         address executor_,
@@ -78,13 +80,15 @@ error InitFailed();
 error ArrayLengthMismatch();
 
 /*───────────────────────────  Deployer  ───────────────────────────────*/
-contract Deployer is Initializable, OwnableUpgradeable {
+contract Deployer is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /*───────────── ERC-7201 Storage ───────────*/
     /// @custom:storage-location erc7201:poa.deployer.storage
     struct Layout {
         /* immutables */
         IPoaManager poaManager;
         OrgRegistry orgRegistry;
+        /* reentrancy guard */
+        uint256 _status;
     }
 
     IHats public hats;
@@ -118,10 +122,12 @@ contract Deployer is Initializable, OwnableUpgradeable {
     function initialize(address _poaManager, address _orgRegistry, address _hats) public initializer {
         if (_poaManager == address(0) || _orgRegistry == address(0) || _hats == address(0)) revert InvalidAddress();
         __Ownable_init(msg.sender);
+        __ReentrancyGuard_init();
 
         Layout storage l = _layout();
         l.poaManager = IPoaManager(_poaManager);
         l.orgRegistry = OrgRegistry(_orgRegistry);
+        l._status = 1; // Initialize reentrancy guard status
         hats = IHats(_hats);
     }
 
@@ -134,25 +140,27 @@ contract Deployer is Initializable, OwnableUpgradeable {
         address customImpl, // optional bespoke logic
         bytes memory initData,
         bool lastRegister // only TRUE for *final* owner‑side registration
-    ) internal returns (address proxy) {
+    ) internal returns (address proxy, address beacon) {
         if (initData.length == 0) revert EmptyInit();
 
         Layout storage l = _layout();
 
-        /* 1. beacon handling */
-        address beacon;
-        if (autoUpgrade) {
-            if (customImpl != address(0)) revert UnsupportedType();
-            beacon = l.poaManager.getBeacon(typeName);
-            if (beacon == address(0)) revert UnsupportedType();
-            // paranoia‑check – the PoaManager must own the beacon
-            (bool ok,) = beacon.staticcall(abi.encodeWithSignature("implementation()"));
-            if (!ok || Ownable(beacon).owner() != address(l.poaManager)) revert BeaconProbeFail();
-        } else {
-            address impl = (customImpl == address(0)) ? l.poaManager.getCurrentImplementation(typeName) : customImpl;
-            if (impl == address(0)) revert UnsupportedType();
-            beacon = address(new UpgradeableBeacon(impl, moduleOwner));
+        /* 1. beacon handling - always create SwitchableBeacon */
+        address poaBeacon = l.poaManager.getBeacon(typeName);
+        if (poaBeacon == address(0)) revert UnsupportedType();
+
+        address initImpl = address(0);
+        SwitchableBeacon.Mode beaconMode = SwitchableBeacon.Mode.Mirror;
+
+        if (!autoUpgrade) {
+            // For static mode, get the current implementation
+            initImpl = (customImpl == address(0)) ? l.poaManager.getCurrentImplementation(typeName) : customImpl;
+            if (initImpl == address(0)) revert UnsupportedType();
+            beaconMode = SwitchableBeacon.Mode.Static;
         }
+
+        // Create SwitchableBeacon with appropriate configuration
+        beacon = address(new SwitchableBeacon(moduleOwner, poaBeacon, initImpl, beaconMode));
 
         /* 2. Two-step deployment to prevent reentrancy:
            First create proxy WITHOUT initialization to avoid reentrancy window */
@@ -178,14 +186,18 @@ contract Deployer is Initializable, OwnableUpgradeable {
         }
 
         emit ContractDeployed(orgId, typeId, proxy, beacon, autoUpgrade, moduleOwner);
+        return (proxy, beacon);
     }
 
     /*══════════════  MODULE‑SPECIFIC DEPLOY HELPERS  ═════════════=*/
     /*---------  Executor  (first, we need its address everywhere) ---------*/
-    function _deployExecutor(bytes32 orgId, bool autoUp, address customImpl) internal returns (address execProxy) {
+    function _deployExecutor(bytes32 orgId, bool autoUp, address customImpl)
+        internal
+        returns (address execProxy, address execBeacon)
+    {
         // Initialize with Deployer as owner so we can set up governance
         bytes memory init = abi.encodeWithSignature("initialize(address,address)", address(this), address(hats));
-        execProxy = _deploy(orgId, "Executor", address(this), autoUp, customImpl, init, false);
+        (execProxy, execBeacon) = _deploy(orgId, "Executor", address(this), autoUp, customImpl, init, false);
     }
 
     /*---------  QuickJoin  ---------*/
@@ -211,7 +223,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
             masterDeploy,
             memberHats
         );
-        qjProxy = _deploy(orgId, "QuickJoin", executorAddr, autoUp, customImpl, init, false);
+        (qjProxy,) = _deploy(orgId, "QuickJoin", executorAddr, autoUp, customImpl, init, false);
     }
 
     /*---------  ParticipationToken  ---------*/
@@ -242,7 +254,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
             memberHats,
             approverHats
         );
-        ptProxy = _deploy(orgId, "ParticipationToken", executorAddr, autoUp, customImpl, init, false);
+        (ptProxy,) = _deploy(orgId, "ParticipationToken", executorAddr, autoUp, customImpl, init, false);
     }
 
     /*---------  TaskManager  ---------*/
@@ -260,7 +272,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
         bytes memory init = abi.encodeWithSignature(
             "initialize(address,address,uint256[],address)", token, address(hats), creatorHats, executorAddr
         );
-        tmProxy = _deploy(orgId, "TaskManager", executorAddr, autoUp, customImpl, init, false);
+        (tmProxy,) = _deploy(orgId, "TaskManager", executorAddr, autoUp, customImpl, init, false);
     }
 
     /*---------  EducationHub  ---------*/
@@ -290,7 +302,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
             creatorHats,
             memberHats
         );
-        ehProxy = _deploy(orgId, "EducationHub", executorAddr, autoUp, customImpl, init, lastRegister);
+        (ehProxy,) = _deploy(orgId, "EducationHub", executorAddr, autoUp, customImpl, init, lastRegister);
     }
 
     /*---------  EligibilityModule  ---------*/
@@ -301,7 +313,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
         // Initialize without toggle module first since it doesn't exist yet
         bytes memory init =
             abi.encodeWithSignature("initialize(address,address,address)", address(this), address(hats), address(0));
-        emProxy = _deploy(orgId, "EligibilityModule", address(this), autoUp, customImpl, init, false);
+        (emProxy,) = _deploy(orgId, "EligibilityModule", address(this), autoUp, customImpl, init, false);
     }
 
     /*---------  ToggleModule  ---------*/
@@ -310,7 +322,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
         returns (address tmProxy)
     {
         bytes memory init = abi.encodeWithSignature("initialize(address)", adminAddr);
-        tmProxy = _deploy(orgId, "ToggleModule", address(this), autoUp, customImpl, init, false);
+        (tmProxy,) = _deploy(orgId, "ToggleModule", address(this), autoUp, customImpl, init, false);
     }
 
     /*---------  HybridVoting  ---------*/
@@ -333,26 +345,20 @@ contract Deployer is Initializable, OwnableUpgradeable {
         targets[0] = executorAddr;
 
         bytes memory init = abi.encodeWithSelector(
-            IHybridVotingInit.initialize.selector,
-            address(hats),
-            executorAddr,
-            creatorHats,
-            targets,
-            quorumPct,
-            classes
+            IHybridVotingInit.initialize.selector, address(hats), executorAddr, creatorHats, targets, quorumPct, classes
         );
-        hvProxy = _deploy(orgId, "HybridVoting", executorAddr, autoUp, customImpl, init, lastRegister);
+        (hvProxy,) = _deploy(orgId, "HybridVoting", executorAddr, autoUp, customImpl, init, lastRegister);
     }
-    
+
     /*---------  Helper Functions  ---------*/
-    
+
     function _updateClassesWithTokenAndHats(
         IHybridVotingInit.ClassConfig[] memory classes,
         address token,
         bytes32 orgId
     ) internal view returns (IHybridVotingInit.ClassConfig[] memory) {
         Layout storage l = _layout();
-        
+
         // Get the role hat IDs now that they've been created
         uint256[] memory votingHats = new uint256[](2);
         votingHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
@@ -361,13 +367,13 @@ contract Deployer is Initializable, OwnableUpgradeable {
         // For democracy hats, use only the EXECUTIVE role hat
         uint256[] memory democracyHats = new uint256[](1);
         democracyHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
-        
+
         // Create a new array with updated configurations
         IHybridVotingInit.ClassConfig[] memory finalClasses = new IHybridVotingInit.ClassConfig[](classes.length);
-        
+
         for (uint256 i = 0; i < classes.length; i++) {
             finalClasses[i] = classes[i];
-            
+
             // Update token address for ERC20_BAL strategies
             if (finalClasses[i].strategy == IHybridVotingInit.ClassStrategy.ERC20_BAL) {
                 if (finalClasses[i].asset == address(0)) {
@@ -375,36 +381,33 @@ contract Deployer is Initializable, OwnableUpgradeable {
                 }
                 // For token voting, use voting hats (both DEFAULT and EXECUTIVE)
                 finalClasses[i].hatIds = votingHats;
-            } 
+            }
             // Update hat IDs for DIRECT strategies
             else if (finalClasses[i].strategy == IHybridVotingInit.ClassStrategy.DIRECT) {
                 // For direct democracy, use democracy hats (only EXECUTIVE)
                 finalClasses[i].hatIds = democracyHats;
             }
         }
-        
+
         return finalClasses;
     }
 
-    function _setupHatsTree(
-        bytes32 orgId,
-        address executorAddr,
-        string memory orgName,
-        string[] memory roleNames,
-        bool[] memory roleCanVote
-    ) internal returns (uint256 topHatId, uint256[] memory roleHatIds) {
-        if (roleNames.length != roleCanVote.length) revert ArrayLengthMismatch();
+    function _setupHatsTree(DeploymentParams memory params, address executorAddr)
+        internal
+        returns (uint256 topHatId, uint256[] memory roleHatIds)
+    {
+        if (params.roleNames.length != params.roleCanVote.length) revert ArrayLengthMismatch();
 
         // ─────────────────────────────────────────────────────────────
         //  Deploy EligibilityModule with Deployer as initial super admin
         // ─────────────────────────────────────────────────────────────
-        address eligibilityModuleAddress = _deployEligibilityModule(orgId, true, address(0));
+        address eligibilityModuleAddress = _deployEligibilityModule(params.orgId, true, address(0));
         EligibilityModule eligibilityModule = EligibilityModule(eligibilityModuleAddress);
 
         // ─────────────────────────────────────────────────────────────
         //  Deploy ToggleModule with deployer as initial admin
         // ─────────────────────────────────────────────────────────────
-        address toggleModuleAddress = _deployToggleModule(orgId, address(this), true, address(0));
+        address toggleModuleAddress = _deployToggleModule(params.orgId, address(this), true, address(0));
         ToggleModule toggleModule = ToggleModule(toggleModuleAddress);
 
         // Set the toggle module in the eligibility module now that both are deployed
@@ -418,7 +421,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
         // ─────────────────────────────────────────────────────────────
         topHatId = hats.mintTopHat(
             address(this), // wearer for now
-            string(abi.encodePacked("ipfs://", orgName)),
+            string(abi.encodePacked("ipfs://", params.orgName)),
             "" //image uri
         );
 
@@ -451,7 +454,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
         //  Create & (optionally) mint child hats for each role
         //  Now using EligibilityModule admin hat as admin so it can mint them
         // ─────────────────────────────────────────────────────────────
-        uint256 len = roleNames.length;
+        uint256 len = params.roleNames.length;
         roleHatIds = new uint256[](len);
 
         // Create hats in reverse order so higher-level roles can admin lower-level roles
@@ -468,26 +471,30 @@ contract Deployer is Initializable, OwnableUpgradeable {
                 adminHatId = roleHatIds[idx + 1];
             }
 
-            roleHatIds[idx] = hats.createHat(
-                adminHatId, // admin based on hierarchy
-                roleNames[idx], // details + placeholder URI
-                type(uint32).max, // unlimited supply
-                eligibilityModuleAddress, // eligibility module
-                toggleModuleAddress, // toggle module
-                true, // mutable
-                roleNames[idx] // data blob (optional)
-            );
+            {
+                // Create role hat with reduced stack usage
+                uint256 newHatId = hats.createHat(
+                    adminHatId, // admin based on hierarchy
+                    params.roleNames[idx], // details + placeholder URI
+                    type(uint32).max, // unlimited supply
+                    eligibilityModuleAddress, // eligibility module
+                    toggleModuleAddress, // toggle module
+                    true, // mutable
+                    params.roleNames[idx] // data blob (optional)
+                );
+                roleHatIds[idx] = newHatId;
 
-            // Configure role hat eligibility and toggle for the executor
-            eligibilityModule.setWearerEligibility(executorAddr, roleHatIds[idx], true, true);
-            toggleModule.setHatStatus(roleHatIds[idx], true);
+                // Configure role hat eligibility and toggle for the executor
+                eligibilityModule.setWearerEligibility(executorAddr, newHatId, true, true);
+                toggleModule.setHatStatus(newHatId, true);
 
-            // Give the role hat to the Executor right away if flagged
-            // Now the EligibilityModule mints the hat since it's the admin
-            if (roleCanVote[idx]) {
-                // Call the EligibilityModule to mint the hat since it's the admin
-                // We can do this because the deployer is still the super admin at this point
-                eligibilityModule.mintHatToAddress(roleHatIds[idx], executorAddr);
+                // Give the role hat to the Executor right away if flagged
+                // Now the EligibilityModule mints the hat since it's the admin
+                if (params.roleCanVote[idx]) {
+                    // Call the EligibilityModule to mint the hat since it's the admin
+                    // We can do this because the deployer is still the super admin at this point
+                    eligibilityModule.mintHatToAddress(newHatId, executorAddr);
+                }
             }
         }
 
@@ -518,7 +525,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
         //  Book-keep in OrgRegistry so other modules can
         //     fetch the hat IDs later.  Delete if you don't need it.
         // ─────────────────────────────────────────────────────────────
-        _layout().orgRegistry.registerHatsTree(orgId, topHatId, roleHatIds);
+        _layout().orgRegistry.registerHatsTree(params.orgId, topHatId, roleHatIds);
     }
 
     /*════════════════  FULL ORG  DEPLOYMENT  ════════════════*/
@@ -555,6 +562,11 @@ contract Deployer is Initializable, OwnableUpgradeable {
             address educationHub
         )
     {
+        // Manual reentrancy guard to avoid stack-too-deep
+        Layout storage l = _layout();
+        require(l._status != 2, "ReentrancyGuard: reentrant call");
+        l._status = 2;
+
         DeploymentParams memory params = DeploymentParams({
             orgId: orgId,
             orgName: orgName,
@@ -567,7 +579,13 @@ contract Deployer is Initializable, OwnableUpgradeable {
             roleCanVote: roleCanVote
         });
 
-        return _deployFullOrgInternal(params);
+        (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub) =
+            _deployFullOrgInternal(params);
+
+        // Reset reentrancy guard
+        l._status = 1;
+
+        return (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub);
     }
 
     function _deployFullOrgInternal(DeploymentParams memory params)
@@ -582,6 +600,7 @@ contract Deployer is Initializable, OwnableUpgradeable {
         )
     {
         Layout storage l = _layout();
+        address execBeacon;
 
         /* 1. Create Org in bootstrap mode */
         if (!_orgExists(params.orgId)) {
@@ -591,15 +610,14 @@ contract Deployer is Initializable, OwnableUpgradeable {
             revert OrgExistsMismatch();
         }
 
-        /* 2. Deploy Executor */
-        executorAddr = _deployExecutor(params.orgId, params.autoUpgrade, address(0));
+        /* 2. Deploy Executor with temporary ownership */
+        (executorAddr, execBeacon) = _deployExecutor(params.orgId, params.autoUpgrade, address(0));
 
         /* 3. Set the executor for the org */
         l.orgRegistry.setOrgExecutor(params.orgId, executorAddr);
 
         /* 4. Setup Hats Tree */
-        (uint256 topHatId, uint256[] memory roleHatIds) =
-            _setupHatsTree(params.orgId, executorAddr, params.orgName, params.roleNames, params.roleCanVote);
+        (uint256 topHatId, uint256[] memory roleHatIds) = _setupHatsTree(params, executorAddr);
 
         /* 5. QuickJoin */
         quickJoin = _deployQuickJoin(
@@ -621,21 +639,12 @@ contract Deployer is Initializable, OwnableUpgradeable {
         IParticipationToken(participationToken).setEducationHub(educationHub);
 
         /* 9. HybridVoting governor */
-        // Update token address in voting classes if needed  
-        IHybridVotingInit.ClassConfig[] memory finalClasses = _updateClassesWithTokenAndHats(
-            params.votingClasses,
-            participationToken,
-            params.orgId
-        );
-        
+        // Update token address in voting classes if needed
+        IHybridVotingInit.ClassConfig[] memory finalClasses =
+            _updateClassesWithTokenAndHats(params.votingClasses, participationToken, params.orgId);
+
         hybridVoting = _deployHybridVoting(
-            params.orgId,
-            executorAddr,
-            params.autoUpgrade,
-            address(0),
-            true,
-            params.quorumPct,
-            finalClasses
+            params.orgId, executorAddr, params.autoUpgrade, address(0), true, params.quorumPct, finalClasses
         );
 
         /* authorize QuickJoin to mint hats (before setting voting contract as caller) */
@@ -643,6 +652,9 @@ contract Deployer is Initializable, OwnableUpgradeable {
 
         /* link executor to governor */
         IExecutorAdmin(executorAddr).setCaller(hybridVoting);
+
+        /* Transfer SwitchableBeacon ownership from deployer to executor */
+        SwitchableBeacon(execBeacon).transferOwnership(executorAddr);
 
         /* renounce executor ownership - now only governed by voting */
         OwnableUpgradeable(executorAddr).renounceOwnership();

@@ -124,28 +124,26 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         bool[] memory voting = new bool[](2);
         voting[0] = true;
         voting[1] = true;
-        
+
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        (hybrid, exec, qj, token, tm, hub) = deployer.deployFullOrg(
-            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting
-        );
+        (hybrid, exec, qj, token, tm, hub) =
+            deployer.deployFullOrg(ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting);
         vm.stopPrank();
     }
 
     /*–––– Test Helper Functions ––––*/
-    
+
     /// @dev Helper to build legacy-style voting classes
-    function _buildLegacyClasses(
-        uint8 ddSplit,
-        uint8 ptSplit,
-        bool quadratic,
-        uint256 minBal
-    ) internal pure returns (IHybridVotingInit.ClassConfig[] memory) {
+    function _buildLegacyClasses(uint8 ddSplit, uint8 ptSplit, bool quadratic, uint256 minBal)
+        internal
+        pure
+        returns (IHybridVotingInit.ClassConfig[] memory)
+    {
         // Build classes with empty hat arrays - they'll be filled in during deployment
         uint256[] memory emptyHats = new uint256[](0);
-        
+
         IHybridVotingInit.ClassConfig[] memory classes;
-        
+
         if (ddSplit == 100) {
             // Pure Direct Democracy
             classes = new IHybridVotingInit.ClassConfig[](1);
@@ -171,7 +169,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         } else {
             // Hybrid (two classes)
             classes = new IHybridVotingInit.ClassConfig[](2);
-            
+
             // Class 0: Direct Democracy
             classes[0] = IHybridVotingInit.ClassConfig({
                 strategy: IHybridVotingInit.ClassStrategy.DIRECT,
@@ -181,7 +179,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 asset: address(0),
                 hatIds: emptyHats
             });
-            
+
             // Class 1: Participation Token
             classes[1] = IHybridVotingInit.ClassConfig({
                 strategy: IHybridVotingInit.ClassStrategy.ERC20_BAL,
@@ -192,7 +190,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 hatIds: emptyHats
             });
         }
-        
+
         return classes;
     }
 
@@ -216,9 +214,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[2] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub) = deployer.deployFullOrg(
-            ORG_ID, orgName, accountRegProxy, true, 50, classes, names, images, voting
-        );
+        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub) =
+            deployer.deployFullOrg(ORG_ID, orgName, accountRegProxy, true, 50, classes, names, images, voting);
 
         vm.stopPrank();
 
@@ -246,9 +243,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub) = deployer.deployFullOrg(
-            ORG_ID, orgName, accountRegProxy, true, 50, classes, names, images, voting
-        );
+        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub) =
+            deployer.deployFullOrg(ORG_ID, orgName, accountRegProxy, true, 50, classes, names, images, voting);
 
         vm.stopPrank();
 
@@ -516,9 +512,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         (address _hybrid, address _executor, address _quickJoin, address _token, address _taskMgr, address _eduHub) =
-        deployer.deployFullOrg(
-            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting
-        );
+            deployer.deployFullOrg(ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting);
 
         vm.stopPrank();
 
@@ -612,11 +606,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         bool[] memory voting = new bool[](2);
         voting[0] = true;
         voting[1] = true;
-        
+
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        deployer.deployFullOrg(
-            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting
-        );
+        deployer.deployFullOrg(ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting);
         vm.stopPrank();
     }
 
@@ -633,9 +625,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
-            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting
-        );
+        (address hybrid, address exec, address qj, address token, address tm, address hub) =
+            deployer.deployFullOrg(ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting);
 
         // Verify Hats tree registration
         uint256 topHatId = orgRegistry.getTopHat(ORG_ID);
@@ -687,9 +678,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
-            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting
-        );
+        (address hybrid, address exec, address qj, address token, address tm, address hub) =
+            deployer.deployFullOrg(ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting);
 
         vm.stopPrank();
 
@@ -929,9 +919,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        (address hybrid, address exec, address qj, address token, address tm, address hub) = deployer.deployFullOrg(
-            ORG_ID, "Events Test DAO", accountRegProxy, true, 50, classes, names, images, voting
-        );
+        (address hybrid, address exec, address qj, address token, address tm, address hub) =
+            deployer.deployFullOrg(ORG_ID, "Events Test DAO", accountRegProxy, true, 50, classes, names, images, voting);
 
         vm.stopPrank();
 
