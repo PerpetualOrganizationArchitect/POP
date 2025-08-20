@@ -12,7 +12,6 @@ import {VotingErrors} from "./libs/VotingErrors.sol";
 
 /* ──────────────────  Direct‑democracy governor  ─────────────────────── */
 contract DirectDemocracyVoting is Initializable {
-
     /* ─────────── Constants ─────────── */
     bytes4 public constant MODULE_ID = 0x6464766f; /* "ddvo"  */
     uint8 public constant MAX_OPTIONS = 50;
@@ -31,7 +30,6 @@ contract DirectDemocracyVoting is Initializable {
         TARGET_ALLOWED,
         HAT_ALLOWED
     }
-
 
     /* ─────────── Data Structures ─────────── */
     struct PollOption {
@@ -244,7 +242,9 @@ contract DirectDemocracyVoting is Initializable {
         for (uint256 j; j < batchLen;) {
             if (!l.allowedTarget[batch[j].target]) revert VotingErrors.TargetNotAllowed();
             if (batch[j].target == address(this)) revert VotingErrors.TargetSelf();
-            unchecked { ++j; }
+            unchecked {
+                ++j;
+            }
         }
     }
 
@@ -261,7 +261,7 @@ contract DirectDemocracyVoting is Initializable {
         _validateDuration(minutesDuration);
 
         Layout storage l = _layout();
-        
+
         bool isExecuting = false;
         if (batches.length > 0) {
             if (numOptions != batches.length) revert VotingErrors.LengthMismatch();
@@ -270,43 +270,53 @@ contract DirectDemocracyVoting is Initializable {
                     isExecuting = true;
                     _validateTargets(batches[i], l);
                 }
-                unchecked { ++i; }
+                unchecked {
+                    ++i;
+                }
             }
         }
-        
+
         uint64 endTs = uint64(block.timestamp + minutesDuration * 60);
         Proposal storage p = l._proposals.push();
         p.endTimestamp = endTs;
         p.restricted = hatIds.length > 0;
-        
+
         uint256 id = l._proposals.length - 1;
-        
+
         for (uint256 i; i < numOptions;) {
             p.options.push(PollOption(0));
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
-        
+
         if (isExecuting) {
             for (uint256 i; i < numOptions;) {
                 p.batches.push(batches[i]);
-                unchecked { ++i; }
+                unchecked {
+                    ++i;
+                }
             }
         } else {
             for (uint256 i; i < numOptions;) {
                 p.batches.push();
-                unchecked { ++i; }
+                unchecked {
+                    ++i;
+                }
             }
         }
-        
+
         if (hatIds.length > 0) {
             uint256 hatLen = hatIds.length;
             for (uint256 i; i < hatLen;) {
                 p.pollHatIds.push(hatIds[i]);
                 p.pollHatAllowed[hatIds[i]] = true;
-                unchecked { ++i; }
+                unchecked {
+                    ++i;
+                }
             }
         }
-        
+
         return id;
     }
 
@@ -319,9 +329,9 @@ contract DirectDemocracyVoting is Initializable {
         uint256[] calldata hatIds
     ) external onlyCreator whenNotPaused {
         uint256 id = _initProposal(metadata, minutesDuration, numOptions, batches, hatIds);
-        
+
         uint64 endTs = _layout()._proposals[id].endTimestamp;
-        
+
         if (hatIds.length > 0) {
             emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
         } else {
@@ -455,47 +465,47 @@ contract DirectDemocracyVoting is Initializable {
     function proposalsCount() external view returns (uint256) {
         return _layout()._proposals.length;
     }
-    
+
     function quorumPercentage() external view returns (uint8) {
         return _layout().quorumPercentage;
     }
-    
+
     function isTargetAllowed(address target) external view returns (bool) {
         return _layout().allowedTarget[target];
     }
-    
+
     function executor() external view returns (address) {
         return address(_layout().executor);
     }
-    
+
     function hats() external view returns (address) {
         return address(_layout().hats);
     }
-    
+
     function votingHats() external view returns (uint256[] memory) {
         return HatManager.getHatArray(_layout().votingHatIds);
     }
-    
+
     function creatorHats() external view returns (uint256[] memory) {
         return HatManager.getHatArray(_layout().creatorHatIds);
     }
-    
+
     function votingHatCount() external view returns (uint256) {
         return HatManager.getHatCount(_layout().votingHatIds);
     }
-    
+
     function creatorHatCount() external view returns (uint256) {
         return HatManager.getHatCount(_layout().creatorHatIds);
     }
-    
+
     function pollRestricted(uint256 id) external view exists(id) returns (bool) {
         return _layout()._proposals[id].restricted;
     }
-    
+
     function pollHatAllowed(uint256 id, uint256 hat) external view exists(id) returns (bool) {
         return _layout()._proposals[id].pollHatAllowed[hat];
     }
-    
+
     function version() external pure returns (string memory) {
         return "v1";
     }

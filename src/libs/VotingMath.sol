@@ -375,13 +375,13 @@ library VotingMath {
     ) internal pure returns (uint256 win, bool ok, uint256 hi, uint256 second) {
         uint256 numOptions = perOptionPerClassRaw.length;
         if (numOptions == 0) return (0, false, 0, 0);
-        
+
         uint256 numClasses = slices.length;
-        
+
         // Calculate combined scores for each option
         for (uint256 opt; opt < numOptions; ++opt) {
             uint256 score;
-            
+
             for (uint256 cls; cls < numClasses; ++cls) {
                 if (totalsRaw[cls] > 0) {
                     // Calculate this class's contribution to the option's score
@@ -389,7 +389,7 @@ library VotingMath {
                     score += classContribution;
                 }
             }
-            
+
             // Track winner and second place
             if (score > hi) {
                 second = hi;
@@ -399,7 +399,7 @@ library VotingMath {
                 second = score;
             }
         }
-        
+
         // Check quorum and margin requirements
         bool quorumMet = hi >= quorumPct;
         bool meetsMargin = strict ? (hi > second) : (hi >= second);

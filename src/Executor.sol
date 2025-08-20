@@ -155,7 +155,7 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     receive() external payable {}
 
     /* ───────────── Version ───────────── */
-    function version() external pure returns (string memory) {
+    function version() external pure virtual returns (string memory) {
         return "v1";
     }
 }
