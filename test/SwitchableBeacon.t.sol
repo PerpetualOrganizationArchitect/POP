@@ -234,15 +234,41 @@ contract SwitchableBeaconTest is Test {
         vm.expectRevert(SwitchableBeacon.ZeroAddress.selector);
         new SwitchableBeacon(owner, address(0), address(implV1), SwitchableBeacon.Mode.Mirror);
     }
+    
+    // ============ Contract Validation Tests ============
+    
+    function testConstructorRevertsOnNonContractMirrorBeacon() public {
+        address eoa = address(0x1234); // EOA address
+        vm.expectRevert(SwitchableBeacon.NotContract.selector);
+        new SwitchableBeacon(owner, eoa, address(0), SwitchableBeacon.Mode.Mirror);
+    }
+    
+    function testConstructorRevertsOnNonContractStaticImpl() public {
+        address eoa = address(0x1234); // EOA address
+        vm.expectRevert(SwitchableBeacon.NotContract.selector);
+        new SwitchableBeacon(owner, address(poaBeacon), eoa, SwitchableBeacon.Mode.Static);
+    }
 
     function testPinRevertsOnZeroAddress() public {
         vm.expectRevert(SwitchableBeacon.ZeroAddress.selector);
         switchableBeacon.pin(address(0));
     }
+    
+    function testPinRevertsOnNonContract() public {
+        address eoa = address(0x5678); // EOA address
+        vm.expectRevert(SwitchableBeacon.NotContract.selector);
+        switchableBeacon.pin(eoa);
+    }
 
     function testSetMirrorRevertsOnZeroAddress() public {
         vm.expectRevert(SwitchableBeacon.ZeroAddress.selector);
         switchableBeacon.setMirror(address(0));
+    }
+    
+    function testSetMirrorRevertsOnNonContract() public {
+        address eoa = address(0x9999); // EOA address
+        vm.expectRevert(SwitchableBeacon.NotContract.selector);
+        switchableBeacon.setMirror(eoa);
     }
 
     function testSetMirrorRevertsOnBrokenBeacon() public {
@@ -325,8 +351,19 @@ contract SwitchableBeaconTest is Test {
 
     // ============ Fuzz Tests ============
 
-    function testFuzzPin(address impl) public {
-        vm.assume(impl != address(0));
+    function testFuzzPin(uint256 seed) public {
+        vm.assume(seed > 0 && seed < 1000);
+        
+        // Create a valid contract address to pin
+        address impl;
+        if (seed % 3 == 0) {
+            impl = address(new MockImplementationV1());
+        } else if (seed % 3 == 1) {
+            impl = address(new MockImplementationV2());
+        } else {
+            // Deploy another mock contract
+            impl = address(new MockImplementationV1());
+        }
 
         switchableBeacon.pin(impl);
         assertEq(switchableBeacon.implementation(), impl);

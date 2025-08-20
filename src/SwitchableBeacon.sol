@@ -60,6 +60,9 @@ contract SwitchableBeacon is IBeacon {
     /// @notice Thrown when attempting to set invalid mode transition
     error InvalidModeTransition();
 
+    /// @notice Thrown when an address is not a contract when it should be
+    error NotContract();
+
     /// @notice Restricts function access to the owner only
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -76,10 +79,15 @@ contract SwitchableBeacon is IBeacon {
     constructor(address _owner, address _mirrorBeacon, address _staticImpl, Mode _mode) {
         if (_owner == address(0)) revert ZeroAddress();
         if (_mirrorBeacon == address(0)) revert ZeroAddress();
+        
+        // Verify mirrorBeacon is a contract
+        if (_mirrorBeacon.code.length == 0) revert NotContract();
 
         // Static implementation can be zero if starting in Mirror mode
-        if (_mode == Mode.Static && _staticImpl == address(0)) {
-            revert ImplNotSet();
+        if (_mode == Mode.Static) {
+            if (_staticImpl == address(0)) revert ImplNotSet();
+            // Verify static implementation is a contract
+            if (_staticImpl.code.length == 0) revert NotContract();
         }
 
         owner = _owner;
@@ -128,10 +136,16 @@ contract SwitchableBeacon is IBeacon {
      */
     function setMirror(address _mirrorBeacon) external onlyOwner {
         if (_mirrorBeacon == address(0)) revert ZeroAddress();
+        
+        // Verify the beacon is a contract
+        if (_mirrorBeacon.code.length == 0) revert NotContract();
 
         // Validate that the mirror beacon has a valid implementation
         address impl = IBeacon(_mirrorBeacon).implementation();
         if (impl == address(0)) revert ImplNotSet();
+        
+        // Verify the implementation is a contract
+        if (impl.code.length == 0) revert NotContract();
 
         mirrorBeacon = _mirrorBeacon;
         mode = Mode.Mirror;
@@ -147,6 +161,9 @@ contract SwitchableBeacon is IBeacon {
      */
     function pin(address impl) public onlyOwner {
         if (impl == address(0)) revert ZeroAddress();
+        
+        // Verify the implementation is a contract
+        if (impl.code.length == 0) revert NotContract();
 
         staticImplementation = impl;
         mode = Mode.Static;
@@ -162,7 +179,8 @@ contract SwitchableBeacon is IBeacon {
     function pinToCurrent() external onlyOwner {
         address impl = IBeacon(mirrorBeacon).implementation();
         if (impl == address(0)) revert ImplNotSet();
-
+        
+        // The pin function will validate the implementation is a contract
         pin(impl);
     }
 
