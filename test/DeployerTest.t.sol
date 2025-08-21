@@ -525,12 +525,11 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         eduHubProxy = _eduHub;
 
         /* basic invariants */
-        assertEq(HybridVoting(hybridProxy).version(), "v1");
-        assertEq(Executor(executorProxy).version(), "v1");
+        // Version getters removed - contracts are upgradeable via beacon pattern
 
         /*—————————————————— quick smoke test: join + vote —————————————————*/
         vm.prank(voter1);
-        QuickJoin(quickJoinProxy).quickJoinNoUser("v1");
+        QuickJoin(quickJoinProxy).quickJoinNoUser("testUser1");
         vm.prank(voter2);
         QuickJoin(quickJoinProxy).quickJoinNoUser("v2");
 

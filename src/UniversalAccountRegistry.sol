@@ -132,11 +132,6 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         return _layout().ownerOfUsernameHash[keccak256(bytes(_toLower(name)))];
     }
 
-    /*────────────────────────── Version Hook ──────────────────────────*/
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
-
     /*──────────────────── Internal Registration ───────────────────────*/
     function _register(address user, string calldata username) internal {
         Layout storage l = _layout();

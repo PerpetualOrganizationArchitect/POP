@@ -134,9 +134,4 @@ contract ImplementationRegistry is Initializable, OwnableUpgradeable {
     function typeIds(uint256 index) external view returns (bytes32) {
         return _layout().typeIds[index];
     }
-
-    /*───────── Version helper ─────────────*/
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
 }

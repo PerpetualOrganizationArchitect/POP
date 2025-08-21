@@ -505,8 +505,4 @@ contract DirectDemocracyVoting is Initializable {
     function pollHatAllowed(uint256 id, uint256 hat) external view exists(id) returns (bool) {
         return _layout()._proposals[id].pollHatAllowed[hat];
     }
-
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
 }

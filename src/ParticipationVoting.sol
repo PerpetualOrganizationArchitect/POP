@@ -560,8 +560,4 @@ contract ParticipationVoting is Initializable {
     function creatorHatCount() external view returns (uint256) {
         return HatManager.getHatCount(_layout().creatorHatIds);
     }
-
-    function version() external pure returns (string memory) {
-        return "v1";
-    }
 }
