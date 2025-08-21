@@ -678,4 +678,41 @@ contract TaskManager is Initializable, ContextUpgradeable {
         if (id >= l.nextTaskId) revert NotFound();
         t = l._tasks[id];
     }
+
+    /*──────── Minimal External Getters for Lens ─────── */
+    function getLensData(uint8 t, bytes calldata d) external view returns (bytes memory) {
+        Layout storage l = _layout();
+        if (t == 1) { // Task
+            uint256 id = abi.decode(d, (uint256));
+            if (id >= l.nextTaskId) revert NotFound();
+            Task storage task = l._tasks[id];
+            return abi.encode(task.projectId, task.payout, task.claimer, task.bountyPayout, task.requiresApplication, task.status, task.bountyToken);
+        } else if (t == 2) { // Project
+            bytes32 pid = abi.decode(d, (bytes32));
+            Project storage p = l._projects[pid];
+            if (!p.exists) revert NotFound();
+            return abi.encode(p.cap, p.spent, p.exists, p.managers[msg.sender]);
+        } else if (t == 3) { // Hats
+            return abi.encode(address(l.hats));
+        } else if (t == 4) { // Executor
+            return abi.encode(l.executor);
+        } else if (t == 5) { // CreatorHats
+            return abi.encode(HatManager.getHatArray(l.creatorHatIds));
+        } else if (t == 6) { // PermissionHats
+            return abi.encode(HatManager.getHatArray(l.permissionHatIds));
+        } else if (t == 7) { // TaskApplicants
+            uint256 id = abi.decode(d, (uint256));
+            return abi.encode(l.taskApplicants[id]);
+        } else if (t == 8) { // TaskApplication
+            (uint256 id, address applicant) = abi.decode(d, (uint256, address));
+            return abi.encode(l.taskApplications[id][applicant]);
+        } else if (t == 9) { // BountyBudget
+            (bytes32 pid, address token) = abi.decode(d, (bytes32, address));
+            Project storage p = l._projects[pid];
+            if (!p.exists) revert NotFound();
+            BudgetLib.Budget storage b = p.bountyBudgets[token];
+            return abi.encode(b.cap, b.spent);
+        }
+        revert NotFound();
+    }
 }
