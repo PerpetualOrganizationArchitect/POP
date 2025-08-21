@@ -560,7 +560,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
         // Project-related configs - consolidate common logic
         bytes32 pid;
         if (key >= ConfigKey.BOUNTY_CAP) {
-            assembly { pid := calldataload(add(value.offset, 0x20)) }
+            pid = abi.decode(value, (bytes32));
             Project storage p = l._projects[pid];
             if (!p.exists) revert NotFound();
             
@@ -691,7 +691,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
             bytes32 pid = abi.decode(d, (bytes32));
             Project storage p = l._projects[pid];
             if (!p.exists) revert NotFound();
-            return abi.encode(p.cap, p.spent, p.exists, p.managers[msg.sender]);
+            return abi.encode(p.cap, p.spent, p.exists);
         } else if (t == 3) { // Hats
             return abi.encode(address(l.hats));
         } else if (t == 4) { // Executor

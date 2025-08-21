@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import {ValidationLib} from "../libs/ValidationLib.sol";
+
 interface ITaskManager {
     function getLensData(uint8 t, bytes calldata d) external view returns (bytes memory);
 }
@@ -61,46 +63,37 @@ contract TaskManagerLens {
             return abi.encode("v1");
         } else if (key == StorageKey.TASK_INFO) {
             uint256 id = abi.decode(params, (uint256));
-            try tm.getLensData(1, params) returns (bytes memory data) {
-                (
-                    bytes32 projectId,
-                    uint96 payout,
-                    address claimer,
-                    ,  // bountyPayout
-                    bool requiresApplication,
-                    Status status,
-                    // bountyToken
-                ) = abi.decode(data, (bytes32, uint96, address, uint96, bool, Status, address));
-                return abi.encode(payout, status, claimer, projectId, requiresApplication);
-            } catch {
-                revert("Unknown task");
-            }
+            bytes memory data = tm.getLensData(1, params);
+            (
+                bytes32 projectId,
+                uint96 payout,
+                address claimer,
+                ,  // bountyPayout
+                bool requiresApplication,
+                Status status,
+                // bountyToken
+            ) = abi.decode(data, (bytes32, uint96, address, uint96, bool, Status, address));
+            return abi.encode(payout, status, claimer, projectId, requiresApplication);
         } else if (key == StorageKey.TASK_FULL_INFO) {
             uint256 id = abi.decode(params, (uint256));
-            try tm.getLensData(1, params) returns (bytes memory data) {
-                (
-                    bytes32 projectId,
-                    uint96 payout,
-                    address claimer,
-                    uint96 bountyPayout,
-                    bool requiresApplication,
-                    Status status,
-                    address bountyToken
-                ) = abi.decode(data, (bytes32, uint96, address, uint96, bool, Status, address));
-                return abi.encode(
-                    payout, bountyPayout, bountyToken, status, claimer, projectId, requiresApplication
-                );
-            } catch {
-                revert("Unknown task");
-            }
+            bytes memory data = tm.getLensData(1, params);
+            (
+                bytes32 projectId,
+                uint96 payout,
+                address claimer,
+                uint96 bountyPayout,
+                bool requiresApplication,
+                Status status,
+                address bountyToken
+            ) = abi.decode(data, (bytes32, uint96, address, uint96, bool, Status, address));
+            return abi.encode(
+                payout, bountyPayout, bountyToken, status, claimer, projectId, requiresApplication
+            );
         } else if (key == StorageKey.PROJECT_INFO) {
             bytes32 pid = abi.decode(params, (bytes32));
-            try tm.getLensData(2, params) returns (bytes memory data) {
-                (uint128 cap, uint128 spent, , bool isManager) = abi.decode(data, (uint128, uint128, bool, bool));
-                return abi.encode(cap, spent, isManager);
-            } catch {
-                revert("Unknown project");
-            }
+            bytes memory data = tm.getLensData(2, params);
+            (uint128 cap, uint128 spent, bool exists) = abi.decode(data, (uint128, uint128, bool));
+            return abi.encode(cap, spent, false); // isManager always false for now since we don't pass caller context
         } else if (key == StorageKey.TASK_APPLICANTS) {
             uint256 id = abi.decode(params, (uint256));
             return tm.getLensData(7, params);
@@ -117,13 +110,10 @@ contract TaskManagerLens {
             return abi.encode(application);
         } else if (key == StorageKey.BOUNTY_BUDGET) {
             (bytes32 pid, address token) = abi.decode(params, (bytes32, address));
-            require(token != address(0), "Invalid token");
-            try tm.getLensData(9, params) returns (bytes memory data) {
-                (uint128 cap, uint128 spent) = abi.decode(data, (uint128, uint128));
-                return abi.encode(cap, spent);
-            } catch {
-                revert("Unknown project");
-            }
+            if (token == address(0)) revert ValidationLib.ZeroAddress();
+            bytes memory data = tm.getLensData(9, params);
+            (uint128 cap, uint128 spent) = abi.decode(data, (uint128, uint128));
+            return abi.encode(cap, spent);
         }
         
         revert("Invalid index");
