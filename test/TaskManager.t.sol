@@ -1020,7 +1020,7 @@ contract TaskManagerTest is TaskManagerTestBase {
         // Old executor can no longer set creator hats
         uint256 TEST_HAT = 123;
         vm.prank(executor);
-        vm.expectRevert(TaskManager.NotCreator.selector);
+        vm.expectRevert(TaskManager.NotExecutor.selector);
         tm.setConfig(TaskManager.ConfigKey.CREATOR_HAT_ALLOWED, abi.encode(TEST_HAT, true));
 
         // New executor can set creator hats
@@ -3187,15 +3187,15 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
     function test_SetBountyCapPermissions() public {
         // Only executor can set bounty caps
         vm.prank(creator1);
-        vm.expectRevert(TaskManager.NotCreator.selector);
+        vm.expectRevert(TaskManager.NotExecutor.selector);
         tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         vm.prank(pm1);
-        vm.expectRevert(TaskManager.NotCreator.selector);
+        vm.expectRevert(TaskManager.NotExecutor.selector);
         tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         vm.prank(member1);
-        vm.expectRevert(TaskManager.NotCreator.selector);
+        vm.expectRevert(TaskManager.NotExecutor.selector);
         tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         // Executor can set cap
@@ -3311,11 +3311,11 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
 
         // Verify independent budget tracking
         bytes memory result = lens.getStorage(
-            TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1))
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1))
         );
         (uint256 cap1, uint256 spent1) = abi.decode(result, (uint256, uint256));
         result = lens.getStorage(
-            TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
         );
         (uint256 cap2, uint256 spent2) = abi.decode(result, (uint256, uint256));
 
@@ -3334,7 +3334,7 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task5"), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 1 ether, false);
 
         result = lens.getStorage(
-            TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
         );
         (cap2, spent2) = abi.decode(result, (uint256, uint256));
         assertEq(spent2, 3 ether, "Token2 spent should now be at cap");
@@ -3711,15 +3711,15 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
 
         // Verify final budget states
         bytes memory result = lens.getStorage(
-            TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1))
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1))
         );
         (uint256 cap1, uint256 spent1) = abi.decode(result, (uint256, uint256));
         result = lens.getStorage(
-            TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
         );
         (uint256 cap2, uint256 spent2) = abi.decode(result, (uint256, uint256));
         result = lens.getStorage(
-            TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken3))
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken3))
         );
         (uint256 cap3, uint256 spent3) = abi.decode(result, (uint256, uint256));
 
