@@ -25,10 +25,10 @@ contract PoaManagerTest is Test {
         DummyImpl impl1 = new DummyImpl();
         DummyImpl impl2 = new DummyImpl();
         pm.addContractType("TypeA", address(impl1));
-        address beacon = pm.getBeacon("TypeA");
+        address beacon = pm.getBeaconById(keccak256("TypeA"));
         assertTrue(beacon != address(0));
-        assertEq(pm.getCurrentImplementation("TypeA"), address(impl1));
+        assertEq(pm.getCurrentImplementationById(keccak256("TypeA")), address(impl1));
         pm.upgradeBeacon("TypeA", address(impl2), "v2");
-        assertEq(pm.getCurrentImplementation("TypeA"), address(impl2));
+        assertEq(pm.getCurrentImplementationById(keccak256("TypeA")), address(impl2));
     }
 }
