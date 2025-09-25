@@ -21,7 +21,9 @@ import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
 import "../src/ImplementationRegistry.sol";
 import "../src/PoaManager.sol";
 import "../src/OrgRegistry.sol";
-import {Deployer, IHybridVotingInit} from "../src/Deployer.sol";
+import {Deployer} from "../src/Deployer.sol";
+import {ModuleDeploymentLib, IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
+import {ModuleTypes} from "../src/libs/ModuleTypes.sol";
 import {EligibilityModule} from "../src/EligibilityModule.sol";
 import {ToggleModule} from "../src/ToggleModule.sol";
 import {IExecutor} from "../src/Executor.sol";
@@ -428,7 +430,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         poaManager.addContractType("ImplementationRegistry", address(implRegistryImpl));
 
         // Get the beacon for ImplementationRegistry
-        address implRegBeacon = poaManager.getBeacon("ImplementationRegistry");
+        bytes32 implRegTypeId = keccak256("ImplementationRegistry");
+        address implRegBeacon = poaManager.getBeaconById(implRegTypeId);
 
         // Create ImplementationRegistry proxy and initialize it with poaAdmin as owner
         bytes memory implRegistryInit = abi.encodeWithSignature("initialize(address)", poaAdmin);
@@ -448,8 +451,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         poaManager.addContractType("Deployer", address(deployerImpl));
 
         // Get beacons created by PoaManager
-        address orgRegBeacon = poaManager.getBeacon("OrgRegistry");
-        address deployerBeacon = poaManager.getBeacon("Deployer");
+        address orgRegBeacon = poaManager.getBeaconById(keccak256("OrgRegistry"));
+        address deployerBeacon = poaManager.getBeaconById(keccak256("Deployer"));
 
         // Create OrgRegistry proxy - initialize with poaAdmin as owner
         bytes memory orgRegistryInit = abi.encodeWithSignature("initialize(address)", poaAdmin);
@@ -460,12 +463,14 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Create Deployer proxy - initialize with msg.sender (poaAdmin) for proper ownership
         bytes memory deployerInit = abi.encodeWithSignature(
-            "initialize(address,address,address)", address(poaManager), address(orgRegistry), SEPOLIA_HATS
+            "initialize(address,address,address)", 
+            address(poaManager), 
+            address(orgRegistry), 
+            SEPOLIA_HATS
         );
         deployer = Deployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
 
-        // Debug to verify Deployer owner
-        console.log("Deployer owner after init:", deployer.owner());
+        // Debug to verify Deployer initialization
         console.log("deployer address:", address(deployer));
 
         // Now transfer orgRegistry ownership to deployer after both are initialized
@@ -486,7 +491,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         /*–– global account registry instance ––*/
         // Get the beacon created by PoaManager for account registry
-        address accRegBeacon = poaManager.getBeacon("UniversalAccountRegistry");
+        address accRegBeacon = poaManager.getBeaconById(keccak256("UniversalAccountRegistry"));
 
         // Create a proxy using the beacon with proper initialization data
         bytes memory accRegInit = abi.encodeWithSignature("initialize(address)", poaAdmin);
@@ -586,7 +591,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         assertEq(owner, exec);
 
         address impl = deployer.getBeaconImplementation(beacon);
-        assertEq(impl, poaManager.getCurrentImplementation("QuickJoin"));
+        assertEq(impl, poaManager.getCurrentImplementationById(ModuleTypes.QUICK_JOIN_ID));
         assertEq(deployer.poaManager(), address(poaManager));
         assertEq(deployer.orgRegistry(), address(orgRegistry));
     }
