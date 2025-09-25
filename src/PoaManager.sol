@@ -77,14 +77,14 @@ contract PoaManager is Ownable(msg.sender) {
     }
 
     /*──────────── Views ───────────*/
-    function getBeacon(string calldata typeName) external view returns (address) {
-        address b = address(beacons[_id(typeName)]);
+    function getBeaconById(bytes32 typeId) external view returns (address) {
+        address b = address(beacons[typeId]);
         if (b == address(0)) revert TypeUnknown();
         return b;
     }
 
-    function getCurrentImplementation(string calldata typeName) external view returns (address) {
-        UpgradeableBeacon b = beacons[_id(typeName)];
+    function getCurrentImplementationById(bytes32 typeId) external view returns (address) {
+        UpgradeableBeacon b = beacons[typeId];
         if (address(b) == address(0)) revert TypeUnknown();
         return b.implementation();
     }
