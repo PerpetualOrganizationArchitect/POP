@@ -83,7 +83,7 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165, Initializable {
     // ============ Storage Structs ============
     struct Config {
         address hats;
-        address admin;  // The executor contract that administers this paymaster
+        address admin; // The executor contract that administers this paymaster
         address operator; // Optional operator address for delegated management
         bool paused;
         uint8 version;

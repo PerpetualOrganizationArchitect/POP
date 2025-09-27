@@ -216,15 +216,15 @@ contract Deployer is Initializable {
 
     /*════════════════  FULL ORG  DEPLOYMENT  ════════════════*/
     struct PaymasterConfig {
-        bool enabled;                   // Whether to deploy a paymaster
-        address entryPoint;             // ERC-4337 EntryPoint address
-        uint256 initialDeposit;         // Initial ETH to deposit to EntryPoint
-        uint256 initialBounty;          // Initial ETH for bounty pool
-        bool enableBounty;              // Whether to enable bounty system
-        uint96 maxBountyPerOp;          // Max bounty per operation
-        uint16 bountyPctCap;            // Bounty percentage cap in basis points
+        bool enabled; // Whether to deploy a paymaster
+        address entryPoint; // ERC-4337 EntryPoint address
+        uint256 initialDeposit; // Initial ETH to deposit to EntryPoint
+        uint256 initialBounty; // Initial ETH for bounty pool
+        bool enableBounty; // Whether to enable bounty system
+        uint96 maxBountyPerOp; // Max bounty per operation
+        uint16 bountyPctCap; // Bounty percentage cap in basis points
     }
-    
+
     struct RoleAssignments {
         uint256[] quickJoinRoles; // Roles that new members get via QuickJoin
         uint256[] tokenMemberRoles; // Roles that can hold participation tokens
@@ -376,38 +376,37 @@ contract Deployer is Initializable {
             // Validate funding amounts match msg.value
             uint256 totalFunding = params.paymasterConfig.initialDeposit + params.paymasterConfig.initialBounty;
             if (msg.value < totalFunding) revert InsufficientFunding();
-            
+
             // Deploy PaymasterHub with the executor as admin
-            address paymasterBeacon = _createBeacon(ModuleTypes.PAYMASTER_HUB_ID, executorAddr, params.autoUpgrade, address(0));
+            address paymasterBeacon =
+                _createBeacon(ModuleTypes.PAYMASTER_HUB_ID, executorAddr, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory pmConfig =
                 _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
             paymasterHub = ModuleDeploymentLib.deployPaymasterHub(
                 pmConfig,
                 params.paymasterConfig.entryPoint,
-                executorAddr,  // Use executor as the admin
+                executorAddr, // Use executor as the admin
                 paymasterBeacon
             );
-            
+
             // Fund the PaymasterHub if initial deposits are specified
             if (params.paymasterConfig.initialDeposit > 0) {
                 // Deposit to EntryPoint
                 IPaymasterHubAdmin(paymasterHub).depositToEntryPoint{value: params.paymasterConfig.initialDeposit}();
             }
-            
+
             if (params.paymasterConfig.initialBounty > 0) {
                 // Fund bounty pool
                 IPaymasterHubAdmin(paymasterHub).fundBounty{value: params.paymasterConfig.initialBounty}();
             }
-            
+
             // Configure bounty if enabled
             if (params.paymasterConfig.enableBounty) {
                 IPaymasterHubAdmin(paymasterHub).setBounty(
-                    true,
-                    params.paymasterConfig.maxBountyPerOp,
-                    params.paymasterConfig.bountyPctCap
+                    true, params.paymasterConfig.maxBountyPerOp, params.paymasterConfig.bountyPctCap
                 );
             }
-            
+
             // Transfer ownership of the beacon to the executor
             SwitchableBeacon(paymasterBeacon).transferOwnership(executorAddr);
         }

@@ -252,18 +252,12 @@ library ModuleDeploymentLib {
         hvProxy = deployCore(config, ModuleTypes.HYBRID_VOTING_ID, init, lastRegister, beacon);
     }
 
-    function deployPaymasterHub(
-        DeployConfig memory config,
-        address entryPoint,
-        address admin,
-        address beacon
-    ) internal returns (address pmProxy) {
-        bytes memory init = abi.encodeWithSelector(
-            IPaymasterHubInit.initialize.selector,
-            entryPoint,
-            config.hats,
-            admin
-        );
+    function deployPaymasterHub(DeployConfig memory config, address entryPoint, address admin, address beacon)
+        internal
+        returns (address pmProxy)
+    {
+        bytes memory init =
+            abi.encodeWithSelector(IPaymasterHubInit.initialize.selector, entryPoint, config.hats, admin);
         pmProxy = deployCore(config, ModuleTypes.PAYMASTER_HUB_ID, init, false, beacon);
     }
 }
