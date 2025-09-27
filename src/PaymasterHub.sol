@@ -54,7 +54,7 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165, Initializable {
     uint256 private constant MAX_BOUNTY_PCT_BP = 10000; // 100%
 
     // ============ Events ============
-    event PaymasterInitialized(address indexed entryPoint, address indexed hats, uint256 adminHatId);
+    event PaymasterInitialized(address indexed entryPoint, address indexed hats, address indexed admin);
     event RuleSet(address indexed target, bytes4 indexed selector, bool allowed, uint32 maxCallGasHint);
     event BudgetSet(bytes32 indexed subjectKey, uint128 capPerEpoch, uint32 epochLen, uint32 epochStart);
     event FeeCapsSet(
@@ -65,7 +65,7 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165, Initializable {
         uint32 maxPreVerificationGas
     );
     event PauseSet(bool paused);
-    event OperatorHatSet(uint256 operatorHatId);
+    event OperatorSet(address indexed operator);
     event DepositIncrease(uint256 amount, uint256 newDeposit);
     event DepositWithdraw(address indexed to, uint256 amount);
     event BountyConfig(bool enabled, uint96 maxPerOp, uint16 pctBpCap);
@@ -83,8 +83,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165, Initializable {
     // ============ Storage Structs ============
     struct Config {
         address hats;
-        uint256 adminHatId;
-        uint256 operatorHatId; // Optional role for budget/rule management
+        address admin;  // The executor contract that administers this paymaster
+        address operator; // Optional operator address for delegated management
         bool paused;
         uint8 version;
         uint24 reserved; // For future use
@@ -144,10 +144,10 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165, Initializable {
     }
 
     // ============ Initializer ============
-    function initialize(address _entryPoint, address _hats, uint256 _adminHatId) public initializer {
+    function initialize(address _entryPoint, address _hats, address _admin) public initializer {
         if (_entryPoint == address(0)) revert ZeroAddress();
         if (_hats == address(0)) revert ZeroAddress();
-        if (_adminHatId == 0) revert ZeroAddress();
+        if (_admin == address(0)) revert ZeroAddress();
 
         // Verify entryPoint is a contract
         uint256 codeSize;
@@ -160,11 +160,11 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165, Initializable {
 
         Config storage config = _getConfigStorage();
         config.hats = _hats;
-        config.adminHatId = _adminHatId;
+        config.admin = _admin;
         config.version = PAYMASTER_DATA_VERSION;
         config.paused = false;
 
-        emit PaymasterInitialized(_entryPoint, _hats, _adminHatId);
+        emit PaymasterInitialized(_entryPoint, _hats, _admin);
     }
 
     // ============ Modifiers ============
@@ -175,7 +175,7 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165, Initializable {
 
     modifier onlyAdmin() {
         Config storage config = _getConfigStorage();
-        if (!IHats(config.hats).isWearerOfHat(msg.sender, config.adminHatId)) {
+        if (msg.sender != config.admin) {
             revert NotAdmin();
         }
         _;
@@ -183,9 +183,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165, Initializable {
 
     modifier onlyOperator() {
         Config storage config = _getConfigStorage();
-        bool isAdmin = IHats(config.hats).isWearerOfHat(msg.sender, config.adminHatId);
-        bool isOperator =
-            config.operatorHatId != 0 && IHats(config.hats).isWearerOfHat(msg.sender, config.operatorHatId);
+        bool isAdmin = msg.sender == config.admin;
+        bool isOperator = config.operator != address(0) && msg.sender == config.operator;
         if (!isAdmin && !isOperator) revert NotOperator();
         _;
     }
@@ -392,11 +391,11 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165, Initializable {
     }
 
     /**
-     * @notice Set optional operator hat for delegated management
+     * @notice Set optional operator address for delegated management
      */
-    function setOperatorHat(uint256 operatorHatId) external onlyAdmin {
-        _getConfigStorage().operatorHatId = operatorHatId;
-        emit OperatorHatSet(operatorHatId);
+    function setOperator(address operator) external onlyAdmin {
+        _getConfigStorage().operator = operator;
+        emit OperatorSet(operator);
     }
 
     /**

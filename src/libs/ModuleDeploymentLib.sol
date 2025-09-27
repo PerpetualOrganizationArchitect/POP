@@ -85,7 +85,7 @@ interface IToggleModuleInit {
 }
 
 interface IPaymasterHubInit {
-    function initialize(address entryPoint, address hats, uint256 adminHatId) external;
+    function initialize(address entryPoint, address hats, address admin) external;
 }
 
 library ModuleDeploymentLib {
@@ -255,14 +255,14 @@ library ModuleDeploymentLib {
     function deployPaymasterHub(
         DeployConfig memory config,
         address entryPoint,
-        uint256 adminHatId,
+        address admin,
         address beacon
     ) internal returns (address pmProxy) {
         bytes memory init = abi.encodeWithSelector(
             IPaymasterHubInit.initialize.selector,
             entryPoint,
             config.hats,
-            adminHatId
+            admin
         );
         pmProxy = deployCore(config, ModuleTypes.PAYMASTER_HUB_ID, init, false, beacon);
     }

@@ -60,7 +60,7 @@ interface IExecutorAdmin {
 
 interface IPaymasterHubAdmin {
     function setPause(bool paused) external;
-    function setOperatorHat(uint256 operatorHatId) external;
+    function setOperator(address operator) external;
     function setBounty(bool enabled, uint96 maxBountyPerOp, uint16 pctBpCap) external;
     function depositToEntryPoint() external payable;
     function fundBounty() external payable;
@@ -377,18 +377,14 @@ contract Deployer is Initializable {
             uint256 totalFunding = params.paymasterConfig.initialDeposit + params.paymasterConfig.initialBounty;
             if (msg.value < totalFunding) revert InsufficientFunding();
             
-            // Use the executive role (role[1]) as admin for the PaymasterHub
-            // This assumes the second role is the executive/admin role
-            uint256 adminHatId = roleHatIds.length > 1 ? roleHatIds[1] : roleHatIds[0];
-            
-            // Deploy PaymasterHub
+            // Deploy PaymasterHub with the executor as admin
             address paymasterBeacon = _createBeacon(ModuleTypes.PAYMASTER_HUB_ID, executorAddr, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory pmConfig =
                 _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
             paymasterHub = ModuleDeploymentLib.deployPaymasterHub(
                 pmConfig,
                 params.paymasterConfig.entryPoint,
-                adminHatId,
+                executorAddr,  // Use executor as the admin
                 paymasterBeacon
             );
             
