@@ -34,10 +34,10 @@ interface IPaymentManager {
     event OptOutToggled(address indexed user, bool optedOut);
 
     /**
-     * @notice Emitted when the eligibility token is changed
-     * @param token The new eligibility token address
+     * @notice Emitted when the revenue share token is changed
+     * @param token The new revenue share token address
      */
-    event EligibilityTokenSet(address indexed token);
+    event RevenueShareTokenSet(address indexed token);
 
     /*──────────────────────────────────────────────────────────────────────────
                                     ERRORS
@@ -134,19 +134,19 @@ interface IPaymentManager {
     ──────────────────────────────────────────────────────────────────────────*/
 
     /**
-     * @notice Set the token used to determine distribution eligibility
+     * @notice Set the token used to determine revenue share distribution
      * @dev Only callable by owner, must be a valid ERC-20 token
-     * @param eligibilityToken The new eligibility token address
+     * @param revenueShareToken The new revenue share token address
      */
-    function setEligibilityToken(address eligibilityToken) external;
+    function setRevenueShareToken(address revenueShareToken) external;
 
     /*──────────────────────────────────────────────────────────────────────────
                                     VIEW FUNCTIONS
     ──────────────────────────────────────────────────────────────────────────*/
 
     /**
-     * @notice Get the current eligibility token address
+     * @notice Get the current revenue share token address
      * @return The address of the token used for distribution weights
      */
-    function eligibilityToken() external view returns (address);
+    function revenueShareToken() external view returns (address);
 }

@@ -11,7 +11,7 @@ import {ReentrancyGuardUpgradeable} from
 
 /**
  * @title PaymentManager
- * @notice Accepts payments in ETH or ERC-20 tokens and distributes revenue to eligibility token holders
+ * @notice Accepts payments in ETH or ERC-20 tokens and distributes revenue to revenue share token holders
  * @dev Implements IPaymentManager interface with ERC-7201 storage pattern, part of the Perpetual Organization Architect (POA) ecosystem
  */
 contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
@@ -31,7 +31,7 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
     /// @custom:storage-location erc7201:poa.paymentmanager.storage
     struct Layout {
         /// @notice The ERC-20 token used to determine distribution weights
-        address eligibilityToken;
+        address revenueShareToken;
         /// @notice Tracks which addresses have opted out of distributions
         mapping(address => bool) optedOut;
     }
@@ -52,18 +52,18 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
     /**
      * @notice Initializes the PaymentManager
      * @param _owner The address that will own the contract (typically the Executor)
-     * @param _eligibilityToken The initial eligibility token address
+     * @param _revenueShareToken The initial revenue share token address
      */
-    function initialize(address _owner, address _eligibilityToken) external initializer {
+    function initialize(address _owner, address _revenueShareToken) external initializer {
         if (_owner == address(0)) revert ZeroAddress();
-        if (_eligibilityToken == address(0)) revert ZeroAddress();
+        if (_revenueShareToken == address(0)) revert ZeroAddress();
 
         __Ownable_init(_owner);
         __ReentrancyGuard_init();
 
         Layout storage s = _layout();
-        s.eligibilityToken = _eligibilityToken;
-        emit EligibilityTokenSet(_eligibilityToken);
+        s.revenueShareToken = _revenueShareToken;
+        emit RevenueShareTokenSet(_revenueShareToken);
     }
 
     /*──────────────────────────────────────────────────────────────────────────
@@ -122,8 +122,8 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
 
         Layout storage s = _layout();
 
-        // Get total weight from eligibility token
-        uint256 totalWeight = IERC20(s.eligibilityToken).totalSupply();
+        // Get total weight from revenue share token
+        uint256 totalWeight = IERC20(s.revenueShareToken).totalSupply();
         if (totalWeight == 0) revert NoEligibleHolders();
 
         uint256 scaledAmount = amount * PRECISION;
@@ -138,7 +138,7 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
             if (s.optedOut[holder]) continue;
 
             // Get holder's balance
-            uint256 balance = IERC20(s.eligibilityToken).balanceOf(holder);
+            uint256 balance = IERC20(s.revenueShareToken).balanceOf(holder);
             if (balance == 0) continue;
 
             // Calculate share
@@ -194,11 +194,11 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
     /**
      * @inheritdoc IPaymentManager
      */
-    function setEligibilityToken(address _eligibilityToken) external override onlyOwner {
-        if (_eligibilityToken == address(0)) revert ZeroAddress();
+    function setRevenueShareToken(address _revenueShareToken) external override onlyOwner {
+        if (_revenueShareToken == address(0)) revert ZeroAddress();
         Layout storage s = _layout();
-        s.eligibilityToken = _eligibilityToken;
-        emit EligibilityTokenSet(_eligibilityToken);
+        s.revenueShareToken = _revenueShareToken;
+        emit RevenueShareTokenSet(_revenueShareToken);
     }
 
     /*──────────────────────────────────────────────────────────────────────────
@@ -208,8 +208,8 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
     /**
      * @inheritdoc IPaymentManager
      */
-    function eligibilityToken() external view override returns (address) {
+    function revenueShareToken() external view override returns (address) {
         Layout storage s = _layout();
-        return s.eligibilityToken;
+        return s.revenueShareToken;
     }
 }
