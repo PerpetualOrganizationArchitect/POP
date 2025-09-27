@@ -90,8 +90,12 @@ contract HybridVoting is Initializable {
 
     /* ─────────── Inline Pausable Implementation ─────────── */
     modifier whenNotPaused() {
-        if (_layout()._paused) revert VotingErrors.Paused();
+        _checkNotPaused();
         _;
+    }
+
+    function _checkNotPaused() private view {
+        if (_layout()._paused) revert VotingErrors.Paused();
     }
 
     function paused() external view returns (bool) {
@@ -172,8 +176,12 @@ contract HybridVoting is Initializable {
 
     /* ─────── Governance setters (executor‑gated) ─────── */
     modifier onlyExecutor() {
-        if (_msgSender() != address(_layout().executor)) revert VotingErrors.Unauthorized();
+        _checkExecutor();
         _;
+    }
+
+    function _checkExecutor() private view {
+        if (_msgSender() != address(_layout().executor)) revert VotingErrors.Unauthorized();
     }
 
     function pause() external onlyExecutor {
@@ -237,22 +245,34 @@ contract HybridVoting is Initializable {
 
     /* ─────── Helpers & modifiers ─────── */
     modifier onlyCreator() {
+        _checkCreator();
+        _;
+    }
+
+    modifier exists(uint256 id) {
+        _checkExists(id);
+        _;
+    }
+
+    modifier isExpired(uint256 id) {
+        _checkExpired(id);
+        _;
+    }
+
+    function _checkCreator() private view {
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
             bool canCreate = HatManager.hasAnyHat(l.hats, l.creatorHatIds, _msgSender());
             if (!canCreate) revert VotingErrors.Unauthorized();
         }
-        _;
     }
 
-    modifier exists(uint256 id) {
+    function _checkExists(uint256 id) private view {
         if (id >= _layout()._proposals.length) revert VotingErrors.InvalidProposal();
-        _;
     }
 
-    modifier isExpired(uint256 id) {
+    function _checkExpired(uint256 id) private view {
         if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingErrors.VotingOpen();
-        _;
     }
 
     /* ─────── Proposal creation ─────── */
