@@ -32,9 +32,6 @@ contract PaymentManager is IPaymentManager, Ownable, ReentrancyGuard {
     /// @notice Tracks which addresses have opted out of distributions
     mapping(address => bool) private _optedOut;
 
-    /// @notice Tracks total amount distributed per token
-    mapping(address => uint256) private _distributedTotal;
-
     /*──────────────────────────────────────────────────────────────────────────
                                     CONSTRUCTOR
     ──────────────────────────────────────────────────────────────────────────*/
@@ -144,7 +141,6 @@ contract PaymentManager is IPaymentManager, Ownable, ReentrancyGuard {
 
         if (processed == 0) revert NoEligibleHolders();
 
-        _distributedTotal[payoutToken] += totalDistributed;
         emit RevenueDistributed(payoutToken, totalDistributed, processed);
     }
 
@@ -178,17 +174,6 @@ contract PaymentManager is IPaymentManager, Ownable, ReentrancyGuard {
         if (_eligibilityToken == address(0)) revert ZeroAddress();
         eligibilityToken = _eligibilityToken;
         emit EligibilityTokenSet(_eligibilityToken);
-    }
-
-    /*──────────────────────────────────────────────────────────────────────────
-                                    VIEW FUNCTIONS
-    ──────────────────────────────────────────────────────────────────────────*/
-
-    /**
-     * @inheritdoc IPaymentManager
-     */
-    function getDistributedTotal(address token) external view override returns (uint256) {
-        return _distributedTotal[token];
     }
 }
 

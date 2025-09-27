@@ -331,30 +331,6 @@ contract PaymentManagerTest is Test {
     }
 
     /*──────────────────────────────────────────────────────────────────────────
-                                VIEW FUNCTIONS TESTS
-    ──────────────────────────────────────────────────────────────────────────*/
-
-    function test_GetDistributedTotal() public {
-        // Initially should be zero
-        assertEq(paymentManager.getDistributedTotal(address(0)), 0);
-
-        // Add ETH and distribute
-        vm.prank(payer);
-        paymentManager.pay{value: 10 ether}();
-
-        address[] memory holders = new address[](3);
-        holders[0] = alice;
-        holders[1] = bob;
-        holders[2] = charlie;
-
-        vm.prank(executor);
-        paymentManager.distributeRevenue(address(0), 10 ether, holders);
-
-        // Should track the total distributed
-        assertEq(paymentManager.getDistributedTotal(address(0)), 10 ether);
-    }
-
-    /*──────────────────────────────────────────────────────────────────────────
                                 EDGE CASES & FUZZING
     ──────────────────────────────────────────────────────────────────────────*/
 
