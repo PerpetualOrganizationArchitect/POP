@@ -135,8 +135,20 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (hybrid, exec, qj, token, tm, hub, pm) = deployer.deployFullOrg(
-            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        
+        // Create PaymasterConfig with disabled paymaster
+        Deployer.PaymasterConfig memory pmConfig = Deployer.PaymasterConfig({
+            enabled: false,
+            entryPoint: address(0),
+            initialDeposit: 0,
+            initialBounty: 0,
+            enableBounty: false,
+            maxBountyPerOp: 0,
+            bountyPctCap: 0
+        });
+        
+        (hybrid, exec, qj, token, tm, hub, pm,) = deployer.deployFullOrg(
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, pmConfig
         );
         vm.stopPrank();
     }
