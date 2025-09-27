@@ -114,15 +114,15 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
 2. **Actor**: Executor calls `distributeRevenue(payoutToken, amount, holders[])`
 3. **System validates**:
    - `amount > 0`, holders array non-empty
-   - For each h in holders:
+   - Get total weight: `W = IERC20(eligibilityToken).totalSupply()`. If `W == 0` → revert
+4. **System distributes** (single pass):
+   - Scale amount with PRECISION constant (1e18) for accurate calculations
+   - For each holder h:
      - If `optedOut[h] == true` → skip
      - Read `bal = IERC20(eligibilityToken).balanceOf(h)`. If `bal == 0` → skip
-   - Sum weights `W = Σ bal(h)` over non-skipped. If `W == 0` → revert `NoEligibleHolders()`
-4. **System computes / emits**:
-   - Scale amount with PRECISION constant (1e18) for accurate calculations
-   - For each eligible h: `scaledShare = (amount * PRECISION * bal(h)) / W`
-   - Actual share: `share = scaledShare / PRECISION` (rounds down)
-   - Transfer share via SafeERC20 to h
+     - Calculate: `scaledShare = (amount * PRECISION * bal) / W`
+     - Actual share: `share = scaledShare / PRECISION` (rounds down)
+     - Transfer share via SafeERC20 or native transfer
    - Track `distributedTotal[payoutToken] += actualDistributed`
    - Emit `RevenueDistributed(payoutToken, amount, holdersProcessed)`
 5. **Post-condition**: Payout sent; skipped addresses received nothing
@@ -210,9 +210,12 @@ sequenceDiagram
     E->>PM: distributeRevenue(payoutToken, amount, holders[])
     PM->>PM: require caller is owner (Executor)
     Note over PM: payoutToken = address(0) for ETH
-    PM->>PM: totalWeight = 0, eligibleHolders = []
+    PM->>ET: totalSupply()
+    ET-->>PM: totalWeight
+    PM->>PM: require totalWeight > 0
+    PM->>PM: scaledAmount = amount * PRECISION, processed = 0
     
-    loop for each holder (calculate weights)
+    loop for each holder (single pass)
       alt opted out
         PM->>PM: if optedOut[h] == true → skip
       else check balance
@@ -220,29 +223,23 @@ sequenceDiagram
         ET-->>PM: balance
         alt zero balance
           PM->>PM: if balance == 0 → skip
-        else positive balance
-          PM->>PM: totalWeight += balance
-          PM->>PM: eligibleHolders.push(h, balance)
+        else positive balance (distribute)
+          PM->>PM: scaledShare = (scaledAmount * balance) / totalWeight
+          PM->>PM: share = scaledShare / PRECISION
+          alt ETH distribution
+            PM->>H: transfer ETH (share)
+            H-->>PM: OK
+          else ERC20 distribution
+            PM->>PT: safeTransfer(holder, share)
+            PT-->>PM: OK
+          end
+          PM->>PM: processed++
         end
       end
     end
     
-    PM->>PM: require totalWeight > 0 (else revert NoEligibleHolders)
-    PM->>PM: scaledAmount = amount * PRECISION
-    
-    loop for each eligible holder (distribute)
-      PM->>PM: scaledShare = (scaledAmount * balance) / totalWeight
-      PM->>PM: share = scaledShare / PRECISION
-      alt ETH distribution
-        PM->>H: transfer ETH (share)
-        H-->>PM: OK
-      else ERC20 distribution
-        PM->>PT: safeTransfer(holder, share)
-        PT-->>PM: OK
-      end
-    end
-    
-    PM-->>E: emit RevenueDistributed(token, amount, eligibleHolders.length)
+    PM->>PM: require processed > 0 (else revert NoEligibleHolders)
+    PM-->>E: emit RevenueDistributed(token, amount, processed)
 ```
 
 ### 5.4 High-Level State Diagram (Payment & Revenue Lifecycle)
