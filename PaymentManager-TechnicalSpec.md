@@ -6,7 +6,7 @@
 The Perpetual Organization Architect (POA) ecosystem currently manages tasks, education modules, and participation tokens through separate contracts (TaskManager, EducationHub, ParticipationToken). However, organizations need an additional revenue layer to:
 
 - **Monetize Services**: Organizations need to offer paid services/products to external users beyond just internal task rewards
-- **Accept Diverse Payments**: Support various ERC-20 tokens as payment methods for different services
+- **Accept Diverse Payments**: Support both ETH and various ERC-20 tokens as payment methods for different services
 - **Revenue Sharing**: Automatically distribute accumulated revenue to active participants based on their ParticipationToken holdings
 - **Integration with POA**: Seamlessly integrate with the existing Hats Protocol roles, Executor pattern, and ParticipationToken ecosystem
 
@@ -39,7 +39,7 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
 - **Organization Members**: ParticipationToken holders eligible for revenue distributions
 - **Executor Contract**: The organization's governance contract that owns and manages the PaymentManager
 - **Token Ecosystem**:
-  - Payment tokens: Various ERC-20s accepted for service payments
+  - Payment tokens: ETH and various ERC-20s accepted for service payments
   - ParticipationToken: The organization's internal token used for revenue distribution weights
   - Bounty tokens: External tokens that might be accepted as payment for premium services
 
@@ -47,7 +47,7 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
 
 ### Goals & Success Stories
 
-- Publish multiple services with distinct prices and accepted ERC-20 currency
+- Publish multiple services with distinct prices and accepted currency (ETH or ERC-20)
 - Accept payments and immutably record each purchase
 - Periodic revenue distribution to current holders of a chosen eligibility token (configurable `eligibilityToken`), weighted by balances at distribution time
 - **Opt-out**: any address can opt out of revenue shares
@@ -77,7 +77,7 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
 | Pro-rata revshare by eligibility token balance | Aligns incentives, easy to reason about | Balance measured at call time, no historical snapshots |
 | Opt-out toggle | Respects participant preference | Additional check each distribution |
 | Executor-only distribution | Maximum security | Less flexibility |
-| ERC-20 payment support | Standardized token handling | No native currency support |
+| ETH and ERC-20 payment support | Maximum flexibility for buyers | Additional logic for handling ETH |
 
 ### Alternative Approaches
 
@@ -98,16 +98,18 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
 
 ## 4. Step-by-Step Flow
 
-### 4.1 Main ("Happy") Path — Buying a Service (ERC-20)
+### 4.1 Main ("Happy") Path — Buying a Service (ETH or ERC-20)
 
-1. **Pre-condition**: Service S is `active=true`, with price p and paymentToken (ERC-20 address)
-2. **Actor**: User (Buyer) triggers `purchase(serviceId)`
+1. **Pre-condition**: Service S is `active=true`, with price p and paymentToken (address(0) for ETH, or ERC-20 address)
+2. **Actor**: User (Buyer) triggers `purchase(serviceId)` (with msg.value for ETH)
 3. **System validates**:
    - Service exists & active
-   - User has approved `price` and transferFrom succeeds
+   - Correct payment provided:
+     - If ETH: `msg.value == price` and `paymentToken == address(0)`
+     - If ERC-20: user has approved `price` and transferFrom succeeds
 4. **System emits**:
    - Emit `PaymentRecorded(buyer, serviceId, price, paymentToken, timestamp)`
-5. **Post-condition**: Contract balance (ERC-20) increases
+5. **Post-condition**: Contract balance (ETH or ERC-20) increases
 
 ### 4.1b Main Path — Distribute Revenue
 
@@ -133,14 +135,15 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
 | # | Condition | System Action | Suggested Handling |
 |---|-----------|---------------|-------------------|
 | A1 | Service inactive or not found | revert `ServiceInactive()`/`InvalidService()` | Admin enable or create service |
-| A2 | ERC-20 approval insufficient | revert `InsufficientAllowance()` | Ensure proper approval |
-| A3 | ERC-20 transferFrom fails | revert with OZ error | Ensure allowance & balance |
-| A4 | Distribution: zero amount or no holders | revert `InvalidDistributionParams()` | Provide proper inputs |
-| A5 | No eligible holders (all zero balance or opted out) | revert `NoEligibleHolders()` | Retry later or different set |
-| A6 | Insufficient payout token balance | revert `InsufficientFunds()` | Fund contract first |
-| A7 | Payout transfer failure | SafeERC20 revert | Ensure payout token behaves per ERC-20 |
-| A8 | Reentrancy attempt | blocked by nonReentrant | N/A |
-| A9 | Distribution rounding dust | Small residual remains in contract | Accumulates for next distribution |
+| A2 | ETH payment mismatch | revert `InvalidPaymentValue()` | Send exact ETH amount |
+| A3 | ERC-20 approval insufficient | revert `InsufficientAllowance()` | Ensure proper approval |
+| A4 | ERC-20 transferFrom fails | revert with OZ error | Ensure allowance & balance |
+| A5 | Distribution: zero amount or no holders | revert `InvalidDistributionParams()` | Provide proper inputs |
+| A6 | No eligible holders (all zero balance or opted out) | revert `NoEligibleHolders()` | Retry later or different set |
+| A7 | Insufficient payout token balance | revert `InsufficientFunds()` | Fund contract first |
+| A8 | Payout transfer failure | SafeERC20 revert | Ensure payout token behaves per ERC-20 |
+| A9 | Reentrancy attempt | blocked by nonReentrant | N/A |
+| A10 | Distribution rounding dust | Small residual remains in contract | Accumulates for next distribution |
 
 ## 5. UML Diagrams (Mermaid)
 
@@ -156,10 +159,11 @@ classDiagram
       +setEligibilityToken(address) onlyOwner
       +createService(uint256 price, address paymentToken, bool active, bytes metadata) onlyOwner
       +updateService(uint256 id, uint256 price, address paymentToken, bool active) onlyOwner
-      +purchase(uint256 serviceId) nonReentrant
+      +purchase(uint256 serviceId) payable nonReentrant
       +optOut(bool)  // user toggle
       +distributeRevenue(address payoutToken, uint256 amount, address[] holders) onlyOwner nonReentrant
       +withdraw(address token, uint256 amount) onlyOwner
+      +withdrawETH(uint256 amount) onlyOwner
       +getService(uint256 id) view returns (Service)
       -_services: mapping(uint256 => Service)
       -_nextServiceId: uint256
@@ -172,7 +176,7 @@ classDiagram
     class Service {
       +id: uint256
       +price: uint256
-      +paymentToken: address  // ERC-20 token address
+      +paymentToken: address  // address(0) = ETH, else ERC-20
       +active: bool
       // name and other metadata emitted in events only
     }
@@ -199,13 +203,20 @@ sequenceDiagram
     participant PT as PaymentToken (ERC20)
     Note over PM: Service {price, paymentToken, active}
 
-    U->>PT: approve(PM, price)
-    U->>PM: purchase(serviceId)
-    PM->>PM: validate service active
-    PM->>PT: transferFrom(U, PM, price)
-    PT-->>PM: OK
-    PM->>PM: emit PaymentRecorded
-    PM-->>U: OK
+    alt ETH payment (paymentToken == address(0))
+      U->>PM: purchase(serviceId) with msg.value = price
+      PM->>PM: validate service active & msg.value == price
+      PM->>PM: emit PaymentRecorded
+      PM-->>U: OK
+    else ERC20 payment
+      U->>PT: approve(PM, price)
+      U->>PM: purchase(serviceId)
+      PM->>PM: validate service active
+      PM->>PT: transferFrom(U, PM, price)
+      PT-->>PM: OK
+      PM->>PM: emit PaymentRecorded
+      PM-->>U: OK
+    end
 ```
 
 ### 5.3 Distribution Flow
@@ -215,11 +226,12 @@ sequenceDiagram
     participant E as Executor
     participant PM as PaymentManager
     participant ET as EligibilityToken (ERC20)
-    participant RT as PayoutToken (ERC20)
+    participant PT as PayoutToken (ETH or ERC20)
     participant H as Holder[i]
 
     E->>PM: distributeRevenue(payoutToken, amount, holders[])
     PM->>PM: require caller is owner (Executor)
+    Note over PM: payoutToken = address(0) for ETH
     loop for each candidate holder
       alt opted out
         PM->>PM: if optedOut[h] == true → skip holder
@@ -241,8 +253,13 @@ sequenceDiagram
       PM->>PM: scaledShare = (scaledAmount * balance) / totalWeight
       PM->>PM: share = scaledShare / PRECISION  // rounds down
       PM->>PM: actualDistributed += share
-      PM->>RT: safeTransfer(holder, share)
-      RT-->>PM: OK
+      alt ETH distribution
+        PM->>H: transfer ETH (share amount)
+        H-->>PM: OK
+      else ERC20 distribution
+        PM->>PT: safeTransfer(holder, share)
+        PT-->>PM: OK
+      end
     end
     PM->>PM: dust = amount - actualDistributed  // residual stays in contract
     PM-->>E: emit RevenueDistributed(token, amount, processed, skipped)
