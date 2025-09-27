@@ -234,15 +234,15 @@ contract SwitchableBeaconTest is Test {
         vm.expectRevert(SwitchableBeacon.ZeroAddress.selector);
         new SwitchableBeacon(owner, address(0), address(implV1), SwitchableBeacon.Mode.Mirror);
     }
-    
+
     // ============ Contract Validation Tests ============
-    
+
     function testConstructorRevertsOnNonContractMirrorBeacon() public {
         address eoa = address(0x1234); // EOA address
         vm.expectRevert(SwitchableBeacon.NotContract.selector);
         new SwitchableBeacon(owner, eoa, address(0), SwitchableBeacon.Mode.Mirror);
     }
-    
+
     function testConstructorRevertsOnNonContractStaticImpl() public {
         address eoa = address(0x1234); // EOA address
         vm.expectRevert(SwitchableBeacon.NotContract.selector);
@@ -253,7 +253,7 @@ contract SwitchableBeaconTest is Test {
         vm.expectRevert(SwitchableBeacon.ZeroAddress.selector);
         switchableBeacon.pin(address(0));
     }
-    
+
     function testPinRevertsOnNonContract() public {
         address eoa = address(0x5678); // EOA address
         vm.expectRevert(SwitchableBeacon.NotContract.selector);
@@ -264,7 +264,7 @@ contract SwitchableBeaconTest is Test {
         vm.expectRevert(SwitchableBeacon.ZeroAddress.selector);
         switchableBeacon.setMirror(address(0));
     }
-    
+
     function testSetMirrorRevertsOnNonContract() public {
         address eoa = address(0x9999); // EOA address
         vm.expectRevert(SwitchableBeacon.NotContract.selector);
@@ -353,7 +353,7 @@ contract SwitchableBeaconTest is Test {
 
     function testFuzzPin(uint256 seed) public {
         vm.assume(seed > 0 && seed < 1000);
-        
+
         // Create a valid contract address to pin
         address impl;
         if (seed % 3 == 0) {
@@ -437,4 +437,3 @@ contract MockBrokenBeacon {
         return address(0);
     }
 }
-
