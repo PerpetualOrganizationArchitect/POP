@@ -46,6 +46,9 @@ library ModuleTypes {
     /// @dev keccak256("ToggleModule")
     bytes32 constant TOGGLE_MODULE_ID = 0x75dfb681d193a73a66b628a5adc66bb1ca7bb3feb9a5692cd0a1560ccd9b851a;
 
+    /// @dev keccak256("PaymentManager")
+    bytes32 constant PAYMENT_MANAGER_ID = 0x27c0a50afefb382eb18d87e6a049659a778b9a2f11c89b8723c63e6fab6fa323;
+
     /// @dev keccak256("PaymasterHub")
     bytes32 constant PAYMASTER_HUB_ID = 0x846374a1b9aebfa243bcd01b2b2c7d94ce66a1b22f9ed17ed1d6fd61a8c93891;
 }

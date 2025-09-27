@@ -271,6 +271,7 @@ contract Deployer is Initializable {
             address participationToken,
             address taskManager,
             address educationHub,
+            address paymentManager,
             address paymasterHub
         )
     {
@@ -293,13 +294,30 @@ contract Deployer is Initializable {
             paymasterConfig: paymasterConfig
         });
 
-        (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub, paymasterHub) =
-            _deployFullOrgInternal(params);
+        (
+            hybridVoting,
+            executorAddr,
+            quickJoin,
+            participationToken,
+            taskManager,
+            educationHub,
+            paymentManager,
+            paymasterHub
+        ) = _deployFullOrgInternal(params);
 
         // Reset reentrancy guard
         l._status = 1;
 
-        return (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub, paymasterHub);
+        return (
+            hybridVoting,
+            executorAddr,
+            quickJoin,
+            participationToken,
+            taskManager,
+            educationHub,
+            paymentManager,
+            paymasterHub
+        );
     }
 
     function _deployFullOrgInternal(DeploymentParams memory params)
@@ -311,6 +329,7 @@ contract Deployer is Initializable {
             address participationToken,
             address taskManager,
             address educationHub,
+            address paymentManager,
             address paymasterHub
         )
     {
@@ -478,7 +497,16 @@ contract Deployer is Initializable {
             IParticipationToken(participationToken).setEducationHub(educationHub);
         }
 
-        /* 12. HybridVoting governor */
+        /* 12. PaymentManager */
+        {
+            address beacon = _createBeacon(ModuleTypes.PAYMENT_MANAGER_ID, executorAddr, params.autoUpgrade, address(0));
+            ModuleDeploymentLib.DeployConfig memory config =
+                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
+            paymentManager =
+                ModuleDeploymentLib.deployPaymentManager(config, executorAddr, participationToken, beacon, false);
+        }
+
+        /* 13. HybridVoting governor */
         {
             // Update token address in voting classes if needed
             IHybridVotingInit.ClassConfig[] memory finalClasses = _updateClassesWithTokenAndHats(
