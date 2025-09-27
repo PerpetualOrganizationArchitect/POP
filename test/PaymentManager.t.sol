@@ -330,40 +330,6 @@ contract PaymentManagerTest is Test {
         paymentManager.setEligibilityToken(address(0));
     }
 
-    function test_WithdrawETH() public {
-        // Add ETH to the contract
-        vm.prank(payer);
-        paymentManager.pay{value: 10 ether}();
-
-        uint256 executorBalBefore = executor.balance;
-
-        vm.prank(executor);
-        paymentManager.withdrawETH(5 ether);
-
-        assertEq(executor.balance - executorBalBefore, 5 ether);
-        assertEq(address(paymentManager).balance, 5 ether);
-    }
-
-    function test_WithdrawERC20() public {
-        // Add tokens to the contract
-        vm.prank(payer);
-        paymentToken.transfer(address(paymentManager), 100 * 1e18);
-
-        uint256 executorBalBefore = paymentToken.balanceOf(executor);
-
-        vm.prank(executor);
-        paymentManager.withdraw(address(paymentToken), 50 * 1e18);
-
-        assertEq(paymentToken.balanceOf(executor) - executorBalBefore, 50 * 1e18);
-        assertEq(paymentToken.balanceOf(address(paymentManager)), 50 * 1e18);
-    }
-
-    function test_RevertWithdraw_NotOwner() public {
-        vm.prank(alice);
-        vm.expectRevert();
-        paymentManager.withdrawETH(1 ether);
-    }
-
     /*──────────────────────────────────────────────────────────────────────────
                                 VIEW FUNCTIONS TESTS
     ──────────────────────────────────────────────────────────────────────────*/

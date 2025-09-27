@@ -180,27 +180,6 @@ contract PaymentManager is IPaymentManager, Ownable, ReentrancyGuard {
         emit EligibilityTokenSet(_eligibilityToken);
     }
 
-    /**
-     * @inheritdoc IPaymentManager
-     */
-    function withdraw(address token, uint256 amount) external override onlyOwner {
-        if (token == address(0)) revert ZeroAddress();
-        if (amount == 0) revert ZeroAmount();
-
-        IERC20(token).safeTransfer(msg.sender, amount);
-    }
-
-    /**
-     * @inheritdoc IPaymentManager
-     */
-    function withdrawETH(uint256 amount) external override onlyOwner {
-        if (amount == 0) revert ZeroAmount();
-        if (address(this).balance < amount) revert InsufficientFunds();
-
-        (bool success,) = msg.sender.call{value: amount}("");
-        if (!success) revert TransferFailed();
-    }
-
     /*──────────────────────────────────────────────────────────────────────────
                                     VIEW FUNCTIONS
     ──────────────────────────────────────────────────────────────────────────*/
