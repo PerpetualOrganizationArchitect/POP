@@ -151,4 +151,3 @@ interface IPaymentManager {
      */
     function eligibilityToken() external view returns (address);
 }
-

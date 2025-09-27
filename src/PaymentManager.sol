@@ -6,7 +6,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Initializable} from "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {OwnableUpgradeable} from "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
-import {ReentrancyGuardUpgradeable} from "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from
+    "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 /**
  * @title PaymentManager
@@ -56,10 +57,10 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
     function initialize(address _owner, address _eligibilityToken) external initializer {
         if (_owner == address(0)) revert ZeroAddress();
         if (_eligibilityToken == address(0)) revert ZeroAddress();
-        
+
         __Ownable_init(_owner);
         __ReentrancyGuard_init();
-        
+
         Layout storage s = _layout();
         s.eligibilityToken = _eligibilityToken;
         emit EligibilityTokenSet(_eligibilityToken);
@@ -120,7 +121,7 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         }
 
         Layout storage s = _layout();
-        
+
         // Get total weight from eligibility token
         uint256 totalWeight = IERC20(s.eligibilityToken).totalSupply();
         if (totalWeight == 0) revert NoEligibleHolders();
