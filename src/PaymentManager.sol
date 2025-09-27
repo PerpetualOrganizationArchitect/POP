@@ -127,8 +127,8 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         if (totalWeight == 0) revert NoEligibleHolders();
 
         uint256 scaledAmount = amount * PRECISION;
-        uint256 processed = 0;
         uint256 totalDistributed = 0;
+        bool hasDistributed = false;
 
         // Single pass distribution
         for (uint256 i = 0; i < holders.length; i++) {
@@ -157,13 +157,13 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
                 }
 
                 totalDistributed += share;
-                processed++;
+                hasDistributed = true;
             }
         }
 
-        if (processed == 0) revert NoEligibleHolders();
+        if (!hasDistributed) revert NoEligibleHolders();
 
-        emit RevenueDistributed(payoutToken, totalDistributed, processed);
+        emit RevenueDistributed(payoutToken, totalDistributed);
     }
 
     /*──────────────────────────────────────────────────────────────────────────

@@ -35,7 +35,7 @@ contract PaymentManagerTest is Test {
     uint256 constant INITIAL_BALANCE = 1000 * 1e18;
 
     event PaymentReceived(address indexed payer, uint256 amount, address indexed token);
-    event RevenueDistributed(address indexed token, uint256 amount, uint256 processed);
+    event RevenueDistributed(address indexed token, uint256 amount);
     event OptOutToggled(address indexed user, bool optedOut);
     event EligibilityTokenSet(address indexed token);
 
@@ -156,7 +156,7 @@ contract PaymentManagerTest is Test {
 
         vm.prank(executor);
         vm.expectEmit(true, false, false, true);
-        emit RevenueDistributed(address(0), 10 ether, 3);
+        emit RevenueDistributed(address(0), 10 ether);
 
         paymentManager.distributeRevenue(address(0), 10 ether, holders);
 
@@ -179,7 +179,7 @@ contract PaymentManagerTest is Test {
 
         vm.prank(executor);
         vm.expectEmit(true, false, false, true);
-        emit RevenueDistributed(address(paymentToken), distributionAmount, 3);
+        emit RevenueDistributed(address(paymentToken), distributionAmount);
 
         paymentManager.distributeRevenue(address(paymentToken), distributionAmount, holders);
 
