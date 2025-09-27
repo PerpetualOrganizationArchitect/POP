@@ -149,12 +149,5 @@ interface IPaymentManager {
      * @return The address of the token used for distribution weights
      */
     function eligibilityToken() external view returns (address);
-
-    /**
-     * @notice Get the total amount distributed for a specific token
-     * @param token The token address to query (address(0) for ETH)
-     * @return The cumulative amount distributed
-     */
-    function getDistributedTotal(address token) external view returns (uint256);
 }
 
