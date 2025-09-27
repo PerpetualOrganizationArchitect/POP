@@ -1,22 +1,22 @@
-# Technical Spec — PaymentManager (Services + RevShare)
+# Technical Spec — PaymentManager (Direct Payments + RevShare)
 
 ## 1. Background
 
 ### Problem Statement
 The Perpetual Organization Architect (POA) ecosystem currently manages tasks, education modules, and participation tokens through separate contracts (TaskManager, EducationHub, ParticipationToken). However, organizations need an additional revenue layer to:
 
-- **Monetize Services**: Organizations need to offer paid services/products to external users beyond just internal task rewards
-- **Accept Diverse Payments**: Support both ETH and various ERC-20 tokens as payment methods for different services
+- **Accept External Revenue**: Organizations need a simple way to receive payments from any source
+- **Accept Diverse Payments**: Support both ETH and various ERC-20 tokens without restrictions
 - **Revenue Sharing**: Automatically distribute accumulated revenue to active participants based on their ParticipationToken holdings
-- **Integration with POA**: Seamlessly integrate with the existing Hats Protocol roles, Executor pattern, and ParticipationToken ecosystem
+- **Integration with POA**: Seamlessly integrate with the existing Executor pattern and ParticipationToken ecosystem
 
 Current limitations:
-- TaskManager handles internal bounties but not external customer payments
-- No mechanism for organizations to sell services/products to non-members
+- TaskManager handles internal bounties but not external revenue
+- No mechanism for organizations to receive and distribute arbitrary payments
 - Revenue generated outside the task system cannot be automatically distributed
 - No opt-out mechanism for members who don't want revenue distributions
 
-The PaymentManager fills this gap by providing a service marketplace layer that connects external revenue to the internal ParticipationToken economy, allowing organizations to operate sustainable business models while maintaining decentralized governance and fair value distribution.
+The PaymentManager fills this gap by providing a simple payment reception and distribution layer that connects external revenue to the internal ParticipationToken economy, allowing organizations to operate sustainable business models while maintaining decentralized governance and fair value distribution.
 
 ### Context / History
 The POA system architecture includes:
@@ -35,26 +35,25 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
 - Integration with the existing POA governance and role system
 
 ### Stakeholders
-- **External Buyers/Clients**: Non-members purchasing services from the organization
+- **External Payers**: Anyone sending payments to the organization
 - **Organization Members**: ParticipationToken holders eligible for revenue distributions
 - **Executor Contract**: The organization's governance contract that owns and manages the PaymentManager
 - **Token Ecosystem**:
-  - Payment tokens: ETH and various ERC-20s accepted for service payments
+  - Payment tokens: ETH and various ERC-20s accepted as payments
   - ParticipationToken: The organization's internal token used for revenue distribution weights
-  - Bounty tokens: External tokens that might be accepted as payment for premium services
 
 ## 2. Motivation
 
 ### Goals & Success Stories
 
-- Publish multiple services with distinct prices and accepted currency (ETH or ERC-20)
-- Accept payments and immutably record each purchase
+- Accept direct payments in ETH or any ERC-20 token without restrictions
+- Emit payment events for transparency and tracking
 - Periodic revenue distribution to current holders of a chosen eligibility token (configurable `eligibilityToken`), weighted by balances at distribution time
 - **Opt-out**: any address can opt out of revenue shares
 - **Access-controlled distribution**: only the Executor (owner) can initiate `distributeRevenue(token, amount, holders[])`
 - **Safety**: skip recipients with zero eligibility balance or who opted out; use pull-over-push (optional) or safe push transfers with SafeERC20
 
-**Success looks like**: A POA organization selling consulting services, educational content, or digital products to external clients, with revenue automatically flowing to active contributors based on their ParticipationToken holdings earned through completed tasks and education modules. This creates a sustainable economic loop where internal work (tasks/learning) translates to external revenue share.
+**Success looks like**: A POA organization receiving payments from various sources (grants, donations, client payments, etc.), with revenue automatically flowing to active contributors based on their ParticipationToken holdings earned through completed tasks and education modules. This creates a sustainable economic loop where internal work (tasks/learning) translates to external revenue share.
 
 ## 3. Scope and Approaches
 
@@ -62,7 +61,7 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
 
 | Item (Non-Goal) | Reasoning for being off scope | Tradeoffs |
 |-----------------|-------------------------------|-----------|
-| On-chain price oracles | Complexity & external dependencies | Simpler, but price must be set manually |
+| Payment validation/restrictions | Reduces flexibility | Accept any payment amount from anyone |
 | Streaming payments | Different lifecycle and continuous accrual | Periodic batch is cheaper and simpler |
 | Snapshotting past balances | Requires checkpoints/snapshots | We weight by live balances at distribution call |
 | Fee splitting by vesting / cliffs | Adds state and complexity | Keep MVP minimal, add later if needed |
@@ -72,7 +71,7 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
 
 | Technical Functionality | Value | Tradeoffs |
 |------------------------|-------|-----------|
-| Service catalog with per-service currency & price | Flexible monetization | Slightly more storage per service |
+| Direct payment acceptance | Simple, unrestricted revenue collection | No payment validation or categorization |
 | Payment recording (events only) | Auditable sales ledger | Gas efficient, no storage growth |
 | Pro-rata revshare by eligibility token balance | Aligns incentives, easy to reason about | Balance measured at call time, no historical snapshots |
 | Opt-out toggle | Respects participant preference | Additional check each distribution |
@@ -98,17 +97,15 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
 
 ## 4. Step-by-Step Flow
 
-### 4.1 Main ("Happy") Path — Buying a Service (ETH or ERC-20)
+### 4.1 Main ("Happy") Path — Receiving Payment (ETH or ERC-20)
 
-1. **Pre-condition**: Service S is `active=true`, with price p and paymentToken (address(0) for ETH, or ERC-20 address)
-2. **Actor**: User (Buyer) triggers `purchase(serviceId)` (with msg.value for ETH)
-3. **System validates**:
-   - Service exists & active
-   - Correct payment provided:
-     - If ETH: `msg.value == price` and `paymentToken == address(0)`
-     - If ERC-20: user has approved `price` and transferFrom succeeds
+1. **Pre-condition**: PaymentManager contract is deployed
+2. **Actor**: Any external payer sends payment
+3. **Payment methods**:
+   - **ETH**: Payer sends ETH directly to contract via `receive()` or `pay()` function
+   - **ERC-20**: Payer calls `payERC20(token, amount)` after approving token transfer
 4. **System emits**:
-   - Emit `PaymentRecorded(buyer, serviceId, price, paymentToken, timestamp)`
+   - Emit `PaymentReceived(payer, amount, token, timestamp)`
 5. **Post-condition**: Contract balance (ETH or ERC-20) increases
 
 ### 4.1b Main Path — Distribute Revenue
@@ -134,16 +131,15 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
 
 | # | Condition | System Action | Suggested Handling |
 |---|-----------|---------------|-------------------|
-| A1 | Service inactive or not found | revert `ServiceInactive()`/`InvalidService()` | Admin enable or create service |
-| A2 | ETH payment mismatch | revert `InvalidPaymentValue()` | Send exact ETH amount |
-| A3 | ERC-20 approval insufficient | revert `InsufficientAllowance()` | Ensure proper approval |
-| A4 | ERC-20 transferFrom fails | revert with OZ error | Ensure allowance & balance |
-| A5 | Distribution: zero amount or no holders | revert `InvalidDistributionParams()` | Provide proper inputs |
-| A6 | No eligible holders (all zero balance or opted out) | revert `NoEligibleHolders()` | Retry later or different set |
-| A7 | Insufficient payout token balance | revert `InsufficientFunds()` | Fund contract first |
-| A8 | Payout transfer failure | SafeERC20 revert | Ensure payout token behaves per ERC-20 |
-| A9 | Reentrancy attempt | blocked by nonReentrant | N/A |
-| A10 | Distribution rounding dust | Small residual remains in contract | Accumulates for next distribution |
+| A1 | Zero payment amount | revert `ZeroAmount()` | Send non-zero amount |
+| A2 | ERC-20 approval insufficient | revert `InsufficientAllowance()` | Ensure proper approval |
+| A3 | ERC-20 transferFrom fails | revert with OZ error | Ensure allowance & balance |
+| A4 | Distribution: zero amount or no holders | revert `InvalidDistributionParams()` | Provide proper inputs |
+| A5 | No eligible holders (all zero balance or opted out) | revert `NoEligibleHolders()` | Retry later or different set |
+| A6 | Insufficient payout token balance | revert `InsufficientFunds()` | Fund contract first |
+| A7 | Payout transfer failure | SafeERC20 revert | Ensure payout token behaves per ERC-20 |
+| A8 | Reentrancy attempt | blocked by nonReentrant | N/A |
+| A9 | Distribution rounding dust | Small residual remains in contract | Accumulates for next distribution |
 
 ## 5. UML Diagrams (Mermaid)
 
@@ -157,65 +153,48 @@ classDiagram
       +owner() address
       +eligibilityToken() address
       +setEligibilityToken(address) onlyOwner
-      +createService(uint256 price, address paymentToken, bool active, bytes metadata) onlyOwner
-      +updateService(uint256 id, uint256 price, address paymentToken, bool active) onlyOwner
-      +purchase(uint256 serviceId) payable nonReentrant
+      +receive() payable  // receive ETH
+      +pay() payable  // alternative ETH payment
+      +payERC20(address token, uint256 amount) nonReentrant
       +optOut(bool)  // user toggle
       +distributeRevenue(address payoutToken, uint256 amount, address[] holders) onlyOwner nonReentrant
       +withdraw(address token, uint256 amount) onlyOwner
       +withdrawETH(uint256 amount) onlyOwner
-      +getService(uint256 id) view returns (Service)
-      -_services: mapping(uint256 => Service)
-      -_nextServiceId: uint256
       -_optedOut: mapping(address => bool)
       -_eligibilityToken: address
       -_distributedTotal: mapping(address => uint256)  // tracks total distributed per token
       -PRECISION: uint256 = 1e18  // scaling factor for calculations
     }
-
-    class Service {
-      +id: uint256
-      +price: uint256
-      +paymentToken: address  // address(0) = ETH, else ERC-20
-      +active: bool
-      // name and other metadata emitted in events only
-    }
-
-    PaymentManager --> Service : manages
     
     class Events {
       <<events>>
-      ServiceCreated(uint256 id, uint256 price, address paymentToken, bytes metadata)
-      ServiceUpdated(uint256 id, uint256 price, address paymentToken, bool active, bytes metadata)
-      PaymentRecorded(address buyer, uint256 serviceId, uint256 price, address paymentToken)
+      PaymentReceived(address payer, uint256 amount, address token)
       RevenueDistributed(address token, uint256 amount, uint256 processed, uint256 skipped)
       OptOutToggled(address user, bool optedOut)
       EligibilityTokenSet(address token)
+      Withdrawn(address token, uint256 amount, address to)
     }
 ```
 
-### 5.2 Purchase Flow
+### 5.2 Payment Flow
 
 ```mermaid
 sequenceDiagram
-    participant U as User
+    participant P as Payer
     participant PM as PaymentManager
-    participant PT as PaymentToken (ERC20)
-    Note over PM: Service {price, paymentToken, active}
+    participant T as Token (ERC20)
 
-    alt ETH payment (paymentToken == address(0))
-      U->>PM: purchase(serviceId) with msg.value = price
-      PM->>PM: validate service active & msg.value == price
-      PM->>PM: emit PaymentRecorded
-      PM-->>U: OK
+    alt ETH payment
+      P->>PM: send ETH via receive() or pay()
+      PM->>PM: emit PaymentReceived(payer, amount, address(0))
+      PM-->>P: OK
     else ERC20 payment
-      U->>PT: approve(PM, price)
-      U->>PM: purchase(serviceId)
-      PM->>PM: validate service active
-      PM->>PT: transferFrom(U, PM, price)
-      PT-->>PM: OK
-      PM->>PM: emit PaymentRecorded
-      PM-->>U: OK
+      P->>T: approve(PM, amount)
+      P->>PM: payERC20(token, amount)
+      PM->>T: transferFrom(P, PM, amount)
+      T-->>PM: OK
+      PM->>PM: emit PaymentReceived(payer, amount, token)
+      PM-->>P: OK
     end
 ```
 
@@ -265,25 +244,24 @@ sequenceDiagram
     PM-->>E: emit RevenueDistributed(token, amount, processed, skipped)
 ```
 
-### 5.4 High-Level State Diagram (Service & Revenue Lifecycle)
+### 5.4 High-Level State Diagram (Payment & Revenue Lifecycle)
 
 ```mermaid
 stateDiagram-v2
-    state "Service Management" as SM {
-        [*] --> Draft
-        Draft --> Active: createService(active=true)
-        Draft --> Inactive: createService(active=false)
-        Active --> Inactive: updateService(active=false)
-        Inactive --> Active: updateService(active=true)
-        Active --> Purchased: purchase()
-        Purchased --> Active: automatic
+    state "Payment Reception" as PR {
+        [*] --> AwaitingPayment
+        AwaitingPayment --> ProcessingETH: receive ETH
+        AwaitingPayment --> ProcessingERC20: payERC20()
+        ProcessingETH --> PaymentRecorded: emit event
+        ProcessingERC20 --> PaymentRecorded: emit event
+        PaymentRecorded --> AwaitingPayment: ready for next
     }
     
     state "Revenue Accumulation" as RA {
         [*] --> Idle
-        Idle --> Accumulating: payment received
+        Idle --> Accumulating: payments received
         Accumulating --> Accumulating: more payments
-        Accumulating --> ReadyForDistribution: threshold/time met
+        Accumulating --> ReadyForDistribution: Executor decides
         ReadyForDistribution --> Distributing: distributeRevenue()
     }
     
@@ -293,13 +271,13 @@ stateDiagram-v2
         CheckingHolders --> Eligible: has balance AND not opted out
         Skipped --> CheckingHolders: next holder
         Eligible --> CalculatingShare: weight/totalWeight
-        CalculatingShare --> Transferring: safeTransfer()
+        CalculatingShare --> Transferring: transfer ETH or ERC20
         Transferring --> CheckingHolders: next holder
         Transferring --> Completed: all processed
         Completed --> Idle: reset for next cycle
     }
     
-    SM --> RA: payments flow to contract
+    PR --> RA: payments accumulate
     RA --> DP: distribution triggered
 ```
 
@@ -312,18 +290,17 @@ stateDiagram-v2
 - **Payment token decimals**: Prices are set in smallest units of the configured token; UI must format
 - **Opt-out defaults**: Default is opted-in (`optedOut=false`). Users call `optOut(true)` to stop receiving
 - **Reentrancy**: Guard purchase/distribution with `nonReentrant`
-- **Access control**: Only Executor (as owner) can manage services and trigger distributions
+- **Access control**: Only Executor (as owner) can trigger distributions and withdrawals
 - **Pausable (optional)**: If desired, wrap purchase/distribute with `whenNotPaused`
 
 ## 7. Design Decisions
 
 Based on POA architecture requirements:
 - **Eligibility Token**: Will accept any ERC-20 as eligibility token for flexibility (typically ParticipationToken)
-- **No Hats Integration**: Service management will be controlled solely by the Executor/owner, no Hat roles needed
+- **No Restrictions**: Anyone can send payments; no validation or categorization
 - **Executor as Owner**: The Executor contract will be the sole owner with all admin privileges
 - **Standalone Deployment**: PaymentManager will not register with OrgRegistry, deployed as independent contract
-- **No Revenue Caps**: No per-project or per-service revenue caps will be implemented
-- **Event-Based Metadata**: Service metadata will be emitted in events rather than stored on-chain (following EducationHub pattern)
+- **Event-Based Tracking**: All payments tracked via events for gas efficiency
 - **No Cross-Module Integration**: PaymentManager operates independently, no automatic minting or task creation
 
 ## 8. Open Questions
@@ -336,7 +313,7 @@ Based on POA architecture requirements:
 ### Terms
 - **Eligibility Token** — The ERC-20 whose current balances determine distribution weights (typically ParticipationToken in POA)
 - **Payout Token** — The ERC-20 sent out during a distribution call (`distributeRevenue`)
-- **Payment Token** — The token users pay with for a given service (ETH or ERC-20)
+- **Payment Token** — The token received as payment (ETH represented as address(0), or ERC-20 address)
 - **ParticipationToken** — POA's native token earned through task completion and education modules
 - **Executor** — The POA governance contract that executes privileged operations
 - **Hats Protocol** — Role-based permission system integrated throughout POA
