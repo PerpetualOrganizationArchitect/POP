@@ -124,7 +124,7 @@ Similar payment/royalty splits exist (e.g., streaming splits), but this contract
    - Actual share: `share = scaledShare / PRECISION` (rounds down)
    - Transfer share via SafeERC20 to h
    - Track `distributedTotal[payoutToken] += actualDistributed`
-   - Emit `RevenueDistributed(payoutToken, amount, holdersProcessed, skippedCount)`
+   - Emit `RevenueDistributed(payoutToken, amount, holdersProcessed)`
 5. **Post-condition**: Payout sent; skipped addresses received nothing
 
 ### 4.2 Alternate / Error Paths
@@ -169,7 +169,7 @@ classDiagram
     class Events {
       <<events>>
       PaymentReceived(address payer, uint256 amount, address token)
-      RevenueDistributed(address token, uint256 amount, uint256 processed, uint256 skipped)
+      RevenueDistributed(address token, uint256 amount, uint256 processed)
       OptOutToggled(address user, bool optedOut)
       EligibilityTokenSet(address token)
       Withdrawn(address token, uint256 amount, address to)
@@ -241,7 +241,7 @@ sequenceDiagram
       end
     end
     PM->>PM: dust = amount - actualDistributed  // residual stays in contract
-    PM-->>E: emit RevenueDistributed(token, amount, processed, skipped)
+    PM-->>E: emit RevenueDistributed(token, amount, processed)
 ```
 
 ### 5.4 High-Level State Diagram (Payment & Revenue Lifecycle)
