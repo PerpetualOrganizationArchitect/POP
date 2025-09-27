@@ -8,6 +8,7 @@ import "forge-std/console.sol";
 /*──────────── OpenZeppelin ───────────*/
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
+import "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 
 /*──────────── Local contracts ───────────*/
 import {HybridVoting} from "../src/HybridVoting.sol";
@@ -22,6 +23,7 @@ import "../src/ImplementationRegistry.sol";
 import "../src/PoaManager.sol";
 import "../src/OrgRegistry.sol";
 import {Deployer} from "../src/Deployer.sol";
+import {HatsTreeSetup} from "../src/HatsTreeSetup.sol";
 import {ModuleDeploymentLib, IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
 import {ModuleTypes} from "../src/libs/ModuleTypes.sol";
 import {EligibilityModule} from "../src/EligibilityModule.sol";
@@ -222,7 +224,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.stopPrank();
 
         // Get the eligibility module and role hat IDs
-        setup.eligibilityModule = deployer.getEligibilityModule(ORG_ID);
+        setup.eligibilityModule = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID);
         setup.defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
         setup.executiveRoleHat = orgRegistry.getRoleHat(ORG_ID, 1);
         setup.memberRoleHat = orgRegistry.getRoleHat(ORG_ID, 2);
@@ -251,7 +253,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.stopPrank();
 
         // Get the eligibility module and role hat IDs
-        setup.eligibilityModule = deployer.getEligibilityModule(ORG_ID);
+        setup.eligibilityModule = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID);
         setup.defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
         setup.executiveRoleHat = orgRegistry.getRoleHat(ORG_ID, 1);
         setup.memberRoleHat = 0; // Not applicable for 2-role setup
@@ -461,12 +463,16 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Debug to verify OrgRegistry owner
         console.log("OrgRegistry owner after init:", orgRegistry.owner());
 
+        // Deploy HatsTreeSetup helper contract
+        HatsTreeSetup hatsTreeSetup = new HatsTreeSetup();
+
         // Create Deployer proxy - initialize with msg.sender (poaAdmin) for proper ownership
         bytes memory deployerInit = abi.encodeWithSignature(
-            "initialize(address,address,address)", 
+            "initialize(address,address,address,address)", 
             address(poaManager), 
             address(orgRegistry), 
-            SEPOLIA_HATS
+            SEPOLIA_HATS,
+            address(hatsTreeSetup)
         );
         deployer = Deployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
 
@@ -590,10 +596,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         assertTrue(autoUp);
         assertEq(owner, exec);
 
-        address impl = deployer.getBeaconImplementation(beacon);
+        address impl = IBeacon(beacon).implementation();
         assertEq(impl, poaManager.getCurrentImplementationById(ModuleTypes.QUICK_JOIN_ID));
-        assertEq(deployer.poaManager(), address(poaManager));
-        assertEq(deployer.orgRegistry(), address(orgRegistry));
     }
 
     function testDeployFullOrgMismatchExecutorReverts() public {
@@ -650,15 +654,15 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             topHatId, // admin = parent Top Hat
             "NEW_ROLE", // details
             type(uint32).max, // unlimited supply
-            deployer.getEligibilityModule(ORG_ID), // eligibility module
-            deployer.getToggleModule(ORG_ID), // toggle module
+            orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID), // eligibility module
+            orgRegistry.getOrgContract(ORG_ID, ModuleTypes.TOGGLE_MODULE_ID), // toggle module
             true, // mutable
             "NEW_ROLE" // data blob
         );
 
         // Configure the new role hat for the executor
-        EligibilityModule(deployer.getEligibilityModule(ORG_ID)).setWearerEligibility(exec, newRoleHatId, true, true);
-        ToggleModule(deployer.getToggleModule(ORG_ID)).setHatStatus(newRoleHatId, true);
+        EligibilityModule(orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID)).setWearerEligibility(exec, newRoleHatId, true, true);
+        ToggleModule(orgRegistry.getOrgContract(ORG_ID, ModuleTypes.TOGGLE_MODULE_ID)).setHatStatus(newRoleHatId, true);
 
         // Mint the new role hat to the executor
         IHats(SEPOLIA_HATS).mintHat(newRoleHatId, exec);
@@ -688,7 +692,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.stopPrank();
 
         // Get the eligibility module address directly
-        address eligibilityModuleAddr = deployer.getEligibilityModule(ORG_ID);
+        address eligibilityModuleAddr = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID);
 
         // Verify executor is the super admin
         assertEq(EligibilityModule(eligibilityModuleAddr).superAdmin(), exec, "Executor should be the super admin");
@@ -929,7 +933,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.stopPrank();
 
         // Get the eligibility module address
-        address eligibilityModuleAddr = deployer.getEligibilityModule(ORG_ID);
+        address eligibilityModuleAddr = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID);
 
         // Get role hat IDs
         uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
@@ -1109,7 +1113,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.stopPrank();
 
         // Get the eligibility module address
-        address eligibilityModuleAddr = deployer.getEligibilityModule(ORG_ID);
+        address eligibilityModuleAddr = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID);
 
         // Get role hat IDs
         uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
@@ -1243,7 +1247,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.stopPrank();
 
         // Get the eligibility module address
-        address eligibilityModuleAddr = deployer.getEligibilityModule(ORG_ID);
+        address eligibilityModuleAddr = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID);
 
         // Get role hat IDs
         uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
@@ -1309,7 +1313,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.stopPrank();
 
         // Get the eligibility module address
-        address eligibilityModuleAddr = deployer.getEligibilityModule(ORG_ID);
+        address eligibilityModuleAddr = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID);
 
         // Get role hat IDs
         uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
@@ -1386,7 +1390,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.stopPrank();
 
         // Get the eligibility module address
-        address eligibilityModuleAddr = deployer.getEligibilityModule(ORG_ID);
+        address eligibilityModuleAddr = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID);
 
         // Get role hat IDs
         uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
@@ -1524,7 +1528,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.stopPrank();
 
         // Get the eligibility module address
-        address eligibilityModuleAddr = deployer.getEligibilityModule(ORG_ID);
+        address eligibilityModuleAddr = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID);
 
         // Get role hat IDs
         uint256 defaultRoleHat = orgRegistry.getRoleHat(ORG_ID, 0);
