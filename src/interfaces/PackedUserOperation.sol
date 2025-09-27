@@ -15,20 +15,16 @@ struct PackedUserOperation {
 }
 
 library UserOpLib {
-    function unpackAccountGasLimits(bytes32 accountGasLimits) 
-        internal 
-        pure 
-        returns (uint128 verificationGasLimit, uint128 callGasLimit) 
+    function unpackAccountGasLimits(bytes32 accountGasLimits)
+        internal
+        pure
+        returns (uint128 verificationGasLimit, uint128 callGasLimit)
     {
         verificationGasLimit = uint128(uint256(accountGasLimits));
         callGasLimit = uint128(uint256(accountGasLimits >> 128));
     }
-    
-    function packAccountGasLimits(uint128 verificationGasLimit, uint128 callGasLimit) 
-        internal 
-        pure 
-        returns (bytes32) 
-    {
+
+    function packAccountGasLimits(uint128 verificationGasLimit, uint128 callGasLimit) internal pure returns (bytes32) {
         return bytes32(uint256(verificationGasLimit) | (uint256(callGasLimit) << 128));
     }
 }

@@ -534,7 +534,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
     function setConfig(ConfigKey key, bytes calldata value) external {
         _requireExecutor();
         Layout storage l = _layout();
-        
+
         if (key == ConfigKey.EXECUTOR) {
             address newExecutor = abi.decode(value, (address));
             newExecutor.requireNonZeroAddress();
@@ -542,28 +542,28 @@ contract TaskManager is Initializable, ContextUpgradeable {
             emit ExecutorUpdated(newExecutor);
             return;
         }
-        
+
         if (key == ConfigKey.CREATOR_HAT_ALLOWED) {
             (uint256 hat, bool allowed) = abi.decode(value, (uint256, bool));
             HatManager.setHatInArray(l.creatorHatIds, hat, allowed);
             emit HatSet(HatType.CREATOR, hat, allowed);
             return;
         }
-        
+
         if (key == ConfigKey.ROLE_PERM) {
             (uint256 hatId, uint8 mask) = abi.decode(value, (uint256, uint8));
             l.rolePermGlobal[hatId] = mask;
             HatManager.setHatInArray(l.permissionHatIds, hatId, mask != 0);
             return;
         }
-        
+
         // Project-related configs - consolidate common logic
         bytes32 pid;
         if (key >= ConfigKey.BOUNTY_CAP) {
             pid = abi.decode(value, (bytes32));
             Project storage p = l._projects[pid];
             if (!p.exists) revert NotFound();
-            
+
             if (key == ConfigKey.BOUNTY_CAP) {
                 (, address token, uint256 newCap) = abi.decode(value, (bytes32, address, uint256));
                 token.requireNonZeroAddress();
@@ -682,31 +682,48 @@ contract TaskManager is Initializable, ContextUpgradeable {
     /*──────── Minimal External Getters for Lens ─────── */
     function getLensData(uint8 t, bytes calldata d) external view returns (bytes memory) {
         Layout storage l = _layout();
-        if (t == 1) { // Task
+        if (t == 1) {
+            // Task
             uint256 id = abi.decode(d, (uint256));
             if (id >= l.nextTaskId) revert NotFound();
             Task storage task = l._tasks[id];
-            return abi.encode(task.projectId, task.payout, task.claimer, task.bountyPayout, task.requiresApplication, task.status, task.bountyToken);
-        } else if (t == 2) { // Project
+            return abi.encode(
+                task.projectId,
+                task.payout,
+                task.claimer,
+                task.bountyPayout,
+                task.requiresApplication,
+                task.status,
+                task.bountyToken
+            );
+        } else if (t == 2) {
+            // Project
             bytes32 pid = abi.decode(d, (bytes32));
             Project storage p = l._projects[pid];
             if (!p.exists) revert NotFound();
             return abi.encode(p.cap, p.spent, p.exists);
-        } else if (t == 3) { // Hats
+        } else if (t == 3) {
+            // Hats
             return abi.encode(address(l.hats));
-        } else if (t == 4) { // Executor
+        } else if (t == 4) {
+            // Executor
             return abi.encode(l.executor);
-        } else if (t == 5) { // CreatorHats
+        } else if (t == 5) {
+            // CreatorHats
             return abi.encode(HatManager.getHatArray(l.creatorHatIds));
-        } else if (t == 6) { // PermissionHats
+        } else if (t == 6) {
+            // PermissionHats
             return abi.encode(HatManager.getHatArray(l.permissionHatIds));
-        } else if (t == 7) { // TaskApplicants
+        } else if (t == 7) {
+            // TaskApplicants
             uint256 id = abi.decode(d, (uint256));
             return abi.encode(l.taskApplicants[id]);
-        } else if (t == 8) { // TaskApplication
+        } else if (t == 8) {
+            // TaskApplication
             (uint256 id, address applicant) = abi.decode(d, (uint256, address));
             return abi.encode(l.taskApplications[id][applicant]);
-        } else if (t == 9) { // BountyBudget
+        } else if (t == 9) {
+            // BountyBudget
             (bytes32 pid, address token) = abi.decode(d, (bytes32, address));
             Project storage p = l._projects[pid];
             if (!p.exists) revert NotFound();
