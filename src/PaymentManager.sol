@@ -84,6 +84,7 @@ contract PaymentManager is IPaymentManager, Ownable, ReentrancyGuard {
 
     /**
      * @inheritdoc IPaymentManager
+     * @notice Access restricted to owner only (Executor)
      */
     function distributeRevenue(address payoutToken, uint256 amount, address[] calldata holders)
         external

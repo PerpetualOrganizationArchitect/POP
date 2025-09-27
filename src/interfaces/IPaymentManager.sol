@@ -104,7 +104,8 @@ interface IPaymentManager {
 
     /**
      * @notice Distribute revenue to eligible token holders
-     * @dev Only callable by owner, uses totalSupply for weight calculation
+     * @dev Only callable by contract owner (Executor). Uses totalSupply for weight calculation.
+     *      Will revert if called by non-owner addresses.
      * @param payoutToken The token to distribute (address(0) for ETH)
      * @param amount The total amount to distribute
      * @param holders Array of addresses to consider for distribution
