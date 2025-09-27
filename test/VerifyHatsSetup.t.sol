@@ -8,16 +8,16 @@ import "@hats-protocol/src/Interfaces/IHats.sol";
 contract VerifyHatsSetupTest is Test {
     HatsTreeSetup hatsSetup;
     address constant SEPOLIA_HATS = 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137;
-    
+
     function setUp() public {
         hatsSetup = new HatsTreeSetup();
     }
-    
+
     function testHatsSetupAddress() public {
         console.log("HatsTreeSetup deployed at:", address(hatsSetup));
         assertTrue(address(hatsSetup) != address(0), "HatsSetup should be deployed");
     }
-    
+
     function testHatsSetupSize() public {
         uint256 codeSize;
         address addr = address(hatsSetup);
