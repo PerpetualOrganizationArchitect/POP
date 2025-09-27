@@ -5,6 +5,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {SwitchableBeacon} from "./SwitchableBeacon.sol";
+import {OwnableUpgradeable} from "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 
 /*────────────────────────────── Core deps ──────────────────────────────*/
 import "./OrgRegistry.sol";
@@ -57,11 +58,20 @@ interface IExecutorAdmin {
     function setHatMinterAuthorization(address minter, bool authorized) external;
 }
 
+interface IPaymasterHubAdmin {
+    function setPause(bool paused) external;
+    function setOperatorHat(uint256 operatorHatId) external;
+    function setBounty(bool enabled, uint96 maxBountyPerOp, uint16 pctBpCap) external;
+    function depositToEntryPoint() external payable;
+    function fundBounty() external payable;
+}
+
 /*────────────────────────────  Errors  ───────────────────────────────*/
 error InvalidAddress();
 error UnsupportedType();
 error OrgExistsMismatch();
 error Reentrant();
+error InsufficientFunding();
 
 /*───────────────────────────  Deployer  ───────────────────────────────*/
 contract Deployer is Initializable {
@@ -205,6 +215,16 @@ contract Deployer is Initializable {
     }
 
     /*════════════════  FULL ORG  DEPLOYMENT  ════════════════*/
+    struct PaymasterConfig {
+        bool enabled;                   // Whether to deploy a paymaster
+        address entryPoint;             // ERC-4337 EntryPoint address
+        uint256 initialDeposit;         // Initial ETH to deposit to EntryPoint
+        uint256 initialBounty;          // Initial ETH for bounty pool
+        bool enableBounty;              // Whether to enable bounty system
+        uint96 maxBountyPerOp;          // Max bounty per operation
+        uint16 bountyPctCap;            // Bounty percentage cap in basis points
+    }
+    
     struct RoleAssignments {
         uint256[] quickJoinRoles; // Roles that new members get via QuickJoin
         uint256[] tokenMemberRoles; // Roles that can hold participation tokens
@@ -226,6 +246,7 @@ contract Deployer is Initializable {
         string[] roleImages;
         bool[] roleCanVote;
         RoleAssignments roleAssignments;
+        PaymasterConfig paymasterConfig;
     }
 
     function deployFullOrg(
@@ -238,16 +259,19 @@ contract Deployer is Initializable {
         string[] calldata roleNames,
         string[] calldata roleImages,
         bool[] calldata roleCanVote,
-        RoleAssignments calldata roleAssignments
+        RoleAssignments calldata roleAssignments,
+        PaymasterConfig calldata paymasterConfig
     )
         external
+        payable
         returns (
             address hybridVoting,
             address executorAddr,
             address quickJoin,
             address participationToken,
             address taskManager,
-            address educationHub
+            address educationHub,
+            address paymasterHub
         )
     {
         // Manual reentrancy guard to avoid stack-too-deep
@@ -265,16 +289,17 @@ contract Deployer is Initializable {
             roleNames: roleNames,
             roleImages: roleImages,
             roleCanVote: roleCanVote,
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            paymasterConfig: paymasterConfig
         });
 
-        (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub) =
+        (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub, paymasterHub) =
             _deployFullOrgInternal(params);
 
         // Reset reentrancy guard
         l._status = 1;
 
-        return (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub);
+        return (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub, paymasterHub);
     }
 
     function _deployFullOrgInternal(DeploymentParams memory params)
@@ -285,7 +310,8 @@ contract Deployer is Initializable {
             address quickJoin,
             address participationToken,
             address taskManager,
-            address educationHub
+            address educationHub,
+            address paymasterHub
         )
     {
         Layout storage l = _layout();
@@ -310,11 +336,11 @@ contract Deployer is Initializable {
         /* 3. Set the executor for the org */
         l.orgRegistry.setOrgExecutor(params.orgId, executorAddr);
 
-        /* 4. Deploy and configure modules for Hats tree */
+        /* 5. Deploy and configure modules for Hats tree */
         address eligibilityModule = _deployEligibilityModule(params.orgId, params.autoUpgrade, address(0));
         address toggleModule = _deployToggleModule(params.orgId, address(this), params.autoUpgrade, address(0));
 
-        /* 5. Setup Hats Tree */
+        /* 6. Setup Hats Tree */
         uint256 topHatId;
         uint256[] memory roleHatIds;
         {
@@ -345,7 +371,52 @@ contract Deployer is Initializable {
             l.orgRegistry.registerHatsTree(params.orgId, topHatId, roleHatIds);
         }
 
-        /* 6. QuickJoin */
+        /* 6. Deploy PaymasterHub if enabled */
+        if (params.paymasterConfig.enabled) {
+            // Validate funding amounts match msg.value
+            uint256 totalFunding = params.paymasterConfig.initialDeposit + params.paymasterConfig.initialBounty;
+            if (msg.value < totalFunding) revert InsufficientFunding();
+            
+            // Use the executive role (role[1]) as admin for the PaymasterHub
+            // This assumes the second role is the executive/admin role
+            uint256 adminHatId = roleHatIds.length > 1 ? roleHatIds[1] : roleHatIds[0];
+            
+            // Deploy PaymasterHub
+            address paymasterBeacon = _createBeacon(ModuleTypes.PAYMASTER_HUB_ID, executorAddr, params.autoUpgrade, address(0));
+            ModuleDeploymentLib.DeployConfig memory pmConfig =
+                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
+            paymasterHub = ModuleDeploymentLib.deployPaymasterHub(
+                pmConfig,
+                params.paymasterConfig.entryPoint,
+                adminHatId,
+                paymasterBeacon
+            );
+            
+            // Fund the PaymasterHub if initial deposits are specified
+            if (params.paymasterConfig.initialDeposit > 0) {
+                // Deposit to EntryPoint
+                IPaymasterHubAdmin(paymasterHub).depositToEntryPoint{value: params.paymasterConfig.initialDeposit}();
+            }
+            
+            if (params.paymasterConfig.initialBounty > 0) {
+                // Fund bounty pool
+                IPaymasterHubAdmin(paymasterHub).fundBounty{value: params.paymasterConfig.initialBounty}();
+            }
+            
+            // Configure bounty if enabled
+            if (params.paymasterConfig.enableBounty) {
+                IPaymasterHubAdmin(paymasterHub).setBounty(
+                    true,
+                    params.paymasterConfig.maxBountyPerOp,
+                    params.paymasterConfig.bountyPctCap
+                );
+            }
+            
+            // Transfer ownership of the beacon to the executor
+            SwitchableBeacon(paymasterBeacon).transferOwnership(executorAddr);
+        }
+
+        /* 8. QuickJoin */
         {
             // Get the role hat IDs for new members
             uint256[] memory memberHats =
@@ -359,7 +430,7 @@ contract Deployer is Initializable {
             );
         }
 
-        /* 7. Participation token */
+        /* 9. Participation token */
         {
             string memory tName = string(abi.encodePacked(params.orgName, " Token"));
             string memory tSymbol = "PT";
@@ -380,7 +451,7 @@ contract Deployer is Initializable {
             );
         }
 
-        /* 8. TaskManager */
+        /* 10. TaskManager */
         {
             // Get the role hat IDs for creator permissions
             uint256[] memory creatorHats =
@@ -394,7 +465,7 @@ contract Deployer is Initializable {
             IParticipationToken(participationToken).setTaskManager(taskManager);
         }
 
-        /* 9. EducationHub */
+        /* 11. EducationHub */
         {
             // Get the role hat IDs for creator and member permissions
             uint256[] memory creatorHats =
@@ -412,7 +483,7 @@ contract Deployer is Initializable {
             IParticipationToken(participationToken).setEducationHub(educationHub);
         }
 
-        /* 10. HybridVoting governor */
+        /* 12. HybridVoting governor */
         {
             // Update token address in voting classes if needed
             IHybridVotingInit.ClassConfig[] memory finalClasses = _updateClassesWithTokenAndHats(

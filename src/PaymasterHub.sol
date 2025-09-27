@@ -7,6 +7,7 @@ import {PackedUserOperation, UserOpLib} from "./interfaces/PackedUserOperation.s
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {ReentrancyGuard} from "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {IERC165} from "lib/openzeppelin-contracts/contracts/utils/introspection/IERC165.sol";
+import {Initializable} from "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 
 /**
  * @title PaymasterHub
@@ -15,7 +16,7 @@ import {IERC165} from "lib/openzeppelin-contracts/contracts/utils/introspection/
  * @dev Implements ERC-7201 storage pattern with comprehensive security features
  * @custom:security-contact security@poa.org
  */
-contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
+contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165, Initializable {
     using UserOpLib for bytes32;
 
     // ============ Custom Errors ============
@@ -76,8 +77,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     event UserOpPosted(bytes32 indexed opHash, address indexed postedBy);
     event EmergencyWithdraw(address indexed to, uint256 amount);
 
-    // ============ Immutables ============
-    address public immutable ENTRY_POINT;
+    // ============ Storage (moved from immutable for proxy compatibility) ============
+    address public ENTRY_POINT;
 
     // ============ Storage Structs ============
     struct Config {
@@ -136,8 +137,14 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     bytes32 private constant BOUNTY_STORAGE_LOCATION =
         0x5aefd14c2f5001261e819816e3c40d9d9cc763af84e5df87cd5955f0f5cfd09e;
 
-    // ============ Constructor ============
-    constructor(address _entryPoint, address _hats, uint256 _adminHatId) {
+    // ============ Constructor (disabled for proxy) ============
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    // ============ Initializer ============
+    function initialize(address _entryPoint, address _hats, uint256 _adminHatId) public initializer {
         if (_entryPoint == address(0)) revert ZeroAddress();
         if (_hats == address(0)) revert ZeroAddress();
         if (_adminHatId == 0) revert ZeroAddress();

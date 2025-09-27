@@ -84,6 +84,10 @@ interface IToggleModuleInit {
     function initialize(address admin) external;
 }
 
+interface IPaymasterHubInit {
+    function initialize(address entryPoint, address hats, uint256 adminHatId) external;
+}
+
 library ModuleDeploymentLib {
     error InvalidAddress();
     error EmptyInit();
@@ -246,5 +250,20 @@ library ModuleDeploymentLib {
             IHybridVotingInit.initialize.selector, config.hats, executorAddr, creatorHats, targets, quorumPct, classes
         );
         hvProxy = deployCore(config, ModuleTypes.HYBRID_VOTING_ID, init, lastRegister, beacon);
+    }
+
+    function deployPaymasterHub(
+        DeployConfig memory config,
+        address entryPoint,
+        uint256 adminHatId,
+        address beacon
+    ) internal returns (address pmProxy) {
+        bytes memory init = abi.encodeWithSelector(
+            IPaymasterHubInit.initialize.selector,
+            entryPoint,
+            config.hats,
+            adminHatId
+        );
+        pmProxy = deployCore(config, ModuleTypes.PAYMASTER_HUB_ID, init, false, beacon);
     }
 }
