@@ -322,7 +322,8 @@ contract PaymasterHubTest is Test {
         account = new MockAccount();
 
         // Deploy PaymasterHub
-        hub = new PaymasterHub(address(entryPoint), address(hats), ADMIN_HAT);
+        hub = new PaymasterHub();
+        hub.initialize(address(entryPoint), address(hats), admin);
 
         // Setup hats
         hats.mintHat(ADMIN_HAT, admin);
@@ -338,7 +339,7 @@ contract PaymasterHubTest is Test {
         PaymasterHub.Config memory config = hub.config();
         assertEq(hub.ENTRY_POINT(), address(entryPoint));
         assertEq(config.hats, address(hats));
-        assertEq(config.adminHatId, ADMIN_HAT);
+        assertEq(config.admin, admin);
         assertEq(config.paused, false);
         assertEq(config.version, 1);
     }
