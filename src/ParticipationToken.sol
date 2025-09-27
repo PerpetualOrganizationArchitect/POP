@@ -109,32 +109,50 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
 
     /*────────── Modifiers ─────────*/
     modifier onlyTaskOrEdu() {
-        Layout storage l = _layout();
-        if (_msgSender() != l.executor && _msgSender() != l.taskManager && _msgSender() != l.educationHub) {
-            revert NotTaskOrEdu();
-        }
+        _checkTaskOrEdu();
         _;
     }
 
     modifier onlyApprover() {
-        Layout storage l = _layout();
-        if (_msgSender() == l.executor) {
-            _;
-            return;
-        }
-        if (!_hasHat(_msgSender(), HatType.APPROVER)) revert NotApprover();
+        _checkApprover();
         _;
     }
 
     modifier isMember() {
-        Layout storage l = _layout();
-        if (_msgSender() != l.executor && !_hasHat(_msgSender(), HatType.MEMBER)) revert NotMember();
+        _checkMember();
         _;
     }
 
     modifier onlyExecutor() {
-        if (_msgSender() != _layout().executor) revert Unauthorized();
+        _checkExecutor();
         _;
+    }
+
+    function _checkTaskOrEdu() private view {
+        Layout storage l = _layout();
+        if (_msgSender() != l.executor && _msgSender() != l.taskManager && _msgSender() != l.educationHub) {
+            revert NotTaskOrEdu();
+        }
+    }
+
+    function _checkApprover() private view {
+        Layout storage l = _layout();
+        if (_msgSender() != l.executor && !_hasHat(_msgSender(), HatType.APPROVER)) {
+            revert NotApprover();
+        }
+    }
+
+    function _checkMember() private view {
+        Layout storage l = _layout();
+        if (_msgSender() != l.executor && !_hasHat(_msgSender(), HatType.MEMBER)) {
+            revert NotMember();
+        }
+    }
+
+    function _checkExecutor() private view {
+        if (_msgSender() != _layout().executor) {
+            revert Unauthorized();
+        }
     }
 
     /*──────── Admin setters ───────*/

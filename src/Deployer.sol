@@ -10,27 +10,42 @@ import {SwitchableBeacon} from "./SwitchableBeacon.sol";
 import "./OrgRegistry.sol";
 import {ModuleDeploymentLib} from "./libs/ModuleDeploymentLib.sol";
 import {ModuleTypes} from "./libs/ModuleTypes.sol";
+import {RoleResolver} from "./libs/RoleResolver.sol";
 
 // Import interfaces from library to avoid duplication
 import {IPoaManager, IHybridVotingInit} from "./libs/ModuleDeploymentLib.sol";
+import {IEligibilityModule, IToggleModule} from "./interfaces/IHatsModules.sol";
+
+/*──────────────────── HatsTreeSetup interface ────────────────────*/
+interface IHatsTreeSetup {
+    struct SetupResult {
+        uint256 topHatId;
+        uint256[] roleHatIds;
+        address eligibilityModule;
+        address toggleModule;
+    }
+
+    struct SetupParams {
+        IHats hats;
+        OrgRegistry orgRegistry;
+        bytes32 orgId;
+        address eligibilityModule;
+        address toggleModule;
+        address deployer;
+        address executor;
+        string orgName;
+        string[] roleNames;
+        string[] roleImages;
+        bool[] roleCanVote;
+    }
+
+    function setupHatsTree(SetupParams memory params) external returns (SetupResult memory);
+}
+
 /*──────────────────── External management contracts ────────────────────*/
 // IPoaManager moved to ModuleDeploymentLib to break circular dependency
 
 /*────────────────────── Module‑specific hooks ──────────────────────────*/
-interface IEligibilityModule {
-    function setToggleModule(address) external;
-    function setWearerEligibility(address wearer, uint256 hatId, bool eligible, bool standing) external;
-    function setDefaultEligibility(uint256 hatId, bool eligible, bool standing) external;
-    function setEligibilityModuleAdminHat(uint256) external;
-    function mintHatToAddress(uint256 hatId, address wearer) external;
-    function transferSuperAdmin(address) external;
-}
-
-interface IToggleModule {
-    function setEligibilityModule(address) external;
-    function setHatStatus(uint256 hatId, bool active) external;
-    function transferAdmin(address) external;
-}
 
 interface IParticipationToken {
     function setTaskManager(address) external;
@@ -42,39 +57,16 @@ interface IExecutorAdmin {
     function setHatMinterAuthorization(address minter, bool authorized) external;
 }
 
-/*── init‑selector helpers (reduce bytecode & safety) ────────────────────*/
-// IHybridVotingInit moved to ModuleDeploymentLib to break circular dependency
-
-interface IParticipationVotingInit {
-    function initialize(
-        address executor_,
-        address token_,
-        bytes32[] calldata roles,
-        address[] calldata targets,
-        uint8 quorumPct,
-        bool quadratic,
-        uint256 minBal
-    ) external;
-}
-
 /*────────────────────────────  Errors  ───────────────────────────────*/
 error InvalidAddress();
-error EmptyInit();
 error UnsupportedType();
-error BeaconProbeFail();
 error OrgExistsMismatch();
-error InitFailed();
-error ArrayLengthMismatch();
 error Reentrant();
-
-/*──────────────── Beacon Interface (selector optimization) ────────────*/
-interface IBeaconLike {
-    function implementation() external view returns (address);
-}
 
 /*───────────────────────────  Deployer  ───────────────────────────────*/
 contract Deployer is Initializable {
     using ModuleDeploymentLib for ModuleDeploymentLib.DeployConfig;
+    using RoleResolver for OrgRegistry;
 
     /*───────────── ERC-7201 Storage ───────────*/
     /// @custom:storage-location erc7201:poa.deployer.storage
@@ -84,6 +76,8 @@ contract Deployer is Initializable {
         OrgRegistry orgRegistry;
         /* manual reentrancy guard */
         uint256 _status;
+        /* HatsTreeSetup contract address */
+        address hatsTreeSetup;
     }
 
     IHats public hats;
@@ -102,8 +96,14 @@ contract Deployer is Initializable {
     /* initializer */
     constructor() initializer {}
 
-    function initialize(address _poaManager, address _orgRegistry, address _hats) public initializer {
-        if (_poaManager == address(0) || _orgRegistry == address(0) || _hats == address(0)) {
+    function initialize(address _poaManager, address _orgRegistry, address _hats, address _hatsTreeSetup)
+        public
+        initializer
+    {
+        if (
+            _poaManager == address(0) || _orgRegistry == address(0) || _hats == address(0)
+                || _hatsTreeSetup == address(0)
+        ) {
             revert InvalidAddress();
         }
         Layout storage l = _layout();
@@ -111,6 +111,7 @@ contract Deployer is Initializable {
         l.orgRegistry = OrgRegistry(_orgRegistry);
         l._status = 1; // Initialize manual reentrancy guard
         hats = IHats(_hats);
+        l.hatsTreeSetup = _hatsTreeSetup;
     }
 
     /*──────────────────── Helper function for creating DeployConfig ───────────────────────*/
@@ -182,44 +183,38 @@ contract Deployer is Initializable {
     function _updateClassesWithTokenAndHats(
         IHybridVotingInit.ClassConfig[] memory classes,
         address token,
-        bytes32 orgId
+        bytes32 orgId,
+        RoleAssignments memory roleAssignments
     ) internal view returns (IHybridVotingInit.ClassConfig[] memory) {
         Layout storage l = _layout();
 
-        // Get the role hat IDs now that they've been created
-        uint256[] memory votingHats = new uint256[](2);
-        votingHats[0] = l.orgRegistry.getRoleHat(orgId, 0); // DEFAULT role hat
-        votingHats[1] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
-
-        // For democracy hats, use only the EXECUTIVE role hat
-        uint256[] memory democracyHats = new uint256[](1);
-        democracyHats[0] = l.orgRegistry.getRoleHat(orgId, 1); // EXECUTIVE role hat
-
-        // Create a new array with updated configurations
-        IHybridVotingInit.ClassConfig[] memory finalClasses = new IHybridVotingInit.ClassConfig[](classes.length);
-
         for (uint256 i = 0; i < classes.length; i++) {
-            finalClasses[i] = classes[i];
-
-            // Update token address for ERC20_BAL strategies
-            if (finalClasses[i].strategy == IHybridVotingInit.ClassStrategy.ERC20_BAL) {
-                if (finalClasses[i].asset == address(0)) {
-                    finalClasses[i].asset = token;
+            if (classes[i].strategy == IHybridVotingInit.ClassStrategy.ERC20_BAL) {
+                if (classes[i].asset == address(0)) {
+                    classes[i].asset = token;
                 }
-                // For token voting, use voting hats (both DEFAULT and EXECUTIVE)
-                finalClasses[i].hatIds = votingHats;
-            }
-            // Update hat IDs for DIRECT strategies
-            else if (finalClasses[i].strategy == IHybridVotingInit.ClassStrategy.DIRECT) {
-                // For direct democracy, use democracy hats (only EXECUTIVE)
-                finalClasses[i].hatIds = democracyHats;
+                // For token-based voting, use token member roles
+                classes[i].hatIds = RoleResolver.resolveRoleHats(l.orgRegistry, orgId, roleAssignments.tokenMemberRoles);
+            } else if (classes[i].strategy == IHybridVotingInit.ClassStrategy.DIRECT) {
+                // For direct voting, use proposal creator roles
+                classes[i].hatIds =
+                    RoleResolver.resolveRoleHats(l.orgRegistry, orgId, roleAssignments.proposalCreatorRoles);
             }
         }
-
-        return finalClasses;
+        return classes;
     }
 
     /*════════════════  FULL ORG  DEPLOYMENT  ════════════════*/
+    struct RoleAssignments {
+        uint256[] quickJoinRoles; // Roles that new members get via QuickJoin
+        uint256[] tokenMemberRoles; // Roles that can hold participation tokens
+        uint256[] tokenApproverRoles; // Roles that can approve token transfers
+        uint256[] taskCreatorRoles; // Roles that can create tasks
+        uint256[] educationCreatorRoles; // Roles that can create education content
+        uint256[] educationMemberRoles; // Roles that can access education content
+        uint256[] proposalCreatorRoles; // Roles that can create proposals
+    }
+
     struct DeploymentParams {
         bytes32 orgId;
         string orgName;
@@ -230,6 +225,7 @@ contract Deployer is Initializable {
         string[] roleNames;
         string[] roleImages;
         bool[] roleCanVote;
+        RoleAssignments roleAssignments;
     }
 
     function deployFullOrg(
@@ -241,7 +237,8 @@ contract Deployer is Initializable {
         IHybridVotingInit.ClassConfig[] calldata votingClasses,
         string[] calldata roleNames,
         string[] calldata roleImages,
-        bool[] calldata roleCanVote
+        bool[] calldata roleCanVote,
+        RoleAssignments calldata roleAssignments
     )
         external
         returns (
@@ -267,7 +264,8 @@ contract Deployer is Initializable {
             votingClasses: votingClasses,
             roleNames: roleNames,
             roleImages: roleImages,
-            roleCanVote: roleCanVote
+            roleCanVote: roleCanVote,
+            roleAssignments: roleAssignments
         });
 
         (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub) =
@@ -316,84 +314,42 @@ contract Deployer is Initializable {
         address eligibilityModule = _deployEligibilityModule(params.orgId, params.autoUpgrade, address(0));
         address toggleModule = _deployToggleModule(params.orgId, address(this), params.autoUpgrade, address(0));
 
-        // Configure module relationships
-        IEligibilityModule(eligibilityModule).setToggleModule(toggleModule);
-        IToggleModule(toggleModule).setEligibilityModule(eligibilityModule);
-
         /* 5. Setup Hats Tree */
+        uint256 topHatId;
+        uint256[] memory roleHatIds;
         {
-            // Create top hat
-            uint256 topHatId = hats.mintTopHat(address(this), string(abi.encodePacked("ipfs://", params.orgName)), "");
-            IEligibilityModule(eligibilityModule).setWearerEligibility(address(this), topHatId, true, true);
-            IToggleModule(toggleModule).setHatStatus(topHatId, true);
+            // Transfer superAdmin rights to HatsTreeSetup contract
+            IEligibilityModule(eligibilityModule).transferSuperAdmin(l.hatsTreeSetup);
+            IToggleModule(toggleModule).transferAdmin(l.hatsTreeSetup);
 
-            // Create eligibility admin hat
-            uint256 eligibilityAdminHatId = hats.createHat(
-                topHatId, "ELIGIBILITY_ADMIN", 1, eligibilityModule, toggleModule, true, "ELIGIBILITY_ADMIN"
-            );
-            IEligibilityModule(eligibilityModule).setWearerEligibility(
-                eligibilityModule, eligibilityAdminHatId, true, true
-            );
-            IToggleModule(toggleModule).setHatStatus(eligibilityAdminHatId, true);
-            hats.mintHat(eligibilityAdminHatId, eligibilityModule);
-            IEligibilityModule(eligibilityModule).setEligibilityModuleAdminHat(eligibilityAdminHatId);
+            // Call HatsTreeSetup to do all the Hats configuration
+            IHatsTreeSetup.SetupParams memory setupParams = IHatsTreeSetup.SetupParams({
+                hats: hats,
+                orgRegistry: l.orgRegistry,
+                orgId: params.orgId,
+                eligibilityModule: eligibilityModule,
+                toggleModule: toggleModule,
+                deployer: address(this),
+                executor: executorAddr,
+                orgName: params.orgName,
+                roleNames: params.roleNames,
+                roleImages: params.roleImages,
+                roleCanVote: params.roleCanVote
+            });
+            IHatsTreeSetup.SetupResult memory result = IHatsTreeSetup(l.hatsTreeSetup).setupHatsTree(setupParams);
 
-            // Create role hats
-            uint256 len = params.roleNames.length;
-            uint256[] memory roleHatIds = new uint256[](len);
+            topHatId = result.topHatId;
+            roleHatIds = result.roleHatIds;
 
-            // Create hats in reverse order for proper hierarchy
-            for (uint256 i = len; i > 0; i--) {
-                uint256 idx = i - 1;
-                uint256 adminHatId;
-
-                if (idx == len - 1) {
-                    adminHatId = eligibilityAdminHatId;
-                } else {
-                    adminHatId = roleHatIds[idx + 1];
-                }
-
-                uint256 newHatId = hats.createHat(
-                    adminHatId,
-                    params.roleNames[idx],
-                    type(uint32).max,
-                    eligibilityModule,
-                    toggleModule,
-                    true,
-                    params.roleNames[idx]
-                );
-                roleHatIds[idx] = newHatId;
-
-                IEligibilityModule(eligibilityModule).setWearerEligibility(executorAddr, newHatId, true, true);
-                IToggleModule(toggleModule).setHatStatus(newHatId, true);
-
-                if (params.roleCanVote[idx]) {
-                    IEligibilityModule(eligibilityModule).mintHatToAddress(newHatId, executorAddr);
-                }
-            }
-
-            // Transfer top hat to executor
-            hats.transferHat(topHatId, address(this), executorAddr);
-
-            // Set default eligibility
-            IEligibilityModule(eligibilityModule).setDefaultEligibility(topHatId, true, true);
-            for (uint256 i = 0; i < roleHatIds.length; i++) {
-                IEligibilityModule(eligibilityModule).setDefaultEligibility(roleHatIds[i], true, true);
-            }
-
-            // Transfer module admin rights
-            IEligibilityModule(eligibilityModule).transferSuperAdmin(executorAddr);
-            IToggleModule(toggleModule).transferAdmin(executorAddr);
-
-            // Register the Hats tree in OrgRegistry
+            // Register the Hats tree in OrgRegistry (must be done by Deployer as it's the owner during bootstrap)
             l.orgRegistry.registerHatsTree(params.orgId, topHatId, roleHatIds);
         }
 
         /* 6. QuickJoin */
         {
-            // Get the DEFAULT role hat ID for new members
-            uint256[] memory memberHats = new uint256[](1);
-            memberHats[0] = l.orgRegistry.getRoleHat(params.orgId, 0); // DEFAULT role hat
+            // Get the role hat IDs for new members
+            uint256[] memory memberHats =
+                RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.quickJoinRoles);
 
             address beacon = _createBeacon(ModuleTypes.QUICK_JOIN_ID, executorAddr, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
@@ -409,11 +365,11 @@ contract Deployer is Initializable {
             string memory tSymbol = "PT";
 
             // Get the role hat IDs for member and approver permissions
-            uint256[] memory memberHats = new uint256[](1);
-            memberHats[0] = l.orgRegistry.getRoleHat(params.orgId, 0); // DEFAULT role hat
+            uint256[] memory memberHats =
+                RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.tokenMemberRoles);
 
-            uint256[] memory approverHats = new uint256[](1);
-            approverHats[0] = l.orgRegistry.getRoleHat(params.orgId, 1); // EXECUTIVE role hat
+            uint256[] memory approverHats =
+                RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.tokenApproverRoles);
 
             address beacon =
                 _createBeacon(ModuleTypes.PARTICIPATION_TOKEN_ID, executorAddr, params.autoUpgrade, address(0));
@@ -427,8 +383,8 @@ contract Deployer is Initializable {
         /* 8. TaskManager */
         {
             // Get the role hat IDs for creator permissions
-            uint256[] memory creatorHats = new uint256[](1);
-            creatorHats[0] = l.orgRegistry.getRoleHat(params.orgId, 1); // EXECUTIVE role hat
+            uint256[] memory creatorHats =
+                RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.taskCreatorRoles);
 
             address beacon = _createBeacon(ModuleTypes.TASK_MANAGER_ID, executorAddr, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
@@ -441,11 +397,11 @@ contract Deployer is Initializable {
         /* 9. EducationHub */
         {
             // Get the role hat IDs for creator and member permissions
-            uint256[] memory creatorHats = new uint256[](1);
-            creatorHats[0] = l.orgRegistry.getRoleHat(params.orgId, 1); // EXECUTIVE role hat
+            uint256[] memory creatorHats =
+                RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.educationCreatorRoles);
 
-            uint256[] memory memberHats = new uint256[](1);
-            memberHats[0] = l.orgRegistry.getRoleHat(params.orgId, 0); // DEFAULT role hat
+            uint256[] memory memberHats =
+                RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.educationMemberRoles);
 
             address beacon = _createBeacon(ModuleTypes.EDUCATION_HUB_ID, executorAddr, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
@@ -459,12 +415,13 @@ contract Deployer is Initializable {
         /* 10. HybridVoting governor */
         {
             // Update token address in voting classes if needed
-            IHybridVotingInit.ClassConfig[] memory finalClasses =
-                _updateClassesWithTokenAndHats(params.votingClasses, participationToken, params.orgId);
+            IHybridVotingInit.ClassConfig[] memory finalClasses = _updateClassesWithTokenAndHats(
+                params.votingClasses, participationToken, params.orgId, params.roleAssignments
+            );
 
-            // For creator hats, use the EXECUTIVE role hat
-            uint256[] memory creatorHats = new uint256[](1);
-            creatorHats[0] = l.orgRegistry.getRoleHat(params.orgId, 1); // EXECUTIVE role hat
+            // Get the role hat IDs for proposal creators
+            uint256[] memory creatorHats =
+                RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.proposalCreatorRoles);
 
             address beacon = _createBeacon(ModuleTypes.HYBRID_VOTING_ID, executorAddr, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
@@ -488,36 +445,10 @@ contract Deployer is Initializable {
     }
 
     /*══════════════  UTILITIES  ═════════════=*/
-    function getBeaconImplementation(address beacon) external view returns (address impl) {
-        (bool ok, bytes memory ret) = beacon.staticcall(abi.encodeWithSelector(IBeaconLike.implementation.selector));
-        if (!ok) revert BeaconProbeFail();
-        impl = abi.decode(ret, (address));
-    }
 
     function _orgExists(bytes32 id) internal view returns (bool) {
         // Destructure the tuple to get the exists field (4th element)
         (,,, bool exists) = _layout().orgRegistry.orgOf(id);
         return exists;
-    }
-
-    // Public getter for poaManager
-    function poaManager() external view returns (address) {
-        return address(_layout().poaManager);
-    }
-
-    // Public getter for orgRegistry
-    function orgRegistry() external view returns (address) {
-        return address(_layout().orgRegistry);
-    }
-
-    /* ─────────── Module Getters ─────────── */
-    function getEligibilityModule(bytes32 orgId) external view returns (address) {
-        Layout storage l = _layout();
-        return l.orgRegistry.getOrgContract(orgId, ModuleTypes.ELIGIBILITY_MODULE_ID);
-    }
-
-    function getToggleModule(bytes32 orgId) external view returns (address) {
-        Layout storage l = _layout();
-        return l.orgRegistry.getOrgContract(orgId, ModuleTypes.TOGGLE_MODULE_ID);
     }
 }
