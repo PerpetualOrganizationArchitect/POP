@@ -356,4 +356,3 @@ contract PaymentManagerTest is Test {
         assertEq(paymentToken.balanceOf(address(paymentManager)), amount);
     }
 }
-
