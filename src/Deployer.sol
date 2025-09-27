@@ -247,7 +247,8 @@ contract Deployer is Initializable {
             address quickJoin,
             address participationToken,
             address taskManager,
-            address educationHub
+            address educationHub,
+            address paymentManager
         )
     {
         // Manual reentrancy guard to avoid stack-too-deep
@@ -268,13 +269,13 @@ contract Deployer is Initializable {
             roleAssignments: roleAssignments
         });
 
-        (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub) =
+        (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub, paymentManager) =
             _deployFullOrgInternal(params);
 
         // Reset reentrancy guard
         l._status = 1;
 
-        return (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub);
+        return (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub, paymentManager);
     }
 
     function _deployFullOrgInternal(DeploymentParams memory params)
@@ -285,7 +286,8 @@ contract Deployer is Initializable {
             address quickJoin,
             address participationToken,
             address taskManager,
-            address educationHub
+            address educationHub,
+            address paymentManager
         )
     {
         Layout storage l = _layout();
@@ -412,7 +414,17 @@ contract Deployer is Initializable {
             IParticipationToken(participationToken).setEducationHub(educationHub);
         }
 
-        /* 10. HybridVoting governor */
+        /* 10. PaymentManager */
+        {
+            address beacon = _createBeacon(ModuleTypes.PAYMENT_MANAGER_ID, executorAddr, params.autoUpgrade, address(0));
+            ModuleDeploymentLib.DeployConfig memory config =
+                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
+            paymentManager = ModuleDeploymentLib.deployPaymentManager(
+                config, executorAddr, participationToken, beacon, false
+            );
+        }
+
+        /* 11. HybridVoting governor */
         {
             // Update token address in voting classes if needed
             IHybridVotingInit.ClassConfig[] memory finalClasses = _updateClassesWithTokenAndHats(
