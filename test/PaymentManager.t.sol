@@ -6,6 +6,7 @@ import {PaymentManager} from "../src/PaymentManager.sol";
 import {IPaymentManager} from "../src/interfaces/IPaymentManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {Proxy} from "@openzeppelin/contracts/proxy/Proxy.sol";
 
 // Mock ERC20 token for testing
 contract MockToken is ERC20 {
@@ -43,8 +44,9 @@ contract PaymentManagerTest is Test {
         eligibilityToken = new MockToken("Participation Token", "PT");
         paymentToken = new MockToken("Payment Token", "PAY");
 
-        // Deploy PaymentManager with executor as owner
-        paymentManager = new PaymentManager(executor, address(eligibilityToken));
+        // Deploy PaymentManager and initialize
+        paymentManager = new PaymentManager();
+        paymentManager.initialize(executor, address(eligibilityToken));
 
         // Setup initial token balances for holders
         eligibilityToken.mint(alice, 500 * 1e18); // 50% of supply
