@@ -463,10 +463,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Create Deployer proxy - initialize with msg.sender (poaAdmin) for proper ownership
         bytes memory deployerInit = abi.encodeWithSignature(
-            "initialize(address,address,address)", 
-            address(poaManager), 
-            address(orgRegistry), 
-            SEPOLIA_HATS
+            "initialize(address,address,address)", address(poaManager), address(orgRegistry), SEPOLIA_HATS
         );
         deployer = Deployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
 

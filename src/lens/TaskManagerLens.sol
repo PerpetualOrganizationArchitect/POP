@@ -13,7 +13,6 @@ interface ITaskManager {
  * @dev Separated from main contract to reduce bytecode size
  */
 contract TaskManagerLens {
-    
     /*──────── Enums ────────*/
     enum StorageKey {
         HATS,
@@ -32,7 +31,7 @@ contract TaskManagerLens {
         HAS_APPLIED_FOR_TASK,
         BOUNTY_BUDGET
     }
-    
+
     enum Status {
         UNCLAIMED,
         CLAIMED,
@@ -40,11 +39,15 @@ contract TaskManagerLens {
         COMPLETED,
         CANCELLED
     }
-    
+
     /*──────── Unified Storage Getter ─────── */
-    function getStorage(address taskManager, StorageKey key, bytes calldata params) external view returns (bytes memory) {
+    function getStorage(address taskManager, StorageKey key, bytes calldata params)
+        external
+        view
+        returns (bytes memory)
+    {
         ITaskManager tm = ITaskManager(taskManager);
-        
+
         if (key == StorageKey.HATS) {
             return tm.getLensData(3, "");
         } else if (key == StorageKey.EXECUTOR) {
@@ -68,7 +71,7 @@ contract TaskManagerLens {
                 bytes32 projectId,
                 uint96 payout,
                 address claimer,
-                ,  // bountyPayout
+                , // bountyPayout
                 bool requiresApplication,
                 Status status,
                 // bountyToken
@@ -86,9 +89,7 @@ contract TaskManagerLens {
                 Status status,
                 address bountyToken
             ) = abi.decode(data, (bytes32, uint96, address, uint96, bool, Status, address));
-            return abi.encode(
-                payout, bountyPayout, bountyToken, status, claimer, projectId, requiresApplication
-            );
+            return abi.encode(payout, bountyPayout, bountyToken, status, claimer, projectId, requiresApplication);
         } else if (key == StorageKey.PROJECT_INFO) {
             bytes32 pid = abi.decode(params, (bytes32));
             bytes memory data = tm.getLensData(2, params);
@@ -115,10 +116,10 @@ contract TaskManagerLens {
             (uint128 cap, uint128 spent) = abi.decode(data, (uint128, uint128));
             return abi.encode(cap, spent);
         }
-        
+
         revert("Invalid index");
     }
-    
+
     // Overloaded version for compatibility with tests that don't pass taskManager
     function getStorage(StorageKey key, bytes calldata params) external view returns (bytes memory) {
         // For backward compatibility, assume msg.sender is the TaskManager
