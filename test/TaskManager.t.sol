@@ -426,7 +426,8 @@ contract TaskManagerTest is TaskManagerTestBase {
         tm.cancelTask(0); // This should work normally
 
         // Verify spent was correctly reduced
-        bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(projectId));
+        bytes memory result =
+            lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(projectId));
         (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spent, 1 ether, "Spent should be reduced by cancelled task payout");
     }
@@ -600,7 +601,8 @@ contract TaskManagerTest is TaskManagerTestBase {
         vm.stopPrank();
 
         // Budget verification
-        bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(PROJECT_A_ID));
+        bytes memory result =
+            lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(PROJECT_A_ID));
         (uint256 capA, uint256 spentA, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spentA, 1 ether, "PROJECT_A spent should be 1 ether");
         assertEq(capA, 5 ether, "PROJECT_A cap should be 5 ether");
@@ -731,7 +733,8 @@ contract TaskManagerTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("pm2_with_hat"), MULTI_PM_ID, address(0), 0, false);
 
         // Verify overall budget tracking
-        bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(MULTI_PM_ID));
+        bytes memory result =
+            lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(MULTI_PM_ID));
         (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spent, 7 ether, "Project should track 7 ether spent");
     }
@@ -967,7 +970,8 @@ contract TaskManagerTest is TaskManagerTestBase {
         tm.cancelTask(1);
 
         // Verify spent amount is 1 ether (from completed task)
-        bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(TO_DELETE_ID));
+        bytes memory result =
+            lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(TO_DELETE_ID));
         (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spent, 1 ether, "Project spent should only reflect completed task");
 
@@ -1563,7 +1567,8 @@ contract TaskManagerTest is TaskManagerTestBase {
         tm.createAndAssignTask(1 ether, bytes("task3"), projectId, member1, address(0), 0, false);
 
         // Verify project budget tracking
-        bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(projectId));
+        bytes memory result =
+            lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(projectId));
         (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
         assertEq(spent, 2 ether, "Project should have spent 2 ether");
         assertEq(cap, 2 ether, "Project cap should be 2 ether");
@@ -1612,7 +1617,8 @@ contract TaskManagerTest is TaskManagerTestBase {
 
         // Create and assign task
         vm.prank(creator1);
-        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("lifecycle_test"), projectId, member1, address(0), 0, false);
+        uint256 taskId =
+            tm.createAndAssignTask(1 ether, bytes("lifecycle_test"), projectId, member1, address(0), 0, false);
 
         // Verify task is in CLAIMED status
         bytes memory ret = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(taskId));
@@ -1745,7 +1751,8 @@ contract TaskManagerTest is TaskManagerTestBase {
 
         // Test assigning to self
         vm.prank(creator1);
-        uint256 taskId = tm.createAndAssignTask(1 ether, bytes("self_assign"), projectId, creator1, address(0), 0, false);
+        uint256 taskId =
+            tm.createAndAssignTask(1 ether, bytes("self_assign"), projectId, creator1, address(0), 0, false);
         bytes memory ret = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(taskId));
         (,, address claimer,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(claimer, creator1, "Task should be assigned to creator1");
@@ -1846,12 +1853,17 @@ contract TaskManagerTest is TaskManagerTestBase {
 
         // Verify application was recorded
         assertEq(
-            abi.decode(lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICANTS, abi.encode(0)), (address[]))[0],
+            abi.decode(
+                lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICANTS, abi.encode(0)), (address[])
+            )[0],
             member1,
             "Member1 should have applied"
         );
         assertEq(
-            abi.decode(lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICATION, abi.encode(0, member1)), (bytes32)),
+            abi.decode(
+                lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICATION, abi.encode(0, member1)),
+                (bytes32)
+            ),
             applicationHash,
             "Application hash should match"
         );
@@ -1890,7 +1902,9 @@ contract TaskManagerTest is TaskManagerTestBase {
         (, TaskManager.Status status,,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
         assertEq(uint8(status), uint8(TaskManager.Status.UNCLAIMED));
         assertEq(
-            abi.decode(lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICANTS, abi.encode(0)), (address[]))[0],
+            abi.decode(
+                lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICANTS, abi.encode(0)), (address[])
+            )[0],
             member1,
             "Member1 should have applied"
         );
@@ -2447,7 +2461,8 @@ contract TaskManagerTest is TaskManagerTestBase {
         assertTrue(hasApplied != bytes32(0), "Member3 should have applied");
 
         address nonApplicant = makeAddr("nonApplicant");
-        result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, nonApplicant));
+        result =
+            lens.getStorage(address(tm), TaskManagerLens.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, nonApplicant));
         hasApplied = abi.decode(result, (bytes32));
         assertTrue(hasApplied == bytes32(0), "Non-applicant should not have applied");
     }
@@ -2533,7 +2548,8 @@ contract TaskManagerTest is TaskManagerTestBase {
         tm.applyForTask(0, applicationHash);
 
         // Verify application data persists
-        bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICATION, abi.encode(0, member1));
+        bytes memory result =
+            lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICATION, abi.encode(0, member1));
         applicationHash = abi.decode(result, (bytes32));
         assertEq(applicationHash, keccak256("detailed_application_content"), "Application hash should persist");
 
@@ -2588,7 +2604,8 @@ contract TaskManagerTest is TaskManagerTestBase {
         tm.applyForTask(0, keccak256("application2"));
 
         // Verify applications exist
-        bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICANT_COUNT, abi.encode(0));
+        bytes memory result =
+            lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICANT_COUNT, abi.encode(0));
         uint256 applicantCount = abi.decode(result, (uint256));
         assertEq(applicantCount, 2, "Should have 2 applicants");
         result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, member1));
@@ -2650,7 +2667,8 @@ contract TaskManagerTest is TaskManagerTestBase {
         tm.applyForTask(0, keccak256("application2"));
 
         // Verify only one application exists
-        bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICANT_COUNT, abi.encode(0));
+        bytes memory result =
+            lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICANT_COUNT, abi.encode(0));
         uint256 applicantCount = abi.decode(result, (uint256));
         assertEq(applicantCount, 1, "Should have only 1 applicant");
         result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICATION, abi.encode(0, member1));
@@ -2787,11 +2805,12 @@ contract TaskManagerBountyTest is TaskManagerTestBase {
         // Create and assign task with bounty
         vm.prank(creator1);
         uint256 taskId = tm.createAndAssignTask(
-            1 ether, bytes("assign_bounty_task"), BOUNTY_PROJECT_ID, member1, address(bountyToken1), 0.4 ether
-        , false);
+            1 ether, bytes("assign_bounty_task"), BOUNTY_PROJECT_ID, member1, address(bountyToken1), 0.4 ether, false
+        );
 
         // Verify task is assigned and has bounty info
-        bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_FULL_INFO, abi.encode(taskId));
+        bytes memory result =
+            lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_FULL_INFO, abi.encode(taskId));
         (
             uint256 payout,
             uint256 bountyPayout,
@@ -2811,7 +2830,9 @@ contract TaskManagerBountyTest is TaskManagerTestBase {
     function test_CompleteTaskWithBounty() public {
         // Create task with bounty
         vm.prank(creator1);
-        tm.createTask(1 ether, bytes("complete_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.5 ether, false);
+        tm.createTask(
+            1 ether, bytes("complete_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.5 ether, false
+        );
 
         // Assign and complete task
         vm.prank(creator1);
@@ -2882,7 +2903,9 @@ contract TaskManagerBountyTest is TaskManagerTestBase {
     function test_UpdateTaskBountyAfterClaimReverts() public {
         // Create task with initial bounty
         vm.prank(creator1);
-        tm.createTask(1 ether, bytes("update_claimed_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether, false);
+        tm.createTask(
+            1 ether, bytes("update_claimed_bounty_task"), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether, false
+        );
 
         // Assign task
         vm.prank(creator1);
@@ -3177,8 +3200,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
         // Verify cap was set
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 5 ether, "Bounty cap should be set correctly");
         assertEq(spent, 0, "Bounty spent should be zero initially");
@@ -3202,8 +3226,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         vm.prank(executor);
         tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 5 ether, "Executor should be able to set bounty cap");
     }
@@ -3230,11 +3255,17 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
     function test_GetBountyBudgetValidation() public {
         // Test zero address token
         vm.expectRevert(ValidationLib.ZeroAddress.selector);
-        lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(0)));
+        lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(0))
+        );
 
         // Test non-existent project
         vm.expectRevert(TaskManager.NotFound.selector);
-        lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(bytes32(uint256(999)), address(bountyToken1)));
+        lens.getStorage(
+            address(tm),
+            TaskManagerLens.StorageKey.BOUNTY_BUDGET,
+            abi.encode(bytes32(uint256(999)), address(bountyToken1))
+        );
     }
 
     function test_CreateTaskWithBountyBudgetEnforcement() public {
@@ -3247,8 +3278,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 1.5 ether, false);
 
         // Verify budget tracking
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 3 ether, "Cap should remain unchanged");
         assertEq(spent, 1.5 ether, "Spent should be updated");
@@ -3258,8 +3290,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 1.5 ether, false);
 
         // Verify budget tracking
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should be at cap");
 
@@ -3275,8 +3308,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 5 ether, false);
 
         // Verify budget tracking (cap should be 0, spent should be updated)
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 0, "Cap should be zero (unlimited)");
         assertEq(spent, 5 ether, "Spent should be updated");
@@ -3285,8 +3319,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 10 ether, false);
 
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 15 ether, "Spent should be cumulative");
     }
@@ -3311,11 +3346,15 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
 
         // Verify independent budget tracking
         bytes memory result = lens.getStorage(
-            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1))
+            address(tm),
+            TaskManagerLens.StorageKey.BOUNTY_BUDGET,
+            abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1))
         );
         (uint256 cap1, uint256 spent1) = abi.decode(result, (uint256, uint256));
         result = lens.getStorage(
-            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
+            address(tm),
+            TaskManagerLens.StorageKey.BOUNTY_BUDGET,
+            abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
         );
         (uint256 cap2, uint256 spent2) = abi.decode(result, (uint256, uint256));
 
@@ -3334,7 +3373,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task5"), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 1 ether, false);
 
         result = lens.getStorage(
-            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
+            address(tm),
+            TaskManagerLens.StorageKey.BOUNTY_BUDGET,
+            abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
         );
         (cap2, spent2) = abi.decode(result, (uint256, uint256));
         assertEq(spent2, 3 ether, "Token2 spent should now be at cap");
@@ -3350,8 +3391,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
 
         // Verify initial budget
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 2 ether, "Initial spent should be correct");
 
@@ -3360,8 +3402,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken1), 3 ether);
 
         // Verify budget updated
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should be updated after task update");
 
@@ -3383,11 +3426,13 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
 
         // Verify initial budgets
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap1, uint256 spent1) = abi.decode(result, (uint256, uint256));
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2))
+        );
         (uint256 cap2, uint256 spent2) = abi.decode(result, (uint256, uint256));
         assertEq(spent1, 2 ether, "Token1 spent should be correct");
         assertEq(spent2, 0, "Token2 spent should be zero");
@@ -3397,11 +3442,13 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken2), 3 ether);
 
         // Verify budgets updated correctly
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap1, spent1) = abi.decode(result, (uint256, uint256));
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2))
+        );
         (cap2, spent2) = abi.decode(result, (uint256, uint256));
         assertEq(spent1, 0, "Token1 spent should be rolled back");
         assertEq(spent2, 3 ether, "Token2 spent should be updated");
@@ -3417,8 +3464,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, false);
 
         // Verify budget
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should be correct");
 
@@ -3427,8 +3475,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.updateTask(0, 1 ether, bytes("updated"), address(0), 0);
 
         // Verify budget rolled back
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 0, "Spent should be rolled back");
     }
@@ -3443,8 +3492,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
 
         // Verify budget
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 2 ether, "Spent should be correct");
 
@@ -3453,8 +3503,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.cancelTask(0);
 
         // Verify budget rolled back
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 0, "Spent should be rolled back after cancel");
     }
@@ -3467,12 +3518,13 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         // Create and assign task
         vm.prank(creator1);
         uint256 taskId = tm.createAndAssignTask(
-            1 ether, bytes("assign_task"), BUDGET_PROJECT_ID, member1, address(bountyToken1), 3 ether
-        , false);
+            1 ether, bytes("assign_task"), BUDGET_PROJECT_ID, member1, address(bountyToken1), 3 ether, false
+        );
 
         // Verify budget tracking
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should be updated");
 
@@ -3480,8 +3532,8 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         vm.prank(creator1);
         vm.expectRevert(BudgetLib.BudgetExceeded.selector);
         tm.createAndAssignTask(
-            1 ether, bytes("assign_task2"), BUDGET_PROJECT_ID, member1, address(bountyToken1), 2.1 ether
-        , false);
+            1 ether, bytes("assign_task2"), BUDGET_PROJECT_ID, member1, address(bountyToken1), 2.1 ether, false
+        );
     }
 
     function test_ApplicationTaskBountyBudget() public {
@@ -3494,8 +3546,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("app_task"), BUDGET_PROJECT_ID, address(bountyToken1), 4 ether, true);
 
         // Verify budget tracking
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 4 ether, "Spent should be updated");
 
@@ -3511,8 +3564,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, false);
 
         // Verify spent
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should be correct");
 
@@ -3525,8 +3579,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         vm.prank(executor);
         tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 3 ether));
 
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 3 ether, "Cap should be set correctly");
 
@@ -3534,8 +3589,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         vm.prank(executor);
         tm.setConfig(TaskManager.ConfigKey.BOUNTY_CAP, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1), 5 ether));
 
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 5 ether, "Cap should be updated correctly");
     }
@@ -3565,11 +3621,13 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1.5 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
 
         // Verify both budgets are tracked independently
-        bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(BUDGET_PROJECT_ID));
+        bytes memory result =
+            lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(BUDGET_PROJECT_ID));
         (uint256 participationCap, uint256 participationSpent, bool isManager) =
             abi.decode(result, (uint256, uint256, bool));
-        bytes memory bountyResult =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory bountyResult = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 bountyCap, uint256 bountySpent) = abi.decode(bountyResult, (uint256, uint256));
 
         assertEq(participationSpent, 1.5 ether, "Participation token spent should be correct");
@@ -3602,8 +3660,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.submitTask(0, bytes("submission"));
 
         // Budget should remain reserved during completion
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should remain reserved");
 
@@ -3611,8 +3670,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.completeTask(0);
 
         // Budget should still be marked as spent after completion
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should remain after completion");
 
@@ -3649,8 +3709,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 100 ether, false);
 
         // Verify budget tracking
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 0, "Cap should be zero (unlimited)");
         assertEq(spent, 100 ether, "Spent should be tracked");
@@ -3659,18 +3720,21 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 200 ether, false);
 
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 300 ether, "Spent should be cumulative");
     }
 
     function test_GetBountyBudgetUnusedToken() public {
         // Get budget for token that was never used
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(cap, 0, "Unused token cap should be zero");
         assertEq(spent, 0, "Unused token spent should be zero");
@@ -3711,15 +3775,21 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
 
         // Verify final budget states
         bytes memory result = lens.getStorage(
-            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1))
+            address(tm),
+            TaskManagerLens.StorageKey.BOUNTY_BUDGET,
+            abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken1))
         );
         (uint256 cap1, uint256 spent1) = abi.decode(result, (uint256, uint256));
         result = lens.getStorage(
-            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
+            address(tm),
+            TaskManagerLens.StorageKey.BOUNTY_BUDGET,
+            abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken2))
         );
         (uint256 cap2, uint256 spent2) = abi.decode(result, (uint256, uint256));
         result = lens.getStorage(
-            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken3))
+            address(tm),
+            TaskManagerLens.StorageKey.BOUNTY_BUDGET,
+            abi.encode(MULTI_TOKEN_PROJECT_ID, address(bountyToken3))
         );
         (uint256 cap3, uint256 spent3) = abi.decode(result, (uint256, uint256));
 
@@ -3757,16 +3827,18 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task2"), BUDGET_PROJECT_ID, address(bountyToken1), 1 ether, false);
 
         // Verify budget is correct
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 1 ether, "Spent should be correct");
 
         // Normal cancellation should work
         vm.prank(creator1);
         tm.cancelTask(1);
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 0, "Spent should be rolled back correctly");
     }
@@ -3777,16 +3849,18 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
 
         // Verify budget
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 2 ether, "Spent should be correct");
 
         // Normal update should work (rolling back and applying new bounty)
         vm.prank(creator1);
         tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken1), 1.5 ether);
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 1.5 ether, "Spent should be updated correctly");
 
@@ -3804,8 +3878,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         vm.prank(creator1);
         tm.createTask(1 ether, bytes("task1"), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, false);
 
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap, uint256 spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 3 ether, "Spent should equal bounty payout");
 
@@ -3813,8 +3888,9 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         vm.prank(creator1);
         tm.cancelTask(0);
 
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap, spent) = abi.decode(result, (uint256, uint256));
         assertEq(spent, 0, "Spent should be zero after cancel");
     }
@@ -3835,11 +3911,13 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         tm.updateTask(0, 1 ether, bytes("updated"), address(bountyToken2), 3 ether);
 
         // Verify budgets
-        bytes memory result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        bytes memory result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (uint256 cap1, uint256 spent1) = abi.decode(result, (uint256, uint256));
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2))
+        );
         (uint256 cap2, uint256 spent2) = abi.decode(result, (uint256, uint256));
 
         assertEq(spent1, 0, "Token1 spent should be rolled back");
@@ -3848,11 +3926,13 @@ contract TaskManagerBountyBudgetTest is TaskManagerTestBase {
         // Cancel task should roll back token2
         vm.prank(creator1);
         tm.cancelTask(0);
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken1))
+        );
         (cap1, spent1) = abi.decode(result, (uint256, uint256));
-        result =
-            lens.getStorage(address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2)));
+        result = lens.getStorage(
+            address(tm), TaskManagerLens.StorageKey.BOUNTY_BUDGET, abi.encode(BUDGET_PROJECT_ID, address(bountyToken2))
+        );
         (cap2, spent2) = abi.decode(result, (uint256, uint256));
 
         assertEq(spent1, 0, "Token1 spent should remain zero");
