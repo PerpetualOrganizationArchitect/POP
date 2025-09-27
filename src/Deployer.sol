@@ -419,9 +419,8 @@ contract Deployer is Initializable {
             address beacon = _createBeacon(ModuleTypes.PAYMENT_MANAGER_ID, executorAddr, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
                 _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
-            paymentManager = ModuleDeploymentLib.deployPaymentManager(
-                config, executorAddr, participationToken, beacon, false
-            );
+            paymentManager =
+                ModuleDeploymentLib.deployPaymentManager(config, executorAddr, participationToken, beacon, false);
         }
 
         /* 11. HybridVoting governor */
