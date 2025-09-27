@@ -23,9 +23,8 @@ interface IPaymentManager {
      * @notice Emitted when revenue is distributed to eligible holders
      * @param token The token being distributed (address(0) for native ETH)
      * @param amount The total amount distributed in the smallest unit
-     * @param processed The number of holders that received distributions
      */
-    event RevenueDistributed(address indexed token, uint256 amount, uint256 processed);
+    event RevenueDistributed(address indexed token, uint256 amount);
 
     /**
      * @notice Emitted when a user changes their opt-out status
