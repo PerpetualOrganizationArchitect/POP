@@ -23,7 +23,7 @@ contract MockToken is ERC20 {
 
 contract PaymentManagerTest is Test {
     PaymentManager public paymentManager;
-    MockToken public eligibilityToken;
+    MockToken public revenueShareToken;
     MockToken public paymentToken;
 
     address public executor = address(0x1);
@@ -37,21 +37,21 @@ contract PaymentManagerTest is Test {
     event PaymentReceived(address indexed payer, uint256 amount, address indexed token);
     event RevenueDistributed(address indexed token, uint256 amount);
     event OptOutToggled(address indexed user, bool optedOut);
-    event EligibilityTokenSet(address indexed token);
+    event RevenueShareTokenSet(address indexed token);
 
     function setUp() public {
         // Deploy tokens
-        eligibilityToken = new MockToken("Participation Token", "PT");
+        revenueShareToken = new MockToken("Revenue Share Token", "RST");
         paymentToken = new MockToken("Payment Token", "PAY");
 
         // Deploy PaymentManager and initialize
         paymentManager = new PaymentManager();
-        paymentManager.initialize(executor, address(eligibilityToken));
+        paymentManager.initialize(executor, address(revenueShareToken));
 
         // Setup initial token balances for holders
-        eligibilityToken.mint(alice, 500 * 1e18); // 50% of supply
-        eligibilityToken.mint(bob, 300 * 1e18); // 30% of supply
-        eligibilityToken.mint(charlie, 200 * 1e18); // 20% of supply
+        revenueShareToken.mint(alice, 500 * 1e18); // 50% of supply
+        revenueShareToken.mint(bob, 300 * 1e18); // 30% of supply
+        revenueShareToken.mint(charlie, 200 * 1e18); // 20% of supply
 
         // Give payer some tokens to pay with
         paymentToken.mint(payer, INITIAL_BALANCE);
@@ -307,29 +307,189 @@ contract PaymentManagerTest is Test {
                                 ADMIN TESTS
     ──────────────────────────────────────────────────────────────────────────*/
 
-    function test_SetEligibilityToken() public {
+    function test_SetRevenueShareToken() public {
         MockToken newToken = new MockToken("New Token", "NEW");
 
         vm.prank(executor);
         vm.expectEmit(true, false, false, false);
-        emit EligibilityTokenSet(address(newToken));
+        emit RevenueShareTokenSet(address(newToken));
 
-        paymentManager.setEligibilityToken(address(newToken));
-        assertEq(paymentManager.eligibilityToken(), address(newToken));
+        paymentManager.setRevenueShareToken(address(newToken));
+        assertEq(paymentManager.revenueShareToken(), address(newToken));
     }
 
-    function test_RevertSetEligibilityToken_NotOwner() public {
+    function test_RevertSetRevenueShareToken_NotOwner() public {
         MockToken newToken = new MockToken("New Token", "NEW");
 
         vm.prank(alice);
         vm.expectRevert();
-        paymentManager.setEligibilityToken(address(newToken));
+        paymentManager.setRevenueShareToken(address(newToken));
     }
 
-    function test_RevertSetEligibilityToken_ZeroAddress() public {
+    function test_RevertSetRevenueShareToken_ZeroAddress() public {
         vm.prank(executor);
         vm.expectRevert(IPaymentManager.ZeroAddress.selector);
-        paymentManager.setEligibilityToken(address(0));
+        paymentManager.setRevenueShareToken(address(0));
+    }
+
+    /*──────────────────────────────────────────────────────────────────────────
+                            MULTIPLE DISTRIBUTION TESTS
+    ──────────────────────────────────────────────────────────────────────────*/
+
+    function test_MultipleDistributions_UnderBalance() public {
+        // Add 20 ETH to the contract
+        vm.prank(payer);
+        paymentManager.pay{value: 20 ether}();
+
+        address[] memory holders = new address[](3);
+        holders[0] = alice;
+        holders[1] = bob;
+        holders[2] = charlie;
+
+        uint256 aliceBalBefore = alice.balance;
+        uint256 bobBalBefore = bob.balance;
+        uint256 charlieBalBefore = charlie.balance;
+
+        // First distribution: 5 ETH
+        vm.prank(executor);
+        paymentManager.distributeRevenue(address(0), 5 ether, holders);
+
+        // Verify first distribution
+        assertEq(alice.balance - aliceBalBefore, 2.5 ether); // 50% of 5
+        assertEq(bob.balance - bobBalBefore, 1.5 ether); // 30% of 5
+        assertEq(charlie.balance - charlieBalBefore, 1 ether); // 20% of 5
+
+        // Update balances for next check
+        aliceBalBefore = alice.balance;
+        bobBalBefore = bob.balance;
+        charlieBalBefore = charlie.balance;
+
+        // Second distribution: 8 ETH
+        vm.prank(executor);
+        paymentManager.distributeRevenue(address(0), 8 ether, holders);
+
+        // Verify second distribution
+        assertEq(alice.balance - aliceBalBefore, 4 ether); // 50% of 8
+        assertEq(bob.balance - bobBalBefore, 2.4 ether); // 30% of 8
+        assertEq(charlie.balance - charlieBalBefore, 1.6 ether); // 20% of 8
+
+        // Third distribution: 7 ETH (total distributed = 20, equals balance)
+        aliceBalBefore = alice.balance;
+        bobBalBefore = bob.balance;
+        charlieBalBefore = charlie.balance;
+
+        vm.prank(executor);
+        paymentManager.distributeRevenue(address(0), 7 ether, holders);
+
+        // Verify third distribution
+        assertEq(alice.balance - aliceBalBefore, 3.5 ether); // 50% of 7
+        assertEq(bob.balance - bobBalBefore, 2.1 ether); // 30% of 7
+        assertEq(charlie.balance - charlieBalBefore, 1.4 ether); // 20% of 7
+
+        // Contract should have 0 balance now
+        assertEq(address(paymentManager).balance, 0);
+    }
+
+    function test_MultipleDistributions_OverBalance() public {
+        // Add 10 ETH to the contract
+        vm.prank(payer);
+        paymentManager.pay{value: 10 ether}();
+
+        address[] memory holders = new address[](3);
+        holders[0] = alice;
+        holders[1] = bob;
+        holders[2] = charlie;
+
+        // First distribution: 7 ETH (under balance)
+        vm.prank(executor);
+        paymentManager.distributeRevenue(address(0), 7 ether, holders);
+
+        // Verify contract still has 3 ETH
+        assertEq(address(paymentManager).balance, 3 ether);
+
+        // Try to distribute more than remaining balance (should revert)
+        vm.prank(executor);
+        vm.expectRevert(IPaymentManager.InsufficientFunds.selector);
+        paymentManager.distributeRevenue(address(0), 5 ether, holders);
+
+        // Should be able to distribute exactly the remaining balance
+        vm.prank(executor);
+        paymentManager.distributeRevenue(address(0), 3 ether, holders);
+
+        // Contract should have 0 balance now
+        assertEq(address(paymentManager).balance, 0);
+    }
+
+    function test_MultipleDistributions_WithTokenChanges() public {
+        // Add 15 ETH to the contract
+        vm.prank(payer);
+        paymentManager.pay{value: 15 ether}();
+
+        address[] memory holders = new address[](3);
+        holders[0] = alice;
+        holders[1] = bob;
+        holders[2] = charlie;
+
+        // First distribution with original token balances
+        vm.prank(executor);
+        paymentManager.distributeRevenue(address(0), 5 ether, holders);
+
+        // Change token balances - mint more to alice
+        revenueShareToken.mint(alice, 500 * 1e18); // Alice now has 1000 (66.67% of new total)
+        // New total: Alice 1000, Bob 300, Charlie 200 = 1500
+
+        uint256 aliceBalBefore = alice.balance;
+        uint256 bobBalBefore = bob.balance;
+        uint256 charlieBalBefore = charlie.balance;
+
+        // Second distribution with new token balances
+        vm.prank(executor);
+        paymentManager.distributeRevenue(address(0), 6 ether, holders);
+
+        // Verify distribution with new weights
+        assertEq(alice.balance - aliceBalBefore, 4 ether); // 1000/1500 * 6 = 4
+        assertEq(bob.balance - bobBalBefore, 1.2 ether); // 300/1500 * 6 = 1.2
+        assertEq(charlie.balance - charlieBalBefore, 0.8 ether); // 200/1500 * 6 = 0.8
+    }
+
+    function test_MultipleDistributions_ERC20() public {
+        // Fund contract with payment tokens
+        vm.prank(payer);
+        paymentToken.approve(address(paymentManager), 300 * 1e18);
+        vm.prank(payer);
+        paymentManager.payERC20(address(paymentToken), 300 * 1e18);
+
+        address[] memory holders = new address[](3);
+        holders[0] = alice;
+        holders[1] = bob;
+        holders[2] = charlie;
+
+        // First distribution: 100 tokens
+        vm.prank(executor);
+        paymentManager.distributeRevenue(address(paymentToken), 100 * 1e18, holders);
+
+        assertEq(paymentToken.balanceOf(alice), 50 * 1e18); // 50% of 100
+        assertEq(paymentToken.balanceOf(bob), 30 * 1e18); // 30% of 100
+        assertEq(paymentToken.balanceOf(charlie), 20 * 1e18); // 20% of 100
+
+        // Second distribution: 150 tokens
+        vm.prank(executor);
+        paymentManager.distributeRevenue(address(paymentToken), 150 * 1e18, holders);
+
+        assertEq(paymentToken.balanceOf(alice), 125 * 1e18); // 50 + 75
+        assertEq(paymentToken.balanceOf(bob), 75 * 1e18); // 30 + 45
+        assertEq(paymentToken.balanceOf(charlie), 50 * 1e18); // 20 + 30
+
+        // Try to distribute more than remaining balance (should revert)
+        vm.prank(executor);
+        vm.expectRevert(IPaymentManager.InsufficientFunds.selector);
+        paymentManager.distributeRevenue(address(paymentToken), 100 * 1e18, holders);
+
+        // Distribute remaining 50 tokens
+        vm.prank(executor);
+        paymentManager.distributeRevenue(address(paymentToken), 50 * 1e18, holders);
+
+        assertEq(paymentToken.balanceOf(address(paymentManager)), 0);
     }
 
     /*──────────────────────────────────────────────────────────────────────────
