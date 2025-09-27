@@ -172,7 +172,6 @@ classDiagram
       RevenueDistributed(address token, uint256 amount, uint256 processed)
       OptOutToggled(address user, bool optedOut)
       EligibilityTokenSet(address token)
-      Withdrawn(address token, uint256 amount, address to)
     }
 ```
 
