@@ -84,6 +84,10 @@ interface IToggleModuleInit {
     function initialize(address admin) external;
 }
 
+interface IPaymentManagerInit {
+    function initialize(address _owner, address _revenueShareToken) external;
+}
+
 library ModuleDeploymentLib {
     error InvalidAddress();
     error EmptyInit();
@@ -246,5 +250,16 @@ library ModuleDeploymentLib {
             IHybridVotingInit.initialize.selector, config.hats, executorAddr, creatorHats, targets, quorumPct, classes
         );
         hvProxy = deployCore(config, ModuleTypes.HYBRID_VOTING_ID, init, lastRegister, beacon);
+    }
+
+    function deployPaymentManager(
+        DeployConfig memory config,
+        address owner,
+        address revenueShareToken,
+        address beacon,
+        bool lastRegister
+    ) internal returns (address pmProxy) {
+        bytes memory init = abi.encodeWithSelector(IPaymentManagerInit.initialize.selector, owner, revenueShareToken);
+        pmProxy = deployCore(config, ModuleTypes.PAYMENT_MANAGER_ID, init, lastRegister, beacon);
     }
 }
