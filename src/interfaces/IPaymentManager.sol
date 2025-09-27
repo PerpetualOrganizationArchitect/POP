@@ -79,9 +79,15 @@ interface IPaymentManager {
      */
     error TransferFailed();
 
+    /**
+     * @notice Thrown when holder array doesn't represent all token holders
+     * @dev Ensures all token holders are included in distribution
+     */
+    error IncompleteHoldersList();
+
     /*──────────────────────────────────────────────────────────────────────────
                                     PAYMENT FUNCTIONS
-    ──────────────────────────────────────────────────────────────────────────*/
+    ──────────────────────────────────────────────────────────────────────────────*/
 
     /**
      * @notice Alternative function to receive ETH payments
