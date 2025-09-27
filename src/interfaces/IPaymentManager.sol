@@ -140,21 +140,6 @@ interface IPaymentManager {
      */
     function setEligibilityToken(address eligibilityToken) external;
 
-    /**
-     * @notice Withdraw ERC-20 tokens from the contract
-     * @dev Only callable by owner, for recovering tokens
-     * @param token The ERC-20 token to withdraw
-     * @param amount The amount to withdraw
-     */
-    function withdraw(address token, uint256 amount) external;
-
-    /**
-     * @notice Withdraw ETH from the contract
-     * @dev Only callable by owner, for managing ETH balance
-     * @param amount The amount of ETH to withdraw
-     */
-    function withdrawETH(uint256 amount) external;
-
     /*──────────────────────────────────────────────────────────────────────────
                                     VIEW FUNCTIONS
     ──────────────────────────────────────────────────────────────────────────*/
