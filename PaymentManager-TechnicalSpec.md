@@ -210,37 +210,39 @@ sequenceDiagram
     E->>PM: distributeRevenue(payoutToken, amount, holders[])
     PM->>PM: require caller is owner (Executor)
     Note over PM: payoutToken = address(0) for ETH
-    loop for each candidate holder
+    PM->>PM: totalWeight = 0, eligibleHolders = []
+    
+    loop for each holder (calculate weights)
       alt opted out
-        PM->>PM: if optedOut[h] == true → skip holder
+        PM->>PM: if optedOut[h] == true → skip
       else check balance
         PM->>ET: balanceOf(h)
         ET-->>PM: balance
         alt zero balance
-          PM->>PM: if balance == 0 → skip holder
+          PM->>PM: if balance == 0 → skip
         else positive balance
-          PM->>PM: accumulate totalWeight += balance
-          PM->>PM: mark holder as eligible
+          PM->>PM: totalWeight += balance
+          PM->>PM: eligibleHolders.push(h, balance)
         end
       end
     end
+    
     PM->>PM: require totalWeight > 0 (else revert NoEligibleHolders)
-    PM->>PM: scaledAmount = amount * PRECISION (1e18)
-    PM->>PM: actualDistributed = 0
-    loop for each eligible holder
+    PM->>PM: scaledAmount = amount * PRECISION
+    
+    loop for each eligible holder (distribute)
       PM->>PM: scaledShare = (scaledAmount * balance) / totalWeight
-      PM->>PM: share = scaledShare / PRECISION  // rounds down
-      PM->>PM: actualDistributed += share
+      PM->>PM: share = scaledShare / PRECISION
       alt ETH distribution
-        PM->>H: transfer ETH (share amount)
+        PM->>H: transfer ETH (share)
         H-->>PM: OK
       else ERC20 distribution
         PM->>PT: safeTransfer(holder, share)
         PT-->>PM: OK
       end
     end
-    PM->>PM: dust = amount - actualDistributed  // residual stays in contract
-    PM-->>E: emit RevenueDistributed(token, amount, processed)
+    
+    PM-->>E: emit RevenueDistributed(token, amount, eligibleHolders.length)
 ```
 
 ### 5.4 High-Level State Diagram (Payment & Revenue Lifecycle)
