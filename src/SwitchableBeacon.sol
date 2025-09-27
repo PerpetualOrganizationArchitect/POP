@@ -79,7 +79,7 @@ contract SwitchableBeacon is IBeacon {
     constructor(address _owner, address _mirrorBeacon, address _staticImpl, Mode _mode) {
         if (_owner == address(0)) revert ZeroAddress();
         if (_mirrorBeacon == address(0)) revert ZeroAddress();
-        
+
         // Verify mirrorBeacon is a contract
         if (_mirrorBeacon.code.length == 0) revert NotContract();
 
@@ -136,14 +136,14 @@ contract SwitchableBeacon is IBeacon {
      */
     function setMirror(address _mirrorBeacon) external onlyOwner {
         if (_mirrorBeacon == address(0)) revert ZeroAddress();
-        
+
         // Verify the beacon is a contract
         if (_mirrorBeacon.code.length == 0) revert NotContract();
 
         // Validate that the mirror beacon has a valid implementation
         address impl = IBeacon(_mirrorBeacon).implementation();
         if (impl == address(0)) revert ImplNotSet();
-        
+
         // Verify the implementation is a contract
         if (impl.code.length == 0) revert NotContract();
 
@@ -161,7 +161,7 @@ contract SwitchableBeacon is IBeacon {
      */
     function pin(address impl) public onlyOwner {
         if (impl == address(0)) revert ZeroAddress();
-        
+
         // Verify the implementation is a contract
         if (impl.code.length == 0) revert NotContract();
 
@@ -179,7 +179,7 @@ contract SwitchableBeacon is IBeacon {
     function pinToCurrent() external onlyOwner {
         address impl = IBeacon(mirrorBeacon).implementation();
         if (impl == address(0)) revert ImplNotSet();
-        
+
         // The pin function will validate the implementation is a contract
         pin(impl);
     }
