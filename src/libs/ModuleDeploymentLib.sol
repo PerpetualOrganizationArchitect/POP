@@ -259,9 +259,7 @@ library ModuleDeploymentLib {
         address beacon,
         bool lastRegister
     ) internal returns (address pmProxy) {
-        bytes memory init = abi.encodeWithSelector(
-            IPaymentManagerInit.initialize.selector, owner, revenueShareToken
-        );
+        bytes memory init = abi.encodeWithSelector(IPaymentManagerInit.initialize.selector, owner, revenueShareToken);
         pmProxy = deployCore(config, ModuleTypes.PAYMENT_MANAGER_ID, init, lastRegister, beacon);
     }
 }
