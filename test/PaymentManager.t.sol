@@ -245,9 +245,26 @@ contract PaymentManagerTest is Test {
         assertEq(dave.balance, daveBalBefore);
     }
 
-    function test_RevertDistribute_NotOwner() public {
-        address[] memory holders = new address[](1);
+    function test_RevertDistribute_IncompleteHoldersList() public {
+        // Add ETH to the contract
+        vm.prank(payer);
+        paymentManager.pay{value: 10 ether}();
+
+        // Only include alice and bob, missing charlie
+        address[] memory holders = new address[](2);
         holders[0] = alice;
+        holders[1] = bob;
+
+        vm.prank(executor);
+        vm.expectRevert(IPaymentManager.IncompleteHoldersList.selector);
+        paymentManager.distributeRevenue(address(0), 10 ether, holders);
+    }
+
+    function test_RevertDistribute_NotOwner() public {
+        address[] memory holders = new address[](3);
+        holders[0] = alice;
+        holders[1] = bob;
+        holders[2] = charlie;
 
         vm.prank(alice);
         vm.expectRevert();
@@ -255,8 +272,10 @@ contract PaymentManagerTest is Test {
     }
 
     function test_RevertDistribute_InsufficientFunds() public {
-        address[] memory holders = new address[](1);
+        address[] memory holders = new address[](3);
         holders[0] = alice;
+        holders[1] = bob;
+        holders[2] = charlie;
 
         vm.prank(executor);
         vm.expectRevert(IPaymentManager.InsufficientFunds.selector);
@@ -264,8 +283,10 @@ contract PaymentManagerTest is Test {
     }
 
     function test_RevertDistribute_ZeroAmount() public {
-        address[] memory holders = new address[](1);
+        address[] memory holders = new address[](3);
         holders[0] = alice;
+        holders[1] = bob;
+        holders[2] = charlie;
 
         vm.prank(executor);
         vm.expectRevert(IPaymentManager.InvalidDistributionParams.selector);

@@ -128,17 +128,21 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
 
         uint256 scaledAmount = amount * PRECISION;
         uint256 totalDistributed = 0;
+        uint256 totalHoldersBalance = 0;
         bool hasDistributed = false;
 
-        // Single pass distribution
+        // Single pass distribution and balance tallying
         for (uint256 i = 0; i < holders.length; i++) {
             address holder = holders[i];
 
-            // Skip if opted out
-            if (s.optedOut[holder]) continue;
-
             // Get holder's balance
             uint256 balance = IERC20(s.revenueShareToken).balanceOf(holder);
+
+            // Tally up total balance (including opted-out holders)
+            totalHoldersBalance += balance;
+
+            // Skip if opted out
+            if (s.optedOut[holder]) continue;
             if (balance == 0) continue;
 
             // Calculate share
@@ -160,6 +164,9 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
                 hasDistributed = true;
             }
         }
+
+        // Verify that all token holders were included
+        if (totalHoldersBalance != totalWeight) revert IncompleteHoldersList();
 
         if (!hasDistributed) revert NoEligibleHolders();
 
