@@ -28,6 +28,7 @@ import {Deployer} from "../src/Deployer.sol";
 import {HatsTreeSetup} from "../src/HatsTreeSetup.sol";
 import {ModuleDeploymentLib, IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
 import {ModuleTypes} from "../src/libs/ModuleTypes.sol";
+import {DeployerTestHelper} from "./helpers/DeployerTestHelper.sol";
 import {EligibilityModule} from "../src/EligibilityModule.sol";
 import {ToggleModule} from "../src/ToggleModule.sol";
 import {IExecutor} from "../src/Executor.sol";
@@ -63,7 +64,7 @@ interface IEligibilityModuleEvents {
 }
 
 /*────────────── Test contract ───────────*/
-contract DeployerTest is Test, IEligibilityModuleEvents {
+contract DeployerTest is Test, DeployerTestHelper, IEligibilityModuleEvents {
     /*–––– implementations ––––*/
     HybridVoting hybridImpl;
     Executor execImpl;
@@ -113,6 +114,19 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         uint256 memberRoleHat;
     }
 
+    // Helper function to create an empty PaymasterConfig for tests
+    function _emptyPaymasterConfig() private pure returns (Deployer.PaymasterConfig memory) {
+        return Deployer.PaymasterConfig({
+            enabled: false,
+            entryPoint: address(0),
+            initialDeposit: 0,
+            initialBounty: 0,
+            enableBounty: false,
+            maxBountyPerOp: 0,
+            bountyPctCap: 0
+        });
+    }
+
     struct EligibilityStatus {
         bool eligible;
         bool standing;
@@ -135,20 +149,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-
-        // Create PaymasterConfig with disabled paymaster
-        Deployer.PaymasterConfig memory pmConfig = Deployer.PaymasterConfig({
-            enabled: false,
-            entryPoint: address(0),
-            initialDeposit: 0,
-            initialBounty: 0,
-            enableBounty: false,
-            maxBountyPerOp: 0,
-            bountyPctCap: 0
-        });
-
-        (hybrid, exec, qj, token, tm, hub, pm,) = deployer.deployFullOrg(
-            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, pmConfig
+        (hybrid, exec, qj, token, tm, hub, pm,) = deployFullOrgLegacy(
+            deployer,
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
         vm.stopPrank();
     }
@@ -256,8 +259,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub,) = deployer.deployFullOrg(
-            ORG_ID, orgName, accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub,,) = deployFullOrgLegacy(
+            deployer,
+            ORG_ID, orgName, accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
 
         vm.stopPrank();
@@ -287,8 +291,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub,) = deployer.deployFullOrg(
-            ORG_ID, orgName, accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        (setup.hybrid, setup.exec, setup.qj, setup.token, setup.tm, setup.hub,,) = deployFullOrgLegacy(
+            deployer,
+            ORG_ID, orgName, accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
 
         vm.stopPrank();
@@ -566,9 +571,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (address _hybrid, address _executor, address _quickJoin, address _token, address _taskMgr, address _eduHub,) =
-        deployer.deployFullOrg(
-            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        (address _hybrid, address _executor, address _quickJoin, address _token, address _taskMgr, address _eduHub,,) =
+        deployFullOrgLegacy(
+            deployer,
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
 
         vm.stopPrank();
@@ -677,8 +683,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        deployer.deployFullOrg(
-            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        deployFullOrgLegacy(
+            deployer,
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
         vm.stopPrank();
     }
@@ -697,8 +704,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployer.deployFullOrg(
-            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployFullOrgLegacy(
+            deployer,
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
 
         // Verify Hats tree registration
@@ -754,8 +762,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployer.deployFullOrg(
-            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployFullOrgLegacy(
+            deployer,
+            ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
 
         vm.stopPrank();
@@ -997,8 +1006,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployer.deployFullOrg(
-            ORG_ID, "Events Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployFullOrgLegacy(
+            deployer,
+            ORG_ID, "Events Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
 
         vm.stopPrank();
@@ -1178,8 +1188,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployer.deployFullOrg(
-            ORG_ID, "Vouch Error Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployFullOrgLegacy(
+            deployer,
+            ORG_ID, "Vouch Error Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
 
         vm.stopPrank();
@@ -1313,8 +1324,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployer.deployFullOrg(
-            ORG_ID, "Vouch Events Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployFullOrgLegacy(
+            deployer,
+            ORG_ID, "Vouch Events Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
 
         vm.stopPrank();
@@ -1380,8 +1392,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployer.deployFullOrg(
-            ORG_ID, "Vouch Disable Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployFullOrgLegacy(
+            deployer,
+            ORG_ID, "Vouch Disable Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
 
         vm.stopPrank();
@@ -1458,8 +1471,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployer.deployFullOrg(
-            ORG_ID, "SuperAdmin Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
+        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployFullOrgLegacy(
+            deployer,
+            ORG_ID, "SuperAdmin Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments, _emptyPaymasterConfig(), 0
         );
 
         vm.stopPrank();
@@ -1597,7 +1611,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployer.deployFullOrg(
+        (address hybrid, address exec, address qj, address token, address tm, address hub,,) = deployFullOrgLegacy(
+            deployer,
             ORG_ID,
             "Unrestricted Hat Test DAO",
             accountRegProxy,
@@ -1607,7 +1622,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             names,
             images,
             voting,
-            roleAssignments
+            roleAssignments, _emptyPaymasterConfig(), 0
         );
 
         vm.stopPrank();

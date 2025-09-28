@@ -215,6 +215,49 @@ contract Deployer is Initializable {
     }
 
     /*════════════════  FULL ORG  DEPLOYMENT  ════════════════*/
+    
+    /// @notice Complete deployment configuration struct
+    /// @dev Bundles all parameters to avoid stack too deep errors
+    struct DeployConfig {
+        // Organization identity
+        bytes32 orgId;
+        string orgName;
+        address registryAddr;
+        bool autoUpgrade;
+        // Governance settings
+        uint8 quorumPct;
+        IHybridVotingInit.ClassConfig[] votingClasses;
+        // Role configuration
+        string[] roleNames;
+        string[] roleImages;
+        bool[] roleCanVote;
+        RoleAssignments roleAssignments;
+        // Paymaster settings
+        PaymasterConfig paymasterConfig;
+    }
+    
+    /// @notice Core organization configuration
+    struct OrgConfig {
+        bytes32 orgId;
+        string orgName;
+        address registryAddr;
+        bool autoUpgrade;
+    }
+    
+    /// @notice Governance and voting configuration
+    struct GovernanceConfig {
+        uint8 quorumPct;
+        IHybridVotingInit.ClassConfig[] votingClasses;
+    }
+    
+    /// @notice Role management configuration
+    struct RoleConfig {
+        string[] roleNames;
+        string[] roleImages;
+        bool[] roleCanVote;
+        RoleAssignments roleAssignments;
+    }
+    
     struct PaymasterConfig {
         bool enabled; // Whether to deploy a paymaster
         address entryPoint; // ERC-4337 EntryPoint address
@@ -250,16 +293,9 @@ contract Deployer is Initializable {
     }
 
     function deployFullOrg(
-        bytes32 orgId,
-        string calldata orgName,
-        address registryAddr,
-        bool autoUpgrade,
-        uint8 quorumPct,
-        IHybridVotingInit.ClassConfig[] calldata votingClasses,
-        string[] calldata roleNames,
-        string[] calldata roleImages,
-        bool[] calldata roleCanVote,
-        RoleAssignments calldata roleAssignments,
+        OrgConfig calldata orgConfig,
+        GovernanceConfig calldata governanceConfig,
+        RoleConfig calldata roleConfig,
         PaymasterConfig calldata paymasterConfig
     )
         external
@@ -281,16 +317,16 @@ contract Deployer is Initializable {
         l._status = 2;
 
         DeploymentParams memory params = DeploymentParams({
-            orgId: orgId,
-            orgName: orgName,
-            registryAddr: registryAddr,
-            autoUpgrade: autoUpgrade,
-            quorumPct: quorumPct,
-            votingClasses: votingClasses,
-            roleNames: roleNames,
-            roleImages: roleImages,
-            roleCanVote: roleCanVote,
-            roleAssignments: roleAssignments,
+            orgId: orgConfig.orgId,
+            orgName: orgConfig.orgName,
+            registryAddr: orgConfig.registryAddr,
+            autoUpgrade: orgConfig.autoUpgrade,
+            quorumPct: governanceConfig.quorumPct,
+            votingClasses: governanceConfig.votingClasses,
+            roleNames: roleConfig.roleNames,
+            roleImages: roleConfig.roleImages,
+            roleCanVote: roleConfig.roleCanVote,
+            roleAssignments: roleConfig.roleAssignments,
             paymasterConfig: paymasterConfig
         });
 
@@ -319,6 +355,69 @@ contract Deployer is Initializable {
             paymasterHub
         );
     }
+
+    /// @notice Deploy a new organization with a single configuration struct
+    /// @dev This is the most efficient interface to avoid stack too deep errors
+    function deployFullOrgWithConfig(DeployConfig calldata config)
+        external
+        payable
+        returns (
+            address hybridVoting,
+            address executorAddr,
+            address quickJoin,
+            address participationToken,
+            address taskManager,
+            address educationHub,
+            address paymentManager,
+            address paymasterHub
+        )
+    {
+        // Manual reentrancy guard to avoid stack-too-deep
+        Layout storage l = _layout();
+        if (l._status == 2) revert Reentrant();
+        l._status = 2;
+
+        // Create DeploymentParams for internal function
+        DeploymentParams memory params = DeploymentParams({
+            orgId: config.orgId,
+            orgName: config.orgName,
+            registryAddr: config.registryAddr,
+            autoUpgrade: config.autoUpgrade,
+            quorumPct: config.quorumPct,
+            votingClasses: config.votingClasses,
+            roleNames: config.roleNames,
+            roleImages: config.roleImages,
+            roleCanVote: config.roleCanVote,
+            roleAssignments: config.roleAssignments,
+            paymasterConfig: config.paymasterConfig
+        });
+
+        (
+            hybridVoting,
+            executorAddr,
+            quickJoin,
+            participationToken,
+            taskManager,
+            educationHub,
+            paymentManager,
+            paymasterHub
+        ) = _deployFullOrgInternal(params);
+
+        // Reset reentrancy guard
+        l._status = 1;
+
+        return (
+            hybridVoting,
+            executorAddr,
+            quickJoin,
+            participationToken,
+            taskManager,
+            educationHub,
+            paymentManager,
+            paymasterHub
+        );
+    }
+
 
     function _deployFullOrgInternal(DeploymentParams memory params)
         internal

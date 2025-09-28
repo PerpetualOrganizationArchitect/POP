@@ -43,7 +43,8 @@ contract PaymasterHubIntegrationTest is Test {
         account2 = new MockAccount();
 
         // Deploy PaymasterHub
-        hub = new PaymasterHub(address(entryPoint), address(hats), ADMIN_HAT);
+        hub = new PaymasterHub();
+        hub.initialize(address(entryPoint), address(hats), admin);
 
         // Setup roles
         hats.mintHat(ADMIN_HAT, admin);

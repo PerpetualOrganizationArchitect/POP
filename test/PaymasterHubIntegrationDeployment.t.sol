@@ -122,7 +122,7 @@ contract PaymasterHubIntegrationDeploymentTest is Test {
 
         // Deploy core infrastructure
         implRegistry = new ImplementationRegistry();
-        poaManager = new PoaManager();
+        poaManager = new PoaManager(address(implRegistry));
         orgRegistry = new OrgRegistry();
 
         // Deploy and initialize Hats
@@ -131,10 +131,6 @@ contract PaymasterHubIntegrationDeploymentTest is Test {
 
         // Deploy HatsTreeSetup
         hatsTreeSetup = address(new HatsTreeSetup());
-
-        // Initialize PoaManager
-        vm.prank(poaAdmin);
-        poaManager.initialize(address(implRegistry), poaAdmin);
 
         // Deploy implementations
         paymasterImpl = new PaymasterHub();
@@ -150,31 +146,31 @@ contract PaymasterHubIntegrationDeploymentTest is Test {
 
         // Register implementations
         vm.startPrank(poaAdmin);
-        implRegistry.registerImplementation("PaymasterHub", address(paymasterImpl));
-        implRegistry.registerImplementation("HybridVoting", address(hybridImpl));
-        implRegistry.registerImplementation("Executor", address(execImpl));
-        implRegistry.registerImplementation("ParticipationToken", address(pTokenImpl));
-        implRegistry.registerImplementation("QuickJoin", address(quickJoinImpl));
-        implRegistry.registerImplementation("TaskManager", address(taskMgrImpl));
-        implRegistry.registerImplementation("EducationHub", address(eduHubImpl));
-        implRegistry.registerImplementation("EligibilityModule", address(eligModuleImpl));
-        implRegistry.registerImplementation("ToggleModule", address(toggleModuleImpl));
+        implRegistry.registerImplementation("PaymasterHub", "1.0.0", address(paymasterImpl), true);
+        implRegistry.registerImplementation("HybridVoting", "1.0.0", address(hybridImpl), true);
+        implRegistry.registerImplementation("Executor", "1.0.0", address(execImpl), true);
+        implRegistry.registerImplementation("ParticipationToken", "1.0.0", address(pTokenImpl), true);
+        implRegistry.registerImplementation("QuickJoin", "1.0.0", address(quickJoinImpl), true);
+        implRegistry.registerImplementation("TaskManager", "1.0.0", address(taskMgrImpl), true);
+        implRegistry.registerImplementation("EducationHub", "1.0.0", address(eduHubImpl), true);
+        implRegistry.registerImplementation("EligibilityModule", "1.0.0", address(eligModuleImpl), true);
+        implRegistry.registerImplementation("ToggleModule", "1.0.0", address(toggleModuleImpl), true);
 
         // Create beacons
-        poaManager.createBeacon("PaymasterHub");
-        poaManager.createBeacon("HybridVoting");
-        poaManager.createBeacon("Executor");
-        poaManager.createBeacon("ParticipationToken");
-        poaManager.createBeacon("QuickJoin");
-        poaManager.createBeacon("TaskManager");
-        poaManager.createBeacon("EducationHub");
-        poaManager.createBeacon("EligibilityModule");
-        poaManager.createBeacon("ToggleModule");
+        poaManager.addContractType("PaymasterHub", address(paymasterImpl));
+        poaManager.addContractType("HybridVoting", address(hybridImpl));
+        poaManager.addContractType("Executor", address(execImpl));
+        poaManager.addContractType("ParticipationToken", address(pTokenImpl));
+        poaManager.addContractType("QuickJoin", address(quickJoinImpl));
+        poaManager.addContractType("TaskManager", address(taskMgrImpl));
+        poaManager.addContractType("EducationHub", address(eduHubImpl));
+        poaManager.addContractType("EligibilityModule", address(eligModuleImpl));
+        poaManager.addContractType("ToggleModule", address(toggleModuleImpl));
         vm.stopPrank();
 
         // Initialize OrgRegistry
         vm.prank(poaAdmin);
-        orgRegistry.initialize(poaAdmin, address(poaManager));
+        orgRegistry.initialize(poaAdmin);
 
         // Deploy and initialize Deployer
         deployer = new Deployer();
@@ -245,7 +241,7 @@ contract PaymasterHubIntegrationDeploymentTest is Test {
         address token;
         address taskManager;
         address educationHub;
-        (hybrid, executor, quickJoin, token, taskManager, educationHub, paymaster) = deployer.deployFullOrg{
+        (hybrid, executor, quickJoin, token, taskManager, educationHub,, paymaster) = deployer.deployFullOrgLegacy{
             value: 3 ether
         }(
             ORG_ID,
@@ -445,7 +441,8 @@ contract PaymasterHubIntegrationDeploymentTest is Test {
             callData: callData,
             accountGasLimits: bytes32(uint256(100000) << 128 | 50000),
             preVerificationGas: 21000,
-            gasFees: bytes32(uint256(10 gwei) << 128 | 1 gwei),
+            maxFeePerGas: 10 gwei,
+            maxPriorityFeePerGas: 1 gwei,
             paymasterAndData: paymasterAndData,
             signature: ""
         });
@@ -475,7 +472,8 @@ contract PaymasterHubIntegrationDeploymentTest is Test {
             callData: callData,
             accountGasLimits: bytes32(uint256(100000) << 128 | 50000),
             preVerificationGas: 21000,
-            gasFees: bytes32(uint256(10 gwei) << 128 | 1 gwei),
+            maxFeePerGas: 10 gwei,
+            maxPriorityFeePerGas: 1 gwei,
             paymasterAndData: paymasterAndData,
             signature: ""
         });
