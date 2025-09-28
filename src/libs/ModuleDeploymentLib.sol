@@ -88,6 +88,10 @@ interface IPaymentManagerInit {
     function initialize(address _owner, address _revenueShareToken) external;
 }
 
+interface IPaymasterHubInit {
+    function initialize(address entryPoint, address hats, address admin) external;
+}
+
 library ModuleDeploymentLib {
     error InvalidAddress();
     error EmptyInit();
@@ -261,5 +265,14 @@ library ModuleDeploymentLib {
     ) internal returns (address pmProxy) {
         bytes memory init = abi.encodeWithSelector(IPaymentManagerInit.initialize.selector, owner, revenueShareToken);
         pmProxy = deployCore(config, ModuleTypes.PAYMENT_MANAGER_ID, init, lastRegister, beacon);
+    }
+
+    function deployPaymasterHub(DeployConfig memory config, address entryPoint, address admin, address beacon)
+        internal
+        returns (address pmProxy)
+    {
+        bytes memory init =
+            abi.encodeWithSelector(IPaymasterHubInit.initialize.selector, entryPoint, config.hats, admin);
+        pmProxy = deployCore(config, ModuleTypes.PAYMASTER_HUB_ID, init, false, beacon);
     }
 }

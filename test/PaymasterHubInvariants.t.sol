@@ -34,7 +34,8 @@ contract PaymasterHubInvariantsTest is Test {
         entryPoint = new MockEntryPoint();
         hats = new MockHats();
         account = new MockAccount();
-        hub = new PaymasterHub(address(entryPoint), address(hats), ADMIN_HAT);
+        hub = new PaymasterHub();
+        hub.initialize(address(entryPoint), address(hats), admin);
 
         hats.mintHat(ADMIN_HAT, admin);
         hats.mintHat(USER_HAT, address(account));

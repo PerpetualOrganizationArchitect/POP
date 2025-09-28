@@ -7,6 +7,7 @@ import {PackedUserOperation, UserOpLib} from "./interfaces/PackedUserOperation.s
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {ReentrancyGuard} from "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {IERC165} from "lib/openzeppelin-contracts/contracts/utils/introspection/IERC165.sol";
+import {Initializable} from "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 
 /**
  * @title PaymasterHub
@@ -15,7 +16,7 @@ import {IERC165} from "lib/openzeppelin-contracts/contracts/utils/introspection/
  * @dev Implements ERC-7201 storage pattern with comprehensive security features
  * @custom:security-contact security@poa.org
  */
-contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
+contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165, Initializable {
     using UserOpLib for bytes32;
 
     // ============ Custom Errors ============
@@ -53,7 +54,7 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     uint256 private constant MAX_BOUNTY_PCT_BP = 10000; // 100%
 
     // ============ Events ============
-    event PaymasterInitialized(address indexed entryPoint, address indexed hats, uint256 adminHatId);
+    event PaymasterInitialized(address indexed entryPoint, address indexed hats, address indexed admin);
     event RuleSet(address indexed target, bytes4 indexed selector, bool allowed, uint32 maxCallGasHint);
     event BudgetSet(bytes32 indexed subjectKey, uint128 capPerEpoch, uint32 epochLen, uint32 epochStart);
     event FeeCapsSet(
@@ -64,7 +65,7 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         uint32 maxPreVerificationGas
     );
     event PauseSet(bool paused);
-    event OperatorHatSet(uint256 operatorHatId);
+    event OperatorSet(address indexed operator);
     event DepositIncrease(uint256 amount, uint256 newDeposit);
     event DepositWithdraw(address indexed to, uint256 amount);
     event BountyConfig(bool enabled, uint96 maxPerOp, uint16 pctBpCap);
@@ -76,14 +77,14 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     event UserOpPosted(bytes32 indexed opHash, address indexed postedBy);
     event EmergencyWithdraw(address indexed to, uint256 amount);
 
-    // ============ Immutables ============
-    address public immutable ENTRY_POINT;
+    // ============ Storage (moved from immutable for proxy compatibility) ============
+    address public ENTRY_POINT;
 
     // ============ Storage Structs ============
     struct Config {
         address hats;
-        uint256 adminHatId;
-        uint256 operatorHatId; // Optional role for budget/rule management
+        address admin; // The executor contract that administers this paymaster
+        address operator; // Optional operator address for delegated management
         bool paused;
         uint8 version;
         uint24 reserved; // For future use
@@ -136,11 +137,17 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     bytes32 private constant BOUNTY_STORAGE_LOCATION =
         0x5aefd14c2f5001261e819816e3c40d9d9cc763af84e5df87cd5955f0f5cfd09e;
 
-    // ============ Constructor ============
-    constructor(address _entryPoint, address _hats, uint256 _adminHatId) {
+    // ============ Constructor (disabled for proxy) ============
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    // ============ Initializer ============
+    function initialize(address _entryPoint, address _hats, address _admin) public initializer {
         if (_entryPoint == address(0)) revert ZeroAddress();
         if (_hats == address(0)) revert ZeroAddress();
-        if (_adminHatId == 0) revert ZeroAddress();
+        if (_admin == address(0)) revert ZeroAddress();
 
         // Verify entryPoint is a contract
         uint256 codeSize;
@@ -153,11 +160,11 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
 
         Config storage config = _getConfigStorage();
         config.hats = _hats;
-        config.adminHatId = _adminHatId;
+        config.admin = _admin;
         config.version = PAYMASTER_DATA_VERSION;
         config.paused = false;
 
-        emit PaymasterInitialized(_entryPoint, _hats, _adminHatId);
+        emit PaymasterInitialized(_entryPoint, _hats, _admin);
     }
 
     // ============ Modifiers ============
@@ -168,7 +175,7 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
 
     modifier onlyAdmin() {
         Config storage config = _getConfigStorage();
-        if (!IHats(config.hats).isWearerOfHat(msg.sender, config.adminHatId)) {
+        if (msg.sender != config.admin) {
             revert NotAdmin();
         }
         _;
@@ -176,9 +183,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
 
     modifier onlyOperator() {
         Config storage config = _getConfigStorage();
-        bool isAdmin = IHats(config.hats).isWearerOfHat(msg.sender, config.adminHatId);
-        bool isOperator =
-            config.operatorHatId != 0 && IHats(config.hats).isWearerOfHat(msg.sender, config.operatorHatId);
+        bool isAdmin = msg.sender == config.admin;
+        bool isOperator = config.operator != address(0) && msg.sender == config.operator;
         if (!isAdmin && !isOperator) revert NotOperator();
         _;
     }
@@ -385,11 +391,11 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     }
 
     /**
-     * @notice Set optional operator hat for delegated management
+     * @notice Set optional operator address for delegated management
      */
-    function setOperatorHat(uint256 operatorHatId) external onlyAdmin {
-        _getConfigStorage().operatorHatId = operatorHatId;
-        emit OperatorHatSet(operatorHatId);
+    function setOperator(address operator) external onlyAdmin {
+        _getConfigStorage().operator = operator;
+        emit OperatorSet(operator);
     }
 
     /**
