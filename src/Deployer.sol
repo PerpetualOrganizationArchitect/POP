@@ -272,8 +272,7 @@ contract Deployer is Initializable {
         string[] calldata roleImages,
         bool[] calldata roleCanVote,
         RoleAssignments calldata roleAssignments
-    ) external returns (DeploymentResult memory result)
-    {
+    ) external returns (DeploymentResult memory result) {
         // Manual reentrancy guard to avoid stack-too-deep
         Layout storage l = _layout();
         if (l._status == 2) revert Reentrant();
@@ -300,10 +299,7 @@ contract Deployer is Initializable {
         return result;
     }
 
-    function _deployFullOrgInternal(DeploymentParams memory params)
-        internal
-        returns (DeploymentResult memory result)
-    {
+    function _deployFullOrgInternal(DeploymentParams memory params) internal returns (DeploymentResult memory result) {
         Layout storage l = _layout();
         address execBeacon;
 
@@ -420,7 +416,8 @@ contract Deployer is Initializable {
             uint256[] memory memberHats =
                 RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.educationMemberRoles);
 
-            address beacon = _createBeacon(ModuleTypes.EDUCATION_HUB_ID, result.executor, params.autoUpgrade, address(0));
+            address beacon =
+                _createBeacon(ModuleTypes.EDUCATION_HUB_ID, result.executor, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
                 _getDeployConfig(params.orgId, params.autoUpgrade, address(0), result.executor);
             result.educationHub = ModuleDeploymentLib.deployEducationHub(
@@ -431,11 +428,13 @@ contract Deployer is Initializable {
 
         /* 10. PaymentManager */
         {
-            address beacon = _createBeacon(ModuleTypes.PAYMENT_MANAGER_ID, result.executor, params.autoUpgrade, address(0));
+            address beacon =
+                _createBeacon(ModuleTypes.PAYMENT_MANAGER_ID, result.executor, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
                 _getDeployConfig(params.orgId, params.autoUpgrade, address(0), result.executor);
-            result.paymentManager =
-                ModuleDeploymentLib.deployPaymentManager(config, result.executor, result.participationToken, beacon, false);
+            result.paymentManager = ModuleDeploymentLib.deployPaymentManager(
+                config, result.executor, result.participationToken, beacon, false
+            );
         }
 
         /* 10.5. PaymasterHub */
@@ -445,8 +444,9 @@ contract Deployer is Initializable {
 
             // Set operator role if specified
             if (params.roleAssignments.paymasterOperatorRoles.length > 0) {
-                uint256[] memory operatorHats =
-                    RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.paymasterOperatorRoles);
+                uint256[] memory operatorHats = RoleResolver.resolveRoleHats(
+                    l.orgRegistry, params.orgId, params.roleAssignments.paymasterOperatorRoles
+                );
                 // Set first operator hat
                 if (operatorHats.length > 0) {
                     PaymasterHub(payable(result.paymasterHub)).setOperatorHat(operatorHats[0]);
@@ -465,7 +465,8 @@ contract Deployer is Initializable {
             uint256[] memory creatorHats =
                 RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.proposalCreatorRoles);
 
-            address beacon = _createBeacon(ModuleTypes.HYBRID_VOTING_ID, result.executor, params.autoUpgrade, address(0));
+            address beacon =
+                _createBeacon(ModuleTypes.HYBRID_VOTING_ID, result.executor, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
                 _getDeployConfig(params.orgId, params.autoUpgrade, address(0), result.executor);
             result.hybridVoting = ModuleDeploymentLib.deployHybridVoting(

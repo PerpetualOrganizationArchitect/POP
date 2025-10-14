@@ -139,7 +139,15 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
         vm.stopPrank();
-        return (result.hybridVoting, result.executor, result.quickJoin, result.participationToken, result.taskManager, result.educationHub, result.paymentManager);
+        return (
+            result.hybridVoting,
+            result.executor,
+            result.quickJoin,
+            result.participationToken,
+            result.taskManager,
+            result.educationHub,
+            result.paymentManager
+        );
     }
 
     /*–––– Test Helper Functions ––––*/
