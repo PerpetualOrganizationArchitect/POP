@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 /*──────────────────── OpenZeppelin v5.3 Upgradeables ─────────────*/
-import "@openzeppelin-contracts-upgradeable/contracts/token/ERC20/ERC20Upgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
@@ -11,7 +11,7 @@ import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {HatManager} from "./libs/HatManager.sol";
 
 /*──────────────────  Participation Token  ──────────────────*/
-contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardUpgradeable {
+contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyGuardUpgradeable {
     /*──────────── Errors ───────────*/
     error NotTaskOrEdu();
     error NotApprover();
@@ -82,6 +82,7 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
         if (hatsAddr == address(0) || executor_ == address(0)) revert InvalidAddress();
 
         __ERC20_init(name_, symbol_);
+        __ERC20Votes_init();
         __ReentrancyGuard_init();
 
         Layout storage l = _layout();
@@ -258,6 +259,34 @@ contract ParticipationToken is Initializable, ERC20Upgradeable, ReentrancyGuardU
     function _update(address from, address to, uint256 value) internal override {
         if (from != address(0) && to != address(0)) revert TransfersDisabled();
         super._update(from, to, value);
+
+        // Auto-delegate to self on first mint to ensure votes are counted
+        if (from == address(0) && delegates(to) == address(0)) {
+            _delegate(to, to);
+        }
+    }
+
+    /*───────── Delegation Control (Disabled) ─────────*/
+    /// @notice Delegation is disabled - votes automatically count for token holder
+    /// @dev Reverts to prevent delegation to other addresses
+    function delegate(address) public pure override {
+        revert TransfersDisabled(); // Reusing existing error for consistency
+    }
+
+    /// @notice Delegation by signature is disabled
+    /// @dev Reverts to prevent delegation to other addresses
+    function delegateBySig(address, uint256, uint256, uint8, bytes32, bytes32) public pure override {
+        revert TransfersDisabled(); // Reusing existing error for consistency
+    }
+
+    /*───────── ERC20Votes Clock Configuration ─────────*/
+    /// @dev Use block numbers for checkpointing (simpler and more predictable)
+    function clock() public view override returns (uint48) {
+        return uint48(block.number);
+    }
+
+    function CLOCK_MODE() public pure override returns (string memory) {
+        return "mode=blocknumber&from=default";
     }
 
     /*───────── Internal Helper Functions ─────────*/
