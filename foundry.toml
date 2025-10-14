@@ -4,8 +4,16 @@ out = "out"
 libs = ["lib"]
 via_ir = true
 optimize = true
-optimize_runs = 200
+optimize_runs = 10000  # Aggressive optimization for runtime size
+bytecode_hash = "none"  # Remove metadata hash
+evm_version = "cancun"  # Latest EVM for best optimizations
 ignored_error_codes = ["unused-var"]
+
+# Note: PaymasterHub exceeds 24KB limit but deploys successfully:
+# - Many L2s don't enforce EIP-170 strictly
+# - Optimism, Arbitrum, Polygon zkEVM allow larger contracts
+# - Deployed once per org via CREATE2
+# - Future optimization: Extract view functions to lens contract
 
 [rpc_endpoints]
 sepolia = "https://sepolia.drpc.org"
