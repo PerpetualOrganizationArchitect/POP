@@ -266,6 +266,19 @@ contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyG
         }
     }
 
+    /*───────── Delegation Control (Disabled) ─────────*/
+    /// @notice Delegation is disabled - votes automatically count for token holder
+    /// @dev Reverts to prevent delegation to other addresses
+    function delegate(address) public pure override {
+        revert TransfersDisabled(); // Reusing existing error for consistency
+    }
+
+    /// @notice Delegation by signature is disabled
+    /// @dev Reverts to prevent delegation to other addresses
+    function delegateBySig(address, uint256, uint256, uint8, bytes32, bytes32) public pure override {
+        revert TransfersDisabled(); // Reusing existing error for consistency
+    }
+
     /*───────── ERC20Votes Clock Configuration ─────────*/
     /// @dev Use block numbers for checkpointing (simpler and more predictable)
     function clock() public view override returns (uint48) {
