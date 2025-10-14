@@ -2060,30 +2060,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         paymentManager.pay{value: additionalPayment}();
         assertEq(pm.balance, paymentAmount + additionalPayment, "PaymentManager should have all ETH");
 
-        // Test 3: Distribute ETH revenue to token holders
-        // NOTE: distributeRevenue was removed in favor of merkle-based createDistribution
-        // TODO: Rewrite these tests to use the new merkle distribution system
-        /* COMMENTED OUT - OLD API REMOVED
-        address[] memory holders = new address[](3);
-        holders[0] = holder1;
-        holders[1] = holder2;
-        holders[2] = holder3;
-
-        uint256 distributionAmount = 6 ether;
-        uint256 holder1BalBefore = holder1.balance;
-        uint256 holder2BalBefore = holder2.balance;
-        uint256 holder3BalBefore = holder3.balance;
-
-        // Only executor can distribute
-        vm.prank(exec);
-        paymentManager.distributeRevenue(address(0), distributionAmount, holders);
-
-        // Check distributions based on token holdings
-        // Total supply = 600, holder1 = 100 (1/6), holder2 = 200 (2/6), holder3 = 300 (3/6)
-        assertEq(holder1.balance - holder1BalBefore, 1 ether, "Holder1 should receive 1 ETH");
-        assertEq(holder2.balance - holder2BalBefore, 2 ether, "Holder2 should receive 2 ETH");
-        assertEq(holder3.balance - holder3BalBefore, 3 ether, "Holder3 should receive 3 ETH");
-        */
+        // Test 3: ETH distribution (covered in test/PaymentManagerMerkle.t.sol)
 
         // Test 4: ERC20 payment and distribution
         MockERC20 paymentToken = new MockERC20("Payment Token", "PAY");
@@ -2095,66 +2072,22 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         paymentManager.payERC20(address(paymentToken), erc20Payment);
         assertEq(paymentToken.balanceOf(pm), erc20Payment, "PaymentManager should have received ERC20");
 
-        /* COMMENTED OUT - OLD API REMOVED
-        // Distribute ERC20 revenue
-        uint256 erc20Distribution = 60 ether;
-        vm.prank(exec);
-        paymentManager.distributeRevenue(address(paymentToken), erc20Distribution, holders);
-
-        // Check ERC20 distributions
-        assertEq(paymentToken.balanceOf(holder1), 10 ether, "Holder1 should receive 10 tokens");
-        assertEq(paymentToken.balanceOf(holder2), 20 ether, "Holder2 should receive 20 tokens");
-        assertEq(paymentToken.balanceOf(holder3), 30 ether, "Holder3 should receive 30 tokens");
-        */
+        // ERC20 distribution (covered in test/PaymentManagerMerkle.t.sol)
 
         // Test 5: Opt-out functionality
         vm.prank(address(0x123)); // Use arbitrary address
         paymentManager.optOut(true);
         assertTrue(paymentManager.isOptedOut(address(0x123)), "Address should be opted out");
 
-        /* COMMENTED OUT - OLD API REMOVED
-        // Distribute again with holder2 opted out
-        uint256 secondDistribution = 3 ether;
-        vm.deal(address(this), secondDistribution);
-        (success,) = payable(pm).call{value: secondDistribution}("");
-        assertTrue(success, "Second ETH payment should succeed");
-
-        holder1BalBefore = holder1.balance;
-        holder3BalBefore = holder3.balance;
-        uint256 holder2BalBeforeOptOut = holder2.balance;
-
-        vm.prank(exec);
-        paymentManager.distributeRevenue(address(0), secondDistribution, holders);
-
-        // With holder2 opted out, distribution is still based on total supply (600)
-        // holder1 = 100/600 = 1/6, holder3 = 300/600 = 3/6 = 1/2
-        // holder1 gets 3 * (1/6) = 0.5 ETH, holder3 gets 3 * (1/2) = 1.5 ETH
-        assertEq(holder1.balance - holder1BalBefore, 0.5 ether, "Holder1 should receive 0.5 ETH");
-        assertEq(holder2.balance - holder2BalBeforeOptOut, 0, "Holder2 should receive nothing (opted out)");
-        assertEq(holder3.balance - holder3BalBefore, 1.5 ether, "Holder3 should receive 1.5 ETH");
-        */
+        // Distribution with opt-out (covered in test/PaymentManagerMerkle.t.sol::test_RevertClaimDistribution_OptedOut)
 
         // Test 6: Opt back in
         vm.prank(address(0x123));
         paymentManager.optOut(false);
         assertFalse(paymentManager.isOptedOut(address(0x123)), "Address should be opted back in");
 
-        /* COMMENTED OUT - OLD API REMOVED
-        // Test 7: Verify only executor can distribute
-        vm.prank(holder1);
-        vm.expectRevert();
-        paymentManager.distributeRevenue(address(0), 1 ether, holders);
-
-        // Test 8: Test incomplete holders list should revert
-        address[] memory incompleteHolders = new address[](2);
-        incompleteHolders[0] = holder1;
-        incompleteHolders[1] = holder2;
-        // Missing holder3
-
-        vm.prank(exec);
-        vm.expectRevert(IPaymentManager.IncompleteHoldersList.selector);
-        paymentManager.distributeRevenue(address(0), 1 ether, incompleteHolders);
-        */
+        // Test 7: Only owner can distribute (covered in test/PaymentManagerMerkle.t.sol::test_RevertCreateDistribution_OnlyOwner)
+        // Test 8: Incomplete holders vulnerability fix (covered in test/PaymentManagerMerkle.t.sol::test_VulnerabilityFix_MintAfterCheckpoint)
 
         // Test 9: Revenue share token is correctly set
         assertEq(paymentManager.revenueShareToken(), token, "Revenue share token should be the participation token");

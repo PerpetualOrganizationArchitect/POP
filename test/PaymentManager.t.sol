@@ -20,9 +20,8 @@ contract MockToken is ERC20 {
     }
 }
 
-// NOTE: All PaymentManager tests have been commented out because they test
-// the old distributeRevenue() API which has been removed.
-// TODO: Rewrite tests to use the new merkle-based distribution system:
-//   - createDistribution() for creating distributions
-//   - claimDistribution() for claiming
-//   - See scripts/GenerateDistributionMerkle.s.sol for merkle tree generation
+// NOTE: This test file previously tested the old distributeRevenue() push-based API.
+// All scenarios are now covered by:
+//   - test/PaymentManagerMerkle.t.sol (26 tests for merkle distribution system)
+//   - test/DeployerTest.t.sol (integration tests for pay/payERC20/optOut)
+// Payment reception functions (pay, payERC20) remain unchanged and are tested in DeployerTest
