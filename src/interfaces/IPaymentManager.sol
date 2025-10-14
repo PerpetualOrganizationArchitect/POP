@@ -19,7 +19,6 @@ interface IPaymentManager {
      */
     event PaymentReceived(address indexed payer, uint256 amount, address indexed token);
 
-
     /**
      * @notice Emitted when a user changes their opt-out status
      * @param user The address toggling their distribution participation
@@ -80,7 +79,6 @@ interface IPaymentManager {
      */
     error ZeroAddress();
 
-
     /**
      * @notice Thrown when the contract lacks sufficient funds for an operation
      * @dev Ensures contract has enough balance before attempting transfers
@@ -92,7 +90,6 @@ interface IPaymentManager {
      * @dev Indicates ETH transfer failure during distribution or withdrawal
      */
     error TransferFailed();
-
 
     /**
      * @notice Thrown when merkle root is invalid (zero)
@@ -185,12 +182,9 @@ interface IPaymentManager {
      * @param checkpointBlock The block number for balance snapshot
      * @return distributionId The ID of the created distribution
      */
-    function createDistribution(
-        address payoutToken,
-        uint256 amount,
-        bytes32 merkleRoot,
-        uint256 checkpointBlock
-    ) external returns (uint256 distributionId);
+    function createDistribution(address payoutToken, uint256 amount, bytes32 merkleRoot, uint256 checkpointBlock)
+        external
+        returns (uint256 distributionId);
 
     /**
      * @notice Claims a distribution for the caller
@@ -199,11 +193,7 @@ interface IPaymentManager {
      * @param claimAmount The amount being claimed
      * @param merkleProof The merkle proof for verification
      */
-    function claimDistribution(
-        uint256 distributionId,
-        uint256 claimAmount,
-        bytes32[] calldata merkleProof
-    ) external;
+    function claimDistribution(uint256 distributionId, uint256 claimAmount, bytes32[] calldata merkleProof) external;
 
     /**
      * @notice Claims multiple distributions in a single transaction
@@ -212,11 +202,8 @@ interface IPaymentManager {
      * @param amounts Array of amounts to claim
      * @param proofs Array of merkle proofs
      */
-    function claimMultiple(
-        uint256[] calldata distributionIds,
-        uint256[] calldata amounts,
-        bytes32[][] calldata proofs
-    ) external;
+    function claimMultiple(uint256[] calldata distributionIds, uint256[] calldata amounts, bytes32[][] calldata proofs)
+        external;
 
     /**
      * @notice Finalizes a distribution and returns unclaimed funds
@@ -225,7 +212,6 @@ interface IPaymentManager {
      * @param minClaimPeriodBlocks Minimum blocks that must pass since checkpoint
      */
     function finalizeDistribution(uint256 distributionId, uint256 minClaimPeriodBlocks) external;
-
 
     /*──────────────────────────────────────────────────────────────────────────
                                     OPT-OUT FUNCTIONS
