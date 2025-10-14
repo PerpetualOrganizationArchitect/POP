@@ -1,7 +1,4 @@
 {
-  "lib/hats-protocol": {
-    "rev": "cccb71a061cdb9095af7d11dfdb47026993d8c4e"
-  },
   "lib/openzeppelin-contracts": {
     "tag": {
       "name": "v5.4.0",
@@ -10,6 +7,9 @@
   },
   "lib/forge-std": {
     "rev": "3b20d60d14b343ee4f908cb8079495c07f5e8981"
+  },
+  "lib/hats-protocol": {
+    "rev": "cccb71a061cdb9095af7d11dfdb47026993d8c4e"
   },
   "lib/openzeppelin-contracts-upgradeable": {
     "tag": {

@@ -11,6 +11,7 @@ import "./OrgRegistry.sol";
 import {ModuleDeploymentLib} from "./libs/ModuleDeploymentLib.sol";
 import {ModuleTypes} from "./libs/ModuleTypes.sol";
 import {RoleResolver} from "./libs/RoleResolver.sol";
+import {PaymasterHub} from "./PaymasterHub.sol";
 
 // Import interfaces from library to avoid duplication
 import {IPoaManager, IHybridVotingInit} from "./libs/ModuleDeploymentLib.sol";
@@ -78,6 +79,8 @@ contract Deployer is Initializable {
         uint256 _status;
         /* HatsTreeSetup contract address */
         address hatsTreeSetup;
+        /* ERC-4337 EntryPoint for PaymasterHub */
+        address entryPoint;
     }
 
     IHats public hats;
@@ -96,13 +99,16 @@ contract Deployer is Initializable {
     /* initializer */
     constructor() initializer {}
 
-    function initialize(address _poaManager, address _orgRegistry, address _hats, address _hatsTreeSetup)
-        public
-        initializer
-    {
+    function initialize(
+        address _poaManager,
+        address _orgRegistry,
+        address _hats,
+        address _hatsTreeSetup,
+        address _entryPoint
+    ) public initializer {
         if (
             _poaManager == address(0) || _orgRegistry == address(0) || _hats == address(0)
-                || _hatsTreeSetup == address(0)
+                || _hatsTreeSetup == address(0) || _entryPoint == address(0)
         ) {
             revert InvalidAddress();
         }
@@ -112,6 +118,7 @@ contract Deployer is Initializable {
         l._status = 1; // Initialize manual reentrancy guard
         hats = IHats(_hats);
         l.hatsTreeSetup = _hatsTreeSetup;
+        l.entryPoint = _entryPoint;
     }
 
     /*──────────────────── Helper function for creating DeployConfig ───────────────────────*/
@@ -152,6 +159,20 @@ contract Deployer is Initializable {
         address beacon = _createBeacon(ModuleTypes.TOGGLE_MODULE_ID, address(this), autoUp, customImpl);
         ModuleDeploymentLib.DeployConfig memory config = _getDeployConfig(orgId, autoUp, customImpl, address(this));
         tmProxy = ModuleDeploymentLib.deployToggleModule(config, adminAddr, beacon);
+    }
+
+    /*---------  PaymasterHub  ---------*/
+    function _deployPaymasterHub(bytes32 orgId, uint256 adminHatId) internal returns (address paymasterHub) {
+        Layout storage l = _layout();
+
+        // Deploy non-upgradeable PaymasterHub with constructor
+        // Note: PaymasterHub is not registered in OrgRegistry because:
+        // 1. It's non-upgradeable (immutable entryPoint)
+        // 2. OrgRegistry requires autoUpgrade=true during bootstrap
+        // 3. It's a standalone ERC-4337 paymaster, not an org module
+        paymasterHub = address(new PaymasterHub(l.entryPoint, address(hats), adminHatId));
+
+        return paymasterHub;
     }
 
     /*──────────────────── Helper to create SwitchableBeacon ───────────────────────*/
@@ -205,6 +226,17 @@ contract Deployer is Initializable {
     }
 
     /*════════════════  FULL ORG  DEPLOYMENT  ════════════════*/
+    struct DeploymentResult {
+        address hybridVoting;
+        address executor;
+        address quickJoin;
+        address participationToken;
+        address taskManager;
+        address educationHub;
+        address paymentManager;
+        address paymasterHub;
+    }
+
     struct RoleAssignments {
         uint256[] quickJoinRoles; // Roles that new members get via QuickJoin
         uint256[] tokenMemberRoles; // Roles that can hold participation tokens
@@ -213,6 +245,7 @@ contract Deployer is Initializable {
         uint256[] educationCreatorRoles; // Roles that can create education content
         uint256[] educationMemberRoles; // Roles that can access education content
         uint256[] proposalCreatorRoles; // Roles that can create proposals
+        uint256[] paymasterOperatorRoles; // Roles that can manage paymaster budgets and rules
     }
 
     struct DeploymentParams {
@@ -239,17 +272,7 @@ contract Deployer is Initializable {
         string[] calldata roleImages,
         bool[] calldata roleCanVote,
         RoleAssignments calldata roleAssignments
-    )
-        external
-        returns (
-            address hybridVoting,
-            address executorAddr,
-            address quickJoin,
-            address participationToken,
-            address taskManager,
-            address educationHub,
-            address paymentManager
-        )
+    ) external returns (DeploymentResult memory result)
     {
         // Manual reentrancy guard to avoid stack-too-deep
         Layout storage l = _layout();
@@ -269,26 +292,17 @@ contract Deployer is Initializable {
             roleAssignments: roleAssignments
         });
 
-        (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub, paymentManager) =
-            _deployFullOrgInternal(params);
+        result = _deployFullOrgInternal(params);
 
         // Reset reentrancy guard
         l._status = 1;
 
-        return (hybridVoting, executorAddr, quickJoin, participationToken, taskManager, educationHub, paymentManager);
+        return result;
     }
 
     function _deployFullOrgInternal(DeploymentParams memory params)
         internal
-        returns (
-            address hybridVoting,
-            address executorAddr,
-            address quickJoin,
-            address participationToken,
-            address taskManager,
-            address educationHub,
-            address paymentManager
-        )
+        returns (DeploymentResult memory result)
     {
         Layout storage l = _layout();
         address execBeacon;
@@ -306,11 +320,11 @@ contract Deployer is Initializable {
             execBeacon = _createBeacon(ModuleTypes.EXECUTOR_ID, address(this), params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
                 _getDeployConfig(params.orgId, params.autoUpgrade, address(0), address(this));
-            executorAddr = ModuleDeploymentLib.deployExecutor(config, address(this), execBeacon);
+            result.executor = ModuleDeploymentLib.deployExecutor(config, address(this), execBeacon);
         }
 
         /* 3. Set the executor for the org */
-        l.orgRegistry.setOrgExecutor(params.orgId, executorAddr);
+        l.orgRegistry.setOrgExecutor(params.orgId, result.executor);
 
         /* 4. Deploy and configure modules for Hats tree */
         address eligibilityModule = _deployEligibilityModule(params.orgId, params.autoUpgrade, address(0));
@@ -332,16 +346,16 @@ contract Deployer is Initializable {
                 eligibilityModule: eligibilityModule,
                 toggleModule: toggleModule,
                 deployer: address(this),
-                executor: executorAddr,
+                executor: result.executor,
                 orgName: params.orgName,
                 roleNames: params.roleNames,
                 roleImages: params.roleImages,
                 roleCanVote: params.roleCanVote
             });
-            IHatsTreeSetup.SetupResult memory result = IHatsTreeSetup(l.hatsTreeSetup).setupHatsTree(setupParams);
+            IHatsTreeSetup.SetupResult memory setupResult = IHatsTreeSetup(l.hatsTreeSetup).setupHatsTree(setupParams);
 
-            topHatId = result.topHatId;
-            roleHatIds = result.roleHatIds;
+            topHatId = setupResult.topHatId;
+            roleHatIds = setupResult.roleHatIds;
 
             // Register the Hats tree in OrgRegistry (must be done by Deployer as it's the owner during bootstrap)
             l.orgRegistry.registerHatsTree(params.orgId, topHatId, roleHatIds);
@@ -353,11 +367,11 @@ contract Deployer is Initializable {
             uint256[] memory memberHats =
                 RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.quickJoinRoles);
 
-            address beacon = _createBeacon(ModuleTypes.QUICK_JOIN_ID, executorAddr, params.autoUpgrade, address(0));
+            address beacon = _createBeacon(ModuleTypes.QUICK_JOIN_ID, result.executor, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
-                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
-            quickJoin = ModuleDeploymentLib.deployQuickJoin(
-                config, executorAddr, params.registryAddr, address(this), memberHats, beacon
+                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), result.executor);
+            result.quickJoin = ModuleDeploymentLib.deployQuickJoin(
+                config, result.executor, params.registryAddr, address(this), memberHats, beacon
             );
         }
 
@@ -374,11 +388,11 @@ contract Deployer is Initializable {
                 RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.tokenApproverRoles);
 
             address beacon =
-                _createBeacon(ModuleTypes.PARTICIPATION_TOKEN_ID, executorAddr, params.autoUpgrade, address(0));
+                _createBeacon(ModuleTypes.PARTICIPATION_TOKEN_ID, result.executor, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
-                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
-            participationToken = ModuleDeploymentLib.deployParticipationToken(
-                config, executorAddr, tName, tSymbol, memberHats, approverHats, beacon
+                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), result.executor);
+            result.participationToken = ModuleDeploymentLib.deployParticipationToken(
+                config, result.executor, tName, tSymbol, memberHats, approverHats, beacon
             );
         }
 
@@ -388,12 +402,13 @@ contract Deployer is Initializable {
             uint256[] memory creatorHats =
                 RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.taskCreatorRoles);
 
-            address beacon = _createBeacon(ModuleTypes.TASK_MANAGER_ID, executorAddr, params.autoUpgrade, address(0));
+            address beacon = _createBeacon(ModuleTypes.TASK_MANAGER_ID, result.executor, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
-                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
-            taskManager =
-                ModuleDeploymentLib.deployTaskManager(config, executorAddr, participationToken, creatorHats, beacon);
-            IParticipationToken(participationToken).setTaskManager(taskManager);
+                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), result.executor);
+            result.taskManager = ModuleDeploymentLib.deployTaskManager(
+                config, result.executor, result.participationToken, creatorHats, beacon
+            );
+            IParticipationToken(result.participationToken).setTaskManager(result.taskManager);
         }
 
         /* 9. EducationHub */
@@ -405,54 +420,70 @@ contract Deployer is Initializable {
             uint256[] memory memberHats =
                 RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.educationMemberRoles);
 
-            address beacon = _createBeacon(ModuleTypes.EDUCATION_HUB_ID, executorAddr, params.autoUpgrade, address(0));
+            address beacon = _createBeacon(ModuleTypes.EDUCATION_HUB_ID, result.executor, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
-                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
-            educationHub = ModuleDeploymentLib.deployEducationHub(
-                config, executorAddr, participationToken, creatorHats, memberHats, false, beacon
+                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), result.executor);
+            result.educationHub = ModuleDeploymentLib.deployEducationHub(
+                config, result.executor, result.participationToken, creatorHats, memberHats, false, beacon
             );
-            IParticipationToken(participationToken).setEducationHub(educationHub);
+            IParticipationToken(result.participationToken).setEducationHub(result.educationHub);
         }
 
         /* 10. PaymentManager */
         {
-            address beacon = _createBeacon(ModuleTypes.PAYMENT_MANAGER_ID, executorAddr, params.autoUpgrade, address(0));
+            address beacon = _createBeacon(ModuleTypes.PAYMENT_MANAGER_ID, result.executor, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
-                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
-            paymentManager =
-                ModuleDeploymentLib.deployPaymentManager(config, executorAddr, participationToken, beacon, false);
+                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), result.executor);
+            result.paymentManager =
+                ModuleDeploymentLib.deployPaymentManager(config, result.executor, result.participationToken, beacon, false);
+        }
+
+        /* 10.5. PaymasterHub */
+        {
+            // Deploy PaymasterHub with topHat as admin
+            result.paymasterHub = _deployPaymasterHub(params.orgId, topHatId);
+
+            // Set operator role if specified
+            if (params.roleAssignments.paymasterOperatorRoles.length > 0) {
+                uint256[] memory operatorHats =
+                    RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.paymasterOperatorRoles);
+                // Set first operator hat
+                if (operatorHats.length > 0) {
+                    PaymasterHub(payable(result.paymasterHub)).setOperatorHat(operatorHats[0]);
+                }
+            }
         }
 
         /* 11. HybridVoting governor */
         {
             // Update token address in voting classes if needed
             IHybridVotingInit.ClassConfig[] memory finalClasses = _updateClassesWithTokenAndHats(
-                params.votingClasses, participationToken, params.orgId, params.roleAssignments
+                params.votingClasses, result.participationToken, params.orgId, params.roleAssignments
             );
 
             // Get the role hat IDs for proposal creators
             uint256[] memory creatorHats =
                 RoleResolver.resolveRoleHats(l.orgRegistry, params.orgId, params.roleAssignments.proposalCreatorRoles);
 
-            address beacon = _createBeacon(ModuleTypes.HYBRID_VOTING_ID, executorAddr, params.autoUpgrade, address(0));
+            address beacon = _createBeacon(ModuleTypes.HYBRID_VOTING_ID, result.executor, params.autoUpgrade, address(0));
             ModuleDeploymentLib.DeployConfig memory config =
-                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), executorAddr);
-            hybridVoting = ModuleDeploymentLib.deployHybridVoting(
-                config, executorAddr, creatorHats, params.quorumPct, finalClasses, true, beacon
+                _getDeployConfig(params.orgId, params.autoUpgrade, address(0), result.executor);
+            result.hybridVoting = ModuleDeploymentLib.deployHybridVoting(
+                config, result.executor, creatorHats, params.quorumPct, finalClasses, true, beacon
             );
         }
 
         /* authorize QuickJoin to mint hats (before setting voting contract as caller) */
-        IExecutorAdmin(executorAddr).setHatMinterAuthorization(quickJoin, true);
+        IExecutorAdmin(result.executor).setHatMinterAuthorization(result.quickJoin, true);
 
         /* link executor to governor */
-        IExecutorAdmin(executorAddr).setCaller(hybridVoting);
+        IExecutorAdmin(result.executor).setCaller(result.hybridVoting);
 
         /* Transfer SwitchableBeacon ownership from deployer to executor */
-        SwitchableBeacon(execBeacon).transferOwnership(executorAddr);
+        SwitchableBeacon(execBeacon).transferOwnership(result.executor);
 
         /* renounce executor ownership - now only governed by voting */
-        OwnableUpgradeable(executorAddr).renounceOwnership();
+        OwnableUpgradeable(result.executor).renounceOwnership();
     }
 
     /*══════════════  UTILITIES  ═════════════=*/
