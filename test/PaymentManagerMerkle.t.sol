@@ -57,14 +57,7 @@ contract PaymentManagerMerkleTest is Test {
         uint256[] memory approverHats = new uint256[](1);
         approverHats[0] = approverHatId;
 
-        participationToken.initialize(
-            executor,
-            "Participation Token",
-            "PART",
-            address(hats),
-            memberHats,
-            approverHats
-        );
+        participationToken.initialize(executor, "Participation Token", "PART", address(hats), memberHats, approverHats);
 
         // Deploy payment manager
         paymentManager = new PaymentManager();
@@ -100,12 +93,7 @@ contract PaymentManagerMerkleTest is Test {
         vm.expectEmit(true, true, false, true);
         emit DistributionCreated(1, address(0), amount, checkpointBlock, merkleRoot);
 
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            amount,
-            merkleRoot,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), amount, merkleRoot, checkpointBlock);
 
         assertEq(distributionId, 1);
         assertEq(paymentManager.distributionCounter(), 1);
@@ -135,14 +123,10 @@ contract PaymentManagerMerkleTest is Test {
         vm.roll(block.number + 1);
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(paymentToken),
-            amount,
-            merkleRoot,
-            checkpointBlock
-        );
+        uint256 distributionId =
+            paymentManager.createDistribution(address(paymentToken), amount, merkleRoot, checkpointBlock);
 
-        (address payoutToken,,,,, ) = paymentManager.getDistribution(distributionId);
+        (address payoutToken,,,,,) = paymentManager.getDistribution(distributionId);
         assertEq(payoutToken, address(paymentToken));
     }
 
@@ -201,12 +185,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 merkleRoot = leaf;
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            aliceAmount,
-            merkleRoot,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), aliceAmount, merkleRoot, checkpointBlock);
 
         uint256 aliceBalBefore = alice.balance;
         bytes32[] memory proof = new bytes32[](0); // Empty proof for single leaf
@@ -219,7 +198,7 @@ contract PaymentManagerMerkleTest is Test {
         assertEq(alice.balance, aliceBalBefore + aliceAmount);
         assertTrue(paymentManager.hasClaimed(distributionId, alice));
 
-        (,, ,, uint256 totalClaimed, ) = paymentManager.getDistribution(distributionId);
+        (,,,, uint256 totalClaimed,) = paymentManager.getDistribution(distributionId);
         assertEq(totalClaimed, aliceAmount);
     }
 
@@ -241,12 +220,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 merkleRoot = _hashPair(node1, leafCharlie);
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            10 ether,
-            merkleRoot,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 10 ether, merkleRoot, checkpointBlock);
 
         // Alice claims with proof [bob, charlie]
         bytes32[] memory proofAlice = new bytes32[](2);
@@ -282,7 +256,7 @@ contract PaymentManagerMerkleTest is Test {
         assertTrue(paymentManager.hasClaimed(distributionId, bob));
         assertTrue(paymentManager.hasClaimed(distributionId, charlie));
 
-        (,, ,, uint256 totalClaimed, ) = paymentManager.getDistribution(distributionId);
+        (,,,, uint256 totalClaimed,) = paymentManager.getDistribution(distributionId);
         assertEq(totalClaimed, 10 ether);
     }
 
@@ -294,12 +268,8 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(alice, aliceAmount))));
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(paymentToken),
-            aliceAmount,
-            leaf,
-            checkpointBlock
-        );
+        uint256 distributionId =
+            paymentManager.createDistribution(address(paymentToken), aliceAmount, leaf, checkpointBlock);
 
         bytes32[] memory proof = new bytes32[](0);
 
@@ -316,12 +286,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(alice, 5 ether))));
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            5 ether,
-            leaf,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 5 ether, leaf, checkpointBlock);
 
         // Wrong amount
         bytes32[] memory proof = new bytes32[](0);
@@ -339,12 +304,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 merkleRoot = _hashPair(leafAlice, leafBob);
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            8 ether,
-            merkleRoot,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 8 ether, merkleRoot, checkpointBlock);
 
         // Alice tries to use wrong proof (empty instead of [bob])
         bytes32[] memory wrongProof = new bytes32[](0);
@@ -360,12 +320,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(alice, 5 ether))));
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            5 ether,
-            leaf,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 5 ether, leaf, checkpointBlock);
 
         bytes32[] memory proof = new bytes32[](0);
 
@@ -385,12 +340,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(alice, 5 ether))));
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            5 ether,
-            leaf,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 5 ether, leaf, checkpointBlock);
 
         // Alice opts out
         vm.prank(alice);
@@ -416,12 +366,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(alice, 5 ether))));
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            5 ether,
-            leaf,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 5 ether, leaf, checkpointBlock);
 
         // Fast forward and finalize
         vm.roll(block.number + 100000);
@@ -496,12 +441,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(alice, 5 ether))));
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            5 ether,
-            leaf,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 5 ether, leaf, checkpointBlock);
 
         // Alice claims everything
         bytes32[] memory proof = new bytes32[](0);
@@ -521,7 +461,7 @@ contract PaymentManagerMerkleTest is Test {
         // No unclaimed funds
         assertEq(executor.balance, executorBalBefore);
 
-        (,,,, , bool finalized) = paymentManager.getDistribution(distributionId);
+        (,,,,, bool finalized) = paymentManager.getDistribution(distributionId);
         assertTrue(finalized);
     }
 
@@ -535,12 +475,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 merkleRoot = _hashPair(leafAlice, leafBob);
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            10 ether,
-            merkleRoot,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 10 ether, merkleRoot, checkpointBlock);
 
         // Only alice claims
         bytes32[] memory proofAlice = new bytes32[](1);
@@ -569,12 +504,8 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 merkleRoot = _hashPair(leafAlice, leafBob);
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(paymentToken),
-            1000e18,
-            merkleRoot,
-            checkpointBlock
-        );
+        uint256 distributionId =
+            paymentManager.createDistribution(address(paymentToken), 1000e18, merkleRoot, checkpointBlock);
 
         // Fast forward without any claims
         vm.roll(checkpointBlock + 100001);
@@ -595,12 +526,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(alice, 5 ether))));
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            5 ether,
-            leaf,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 5 ether, leaf, checkpointBlock);
 
         // Try to finalize immediately
         vm.prank(executor);
@@ -615,12 +541,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(alice, 5 ether))));
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            5 ether,
-            leaf,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 5 ether, leaf, checkpointBlock);
 
         vm.roll(checkpointBlock + 100001);
 
@@ -640,12 +561,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(alice, 5 ether))));
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            5 ether,
-            leaf,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 5 ether, leaf, checkpointBlock);
 
         vm.roll(checkpointBlock + 100001);
 
@@ -676,12 +592,7 @@ contract PaymentManagerMerkleTest is Test {
         bytes32 merkleRoot = _hashPair(node1, leafCharlie);
 
         vm.prank(executor);
-        uint256 distributionId = paymentManager.createDistribution(
-            address(0),
-            10 ether,
-            merkleRoot,
-            checkpointBlock
-        );
+        uint256 distributionId = paymentManager.createDistribution(address(0), 10 ether, merkleRoot, checkpointBlock);
 
         // CRITICAL: Dave receives tokens AFTER checkpoint
         // In old system, this would cause IncompleteHoldersList revert
