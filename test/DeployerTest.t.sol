@@ -2060,7 +2060,76 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         paymentManager.pay{value: additionalPayment}();
         assertEq(pm.balance, paymentAmount + additionalPayment, "PaymentManager should have all ETH");
 
-        // Test 3: ETH distribution (covered in test/PaymentManagerMerkle.t.sol)
+        // Test 3: E2E merkle distribution with deployed org
+        // Take checkpoint of current token balances
+        uint256 checkpointBlock = block.number;
+
+        // Calculate distribution amounts based on token holdings
+        // Total supply: 600 ether, Distribution: 6 ether
+        // holder1 (100/600 = 1/6) -> 1 ether
+        // holder2 (200/600 = 2/6) -> 2 ether
+        // holder3 (300/600 = 3/6) -> 3 ether
+        uint256 holder1Amount = 1 ether;
+        uint256 holder2Amount = 2 ether;
+        uint256 holder3Amount = 3 ether;
+        uint256 distributionAmount = 6 ether;
+
+        // Build merkle tree (same logic as in PaymentManagerMerkle.t.sol)
+        bytes32 leaf1 = keccak256(bytes.concat(keccak256(abi.encode(holder1, holder1Amount))));
+        bytes32 leaf2 = keccak256(bytes.concat(keccak256(abi.encode(holder2, holder2Amount))));
+        bytes32 leaf3 = keccak256(bytes.concat(keccak256(abi.encode(holder3, holder3Amount))));
+
+        bytes32 node1 = _hashPair(leaf1, leaf2);
+        bytes32 merkleRoot = _hashPair(node1, leaf3);
+
+        // Advance block so checkpoint is in the past
+        vm.roll(block.number + 1);
+
+        // Create distribution (only executor can do this)
+        vm.prank(exec);
+        uint256 distributionId = paymentManager.createDistribution(
+            address(0), // ETH
+            distributionAmount,
+            merkleRoot,
+            checkpointBlock
+        );
+
+        assertEq(distributionId, 1, "First distribution should have ID 1");
+
+        // Holders claim their shares
+        // holder1 claims
+        bytes32[] memory proof1 = new bytes32[](2);
+        proof1[0] = leaf2;
+        proof1[1] = leaf3;
+
+        uint256 holder1BalBefore = holder1.balance;
+        vm.prank(holder1);
+        paymentManager.claimDistribution(distributionId, holder1Amount, proof1);
+        assertEq(holder1.balance - holder1BalBefore, holder1Amount, "holder1 should receive 1 ETH");
+
+        // holder2 claims
+        bytes32[] memory proof2 = new bytes32[](2);
+        proof2[0] = leaf1;
+        proof2[1] = leaf3;
+
+        uint256 holder2BalBefore = holder2.balance;
+        vm.prank(holder2);
+        paymentManager.claimDistribution(distributionId, holder2Amount, proof2);
+        assertEq(holder2.balance - holder2BalBefore, holder2Amount, "holder2 should receive 2 ETH");
+
+        // holder3 claims
+        bytes32[] memory proof3 = new bytes32[](1);
+        proof3[0] = node1;
+
+        uint256 holder3BalBefore = holder3.balance;
+        vm.prank(holder3);
+        paymentManager.claimDistribution(distributionId, holder3Amount, proof3);
+        assertEq(holder3.balance - holder3BalBefore, holder3Amount, "holder3 should receive 3 ETH");
+
+        // Verify all claimed
+        assertTrue(paymentManager.hasClaimed(distributionId, holder1), "holder1 should have claimed");
+        assertTrue(paymentManager.hasClaimed(distributionId, holder2), "holder2 should have claimed");
+        assertTrue(paymentManager.hasClaimed(distributionId, holder3), "holder3 should have claimed");
 
         // Test 4: ERC20 payment and distribution
         MockERC20 paymentToken = new MockERC20("Payment Token", "PAY");
@@ -2091,5 +2160,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Test 9: Revenue share token is correctly set
         assertEq(paymentManager.revenueShareToken(), token, "Revenue share token should be the participation token");
+    }
+
+    // Helper function for merkle tree construction
+    function _hashPair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+        return a < b ? keccak256(abi.encodePacked(a, b)) : keccak256(abi.encodePacked(b, a));
     }
 }
