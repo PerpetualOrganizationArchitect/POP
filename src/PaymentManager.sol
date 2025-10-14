@@ -28,13 +28,13 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
 
     /// @notice Merkle-based distribution data
     struct Distribution {
-        address payoutToken;        // Token to distribute (address(0) = ETH)
-        uint256 totalAmount;        // Total amount to distribute
-        uint256 checkpointBlock;    // Block number for balance snapshot
-        bytes32 merkleRoot;         // Root of merkle tree with (address, amount) pairs
-        uint256 totalClaimed;       // Running total of claims
-        bool finalized;             // Whether distribution is closed
-        mapping(address => bool) claimed;  // Track who has claimed
+        address payoutToken; // Token to distribute (address(0) = ETH)
+        uint256 totalAmount; // Total amount to distribute
+        uint256 checkpointBlock; // Block number for balance snapshot
+        bytes32 merkleRoot; // Root of merkle tree with (address, amount) pairs
+        uint256 totalClaimed; // Running total of claims
+        bool finalized; // Whether distribution is closed
+        mapping(address => bool) claimed; // Track who has claimed
     }
 
     /// @custom:storage-location erc7201:poa.paymentmanager.storage
@@ -119,12 +119,13 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
      * @notice Creates a new merkle-based distribution
      * @dev Only callable by owner (Executor). Checkpoint must be in the past.
      */
-    function createDistribution(
-        address payoutToken,
-        uint256 amount,
-        bytes32 merkleRoot,
-        uint256 checkpointBlock
-    ) external override onlyOwner nonReentrant returns (uint256 distributionId) {
+    function createDistribution(address payoutToken, uint256 amount, bytes32 merkleRoot, uint256 checkpointBlock)
+        external
+        override
+        onlyOwner
+        nonReentrant
+        returns (uint256 distributionId)
+    {
         if (amount == 0) revert ZeroAmount();
         if (merkleRoot == bytes32(0)) revert InvalidMerkleRoot();
         if (checkpointBlock >= block.number) revert InvalidCheckpoint();
@@ -154,11 +155,11 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
      * @notice Claims a distribution for the caller
      * @dev Verifies merkle proof and transfers funds
      */
-    function claimDistribution(
-        uint256 distributionId,
-        uint256 claimAmount,
-        bytes32[] calldata merkleProof
-    ) external override nonReentrant {
+    function claimDistribution(uint256 distributionId, uint256 claimAmount, bytes32[] calldata merkleProof)
+        external
+        override
+        nonReentrant
+    {
         Layout storage s = _layout();
         Distribution storage dist = s.distributions[distributionId];
 
@@ -193,11 +194,11 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
      * @notice Claims multiple distributions in a single transaction
      * @dev Gas optimization for users with multiple pending claims
      */
-    function claimMultiple(
-        uint256[] calldata distributionIds,
-        uint256[] calldata amounts,
-        bytes32[][] calldata proofs
-    ) external override nonReentrant {
+    function claimMultiple(uint256[] calldata distributionIds, uint256[] calldata amounts, bytes32[][] calldata proofs)
+        external
+        override
+        nonReentrant
+    {
         if (distributionIds.length != amounts.length || distributionIds.length != proofs.length) {
             revert ArrayLengthMismatch();
         }
@@ -243,11 +244,7 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
      * @notice Finalizes a distribution and returns unclaimed funds
      * @dev Only callable by owner after minimum claim period
      */
-    function finalizeDistribution(uint256 distributionId, uint256 minClaimPeriodBlocks)
-        external
-        override
-        onlyOwner
-    {
+    function finalizeDistribution(uint256 distributionId, uint256 minClaimPeriodBlocks) external override onlyOwner {
         Layout storage s = _layout();
         Distribution storage dist = s.distributions[distributionId];
 
@@ -272,7 +269,6 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
 
         emit DistributionFinalized(distributionId, unclaimed);
     }
-
 
     /*──────────────────────────────────────────────────────────────────────────
                                     OPT-OUT FUNCTIONS
@@ -340,12 +336,7 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         Layout storage s = _layout();
         Distribution storage dist = s.distributions[distributionId];
         return (
-            dist.payoutToken,
-            dist.totalAmount,
-            dist.checkpointBlock,
-            dist.merkleRoot,
-            dist.totalClaimed,
-            dist.finalized
+            dist.payoutToken, dist.totalAmount, dist.checkpointBlock, dist.merkleRoot, dist.totalClaimed, dist.finalized
         );
     }
 
