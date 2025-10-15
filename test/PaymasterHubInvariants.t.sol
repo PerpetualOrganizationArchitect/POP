@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
+import {PaymasterHubLens, Config, Budget, Rule, FeeCaps, Bounty} from "../src/PaymasterHubLens.sol";
 import {PackedUserOperation, UserOpLib} from "../src/interfaces/PackedUserOperation.sol";
 import {IPaymaster} from "../src/interfaces/IPaymaster.sol";
 import "./PaymasterHub.t.sol";
@@ -14,6 +15,7 @@ import "./PaymasterHub.t.sol";
  */
 contract PaymasterHubInvariantsTest is Test {
     PaymasterHub public hub;
+    PaymasterHubLens public lens;
     MockEntryPoint public entryPoint;
     MockHats public hats;
     MockAccount public account;
@@ -35,6 +37,7 @@ contract PaymasterHubInvariantsTest is Test {
         hats = new MockHats();
         account = new MockAccount();
         hub = new PaymasterHub(address(entryPoint), address(hats), ADMIN_HAT);
+        lens = new PaymasterHubLens(address(hub));
 
         hats.mintHat(ADMIN_HAT, admin);
         hats.mintHat(USER_HAT, address(account));
@@ -64,7 +67,7 @@ contract PaymasterHubInvariantsTest is Test {
         bytes32[] memory subjectKeys = _getKnownSubjectKeys();
 
         for (uint256 i = 0; i < subjectKeys.length; i++) {
-            PaymasterHub.Budget memory budget = hub.budgetOf(subjectKeys[i]);
+            Budget memory budget = lens.budgetOf(subjectKeys[i]);
             assertLe(budget.usedInEpoch, budget.capPerEpoch, "Usage should never exceed cap");
         }
     }
@@ -109,7 +112,7 @@ contract PaymasterHubInvariantsTest is Test {
                 totalUsed += actualCost;
 
                 // Verify invariant
-                PaymasterHub.Budget memory budget = hub.budgetOf(subjectKey);
+                Budget memory budget = lens.budgetOf(subjectKey);
                 assertEq(budget.usedInEpoch, totalUsed, "Usage tracking mismatch");
                 assertLe(budget.usedInEpoch, budget.capPerEpoch, "Usage exceeds cap");
             } else {
@@ -211,7 +214,7 @@ contract PaymasterHubInvariantsTest is Test {
         vm.stopPrank();
 
         uint256 startTime = block.timestamp;
-        PaymasterHub.Budget memory budget1 = hub.budgetOf(subjectKey);
+        Budget memory budget1 = lens.budgetOf(subjectKey);
         uint32 initialEpochStart = budget1.epochStart;
 
         // Use some budget
@@ -221,13 +224,13 @@ contract PaymasterHubInvariantsTest is Test {
         vm.warp(startTime + timeJump1);
 
         // Check epoch consistency
-        PaymasterHub.Budget memory budget2 = hub.budgetOf(subjectKey);
+        Budget memory budget2 = lens.budgetOf(subjectKey);
         uint256 epochsPassed1 = timeJump1 / epochLen;
 
         if (epochsPassed1 > 0) {
             // Should have rolled
             _usebudget(subjectKey, 0.1 ether); // Trigger roll
-            budget2 = hub.budgetOf(subjectKey);
+            budget2 = lens.budgetOf(subjectKey);
             assertEq(
                 budget2.epochStart,
                 initialEpochStart + (uint32(epochsPassed1) * epochLen),
@@ -247,7 +250,7 @@ contract PaymasterHubInvariantsTest is Test {
         uint256 totalEpochsPassed = totalTimePassed / epochLen;
 
         _usebudget(subjectKey, 0.05 ether); // Trigger potential roll
-        PaymasterHub.Budget memory budget3 = hub.budgetOf(subjectKey);
+        Budget memory budget3 = lens.budgetOf(subjectKey);
 
         assertEq(
             budget3.epochStart,
