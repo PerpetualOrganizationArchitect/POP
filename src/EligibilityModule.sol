@@ -308,15 +308,16 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         Layout storage l = _layout();
 
         // Create the new hat
-        newHatId = l.hats.createHat(
-            params.parentHatId,
-            params.details,
-            params.maxSupply,
-            address(this),
-            l.toggleModule,
-            params._mutable,
-            params.imageURI
-        );
+        newHatId = l.hats
+            .createHat(
+                params.parentHatId,
+                params.details,
+                params.maxSupply,
+                address(this),
+                l.toggleModule,
+                params._mutable,
+                params.imageURI
+            );
 
         // Set default eligibility rules
         l.defaultRules[newHatId] = WearerRules(_packWearerFlags(params.defaultEligible, params.defaultStanding));
@@ -422,9 +423,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         Layout storage l = _layout();
         bool enabled = quorum > 0;
         l.vouchConfigs[hatId] = VouchConfig({
-            quorum: quorum,
-            membershipHatId: membershipHatId,
-            flags: _packVouchFlags(enabled, combineWithHierarchy)
+            quorum: quorum, membershipHatId: membershipHatId, flags: _packVouchFlags(enabled, combineWithHierarchy)
         });
 
         emit VouchConfigSet(hatId, quorum, membershipHatId, enabled, combineWithHierarchy);

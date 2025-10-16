@@ -52,11 +52,7 @@ contract MockHats is IHats {
         return true;
     }
 
-    function sameTippyTopHatDomain(uint32 _topHatDomain, uint256 _newAdminHat)
-        external
-        pure
-        returns (bool sameDomain)
-    {
+    function sameTippyTopHatDomain(uint32 _topHatDomain, uint256 _newAdminHat) external pure returns (bool sameDomain) {
         return true;
     }
 

@@ -47,8 +47,13 @@ interface IExecutorInit {
 }
 
 interface IQuickJoinInit {
-    function initialize(address executor, address hats, address registry, address master, uint256[] calldata memberHats)
-        external;
+    function initialize(
+        address executor,
+        address hats,
+        address registry,
+        address master,
+        uint256[] calldata memberHats
+    ) external;
 }
 
 interface IParticipationTokenInit {
@@ -125,18 +130,19 @@ library ModuleDeploymentLib {
         // Use registrar if provided (for factory pattern), otherwise direct registration
         if (config.registrar != address(0)) {
             // Call registrar's registerContract function (used by factories)
-            (bool success, bytes memory returnData) = config.registrar.call(
-                abi.encodeWithSignature(
-                    "registerContract(bytes32,bytes32,address,address,bool,address,bool)",
-                    config.orgId,
-                    typeId,
-                    proxy,
-                    beacon,
-                    config.autoUpgrade,
-                    config.moduleOwner,
-                    lastRegister
-                )
-            );
+            (bool success, bytes memory returnData) = config.registrar
+                .call(
+                    abi.encodeWithSignature(
+                        "registerContract(bytes32,bytes32,address,address,bool,address,bool)",
+                        config.orgId,
+                        typeId,
+                        proxy,
+                        beacon,
+                        config.autoUpgrade,
+                        config.moduleOwner,
+                        lastRegister
+                    )
+                );
             if (!success) {
                 // Bubble up the revert reason
                 if (returnData.length > 0) {
@@ -149,9 +155,10 @@ library ModuleDeploymentLib {
             }
         } else {
             // Direct registration (backwards compatible)
-            config.orgRegistry.registerOrgContract(
-                config.orgId, typeId, proxy, beacon, config.autoUpgrade, config.moduleOwner, lastRegister
-            );
+            config.orgRegistry
+                .registerOrgContract(
+                    config.orgId, typeId, proxy, beacon, config.autoUpgrade, config.moduleOwner, lastRegister
+                );
         }
 
         // Now safely initialize the proxy after registration is complete
@@ -224,8 +231,9 @@ library ModuleDeploymentLib {
         uint256[] memory creatorHats,
         address beacon
     ) internal returns (address tmProxy) {
-        bytes memory init =
-            abi.encodeWithSelector(ITaskManagerInit.initialize.selector, token, config.hats, creatorHats, executorAddr);
+        bytes memory init = abi.encodeWithSelector(
+            ITaskManagerInit.initialize.selector, token, config.hats, creatorHats, executorAddr
+        );
         tmProxy = deployCore(config, ModuleTypes.TASK_MANAGER_ID, init, false, beacon);
     }
 
@@ -244,12 +252,15 @@ library ModuleDeploymentLib {
         ehProxy = deployCore(config, ModuleTypes.EDUCATION_HUB_ID, init, lastRegister, beacon);
     }
 
-    function deployEligibilityModule(DeployConfig memory config, address deployer, address toggleModule, address beacon)
-        internal
-        returns (address emProxy)
-    {
-        bytes memory init =
-            abi.encodeWithSelector(IEligibilityModuleInit.initialize.selector, deployer, config.hats, toggleModule);
+    function deployEligibilityModule(
+        DeployConfig memory config,
+        address deployer,
+        address toggleModule,
+        address beacon
+    ) internal returns (address emProxy) {
+        bytes memory init = abi.encodeWithSelector(
+            IEligibilityModuleInit.initialize.selector, deployer, config.hats, toggleModule
+        );
 
         emProxy = deployCore(config, ModuleTypes.ELIGIBILITY_MODULE_ID, init, false, beacon);
     }

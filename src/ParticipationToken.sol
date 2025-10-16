@@ -79,7 +79,9 @@ contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyG
         uint256[] calldata initialMemberHats,
         uint256[] calldata initialApproverHats
     ) external initializer {
-        if (hatsAddr == address(0) || executor_ == address(0)) revert InvalidAddress();
+        if (hatsAddr == address(0) || executor_ == address(0)) {
+            revert InvalidAddress();
+        }
 
         __ERC20_init(name_, symbol_);
         __ERC20Votes_init();
