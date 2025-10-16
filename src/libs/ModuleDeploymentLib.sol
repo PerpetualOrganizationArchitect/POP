@@ -106,6 +106,7 @@ library ModuleDeploymentLib {
         address moduleOwner;
         bool autoUpgrade;
         address customImpl;
+        address registrar; // Optional: if set, use this for registration instead of orgRegistry owner
     }
 
     function deployCore(
@@ -121,9 +122,37 @@ library ModuleDeploymentLib {
         proxy = address(new BeaconProxy(beacon, ""));
 
         // Register in OrgRegistry BEFORE initialization
-        config.orgRegistry.registerOrgContract(
-            config.orgId, typeId, proxy, beacon, config.autoUpgrade, config.moduleOwner, lastRegister
-        );
+        // Use registrar if provided (for factory pattern), otherwise direct registration
+        if (config.registrar != address(0)) {
+            // Call registrar's registerContract function (used by factories)
+            (bool success, bytes memory returnData) = config.registrar.call(
+                abi.encodeWithSignature(
+                    "registerContract(bytes32,bytes32,address,address,bool,address,bool)",
+                    config.orgId,
+                    typeId,
+                    proxy,
+                    beacon,
+                    config.autoUpgrade,
+                    config.moduleOwner,
+                    lastRegister
+                )
+            );
+            if (!success) {
+                // Bubble up the revert reason
+                if (returnData.length > 0) {
+                    assembly {
+                        revert(add(32, returnData), mload(returnData))
+                    }
+                } else {
+                    revert("Registration failed");
+                }
+            }
+        } else {
+            // Direct registration (backwards compatible)
+            config.orgRegistry.registerOrgContract(
+                config.orgId, typeId, proxy, beacon, config.autoUpgrade, config.moduleOwner, lastRegister
+            );
+        }
 
         // Now safely initialize the proxy after registration is complete
         (bool success, bytes memory returnData) = proxy.call(initData);
