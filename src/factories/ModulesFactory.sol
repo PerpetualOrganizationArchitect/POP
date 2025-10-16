@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {SwitchableBeacon} from "../SwitchableBeacon.sol";
 import "../OrgRegistry.sol";
 import {ModuleDeploymentLib, IHybridVotingInit} from "../libs/ModuleDeploymentLib.sol";
+import {BeaconDeploymentLib} from "../libs/BeaconDeploymentLib.sol";
 import {ModuleTypes} from "../libs/ModuleTypes.sol";
 import {RoleResolver} from "../libs/RoleResolver.sol";
 import {IPoaManager} from "../libs/ModuleDeploymentLib.sol";
@@ -74,7 +75,7 @@ contract ModulesFactory {
                 OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.taskCreatorRoles
             );
 
-            address beacon = _createBeacon(
+            address beacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.TASK_MANAGER_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
             );
 
@@ -105,7 +106,7 @@ contract ModulesFactory {
                 OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.educationMemberRoles
             );
 
-            address beacon = _createBeacon(
+            address beacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.EDUCATION_HUB_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
             );
 
@@ -127,7 +128,7 @@ contract ModulesFactory {
 
         /* 3. Deploy PaymentManager */
         {
-            address beacon = _createBeacon(
+            address beacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.PAYMENT_MANAGER_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
             );
 
@@ -163,7 +164,7 @@ contract ModulesFactory {
                 OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.proposalCreatorRoles
             );
 
-            address beacon = _createBeacon(
+            address beacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.HYBRID_VOTING_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
             );
 
@@ -214,35 +215,5 @@ contract ModulesFactory {
             }
         }
         return classes;
-    }
-
-    /**
-     * @notice Creates a SwitchableBeacon for a module type
-     * @dev Returns a beacon address that points to the implementation
-     */
-    function _createBeacon(
-        bytes32 typeId,
-        address poaManager,
-        address moduleOwner,
-        bool autoUpgrade,
-        address customImpl
-    ) internal returns (address beacon) {
-        IPoaManager poa = IPoaManager(poaManager);
-
-        address poaBeacon = poa.getBeaconById(typeId);
-        if (poaBeacon == address(0)) revert UnsupportedType();
-
-        address initImpl = address(0);
-        SwitchableBeacon.Mode beaconMode = SwitchableBeacon.Mode.Mirror;
-
-        if (!autoUpgrade) {
-            // For static mode, get the current implementation
-            initImpl = (customImpl == address(0)) ? poa.getCurrentImplementationById(typeId) : customImpl;
-            if (initImpl == address(0)) revert UnsupportedType();
-            beaconMode = SwitchableBeacon.Mode.Static;
-        }
-
-        // Create SwitchableBeacon with appropriate configuration
-        beacon = address(new SwitchableBeacon(moduleOwner, poaBeacon, initImpl, beaconMode));
     }
 }
