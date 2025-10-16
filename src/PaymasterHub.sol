@@ -126,7 +126,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         0x31c1f70de237698620907d8a0468bf5356fb50f4719bfcd111876a981cbccb5c;
 
     // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.rules")) - 1))
-    bytes32 private constant RULES_STORAGE_LOCATION = 0xbe2280b3d3247ad137be1f9de7cbb32fc261644cda199a3a24b0a06528ef326f;
+    bytes32 private constant RULES_STORAGE_LOCATION =
+        0xbe2280b3d3247ad137be1f9de7cbb32fc261644cda199a3a24b0a06528ef326f;
 
     // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.budgets")) - 1))
     bytes32 private constant BUDGETS_STORAGE_LOCATION =
@@ -473,119 +474,50 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         emit UserOpPosted(opHash, msg.sender);
     }
 
-    // ============ View Functions ============
+    // ============ Storage Getters (for Lens) ============
 
-    function budgetOf(bytes32 subjectKey) external view returns (Budget memory) {
-        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage();
-        Budget storage budget = budgets[subjectKey];
-
-        // Calculate current epoch if needed
-        uint256 currentTime = block.timestamp;
-        if (currentTime >= budget.epochStart + budget.epochLen && budget.epochLen > 0) {
-            uint32 epochsPassed = uint32((currentTime - budget.epochStart) / budget.epochLen);
-            return Budget({
-                capPerEpoch: budget.capPerEpoch,
-                usedInEpoch: 0, // Reset after epoch roll
-                epochLen: budget.epochLen,
-                epochStart: budget.epochStart + (epochsPassed * budget.epochLen)
-            });
-        }
-
-        return budget;
-    }
-
-    function ruleOf(address target, bytes4 selector) external view returns (Rule memory) {
-        return _getRulesStorage()[target][selector];
-    }
-
-    function remaining(bytes32 subjectKey) external view returns (uint256) {
-        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage();
-        Budget storage budget = budgets[subjectKey];
-
-        // Check if epoch needs rolling
-        if (block.timestamp >= budget.epochStart + budget.epochLen && budget.epochLen > 0) {
-            return budget.capPerEpoch; // Full budget available after epoch roll
-        }
-
-        return budget.capPerEpoch > budget.usedInEpoch ? budget.capPerEpoch - budget.usedInEpoch : 0;
-    }
-
-    function isAllowed(address target, bytes4 selector) external view returns (bool) {
-        return _getRulesStorage()[target][selector].allowed;
-    }
-
-    function config() external view returns (Config memory) {
+    /**
+     * @notice Get the current configuration
+     * @return The Config struct
+     */
+    function getConfig() external view returns (Config memory) {
         return _getConfigStorage();
     }
 
-    function feeCaps() external view returns (FeeCaps memory) {
-        return _getFeeCapsStorage();
-    }
-
-    function bountyInfo() external view returns (Bounty memory) {
-        (Bounty storage bounty,) = _getBountyStorage();
-        return bounty;
-    }
-
-    function entryPointDeposit() external view returns (uint256) {
-        return IEntryPoint(ENTRY_POINT).balanceOf(address(this));
-    }
-
-    function bountyBalance() external view returns (uint256) {
-        return address(this).balance;
+    /**
+     * @notice Get budget for a specific subject
+     * @param key The subject key (user, role, or org)
+     * @return The Budget struct
+     */
+    function getBudget(bytes32 key) external view returns (Budget memory) {
+        return _getBudgetsStorage()[key];
     }
 
     /**
-     * @notice Check if a UserOperation would be valid without state changes
+     * @notice Get rule for a specific target and selector
+     * @param target The target contract address
+     * @param selector The function selector
+     * @return The Rule struct
      */
-    function wouldValidate(PackedUserOperation calldata userOp, uint256 maxCost)
-        external
-        view
-        returns (bool valid, string memory reason)
-    {
-        // Check pause state
-        if (_getConfigStorage().paused) return (false, "Paused");
+    function getRule(address target, bytes4 selector) external view returns (Rule memory) {
+        return _getRulesStorage()[target][selector];
+    }
 
-        // Decode paymasterAndData
-        (uint8 version, uint8 subjectType, bytes20 subjectId, uint32 ruleId,) =
-            _decodePaymasterData(userOp.paymasterAndData);
+    /**
+     * @notice Get the current fee caps
+     * @return The FeeCaps struct
+     */
+    function getFeeCaps() external view returns (FeeCaps memory) {
+        return _getFeeCapsStorage();
+    }
 
-        if (version != PAYMASTER_DATA_VERSION) return (false, "InvalidVersion");
-
-        // Check subject eligibility
-        bytes32 subjectKey;
-        if (subjectType == SUBJECT_TYPE_ACCOUNT) {
-            if (address(subjectId) != userOp.sender) return (false, "Ineligible");
-            subjectKey = keccak256(abi.encodePacked(subjectType, subjectId));
-        } else if (subjectType == SUBJECT_TYPE_HAT) {
-            uint256 hatId = uint256(bytes32(subjectId));
-            if (!IHats(_getConfigStorage().hats).isWearerOfHat(userOp.sender, hatId)) {
-                return (false, "Ineligible");
-            }
-            subjectKey = keccak256(abi.encodePacked(subjectType, subjectId));
-        } else {
-            return (false, "InvalidSubjectType");
-        }
-
-        // Check rules
-        (address target, bytes4 selector) = _extractTargetSelector(userOp, ruleId);
-        if (!_getRulesStorage()[target][selector].allowed) {
-            return (false, "RuleDenied");
-        }
-
-        // Check budget
-        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage();
-        Budget storage budget = budgets[subjectKey];
-        uint256 currentTime = block.timestamp;
-        uint128 available = budget.capPerEpoch;
-
-        if (currentTime < budget.epochStart + budget.epochLen) {
-            available = budget.capPerEpoch > budget.usedInEpoch ? budget.capPerEpoch - budget.usedInEpoch : 0;
-        }
-
-        if (maxCost > available) return (false, "BudgetExceeded");
-
-        return (true, "Valid");
+    /**
+     * @notice Get the bounty configuration
+     * @return The Bounty struct
+     */
+    function getBountyConfig() external view returns (Bounty memory) {
+        (Bounty storage b,) = _getBountyStorage();
+        return b;
     }
 
     // ============ Storage Accessors ============

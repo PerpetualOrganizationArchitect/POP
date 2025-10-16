@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
+import {PaymasterHubLens, Config, Budget, Rule, FeeCaps, Bounty} from "../src/PaymasterHubLens.sol";
 import {IPaymaster} from "../src/interfaces/IPaymaster.sol";
 import {IEntryPoint} from "../src/interfaces/IEntryPoint.sol";
 import {PackedUserOperation, UserOpLib} from "../src/interfaces/PackedUserOperation.sol";
@@ -295,6 +296,7 @@ contract MockAccount {
 
 contract PaymasterHubTest is Test {
     PaymasterHub public hub;
+    PaymasterHubLens public lens;
     MockEntryPoint public entryPoint;
     MockHats public hats;
     MockAccount public account;
@@ -324,6 +326,9 @@ contract PaymasterHubTest is Test {
         // Deploy PaymasterHub
         hub = new PaymasterHub(address(entryPoint), address(hats), ADMIN_HAT);
 
+        // Deploy PaymasterHubLens
+        lens = new PaymasterHubLens(address(hub));
+
         // Setup hats
         hats.mintHat(ADMIN_HAT, admin);
         hats.mintHat(USER_HAT, user);
@@ -335,7 +340,7 @@ contract PaymasterHubTest is Test {
     }
 
     function testInitialization() public {
-        PaymasterHub.Config memory config = hub.config();
+        Config memory config = lens.config();
         assertEq(hub.ENTRY_POINT(), address(entryPoint));
         assertEq(config.hats, address(hats));
         assertEq(config.adminHatId, ADMIN_HAT);
@@ -353,7 +358,7 @@ contract PaymasterHubTest is Test {
         vm.prank(admin);
         hub.setPause(true);
 
-        PaymasterHub.Config memory config = hub.config();
+        Config memory config = lens.config();
         assertTrue(config.paused);
     }
 
@@ -366,7 +371,7 @@ contract PaymasterHubTest is Test {
         emit RuleSet(target, selector, true, 100000);
         hub.setRule(target, selector, true, 100000);
 
-        PaymasterHub.Rule memory rule = hub.ruleOf(target, selector);
+        Rule memory rule = lens.ruleOf(target, selector);
         assertTrue(rule.allowed);
         assertEq(rule.maxCallGasHint, 100000);
     }
@@ -381,7 +386,7 @@ contract PaymasterHubTest is Test {
         emit BudgetSet(subjectKey, cap, epochLen, uint32(block.timestamp));
         hub.setBudget(subjectKey, cap, epochLen);
 
-        PaymasterHub.Budget memory budget = hub.budgetOf(subjectKey);
+        Budget memory budget = lens.budgetOf(subjectKey);
         assertEq(budget.capPerEpoch, cap);
         assertEq(budget.epochLen, epochLen);
         assertEq(budget.epochStart, uint32(block.timestamp));
@@ -516,7 +521,7 @@ contract PaymasterHubTest is Test {
         hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, actualGasCost);
 
         // Check budget was updated
-        PaymasterHub.Budget memory budget = hub.budgetOf(subjectKey);
+        Budget memory budget = lens.budgetOf(subjectKey);
         assertEq(budget.usedInEpoch, actualGasCost);
     }
 
@@ -570,7 +575,7 @@ contract PaymasterHubTest is Test {
         vm.prank(address(entryPoint));
         hub.postOp(IPaymaster.PostOpMode.opSucceeded, context1, 0.5 ether);
 
-        PaymasterHub.Budget memory budget1 = hub.budgetOf(subjectKey);
+        Budget memory budget1 = lens.budgetOf(subjectKey);
         assertEq(budget1.usedInEpoch, 0.5 ether);
 
         // Move to next epoch
@@ -583,7 +588,7 @@ contract PaymasterHubTest is Test {
         vm.prank(address(entryPoint));
         hub.postOp(IPaymaster.PostOpMode.opSucceeded, context2, 0.3 ether);
 
-        PaymasterHub.Budget memory budget2 = hub.budgetOf(subjectKey);
+        Budget memory budget2 = lens.budgetOf(subjectKey);
         assertEq(budget2.usedInEpoch, 0.3 ether); // Reset after epoch roll
         assertTrue(budget2.epochStart > budget1.epochStart);
     }
@@ -800,8 +805,8 @@ contract PaymasterHubTest is Test {
         vm.warp(block.timestamp + timeJump);
 
         // Check if we can use budget again
-        PaymasterHub.Budget memory budget = hub.budgetOf(subjectKey);
-        uint256 remaining = hub.remaining(subjectKey);
+        Budget memory budget = lens.budgetOf(subjectKey);
+        uint256 remaining = lens.remaining(subjectKey);
 
         if (timeJump >= epochLen) {
             // Should have reset

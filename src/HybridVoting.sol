@@ -27,7 +27,6 @@ contract HybridVoting is Initializable {
     enum ClassStrategy {
         DIRECT, // 1 person → 100 raw points
         ERC20_BAL // balance (or sqrt) scaled
-
     }
 
     struct ClassConfig {

@@ -70,8 +70,7 @@ contract TaskManagerLens {
             (
                 bytes32 projectId,
                 uint96 payout,
-                address claimer,
-                , // bountyPayout
+                address claimer,, // bountyPayout
                 bool requiresApplication,
                 Status status,
                 // bountyToken

@@ -15,6 +15,7 @@ contract ToggleModule is Initializable {
 
     error NotToggleAdmin();
     error ZeroAddress();
+
     /*═════════════════════════════════════ ERC-7201 STORAGE ═════════════════════════════════════*/
 
     /// @custom:storage-location erc7201:poa.togglemodule.storage

@@ -7,8 +7,9 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {Initializable} from "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {OwnableUpgradeable} from "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
-import {ReentrancyGuardUpgradeable} from
-    "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import {
+    ReentrancyGuardUpgradeable
+} from "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 /**
  * @title PaymentManager
@@ -335,9 +336,15 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
     {
         Layout storage s = _layout();
         Distribution storage dist = s.distributions[distributionId];
-        return (
-            dist.payoutToken, dist.totalAmount, dist.checkpointBlock, dist.merkleRoot, dist.totalClaimed, dist.finalized
-        );
+        return
+            (
+                dist.payoutToken,
+                dist.totalAmount,
+                dist.checkpointBlock,
+                dist.merkleRoot,
+                dist.totalClaimed,
+                dist.finalized
+            );
     }
 
     /**

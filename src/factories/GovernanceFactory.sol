@@ -1,0 +1,335 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
+import {SwitchableBeacon} from "../SwitchableBeacon.sol";
+import "../OrgRegistry.sol";
+import {ModuleDeploymentLib, IHybridVotingInit} from "../libs/ModuleDeploymentLib.sol";
+import {BeaconDeploymentLib} from "../libs/BeaconDeploymentLib.sol";
+import {ModuleTypes} from "../libs/ModuleTypes.sol";
+import {RoleResolver} from "../libs/RoleResolver.sol";
+import {IPoaManager} from "../libs/ModuleDeploymentLib.sol";
+import {IEligibilityModule, IToggleModule} from "../interfaces/IHatsModules.sol";
+
+/*──────────────────── HatsTreeSetup interface ────────────────────*/
+interface IHatsTreeSetup {
+    struct SetupResult {
+        uint256 topHatId;
+        uint256[] roleHatIds;
+        address eligibilityModule;
+        address toggleModule;
+    }
+
+    struct SetupParams {
+        IHats hats;
+        OrgRegistry orgRegistry;
+        bytes32 orgId;
+        address eligibilityModule;
+        address toggleModule;
+        address deployer;
+        address executor;
+        string orgName;
+        string[] roleNames;
+        string[] roleImages;
+        bool[] roleCanVote;
+    }
+
+    function setupHatsTree(SetupParams memory params) external returns (SetupResult memory);
+}
+
+/*────────────────────────────  Errors  ───────────────────────────────*/
+error InvalidAddress();
+error UnsupportedType();
+
+/**
+ * @title GovernanceFactory
+ * @notice Factory contract for deploying governance infrastructure (Executor, Hats modules)
+ * @dev Deploys BeaconProxy instances, NOT implementation contracts
+ */
+contract GovernanceFactory {
+    /*──────────────────── Governance Deployment Params ────────────────────*/
+    struct GovernanceParams {
+        bytes32 orgId;
+        string orgName;
+        address poaManager;
+        address orgRegistry;
+        address hats;
+        address hatsTreeSetup;
+        address deployer; // OrgDeployer address for registration callbacks
+        address participationToken; // Token for HybridVoting
+        bool autoUpgrade;
+        uint8 hybridQuorumPct; // Quorum for HybridVoting
+        uint8 ddQuorumPct; // Quorum for DirectDemocracyVoting
+        IHybridVotingInit.ClassConfig[] hybridClasses; // Voting class configuration
+        uint256[] hybridProposalCreatorRoles; // Roles that can create proposals in HybridVoting
+        uint256[] ddVotingRoles; // Roles that can vote in DirectDemocracyVoting
+        uint256[] ddCreatorRoles; // Roles that can create polls in DirectDemocracyVoting
+        address[] ddInitialTargets; // Allowed execution targets for DirectDemocracyVoting
+        string[] roleNames;
+        string[] roleImages;
+        bool[] roleCanVote;
+    }
+
+    /*──────────────────── Governance Deployment Result ────────────────────*/
+    struct GovernanceResult {
+        address executor;
+        address eligibilityModule;
+        address toggleModule;
+        address hybridVoting; // Governance mechanism
+        address directDemocracyVoting; // Polling mechanism
+        uint256 topHatId;
+        uint256[] roleHatIds;
+    }
+
+    /*══════════════  INFRASTRUCTURE DEPLOYMENT  ═════════════=*/
+
+    /**
+     * @notice Deploys governance infrastructure (Executor, Hats modules, Hats tree)
+     * @dev Called BEFORE AccessFactory. Voting mechanisms deployed separately after token exists.
+     * @param params Governance deployment parameters
+     * @return result Addresses and IDs of deployed governance components (voting addresses will be zero)
+     */
+    function deployInfrastructure(GovernanceParams memory params) external returns (GovernanceResult memory result) {
+        if (
+            params.poaManager == address(0) || params.orgRegistry == address(0) || params.hats == address(0)
+                || params.hatsTreeSetup == address(0)
+        ) {
+            revert InvalidAddress();
+        }
+
+        /* 1. Deploy Executor with temporary ownership */
+        address execBeacon;
+        {
+            execBeacon = BeaconDeploymentLib.createBeacon(
+                ModuleTypes.EXECUTOR_ID,
+                params.poaManager,
+                address(this), // temporary owner
+                params.autoUpgrade,
+                address(0) // no custom impl
+            );
+
+            ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
+                poaManager: IPoaManager(params.poaManager),
+                orgRegistry: OrgRegistry(params.orgRegistry),
+                hats: params.hats,
+                orgId: params.orgId,
+                moduleOwner: address(this),
+                autoUpgrade: params.autoUpgrade,
+                customImpl: address(0),
+                registrar: params.deployer // Callback to OrgDeployer for registration
+            });
+
+            result.executor = ModuleDeploymentLib.deployExecutor(config, params.deployer, execBeacon);
+        }
+
+        /* 2. Deploy and configure modules for Hats tree */
+        result.eligibilityModule = _deployEligibilityModule(
+            params.orgId, params.poaManager, params.orgRegistry, params.hats, params.autoUpgrade, params.deployer
+        );
+
+        result.toggleModule = _deployToggleModule(
+            params.orgId, params.poaManager, params.orgRegistry, params.hats, params.autoUpgrade, params.deployer
+        );
+
+        /* 3. Setup Hats Tree */
+        {
+            // Transfer superAdmin rights to HatsTreeSetup contract
+            IEligibilityModule(result.eligibilityModule).transferSuperAdmin(params.hatsTreeSetup);
+            IToggleModule(result.toggleModule).transferAdmin(params.hatsTreeSetup);
+
+            // Call HatsTreeSetup to do all the Hats configuration
+            IHatsTreeSetup.SetupParams memory setupParams = IHatsTreeSetup.SetupParams({
+                hats: IHats(params.hats),
+                orgRegistry: OrgRegistry(params.orgRegistry),
+                orgId: params.orgId,
+                eligibilityModule: result.eligibilityModule,
+                toggleModule: result.toggleModule,
+                deployer: address(this),
+                executor: result.executor,
+                orgName: params.orgName,
+                roleNames: params.roleNames,
+                roleImages: params.roleImages,
+                roleCanVote: params.roleCanVote
+            });
+
+            IHatsTreeSetup.SetupResult memory setupResult =
+                IHatsTreeSetup(params.hatsTreeSetup).setupHatsTree(setupParams);
+
+            result.topHatId = setupResult.topHatId;
+            result.roleHatIds = setupResult.roleHatIds;
+        }
+
+        /* 4. Transfer executor beacon ownership back to executor itself */
+        SwitchableBeacon(execBeacon).transferOwnership(result.executor);
+
+        return result;
+    }
+
+    /*══════════════  VOTING DEPLOYMENT  ═════════════=*/
+
+    /**
+     * @notice Deploys voting mechanisms for an organization
+     * @dev Called AFTER AccessFactory to ensure participationToken exists
+     * @param params Governance deployment parameters (must include participationToken address)
+     * @param executor Address of the executor (from deployInfrastructure)
+     * @param roleHatIds Hat IDs for roles (from deployInfrastructure)
+     * @return hybridVoting Address of deployed HybridVoting contract
+     * @return directDemocracyVoting Address of deployed DirectDemocracyVoting contract
+     */
+    function deployVoting(GovernanceParams memory params, address executor, uint256[] memory roleHatIds)
+        external
+        returns (address hybridVoting, address directDemocracyVoting)
+    {
+        if (executor == address(0) || params.participationToken == address(0)) {
+            revert InvalidAddress();
+        }
+
+        /* 1. Deploy HybridVoting (Governance Mechanism) */
+        {
+            // Resolve proposal creator roles to hat IDs
+            uint256[] memory creatorHats = RoleResolver.resolveRoleHats(
+                OrgRegistry(params.orgRegistry), params.orgId, params.hybridProposalCreatorRoles
+            );
+
+            // Update voting classes with token addresses and role hat IDs
+            IHybridVotingInit.ClassConfig[] memory finalClasses =
+                _updateClassesWithTokenAndHats(params.hybridClasses, params.participationToken, roleHatIds);
+
+            address beacon = BeaconDeploymentLib.createBeacon(
+                ModuleTypes.HYBRID_VOTING_ID, params.poaManager, executor, params.autoUpgrade, address(0)
+            );
+
+            ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
+                poaManager: IPoaManager(params.poaManager),
+                orgRegistry: OrgRegistry(params.orgRegistry),
+                hats: params.hats,
+                orgId: params.orgId,
+                moduleOwner: executor,
+                autoUpgrade: params.autoUpgrade,
+                customImpl: address(0),
+                registrar: params.deployer
+            });
+
+            hybridVoting = ModuleDeploymentLib.deployHybridVoting(
+                config, executor, creatorHats, params.hybridQuorumPct, finalClasses, false, beacon
+            );
+        }
+
+        /* 2. Deploy DirectDemocracyVoting (Polling Mechanism) */
+        {
+            // Resolve voting and creator roles to hat IDs
+            uint256[] memory votingHats =
+                RoleResolver.resolveRoleHats(OrgRegistry(params.orgRegistry), params.orgId, params.ddVotingRoles);
+
+            uint256[] memory creatorHats =
+                RoleResolver.resolveRoleHats(OrgRegistry(params.orgRegistry), params.orgId, params.ddCreatorRoles);
+
+            address beacon = BeaconDeploymentLib.createBeacon(
+                ModuleTypes.DIRECT_DEMOCRACY_VOTING_ID, params.poaManager, executor, params.autoUpgrade, address(0)
+            );
+
+            ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
+                poaManager: IPoaManager(params.poaManager),
+                orgRegistry: OrgRegistry(params.orgRegistry),
+                hats: params.hats,
+                orgId: params.orgId,
+                moduleOwner: executor,
+                autoUpgrade: params.autoUpgrade,
+                customImpl: address(0),
+                registrar: params.deployer
+            });
+
+            directDemocracyVoting = ModuleDeploymentLib.deployDirectDemocracyVoting(
+                config, executor, votingHats, creatorHats, params.ddInitialTargets, params.ddQuorumPct, beacon, true
+            );
+        }
+
+        return (hybridVoting, directDemocracyVoting);
+    }
+
+    /*══════════════  INTERNAL HELPERS  ═════════════=*/
+
+    /**
+     * @notice Updates voting classes with token addresses and role hat IDs
+     * @dev Fills in missing token addresses for ERC20_BAL classes
+     */
+    function _updateClassesWithTokenAndHats(
+        IHybridVotingInit.ClassConfig[] memory classes,
+        address token,
+        uint256[] memory roleHatIds
+    ) internal pure returns (IHybridVotingInit.ClassConfig[] memory) {
+        for (uint256 i = 0; i < classes.length; i++) {
+            if (classes[i].strategy == IHybridVotingInit.ClassStrategy.ERC20_BAL) {
+                // Fill in token address if not provided
+                if (classes[i].asset == address(0)) {
+                    classes[i].asset = token;
+                }
+            }
+            // For both DIRECT and ERC20_BAL, use all role hats if hatIds not specified
+            if (classes[i].hatIds.length == 0) {
+                classes[i].hatIds = roleHatIds;
+            }
+        }
+        return classes;
+    }
+
+    /*══════════════  INTERNAL DEPLOYMENT HELPERS  ═════════════=*/
+
+    /**
+     * @notice Deploys EligibilityModule BeaconProxy
+     */
+    function _deployEligibilityModule(
+        bytes32 orgId,
+        address poaManager,
+        address orgRegistry,
+        address hats,
+        bool autoUpgrade,
+        address deployer
+    ) internal returns (address emProxy) {
+        address beacon = BeaconDeploymentLib.createBeacon(
+            ModuleTypes.ELIGIBILITY_MODULE_ID, poaManager, address(this), autoUpgrade, address(0)
+        );
+
+        ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
+            poaManager: IPoaManager(poaManager),
+            orgRegistry: OrgRegistry(orgRegistry),
+            hats: hats,
+            orgId: orgId,
+            moduleOwner: address(this),
+            autoUpgrade: autoUpgrade,
+            customImpl: address(0),
+            registrar: deployer // Callback to OrgDeployer for registration
+        });
+
+        emProxy = ModuleDeploymentLib.deployEligibilityModule(config, address(this), address(0), beacon);
+    }
+
+    /**
+     * @notice Deploys ToggleModule BeaconProxy
+     */
+    function _deployToggleModule(
+        bytes32 orgId,
+        address poaManager,
+        address orgRegistry,
+        address hats,
+        bool autoUpgrade,
+        address deployer
+    ) internal returns (address tmProxy) {
+        address beacon = BeaconDeploymentLib.createBeacon(
+            ModuleTypes.TOGGLE_MODULE_ID, poaManager, address(this), autoUpgrade, address(0)
+        );
+
+        ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
+            poaManager: IPoaManager(poaManager),
+            orgRegistry: OrgRegistry(orgRegistry),
+            hats: hats,
+            orgId: orgId,
+            moduleOwner: address(this),
+            autoUpgrade: autoUpgrade,
+            customImpl: address(0),
+            registrar: deployer // Callback to OrgDeployer for registration
+        });
+
+        tmProxy = ModuleDeploymentLib.deployToggleModule(config, address(this), beacon);
+    }
+}

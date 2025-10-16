@@ -28,8 +28,8 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         address executor; // DAO / governor / timelock that controls the org
         uint32 contractCount;
         bool bootstrap; // TRUE until the executor (or deployer via `lastRegister`)
-            // finishes initial deployment. Afterwards the registry
-            // owner can no longer add contracts.
+        // finishes initial deployment. Afterwards the registry
+        // owner can no longer add contracts.
         bool exists;
     }
 
