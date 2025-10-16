@@ -4,8 +4,9 @@ pragma solidity ^0.8.21;
 /*────────────────────────── OpenZeppelin v5.3 Upgradeables ────────────────────*/
 import {Initializable} from "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {ContextUpgradeable} from "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
-import {ReentrancyGuardUpgradeable} from
-    "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import {
+    ReentrancyGuardUpgradeable
+} from "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 
 /*───────────────────────── Interface minimal stubs ───────────────────────*/
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";

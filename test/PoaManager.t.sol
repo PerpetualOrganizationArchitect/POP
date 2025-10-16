@@ -6,8 +6,9 @@ import "../src/PoaManager.sol";
 import "../src/ImplementationRegistry.sol";
 
 contract DummyImpl {
-// Mock implementation for testing
-}
+    // Mock implementation for testing
+
+    }
 
 contract PoaManagerTest is Test {
     PoaManager pm;

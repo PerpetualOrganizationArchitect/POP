@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
+import {PaymasterHubLens, Config, Budget, Rule, FeeCaps, Bounty} from "../src/PaymasterHubLens.sol";
 import {IPaymaster} from "../src/interfaces/IPaymaster.sol";
 import {PackedUserOperation, UserOpLib} from "../src/interfaces/PackedUserOperation.sol";
 import "./PaymasterHub.t.sol";
@@ -14,6 +15,7 @@ import "./PaymasterHub.t.sol";
  */
 contract PaymasterHubIntegrationTest is Test {
     PaymasterHub public hub;
+    PaymasterHubLens public lens;
     MockEntryPoint public entryPoint;
     MockHats public hats;
     MockAccount public account1;
@@ -44,6 +46,9 @@ contract PaymasterHubIntegrationTest is Test {
 
         // Deploy PaymasterHub
         hub = new PaymasterHub(address(entryPoint), address(hats), ADMIN_HAT);
+
+        // Deploy PaymasterHubLens
+        lens = new PaymasterHubLens(address(hub));
 
         // Setup roles
         hats.mintHat(ADMIN_HAT, admin);
@@ -121,11 +126,11 @@ contract PaymasterHubIntegrationTest is Test {
         hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, actualGasCost);
 
         // Verify budget was consumed
-        PaymasterHub.Budget memory budget = hub.budgetOf(aliceKey);
+        Budget memory budget = lens.budgetOf(aliceKey);
         assertEq(budget.usedInEpoch, actualGasCost, "Budget should be consumed");
 
         // Verify remaining budget
-        uint256 remaining = hub.remaining(aliceKey);
+        uint256 remaining = lens.remaining(aliceKey);
         assertEq(remaining, 1 ether - actualGasCost, "Remaining should be reduced");
     }
 
@@ -180,9 +185,9 @@ contract PaymasterHubIntegrationTest is Test {
         hub.postOp(IPaymaster.PostOpMode.opSucceeded, bobContext, 0.2 ether);
 
         // Verify shared budget usage
-        PaymasterHub.Budget memory budget = hub.budgetOf(contributorKey);
+        Budget memory budget = lens.budgetOf(contributorKey);
         assertEq(budget.usedInEpoch, 0.5 ether, "Combined usage should be 0.5 ether");
-        assertEq(hub.remaining(contributorKey), 4.5 ether, "Remaining should be 4.5 ether");
+        assertEq(lens.remaining(contributorKey), 4.5 ether, "Remaining should be 4.5 ether");
     }
 
     /**
@@ -276,7 +281,7 @@ contract PaymasterHubIntegrationTest is Test {
         hub.postOp(IPaymaster.PostOpMode.opSucceeded, context2, 0.9 ether);
 
         // Verify budget was reset
-        PaymasterHub.Budget memory budget = hub.budgetOf(aliceKey);
+        Budget memory budget = lens.budgetOf(aliceKey);
         assertEq(budget.usedInEpoch, 0.9 ether, "Should only show current epoch usage");
     }
 
@@ -335,7 +340,7 @@ contract PaymasterHubIntegrationTest is Test {
         hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, 0.7 ether);
 
         // Verify execution
-        PaymasterHub.Budget memory budget = hub.budgetOf(aliceKey);
+        Budget memory budget = lens.budgetOf(aliceKey);
         assertEq(budget.usedInEpoch, 0.7 ether, "Budget should be consumed for batch");
     }
 
@@ -381,8 +386,8 @@ contract PaymasterHubIntegrationTest is Test {
         hub.postOp(IPaymaster.PostOpMode.opSucceeded, bobContext, 0.4 ether);
 
         // Verify independent budget tracking
-        assertEq(hub.budgetOf(aliceKey).usedInEpoch, 0.3 ether, "Alice's budget");
-        assertEq(hub.budgetOf(bobKey).usedInEpoch, 0.4 ether, "Bob's budget");
+        assertEq(lens.budgetOf(aliceKey).usedInEpoch, 0.3 ether, "Alice's budget");
+        assertEq(lens.budgetOf(bobKey).usedInEpoch, 0.4 ether, "Bob's budget");
     }
 
     /**
@@ -409,7 +414,7 @@ contract PaymasterHubIntegrationTest is Test {
         hub.postOp(IPaymaster.PostOpMode.opReverted, context, 0.2 ether);
 
         // Budget should still be consumed for reverted operations
-        PaymasterHub.Budget memory budget = hub.budgetOf(aliceKey);
+        Budget memory budget = lens.budgetOf(aliceKey);
         assertEq(budget.usedInEpoch, 0.2 ether, "Gas should be charged even on revert");
     }
 
@@ -447,8 +452,9 @@ contract PaymasterHubIntegrationTest is Test {
         bytes memory targetCallData,
         uint256 hatId
     ) internal view returns (PackedUserOperation memory) {
-        bytes memory callData =
-            abi.encodeWithSelector(bytes4(keccak256("execute(address,uint256,bytes)")), target, 0, targetCallData);
+        bytes memory callData = abi.encodeWithSelector(
+            bytes4(keccak256("execute(address,uint256,bytes)")), target, 0, targetCallData
+        );
 
         bytes memory paymasterAndData = abi.encodePacked(
             address(hub),
