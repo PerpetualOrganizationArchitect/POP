@@ -40,11 +40,7 @@ event OrgDeployed(
     address paymentManager
 );
 
-event PaymasterDeployed(
-    bytes32 indexed orgId,
-    address indexed paymasterHub,
-    address entryPoint
-);
+event PaymasterDeployed(bytes32 indexed orgId, address indexed paymasterHub, address entryPoint);
 
 /**
  * @title OrgDeployer
@@ -325,10 +321,10 @@ contract OrgDeployer is Initializable {
      * @return result Deployed organization components
      * @return paymasterHub Deployed PaymasterHub address
      */
-    function deployFullOrgWithPaymaster(
-        DeploymentParams calldata params,
-        PaymasterParams calldata paymasterParams
-    ) external returns (DeploymentResult memory result, address paymasterHub) {
+    function deployFullOrgWithPaymaster(DeploymentParams calldata params, PaymasterParams calldata paymasterParams)
+        external
+        returns (DeploymentResult memory result, address paymasterHub)
+    {
         // Manual reentrancy guard
         Layout storage l = _layout();
         if (l._status == 2) revert Reentrant();
@@ -421,9 +417,8 @@ contract OrgDeployer is Initializable {
 
         // Only allow factory contracts to call this
         if (
-            msg.sender != address(l.governanceFactory) &&
-            msg.sender != address(l.accessFactory) &&
-            msg.sender != address(l.modulesFactory)
+            msg.sender != address(l.governanceFactory) && msg.sender != address(l.accessFactory)
+                && msg.sender != address(l.modulesFactory)
         ) {
             revert InvalidAddress();
         }

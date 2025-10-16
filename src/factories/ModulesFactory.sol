@@ -70,8 +70,9 @@ contract ModulesFactory {
         /* 1. Deploy TaskManager */
         {
             // Get the role hat IDs for creator permissions
-            uint256[] memory creatorHats =
-                RoleResolver.resolveRoleHats(OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.taskCreatorRoles);
+            uint256[] memory creatorHats = RoleResolver.resolveRoleHats(
+                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.taskCreatorRoles
+            );
 
             address beacon = _createBeacon(
                 ModuleTypes.TASK_MANAGER_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
@@ -141,15 +142,21 @@ contract ModulesFactory {
                 registrar: params.deployer // Callback to OrgDeployer for registration
             });
 
-            result.paymentManager =
-                ModuleDeploymentLib.deployPaymentManager(config, params.executor, params.participationToken, beacon, false);
+            result.paymentManager = ModuleDeploymentLib.deployPaymentManager(
+                config, params.executor, params.participationToken, beacon, false
+            );
         }
 
         /* 4. Deploy HybridVoting */
         {
             // Update token address in voting classes if needed
-            IHybridVotingInit.ClassConfig[] memory finalClasses =
-                _updateClassesWithTokenAndHats(params.votingClasses, params.participationToken, params.orgRegistry, params.orgId, params.roleAssignments);
+            IHybridVotingInit.ClassConfig[] memory finalClasses = _updateClassesWithTokenAndHats(
+                params.votingClasses,
+                params.participationToken,
+                params.orgRegistry,
+                params.orgId,
+                params.roleAssignments
+            );
 
             // Get the role hat IDs for proposal creators
             uint256[] memory creatorHats = RoleResolver.resolveRoleHats(
@@ -213,10 +220,13 @@ contract ModulesFactory {
      * @notice Creates a SwitchableBeacon for a module type
      * @dev Returns a beacon address that points to the implementation
      */
-    function _createBeacon(bytes32 typeId, address poaManager, address moduleOwner, bool autoUpgrade, address customImpl)
-        internal
-        returns (address beacon)
-    {
+    function _createBeacon(
+        bytes32 typeId,
+        address poaManager,
+        address moduleOwner,
+        bool autoUpgrade,
+        address customImpl
+    ) internal returns (address beacon) {
         IPoaManager poa = IPoaManager(poaManager);
 
         address poaBeacon = poa.getBeaconById(typeId);

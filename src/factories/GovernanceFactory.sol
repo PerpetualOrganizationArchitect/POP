@@ -114,8 +114,9 @@ contract GovernanceFactory {
             params.orgId, params.poaManager, params.orgRegistry, params.hats, params.autoUpgrade, params.deployer
         );
 
-        result.toggleModule =
-            _deployToggleModule(params.orgId, params.poaManager, params.orgRegistry, params.hats, params.autoUpgrade, params.deployer);
+        result.toggleModule = _deployToggleModule(
+            params.orgId, params.poaManager, params.orgRegistry, params.hats, params.autoUpgrade, params.deployer
+        );
 
         /* 3. Setup Hats Tree */
         {
@@ -164,7 +165,8 @@ contract GovernanceFactory {
         bool autoUpgrade,
         address deployer
     ) internal returns (address emProxy) {
-        address beacon = _createBeacon(ModuleTypes.ELIGIBILITY_MODULE_ID, poaManager, address(this), autoUpgrade, address(0));
+        address beacon =
+            _createBeacon(ModuleTypes.ELIGIBILITY_MODULE_ID, poaManager, address(this), autoUpgrade, address(0));
 
         ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
             poaManager: IPoaManager(poaManager),
@@ -183,10 +185,14 @@ contract GovernanceFactory {
     /**
      * @notice Deploys ToggleModule BeaconProxy
      */
-    function _deployToggleModule(bytes32 orgId, address poaManager, address orgRegistry, address hats, bool autoUpgrade, address deployer)
-        internal
-        returns (address tmProxy)
-    {
+    function _deployToggleModule(
+        bytes32 orgId,
+        address poaManager,
+        address orgRegistry,
+        address hats,
+        bool autoUpgrade,
+        address deployer
+    ) internal returns (address tmProxy) {
         address beacon = _createBeacon(ModuleTypes.TOGGLE_MODULE_ID, poaManager, address(this), autoUpgrade, address(0));
 
         ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
@@ -207,10 +213,13 @@ contract GovernanceFactory {
      * @notice Creates a SwitchableBeacon for a module type
      * @dev Returns a beacon address that points to the implementation
      */
-    function _createBeacon(bytes32 typeId, address poaManager, address moduleOwner, bool autoUpgrade, address customImpl)
-        internal
-        returns (address beacon)
-    {
+    function _createBeacon(
+        bytes32 typeId,
+        address poaManager,
+        address moduleOwner,
+        bool autoUpgrade,
+        address customImpl
+    ) internal returns (address beacon) {
         IPoaManager poa = IPoaManager(poaManager);
 
         address poaBeacon = poa.getBeaconById(typeId);
