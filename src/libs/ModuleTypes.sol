@@ -51,4 +51,7 @@ library ModuleTypes {
 
     /// @dev keccak256("PaymasterHub")
     bytes32 constant PAYMASTER_HUB_ID = 0x846374a1b9aebfa243bcd01b2b2c7d94ce66a1b22f9ed17ed1d6fd61a8c93891;
+
+    /// @dev keccak256("DirectDemocracyVoting")
+    bytes32 constant DIRECT_DEMOCRACY_VOTING_ID = 0xf7339bb8aed66291ac713d0a14749e830b09b2288976ec5d45de7e64df0f2aeb;
 }

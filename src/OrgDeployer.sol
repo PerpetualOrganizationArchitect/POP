@@ -33,6 +33,7 @@ event OrgDeployed(
     bytes32 indexed orgId,
     address indexed executor,
     address hybridVoting,
+    address directDemocracyVoting,
     address quickJoin,
     address participationToken,
     address taskManager,
@@ -106,6 +107,7 @@ contract OrgDeployer is Initializable {
 
     struct DeploymentResult {
         address hybridVoting;
+        address directDemocracyVoting;
         address executor;
         address quickJoin;
         address participationToken;
@@ -121,7 +123,9 @@ contract OrgDeployer is Initializable {
         uint256[] taskCreatorRoles;
         uint256[] educationCreatorRoles;
         uint256[] educationMemberRoles;
-        uint256[] proposalCreatorRoles;
+        uint256[] hybridProposalCreatorRoles;
+        uint256[] ddVotingRoles;
+        uint256[] ddCreatorRoles;
     }
 
     struct DeploymentParams {
@@ -129,8 +133,10 @@ contract OrgDeployer is Initializable {
         string orgName;
         address registryAddr;
         bool autoUpgrade;
-        uint8 quorumPct;
-        IHybridVotingInit.ClassConfig[] votingClasses;
+        uint8 hybridQuorumPct;
+        uint8 ddQuorumPct;
+        IHybridVotingInit.ClassConfig[] hybridClasses;
+        address[] ddInitialTargets;
         string[] roleNames;
         string[] roleImages;
         bool[] roleCanVote;
@@ -139,35 +145,11 @@ contract OrgDeployer is Initializable {
 
     /*════════════════  MAIN DEPLOYMENT FUNCTION  ════════════════*/
 
-    function deployFullOrg(
-        bytes32 orgId,
-        string calldata orgName,
-        address registryAddr,
-        bool autoUpgrade,
-        uint8 quorumPct,
-        IHybridVotingInit.ClassConfig[] calldata votingClasses,
-        string[] calldata roleNames,
-        string[] calldata roleImages,
-        bool[] calldata roleCanVote,
-        RoleAssignments calldata roleAssignments
-    ) external returns (DeploymentResult memory result) {
+    function deployFullOrg(DeploymentParams calldata params) external returns (DeploymentResult memory result) {
         // Manual reentrancy guard
         Layout storage l = _layout();
         if (l._status == 2) revert Reentrant();
         l._status = 2;
-
-        DeploymentParams memory params = DeploymentParams({
-            orgId: orgId,
-            orgName: orgName,
-            registryAddr: registryAddr,
-            autoUpgrade: autoUpgrade,
-            quorumPct: quorumPct,
-            votingClasses: votingClasses,
-            roleNames: roleNames,
-            roleImages: roleImages,
-            roleCanVote: roleCanVote,
-            roleAssignments: roleAssignments
-        });
 
         result = _deployFullOrgInternal(params);
 
@@ -189,26 +171,9 @@ contract OrgDeployer is Initializable {
             revert OrgExistsMismatch();
         }
 
-        /* 2. Deploy Governance Infrastructure (Executor, Hats, Voting) */
-        GovernanceFactory.GovernanceResult memory gov;
-        {
-            GovernanceFactory.GovernanceParams memory govParams = GovernanceFactory.GovernanceParams({
-                orgId: params.orgId,
-                orgName: params.orgName,
-                poaManager: l.poaManager,
-                orgRegistry: address(l.orgRegistry),
-                hats: address(hats),
-                hatsTreeSetup: l.hatsTreeSetup,
-                deployer: address(this), // For registration callbacks
-                autoUpgrade: params.autoUpgrade,
-                roleNames: params.roleNames,
-                roleImages: params.roleImages,
-                roleCanVote: params.roleCanVote
-            });
-
-            gov = l.governanceFactory.deployGovernance(govParams);
-            result.executor = gov.executor;
-        }
+        /* 2. Deploy Governance Infrastructure (Executor, Hats modules, Hats tree) */
+        GovernanceFactory.GovernanceResult memory gov = _deployGovernanceInfrastructure(params);
+        result.executor = gov.executor;
 
         /* 3. Set the executor for the org */
         l.orgRegistry.setOrgExecutor(params.orgId, result.executor);
@@ -244,15 +209,13 @@ contract OrgDeployer is Initializable {
             result.participationToken = access.participationToken;
         }
 
-        /* 6. Deploy Functional Modules (TaskManager, Education, Payment, Voting) */
+        /* 6. Deploy Functional Modules (TaskManager, Education, Payment) */
         ModulesFactory.ModulesResult memory modules;
         {
             ModulesFactory.RoleAssignments memory moduleRoles = ModulesFactory.RoleAssignments({
                 taskCreatorRoles: params.roleAssignments.taskCreatorRoles,
                 educationCreatorRoles: params.roleAssignments.educationCreatorRoles,
-                educationMemberRoles: params.roleAssignments.educationMemberRoles,
-                proposalCreatorRoles: params.roleAssignments.proposalCreatorRoles,
-                tokenMemberRoles: params.roleAssignments.tokenMemberRoles
+                educationMemberRoles: params.roleAssignments.educationMemberRoles
             });
 
             ModulesFactory.ModulesParams memory moduleParams = ModulesFactory.ModulesParams({
@@ -266,8 +229,6 @@ contract OrgDeployer is Initializable {
                 participationToken: result.participationToken,
                 roleHatIds: gov.roleHatIds,
                 autoUpgrade: params.autoUpgrade,
-                quorumPct: params.quorumPct,
-                votingClasses: params.votingClasses,
                 roleAssignments: moduleRoles
             });
 
@@ -275,27 +236,31 @@ contract OrgDeployer is Initializable {
             result.taskManager = modules.taskManager;
             result.educationHub = modules.educationHub;
             result.paymentManager = modules.paymentManager;
-            result.hybridVoting = modules.hybridVoting;
         }
 
-        /* 7. Wire up cross-module connections */
+        /* 7. Deploy Voting Mechanisms (HybridVoting, DirectDemocracyVoting) */
+        (result.hybridVoting, result.directDemocracyVoting) =
+            _deployVotingMechanisms(params, result.executor, result.participationToken, gov.roleHatIds);
+
+        /* 8. Wire up cross-module connections */
         IParticipationToken(result.participationToken).setTaskManager(result.taskManager);
         IParticipationToken(result.participationToken).setEducationHub(result.educationHub);
 
-        /* 8. Authorize QuickJoin to mint hats */
+        /* 9. Authorize QuickJoin to mint hats */
         IExecutorAdmin(result.executor).setHatMinterAuthorization(result.quickJoin, true);
 
-        /* 9. Link executor to governor */
+        /* 10. Link executor to governor */
         IExecutorAdmin(result.executor).setCaller(result.hybridVoting);
 
-        /* 10. Renounce executor ownership - now only governed by voting */
+        /* 11. Renounce executor ownership - now only governed by voting */
         OwnableUpgradeable(result.executor).renounceOwnership();
 
-        /* 11. Emit event for subgraph indexing */
+        /* 12. Emit event for subgraph indexing */
         emit OrgDeployed(
             params.orgId,
             result.executor,
             result.hybridVoting,
+            result.directDemocracyVoting,
             result.quickJoin,
             result.participationToken,
             result.taskManager,
@@ -398,6 +363,76 @@ contract OrgDeployer is Initializable {
     function _orgExists(bytes32 id) internal view returns (bool) {
         (,,, bool exists) = _layout().orgRegistry.orgOf(id);
         return exists;
+    }
+
+    /**
+     * @notice Internal helper to deploy governance infrastructure
+     * @dev Extracted to reduce stack depth in main deployment function
+     */
+    function _deployGovernanceInfrastructure(DeploymentParams memory params)
+        internal
+        returns (GovernanceFactory.GovernanceResult memory)
+    {
+        Layout storage l = _layout();
+
+        GovernanceFactory.GovernanceParams memory govParams;
+        govParams.orgId = params.orgId;
+        govParams.orgName = params.orgName;
+        govParams.poaManager = l.poaManager;
+        govParams.orgRegistry = address(l.orgRegistry);
+        govParams.hats = address(hats);
+        govParams.hatsTreeSetup = l.hatsTreeSetup;
+        govParams.deployer = address(this);
+        govParams.participationToken = address(0);
+        govParams.autoUpgrade = params.autoUpgrade;
+        govParams.hybridQuorumPct = params.hybridQuorumPct;
+        govParams.ddQuorumPct = params.ddQuorumPct;
+        govParams.hybridClasses = params.hybridClasses;
+        govParams.hybridProposalCreatorRoles = params.roleAssignments.hybridProposalCreatorRoles;
+        govParams.ddVotingRoles = params.roleAssignments.ddVotingRoles;
+        govParams.ddCreatorRoles = params.roleAssignments.ddCreatorRoles;
+        govParams.ddInitialTargets = params.ddInitialTargets;
+        govParams.roleNames = params.roleNames;
+        govParams.roleImages = params.roleImages;
+        govParams.roleCanVote = params.roleCanVote;
+
+        return l.governanceFactory.deployInfrastructure(govParams);
+    }
+
+    /**
+     * @notice Internal helper to deploy voting mechanisms after token is available
+     * @dev Extracted to reduce stack depth in main deployment function
+     */
+    function _deployVotingMechanisms(
+        DeploymentParams memory params,
+        address executor,
+        address participationToken,
+        uint256[] memory roleHatIds
+    ) internal returns (address hybridVoting, address directDemocracyVoting) {
+        Layout storage l = _layout();
+
+        GovernanceFactory.GovernanceParams memory votingParams;
+        votingParams.orgId = params.orgId;
+        votingParams.orgName = params.orgName;
+        votingParams.poaManager = l.poaManager;
+        votingParams.orgRegistry = address(l.orgRegistry);
+        votingParams.hats = address(hats);
+        votingParams.hatsTreeSetup = l.hatsTreeSetup;
+        votingParams.deployer = address(this);
+        votingParams.participationToken = participationToken;
+        votingParams.autoUpgrade = params.autoUpgrade;
+        votingParams.hybridQuorumPct = params.hybridQuorumPct;
+        votingParams.ddQuorumPct = params.ddQuorumPct;
+        votingParams.hybridClasses = params.hybridClasses;
+        votingParams.hybridProposalCreatorRoles = params.roleAssignments.hybridProposalCreatorRoles;
+        votingParams.ddVotingRoles = params.roleAssignments.ddVotingRoles;
+        votingParams.ddCreatorRoles = params.roleAssignments.ddCreatorRoles;
+        votingParams.ddInitialTargets = params.ddInitialTargets;
+        votingParams.roleNames = params.roleNames;
+        votingParams.roleImages = params.roleImages;
+        votingParams.roleCanVote = params.roleCanVote;
+
+        return l.governanceFactory.deployVoting(votingParams, executor, roleHatIds);
     }
 
     /**
