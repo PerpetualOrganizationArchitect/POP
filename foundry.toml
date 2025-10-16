@@ -3,18 +3,13 @@ src = "src"
 out = "out"
 libs = ["lib"]
 via_ir = true
-# Optimizer disabled - workaround for Foundry via_ir + optimizer bug with vm.roll()
-# See: https://github.com/foundry-rs/foundry/issues/4934 (dup of #1373, #8102)
-# When via_ir + optimizer enabled, contracts read stale block.number after vm.roll()
-# Solidity optimizer assumes block.* is constant within a transaction (breaks in tests)
-# Bug exists in Solidity >=0.8.15 through 0.8.30+ - marked "Done" but not fixed
-# All contracts stay under 24KB without optimizer
-# For production: use FOUNDRY_PROFILE=production to enable optimizer (37% smaller)
-bytecode_hash = "none"  # Remove metadata hash
-evm_version = "cancun"  # Latest EVM for best optimizations
+# Optimizer OFF: Solidity IR bug with vm.roll() in tests (issues #4934, #1373, #8102)
+# For production: FOUNDRY_PROFILE=production to enable optimizer (37% smaller contracts)
+bytecode_hash = "none"
+evm_version = "cancun"
 ignored_error_codes = ["unused-var"]
 
-# Production deployment profile: Enable optimizer for 37% smaller contracts & lower gas costs
+# Production: optimizer enabled for 37% smaller contracts
 # Usage: FOUNDRY_PROFILE=production forge script script/Deploy.s.sol --broadcast
 [profile.production]
 optimizer = true

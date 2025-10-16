@@ -5,6 +5,7 @@ import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {SwitchableBeacon} from "../SwitchableBeacon.sol";
 import "../OrgRegistry.sol";
 import {ModuleDeploymentLib} from "../libs/ModuleDeploymentLib.sol";
+import {BeaconDeploymentLib} from "../libs/BeaconDeploymentLib.sol";
 import {ModuleTypes} from "../libs/ModuleTypes.sol";
 import {IPoaManager} from "../libs/ModuleDeploymentLib.sol";
 import {IEligibilityModule, IToggleModule} from "../interfaces/IHatsModules.sol";
@@ -87,7 +88,7 @@ contract GovernanceFactory {
         /* 1. Deploy Executor with temporary ownership */
         address execBeacon;
         {
-            execBeacon = _createBeacon(
+            execBeacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.EXECUTOR_ID,
                 params.poaManager,
                 address(this), // temporary owner
@@ -165,7 +166,7 @@ contract GovernanceFactory {
         bool autoUpgrade,
         address deployer
     ) internal returns (address emProxy) {
-        address beacon = _createBeacon(
+        address beacon = BeaconDeploymentLib.createBeacon(
             ModuleTypes.ELIGIBILITY_MODULE_ID, poaManager, address(this), autoUpgrade, address(0)
         );
 
@@ -194,7 +195,9 @@ contract GovernanceFactory {
         bool autoUpgrade,
         address deployer
     ) internal returns (address tmProxy) {
-        address beacon = _createBeacon(ModuleTypes.TOGGLE_MODULE_ID, poaManager, address(this), autoUpgrade, address(0));
+        address beacon = BeaconDeploymentLib.createBeacon(
+            ModuleTypes.TOGGLE_MODULE_ID, poaManager, address(this), autoUpgrade, address(0)
+        );
 
         ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
             poaManager: IPoaManager(poaManager),
@@ -208,35 +211,5 @@ contract GovernanceFactory {
         });
 
         tmProxy = ModuleDeploymentLib.deployToggleModule(config, address(this), beacon);
-    }
-
-    /**
-     * @notice Creates a SwitchableBeacon for a module type
-     * @dev Returns a beacon address that points to the implementation
-     */
-    function _createBeacon(
-        bytes32 typeId,
-        address poaManager,
-        address moduleOwner,
-        bool autoUpgrade,
-        address customImpl
-    ) internal returns (address beacon) {
-        IPoaManager poa = IPoaManager(poaManager);
-
-        address poaBeacon = poa.getBeaconById(typeId);
-        if (poaBeacon == address(0)) revert UnsupportedType();
-
-        address initImpl = address(0);
-        SwitchableBeacon.Mode beaconMode = SwitchableBeacon.Mode.Mirror;
-
-        if (!autoUpgrade) {
-            // For static mode, get the current implementation
-            initImpl = (customImpl == address(0)) ? poa.getCurrentImplementationById(typeId) : customImpl;
-            if (initImpl == address(0)) revert UnsupportedType();
-            beaconMode = SwitchableBeacon.Mode.Static;
-        }
-
-        // Create SwitchableBeacon with appropriate configuration
-        beacon = address(new SwitchableBeacon(moduleOwner, poaBeacon, initImpl, beaconMode));
     }
 }
