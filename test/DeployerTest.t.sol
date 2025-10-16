@@ -12,6 +12,7 @@ import "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 
 /*──────────── Local contracts ───────────*/
 import {HybridVoting} from "../src/HybridVoting.sol";
+import {DirectDemocracyVoting} from "../src/DirectDemocracyVoting.sol";
 import {Executor} from "../src/Executor.sol";
 import {ParticipationToken} from "../src/ParticipationToken.sol";
 import {QuickJoin} from "../src/QuickJoin.sol";
@@ -69,6 +70,7 @@ interface IEligibilityModuleEvents {
 contract DeployerTest is Test, IEligibilityModuleEvents {
     /*–––– implementations ––––*/
     HybridVoting hybridImpl;
+    DirectDemocracyVoting ddVotingImpl;
     Executor execImpl;
     UniversalAccountRegistry accountRegImpl;
     QuickJoin quickJoinImpl;
@@ -507,6 +509,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         /*–– deploy bare implementations ––*/
         hybridImpl = new HybridVoting();
+        ddVotingImpl = new DirectDemocracyVoting();
         execImpl = new Executor();
         accountRegImpl = new UniversalAccountRegistry();
         quickJoinImpl = new QuickJoin();
@@ -605,6 +608,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         /*–– register implementation types ––*/
         poaManager.addContractType("HybridVoting", address(hybridImpl));
+        poaManager.addContractType("DirectDemocracyVoting", address(ddVotingImpl));
         poaManager.addContractType("Executor", address(execImpl));
         poaManager.addContractType("QuickJoin", address(quickJoinImpl));
         poaManager.addContractType("ParticipationToken", address(pTokenImpl));
@@ -723,7 +727,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         (address executorAddr, uint32 count, bool boot, bool exists) = orgRegistry.orgOf(ORG_ID);
         assertEq(executorAddr, exec); // Should be the Executor contract address, not orgOwner
-        assertEq(count, 9); // Updated to 9 since we now deploy PaymentManager, EligibilityModule and ToggleModule as beacon proxies
+        assertEq(count, 10); // Updated to 10: now includes PaymentManager, EligibilityModule, ToggleModule, HybridVoting, and DirectDemocracyVoting
         assertFalse(boot);
         assertTrue(exists);
 
