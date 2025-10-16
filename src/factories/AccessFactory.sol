@@ -8,6 +8,7 @@ import {ModuleTypes} from "../libs/ModuleTypes.sol";
 import {RoleResolver} from "../libs/RoleResolver.sol";
 import {IPoaManager} from "../libs/ModuleDeploymentLib.sol";
 /*────────────────────────────  Errors  ───────────────────────────────*/
+
 error InvalidAddress();
 error UnsupportedType();
 
@@ -63,8 +64,9 @@ contract AccessFactory {
         /* 1. Deploy QuickJoin */
         {
             // Get the role hat IDs for new members
-            uint256[] memory memberHats =
-                RoleResolver.resolveRoleHats(OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.quickJoinRoles);
+            uint256[] memory memberHats = RoleResolver.resolveRoleHats(
+                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.quickJoinRoles
+            );
 
             address beacon = _createBeacon(
                 ModuleTypes.QUICK_JOIN_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
@@ -115,8 +117,9 @@ contract AccessFactory {
                 registrar: params.deployer // Callback to OrgDeployer for registration
             });
 
-            result.participationToken =
-                ModuleDeploymentLib.deployParticipationToken(config, params.executor, tName, tSymbol, memberHats, approverHats, beacon);
+            result.participationToken = ModuleDeploymentLib.deployParticipationToken(
+                config, params.executor, tName, tSymbol, memberHats, approverHats, beacon
+            );
         }
 
         return result;
@@ -128,10 +131,13 @@ contract AccessFactory {
      * @notice Creates a SwitchableBeacon for a module type
      * @dev Returns a beacon address that points to the implementation
      */
-    function _createBeacon(bytes32 typeId, address poaManager, address moduleOwner, bool autoUpgrade, address customImpl)
-        internal
-        returns (address beacon)
-    {
+    function _createBeacon(
+        bytes32 typeId,
+        address poaManager,
+        address moduleOwner,
+        bool autoUpgrade,
+        address customImpl
+    ) internal returns (address beacon) {
         IPoaManager poa = IPoaManager(poaManager);
 
         address poaBeacon = poa.getBeaconById(typeId);
