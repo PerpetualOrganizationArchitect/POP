@@ -302,4 +302,26 @@ library ModuleDeploymentLib {
         bytes memory init = abi.encodeWithSelector(IPaymentManagerInit.initialize.selector, owner, revenueShareToken);
         pmProxy = deployCore(config, ModuleTypes.PAYMENT_MANAGER_ID, init, lastRegister, beacon);
     }
+
+    function deployDirectDemocracyVoting(
+        DeployConfig memory config,
+        address executorAddr,
+        uint256[] memory votingHats,
+        uint256[] memory creatorHats,
+        address[] memory initialTargets,
+        uint8 quorumPct,
+        address beacon,
+        bool lastRegister
+    ) internal returns (address ddProxy) {
+        bytes memory init = abi.encodeWithSignature(
+            "initialize(address,address,uint256[],uint256[],address[],uint8)",
+            config.hats,
+            executorAddr,
+            votingHats,
+            creatorHats,
+            initialTargets,
+            quorumPct
+        );
+        ddProxy = deployCore(config, ModuleTypes.DIRECT_DEMOCRACY_VOTING_ID, init, lastRegister, beacon);
+    }
 }
