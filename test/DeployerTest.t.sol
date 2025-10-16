@@ -24,7 +24,10 @@ import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
 import "../src/ImplementationRegistry.sol";
 import "../src/PoaManager.sol";
 import "../src/OrgRegistry.sol";
-import {Deployer} from "../src/Deployer.sol";
+import {OrgDeployer} from "../src/OrgDeployer.sol";
+import {GovernanceFactory} from "../src/factories/GovernanceFactory.sol";
+import {AccessFactory} from "../src/factories/AccessFactory.sol";
+import {ModulesFactory} from "../src/factories/ModulesFactory.sol";
 import {HatsTreeSetup} from "../src/HatsTreeSetup.sol";
 import {ModuleDeploymentLib, IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
 import {ModuleTypes} from "../src/libs/ModuleTypes.sol";
@@ -77,7 +80,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
     ImplementationRegistry implRegistry;
     PoaManager poaManager;
     OrgRegistry orgRegistry;
-    Deployer deployer;
+    OrgDeployer deployer;
+    GovernanceFactory governanceFactory;
+    AccessFactory accessFactory;
+    ModulesFactory modulesFactory;
 
     /*–––– addresses ––––*/
     address public constant poaAdmin = address(1);
@@ -134,8 +140,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
         vm.stopPrank();
@@ -153,7 +159,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
     /*–––– Test Helper Functions ––––*/
 
     /// @dev Helper to build default role assignments (index 0 = members, index 1 = executives)
-    function _buildDefaultRoleAssignments() internal pure returns (Deployer.RoleAssignments memory) {
+    function _buildDefaultRoleAssignments() internal pure returns (OrgDeployer.RoleAssignments memory) {
         uint256[] memory defaultRole = new uint256[](1);
         defaultRole[0] = 0; // First role is for regular members
 
@@ -162,15 +168,14 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         uint256[] memory emptyRoles = new uint256[](0);
 
-        return Deployer.RoleAssignments({
+        return OrgDeployer.RoleAssignments({
             quickJoinRoles: defaultRole, // New members get role 0
             tokenMemberRoles: defaultRole, // Role 0 can hold tokens
             tokenApproverRoles: executiveRole, // Role 1 can approve transfers
             taskCreatorRoles: executiveRole, // Role 1 can create tasks
             educationCreatorRoles: executiveRole, // Role 1 can create education
             educationMemberRoles: defaultRole, // Role 0 can access education
-            proposalCreatorRoles: executiveRole, // Role 1 can create proposals
-            paymasterOperatorRoles: emptyRoles // No paymaster operators by default
+            proposalCreatorRoles: executiveRole // Role 1 can create proposals
         });
     }
 
@@ -255,8 +260,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[2] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID, orgName, accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
         setup.hybrid = result.hybridVoting;
@@ -292,8 +297,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID, orgName, accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
         setup.hybrid = result.hybridVoting;
@@ -478,9 +483,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // We'll update it later after we create the proxy
         poaManager = new PoaManager(address(0)); // Temporary zero address
 
-        // Deploy implementations for OrgRegistry and Deployer
+        // Deploy implementations for OrgRegistry and OrgDeployer
         OrgRegistry orgRegistryImpl = new OrgRegistry();
-        Deployer deployerImpl = new Deployer();
+        OrgDeployer deployerImpl = new OrgDeployer();
 
         // Register ImplementationRegistry implementation with PoaManager first
         poaManager.addContractType("ImplementationRegistry", address(implRegistryImpl));
@@ -502,13 +507,13 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Transfer implRegistry ownership to poaManager
         implRegistry.transferOwnership(address(poaManager));
 
-        // Register implementations for OrgRegistry and Deployer
+        // Register implementations for OrgRegistry and OrgDeployer
         poaManager.addContractType("OrgRegistry", address(orgRegistryImpl));
-        poaManager.addContractType("Deployer", address(deployerImpl));
+        poaManager.addContractType("OrgDeployer", address(deployerImpl));
 
         // Get beacons created by PoaManager
         address orgRegBeacon = poaManager.getBeaconById(keccak256("OrgRegistry"));
-        address deployerBeacon = poaManager.getBeaconById(keccak256("Deployer"));
+        address deployerBeacon = poaManager.getBeaconById(keccak256("OrgDeployer"));
 
         // Create OrgRegistry proxy - initialize with poaAdmin as owner
         bytes memory orgRegistryInit = abi.encodeWithSignature("initialize(address)", poaAdmin);
@@ -523,16 +528,23 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Mock EntryPoint address for PaymasterHub (not actually used in tests, but required for initialization)
         address mockEntryPoint = address(0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789); // ERC-4337 EntryPoint v0.6
 
-        // Create Deployer proxy - initialize with msg.sender (poaAdmin) for proper ownership
+        // Deploy factory contracts
+        governanceFactory = new GovernanceFactory();
+        accessFactory = new AccessFactory();
+        modulesFactory = new ModulesFactory();
+
+        // Create OrgDeployer proxy - initialize with factory addresses
         bytes memory deployerInit = abi.encodeWithSignature(
-            "initialize(address,address,address,address,address)",
+            "initialize(address,address,address,address,address,address,address)",
+            address(governanceFactory),
+            address(accessFactory),
+            address(modulesFactory),
             address(poaManager),
             address(orgRegistry),
             SEPOLIA_HATS,
-            address(hatsTreeSetup),
-            mockEntryPoint
+            address(hatsTreeSetup)
         );
-        deployer = Deployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
+        deployer = OrgDeployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
 
         // Debug to verify Deployer initialization
         console.log("deployer address:", address(deployer));
@@ -581,8 +593,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
 
@@ -691,7 +703,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
         deployer.deployFullOrg(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
@@ -711,8 +723,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
         address hybrid = result.hybridVoting;
@@ -774,8 +786,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID, "Hybrid DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
         address hybrid = result.hybridVoting;
@@ -1023,8 +1035,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[1] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID, "Events Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
         address hybrid = result.hybridVoting;
@@ -1210,8 +1222,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[2] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID, "Vouch Error Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
         address hybrid = result.hybridVoting;
@@ -1351,8 +1363,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[2] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID, "Vouch Events Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
         address hybrid = result.hybridVoting;
@@ -1424,8 +1436,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[2] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID, "Vouch Disable Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
         address hybrid = result.hybridVoting;
@@ -1508,8 +1520,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[2] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID, "SuperAdmin Test DAO", accountRegProxy, true, 50, classes, names, images, voting, roleAssignments
         );
         address hybrid = result.hybridVoting;
@@ -1653,8 +1665,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         voting[2] = true;
 
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        Deployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        Deployer.DeploymentResult memory result = deployer.deployFullOrg(
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(
             ORG_ID,
             "Unrestricted Hat Test DAO",
             accountRegProxy,
