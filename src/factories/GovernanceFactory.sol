@@ -165,8 +165,9 @@ contract GovernanceFactory {
         bool autoUpgrade,
         address deployer
     ) internal returns (address emProxy) {
-        address beacon =
-            _createBeacon(ModuleTypes.ELIGIBILITY_MODULE_ID, poaManager, address(this), autoUpgrade, address(0));
+        address beacon = _createBeacon(
+            ModuleTypes.ELIGIBILITY_MODULE_ID, poaManager, address(this), autoUpgrade, address(0)
+        );
 
         ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
             poaManager: IPoaManager(poaManager),

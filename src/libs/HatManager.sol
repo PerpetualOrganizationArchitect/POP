@@ -165,10 +165,7 @@ library HatManager {
      * @param hatIds Array of hat IDs to add
      * @return addedCount Number of hats actually added (excluding duplicates)
      */
-    function addHatsBatch(uint256[] storage hatArray, uint256[] calldata hatIds)
-        internal
-        returns (uint256 addedCount)
-    {
+    function addHatsBatch(uint256[] storage hatArray, uint256[] calldata hatIds) internal returns (uint256 addedCount) {
         for (uint256 i; i < hatIds.length;) {
             if (setHatInArray(hatArray, hatIds[i], true)) {
                 unchecked {

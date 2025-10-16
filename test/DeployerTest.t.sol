@@ -748,20 +748,20 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.startPrank(exec); // Switch to executor
 
         // Create a new role hat
-        uint256 newRoleHatId = IHats(SEPOLIA_HATS).createHat(
-            topHatId, // admin = parent Top Hat
-            "NEW_ROLE", // details
-            type(uint32).max, // unlimited supply
-            orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID), // eligibility module
-            orgRegistry.getOrgContract(ORG_ID, ModuleTypes.TOGGLE_MODULE_ID), // toggle module
-            true, // mutable
-            "NEW_ROLE" // data blob
-        );
+        uint256 newRoleHatId = IHats(SEPOLIA_HATS)
+            .createHat(
+                topHatId, // admin = parent Top Hat
+                "NEW_ROLE", // details
+                type(uint32).max, // unlimited supply
+                orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID), // eligibility module
+                orgRegistry.getOrgContract(ORG_ID, ModuleTypes.TOGGLE_MODULE_ID), // toggle module
+                true, // mutable
+                "NEW_ROLE" // data blob
+            );
 
         // Configure the new role hat for the executor
-        EligibilityModule(orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID)).setWearerEligibility(
-            exec, newRoleHatId, true, true
-        );
+        EligibilityModule(orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID))
+            .setWearerEligibility(exec, newRoleHatId, true, true);
         ToggleModule(orgRegistry.getOrgContract(ORG_ID, ModuleTypes.TOGGLE_MODULE_ID)).setHatStatus(newRoleHatId, true);
 
         // Mint the new role hat to the executor
@@ -1852,20 +1852,21 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Marketing executive creates a new marketing hat for their team
         // (Executive role wearers are admins of the default role, so they can create child hats under it)
         vm.prank(marketingExecutive);
-        uint256 marketingHatId = EligibilityModule(setup.eligibilityModule).createHatWithEligibility(
-            EligibilityModule.CreateHatParams({
-                parentHatId: setup.defaultRoleHat,
-                details: "Marketing Team",
-                maxSupply: 10,
-                _mutable: true,
-                imageURI: "ipfs://marketing-hat-image",
-                defaultEligible: true,
-                defaultStanding: true,
-                mintToAddresses: new address[](0),
-                wearerEligibleFlags: new bool[](0),
-                wearerStandingFlags: new bool[](0)
-            })
-        );
+        uint256 marketingHatId = EligibilityModule(setup.eligibilityModule)
+            .createHatWithEligibility(
+                EligibilityModule.CreateHatParams({
+                    parentHatId: setup.defaultRoleHat,
+                    details: "Marketing Team",
+                    maxSupply: 10,
+                    _mutable: true,
+                    imageURI: "ipfs://marketing-hat-image",
+                    defaultEligible: true,
+                    defaultStanding: true,
+                    mintToAddresses: new address[](0),
+                    wearerEligibleFlags: new bool[](0),
+                    wearerStandingFlags: new bool[](0)
+                })
+            );
 
         // Verify the marketing hat was created
         assertTrue(marketingHatId > 0, "Marketing hat should be created");
@@ -1890,9 +1891,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // First set eligibility
         vm.prank(marketingExecutive);
-        EligibilityModule(setup.eligibilityModule).batchSetWearerEligibility(
-            marketingHatId, singleMember, singleEligible, singleStanding
-        );
+        EligibilityModule(setup.eligibilityModule)
+            .batchSetWearerEligibility(marketingHatId, singleMember, singleEligible, singleStanding);
 
         // Then mint the hat directly (marketing executive has admin rights)
         vm.prank(marketingExecutive);
@@ -1920,9 +1920,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // First set eligibility for multiple members
         vm.prank(marketingExecutive);
-        EligibilityModule(setup.eligibilityModule).batchSetWearerEligibility(
-            marketingHatId, multipleMembers, multipleEligible, multipleStanding
-        );
+        EligibilityModule(setup.eligibilityModule)
+            .batchSetWearerEligibility(marketingHatId, multipleMembers, multipleEligible, multipleStanding);
 
         // Then mint hats individually (only for eligible members)
         vm.prank(marketingExecutive);
@@ -1960,20 +1959,21 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         initialStanding[1] = true;
 
         vm.prank(marketingExecutive);
-        uint256 campaignHatId = EligibilityModule(setup.eligibilityModule).createHatWithEligibility(
-            EligibilityModule.CreateHatParams({
-                parentHatId: setup.defaultRoleHat,
-                details: "Campaign Team",
-                maxSupply: 5,
-                _mutable: true,
-                imageURI: "ipfs://campaign-hat-image",
-                defaultEligible: false,
-                defaultStanding: true,
-                mintToAddresses: initialMembers,
-                wearerEligibleFlags: initialEligible,
-                wearerStandingFlags: initialStanding
-            })
-        );
+        uint256 campaignHatId = EligibilityModule(setup.eligibilityModule)
+            .createHatWithEligibility(
+                EligibilityModule.CreateHatParams({
+                    parentHatId: setup.defaultRoleHat,
+                    details: "Campaign Team",
+                    maxSupply: 5,
+                    _mutable: true,
+                    imageURI: "ipfs://campaign-hat-image",
+                    defaultEligible: false,
+                    defaultStanding: true,
+                    mintToAddresses: initialMembers,
+                    wearerEligibleFlags: initialEligible,
+                    wearerStandingFlags: initialStanding
+                })
+            );
 
         // Verify the campaign hat was created
         assertTrue(campaignHatId > 0, "Campaign hat should be created");
@@ -1997,20 +1997,21 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Test that only the marketing executive can create hats under their role
         vm.prank(marketingMember1);
         vm.expectRevert(abi.encodeWithSelector(EligibilityModule.NotAuthorizedAdmin.selector));
-        EligibilityModule(setup.eligibilityModule).createHatWithEligibility(
-            EligibilityModule.CreateHatParams({
-                parentHatId: setup.defaultRoleHat,
-                details: "Unauthorized Hat",
-                maxSupply: 1,
-                _mutable: true,
-                imageURI: "",
-                defaultEligible: true,
-                defaultStanding: true,
-                mintToAddresses: new address[](0),
-                wearerEligibleFlags: new bool[](0),
-                wearerStandingFlags: new bool[](0)
-            })
-        );
+        EligibilityModule(setup.eligibilityModule)
+            .createHatWithEligibility(
+                EligibilityModule.CreateHatParams({
+                    parentHatId: setup.defaultRoleHat,
+                    details: "Unauthorized Hat",
+                    maxSupply: 1,
+                    _mutable: true,
+                    imageURI: "",
+                    defaultEligible: true,
+                    defaultStanding: true,
+                    mintToAddresses: new address[](0),
+                    wearerEligibleFlags: new bool[](0),
+                    wearerStandingFlags: new bool[](0)
+                })
+            );
 
         // Test that marketing executive can manage eligibility of their created hats
         vm.prank(marketingExecutive);
@@ -2032,9 +2033,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Set eligibility first
         vm.prank(marketingExecutive);
-        EligibilityModule(setup.eligibilityModule).batchSetWearerEligibility(
-            campaignHatId, member3Array, member3Eligible, member3Standing
-        );
+        EligibilityModule(setup.eligibilityModule)
+            .batchSetWearerEligibility(campaignHatId, member3Array, member3Eligible, member3Standing);
 
         // Then mint the hat
         vm.prank(marketingExecutive);
@@ -2072,20 +2072,21 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         initialStanding[1] = true;
 
         vm.prank(executive);
-        uint256 teamHatId = EligibilityModule(setup.eligibilityModule).createHatWithEligibility(
-            EligibilityModule.CreateHatParams({
-                parentHatId: setup.defaultRoleHat,
-                details: "Team Hat",
-                maxSupply: 10,
-                _mutable: true,
-                imageURI: "ipfs://team-image",
-                defaultEligible: false,
-                defaultStanding: true,
-                mintToAddresses: initialMembers,
-                wearerEligibleFlags: initialEligible,
-                wearerStandingFlags: initialStanding
-            })
-        );
+        uint256 teamHatId = EligibilityModule(setup.eligibilityModule)
+            .createHatWithEligibility(
+                EligibilityModule.CreateHatParams({
+                    parentHatId: setup.defaultRoleHat,
+                    details: "Team Hat",
+                    maxSupply: 10,
+                    _mutable: true,
+                    imageURI: "ipfs://team-image",
+                    defaultEligible: false,
+                    defaultStanding: true,
+                    mintToAddresses: initialMembers,
+                    wearerEligibleFlags: initialEligible,
+                    wearerStandingFlags: initialStanding
+                })
+            );
 
         // Verify both members are immediately wearing the hat
         assertTrue(

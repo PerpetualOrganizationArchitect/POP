@@ -452,8 +452,9 @@ contract PaymasterHubIntegrationTest is Test {
         bytes memory targetCallData,
         uint256 hatId
     ) internal view returns (PackedUserOperation memory) {
-        bytes memory callData =
-            abi.encodeWithSelector(bytes4(keccak256("execute(address,uint256,bytes)")), target, 0, targetCallData);
+        bytes memory callData = abi.encodeWithSelector(
+            bytes4(keccak256("execute(address,uint256,bytes)")), target, 0, targetCallData
+        );
 
         bytes memory paymasterAndData = abi.encodePacked(
             address(hub),

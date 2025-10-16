@@ -16,7 +16,6 @@ contract SwitchableBeacon is IBeacon {
     enum Mode {
         Mirror, // Follow the global beacon's implementation
         Static // Use a pinned implementation
-
     }
 
     /// @notice Current owner of this beacon (typically the Executor or UpgradeAdmin)

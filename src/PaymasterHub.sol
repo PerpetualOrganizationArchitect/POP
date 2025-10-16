@@ -126,7 +126,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         0x31c1f70de237698620907d8a0468bf5356fb50f4719bfcd111876a981cbccb5c;
 
     // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.rules")) - 1))
-    bytes32 private constant RULES_STORAGE_LOCATION = 0xbe2280b3d3247ad137be1f9de7cbb32fc261644cda199a3a24b0a06528ef326f;
+    bytes32 private constant RULES_STORAGE_LOCATION =
+        0xbe2280b3d3247ad137be1f9de7cbb32fc261644cda199a3a24b0a06528ef326f;
 
     // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.budgets")) - 1))
     bytes32 private constant BUDGETS_STORAGE_LOCATION =
