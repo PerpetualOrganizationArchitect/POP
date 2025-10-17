@@ -37,6 +37,16 @@ interface IHatsTreeSetup {
     function setupHatsTree(SetupParams memory params) external returns (SetupResult memory);
 }
 
+/*──────────────────── OrgDeployer interface ────────────────────*/
+interface IOrgDeployer {
+    function batchRegisterContracts(
+        bytes32 orgId,
+        OrgRegistry.ContractRegistration[] calldata registrations,
+        bool autoUpgrade,
+        bool lastRegister
+    ) external;
+}
+
 /*────────────────────────────  Errors  ───────────────────────────────*/
 error InvalidAddress();
 error UnsupportedType();
@@ -61,9 +71,9 @@ contract GovernanceFactory {
         uint8 hybridQuorumPct; // Quorum for HybridVoting
         uint8 ddQuorumPct; // Quorum for DirectDemocracyVoting
         IHybridVotingInit.ClassConfig[] hybridClasses; // Voting class configuration
-        uint256[] hybridProposalCreatorRoles; // Roles that can create proposals in HybridVoting
-        uint256[] ddVotingRoles; // Roles that can vote in DirectDemocracyVoting
-        uint256[] ddCreatorRoles; // Roles that can create polls in DirectDemocracyVoting
+        uint256 hybridProposalCreatorRolesBitmap; // Bit N set = Role N can create proposals
+        uint256 ddVotingRolesBitmap; // Bit N set = Role N can vote in polls
+        uint256 ddCreatorRolesBitmap; // Bit N set = Role N can create polls
         address[] ddInitialTargets; // Allowed execution targets for DirectDemocracyVoting
         string[] roleNames;
         string[] roleImages;
@@ -97,8 +107,10 @@ contract GovernanceFactory {
             revert InvalidAddress();
         }
 
-        /* 1. Deploy Executor with temporary ownership */
+        /* 1. Deploy Executor with temporary ownership (without registration) */
         address execBeacon;
+        address eligibilityBeacon;
+        address toggleBeacon;
         {
             execBeacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.EXECUTOR_ID,
@@ -115,19 +127,18 @@ contract GovernanceFactory {
                 orgId: params.orgId,
                 moduleOwner: address(this),
                 autoUpgrade: params.autoUpgrade,
-                customImpl: address(0),
-                registrar: params.deployer // Callback to OrgDeployer for registration
+                customImpl: address(0)
             });
 
             result.executor = ModuleDeploymentLib.deployExecutor(config, params.deployer, execBeacon);
         }
 
-        /* 2. Deploy and configure modules for Hats tree */
-        result.eligibilityModule = _deployEligibilityModule(
+        /* 2. Deploy and configure modules for Hats tree (without registration) */
+        (result.eligibilityModule, eligibilityBeacon) = _deployEligibilityModule(
             params.orgId, params.poaManager, params.orgRegistry, params.hats, params.autoUpgrade, params.deployer
         );
 
-        result.toggleModule = _deployToggleModule(
+        (result.toggleModule, toggleBeacon) = _deployToggleModule(
             params.orgId, params.poaManager, params.orgRegistry, params.hats, params.autoUpgrade, params.deployer
         );
 
@@ -159,7 +170,36 @@ contract GovernanceFactory {
             result.roleHatIds = setupResult.roleHatIds;
         }
 
-        /* 4. Transfer executor beacon ownership back to executor itself */
+        /* 4. Batch register all 3 deployed contracts */
+        {
+            OrgRegistry.ContractRegistration[] memory registrations = new OrgRegistry.ContractRegistration[](3);
+
+            registrations[0] = OrgRegistry.ContractRegistration({
+                typeId: ModuleTypes.EXECUTOR_ID,
+                proxy: result.executor,
+                beacon: execBeacon,
+                owner: address(this)
+            });
+
+            registrations[1] = OrgRegistry.ContractRegistration({
+                typeId: ModuleTypes.ELIGIBILITY_MODULE_ID,
+                proxy: result.eligibilityModule,
+                beacon: eligibilityBeacon,
+                owner: address(this)
+            });
+
+            registrations[2] = OrgRegistry.ContractRegistration({
+                typeId: ModuleTypes.TOGGLE_MODULE_ID,
+                proxy: result.toggleModule,
+                beacon: toggleBeacon,
+                owner: address(this)
+            });
+
+            // Call OrgDeployer to batch register (not the last batch)
+            IOrgDeployer(params.deployer).batchRegisterContracts(params.orgId, registrations, params.autoUpgrade, false);
+        }
+
+        /* 5. Transfer executor beacon ownership back to executor itself */
         SwitchableBeacon(execBeacon).transferOwnership(result.executor);
 
         return result;
@@ -184,18 +224,21 @@ contract GovernanceFactory {
             revert InvalidAddress();
         }
 
-        /* 1. Deploy HybridVoting (Governance Mechanism) */
+        address hybridBeacon;
+        address ddBeacon;
+
+        /* 1. Deploy HybridVoting (Governance Mechanism) - without registration */
         {
             // Resolve proposal creator roles to hat IDs
-            uint256[] memory creatorHats = RoleResolver.resolveRoleHats(
-                OrgRegistry(params.orgRegistry), params.orgId, params.hybridProposalCreatorRoles
+            uint256[] memory creatorHats = RoleResolver.resolveRoleBitmap(
+                OrgRegistry(params.orgRegistry), params.orgId, params.hybridProposalCreatorRolesBitmap
             );
 
             // Update voting classes with token addresses and role hat IDs
             IHybridVotingInit.ClassConfig[] memory finalClasses =
                 _updateClassesWithTokenAndHats(params.hybridClasses, params.participationToken, roleHatIds);
 
-            address beacon = BeaconDeploymentLib.createBeacon(
+            hybridBeacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.HYBRID_VOTING_ID, params.poaManager, executor, params.autoUpgrade, address(0)
             );
 
@@ -206,25 +249,24 @@ contract GovernanceFactory {
                 orgId: params.orgId,
                 moduleOwner: executor,
                 autoUpgrade: params.autoUpgrade,
-                customImpl: address(0),
-                registrar: params.deployer
+                customImpl: address(0)
             });
 
             hybridVoting = ModuleDeploymentLib.deployHybridVoting(
-                config, executor, creatorHats, params.hybridQuorumPct, finalClasses, false, beacon
+                config, executor, creatorHats, params.hybridQuorumPct, finalClasses, hybridBeacon
             );
         }
 
-        /* 2. Deploy DirectDemocracyVoting (Polling Mechanism) */
+        /* 2. Deploy DirectDemocracyVoting (Polling Mechanism) - without registration */
         {
             // Resolve voting and creator roles to hat IDs
             uint256[] memory votingHats =
-                RoleResolver.resolveRoleHats(OrgRegistry(params.orgRegistry), params.orgId, params.ddVotingRoles);
+                RoleResolver.resolveRoleBitmap(OrgRegistry(params.orgRegistry), params.orgId, params.ddVotingRolesBitmap);
 
             uint256[] memory creatorHats =
-                RoleResolver.resolveRoleHats(OrgRegistry(params.orgRegistry), params.orgId, params.ddCreatorRoles);
+                RoleResolver.resolveRoleBitmap(OrgRegistry(params.orgRegistry), params.orgId, params.ddCreatorRolesBitmap);
 
-            address beacon = BeaconDeploymentLib.createBeacon(
+            ddBeacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.DIRECT_DEMOCRACY_VOTING_ID, params.poaManager, executor, params.autoUpgrade, address(0)
             );
 
@@ -235,13 +277,34 @@ contract GovernanceFactory {
                 orgId: params.orgId,
                 moduleOwner: executor,
                 autoUpgrade: params.autoUpgrade,
-                customImpl: address(0),
-                registrar: params.deployer
+                customImpl: address(0)
             });
 
             directDemocracyVoting = ModuleDeploymentLib.deployDirectDemocracyVoting(
-                config, executor, votingHats, creatorHats, params.ddInitialTargets, params.ddQuorumPct, beacon, true
+                config, executor, votingHats, creatorHats, params.ddInitialTargets, params.ddQuorumPct, ddBeacon
             );
+        }
+
+        /* 3. Batch register both voting contracts */
+        {
+            OrgRegistry.ContractRegistration[] memory registrations = new OrgRegistry.ContractRegistration[](2);
+
+            registrations[0] = OrgRegistry.ContractRegistration({
+                typeId: ModuleTypes.HYBRID_VOTING_ID,
+                proxy: hybridVoting,
+                beacon: hybridBeacon,
+                owner: executor
+            });
+
+            registrations[1] = OrgRegistry.ContractRegistration({
+                typeId: ModuleTypes.DIRECT_DEMOCRACY_VOTING_ID,
+                proxy: directDemocracyVoting,
+                beacon: ddBeacon,
+                owner: executor
+            });
+
+            // Call OrgDeployer to batch register (this is the LAST batch - finalizes bootstrap)
+            IOrgDeployer(params.deployer).batchRegisterContracts(params.orgId, registrations, params.autoUpgrade, true);
         }
 
         return (hybridVoting, directDemocracyVoting);
@@ -276,7 +339,10 @@ contract GovernanceFactory {
     /*══════════════  INTERNAL DEPLOYMENT HELPERS  ═════════════=*/
 
     /**
-     * @notice Deploys EligibilityModule BeaconProxy
+     * @notice Deploys EligibilityModule BeaconProxy (without registration)
+     * @dev Registration handled via batch in deployInfrastructure
+     * @return emProxy The deployed eligibility module proxy address
+     * @return beacon The beacon address for this module
      */
     function _deployEligibilityModule(
         bytes32 orgId,
@@ -285,8 +351,8 @@ contract GovernanceFactory {
         address hats,
         bool autoUpgrade,
         address deployer
-    ) internal returns (address emProxy) {
-        address beacon = BeaconDeploymentLib.createBeacon(
+    ) internal returns (address emProxy, address beacon) {
+        beacon = BeaconDeploymentLib.createBeacon(
             ModuleTypes.ELIGIBILITY_MODULE_ID, poaManager, address(this), autoUpgrade, address(0)
         );
 
@@ -297,15 +363,17 @@ contract GovernanceFactory {
             orgId: orgId,
             moduleOwner: address(this),
             autoUpgrade: autoUpgrade,
-            customImpl: address(0),
-            registrar: deployer // Callback to OrgDeployer for registration
+            customImpl: address(0)
         });
 
         emProxy = ModuleDeploymentLib.deployEligibilityModule(config, address(this), address(0), beacon);
     }
 
     /**
-     * @notice Deploys ToggleModule BeaconProxy
+     * @notice Deploys ToggleModule BeaconProxy (without registration)
+     * @dev Registration handled via batch in deployInfrastructure
+     * @return tmProxy The deployed toggle module proxy address
+     * @return beacon The beacon address for this module
      */
     function _deployToggleModule(
         bytes32 orgId,
@@ -314,8 +382,8 @@ contract GovernanceFactory {
         address hats,
         bool autoUpgrade,
         address deployer
-    ) internal returns (address tmProxy) {
-        address beacon = BeaconDeploymentLib.createBeacon(
+    ) internal returns (address tmProxy, address beacon) {
+        beacon = BeaconDeploymentLib.createBeacon(
             ModuleTypes.TOGGLE_MODULE_ID, poaManager, address(this), autoUpgrade, address(0)
         );
 
@@ -326,8 +394,7 @@ contract GovernanceFactory {
             orgId: orgId,
             moduleOwner: address(this),
             autoUpgrade: autoUpgrade,
-            customImpl: address(0),
-            registrar: deployer // Callback to OrgDeployer for registration
+            customImpl: address(0)
         });
 
         tmProxy = ModuleDeploymentLib.deployToggleModule(config, address(this), beacon);

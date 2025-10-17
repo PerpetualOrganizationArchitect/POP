@@ -117,15 +117,15 @@ contract OrgDeployer is Initializable {
     }
 
     struct RoleAssignments {
-        uint256[] quickJoinRoles;
-        uint256[] tokenMemberRoles;
-        uint256[] tokenApproverRoles;
-        uint256[] taskCreatorRoles;
-        uint256[] educationCreatorRoles;
-        uint256[] educationMemberRoles;
-        uint256[] hybridProposalCreatorRoles;
-        uint256[] ddVotingRoles;
-        uint256[] ddCreatorRoles;
+        uint256 quickJoinRolesBitmap;           // Bit N set = Role N assigned on join
+        uint256 tokenMemberRolesBitmap;         // Bit N set = Role N can hold tokens
+        uint256 tokenApproverRolesBitmap;       // Bit N set = Role N can approve transfers
+        uint256 taskCreatorRolesBitmap;         // Bit N set = Role N can create tasks
+        uint256 educationCreatorRolesBitmap;    // Bit N set = Role N can create education
+        uint256 educationMemberRolesBitmap;     // Bit N set = Role N can access education
+        uint256 hybridProposalCreatorRolesBitmap; // Bit N set = Role N can create proposals
+        uint256 ddVotingRolesBitmap;            // Bit N set = Role N can vote in polls
+        uint256 ddCreatorRolesBitmap;           // Bit N set = Role N can create polls
     }
 
     struct DeploymentParams {
@@ -161,7 +161,7 @@ contract OrgDeployer is Initializable {
 
     /*════════════════  INTERNAL ORCHESTRATION  ════════════════*/
 
-    function _deployFullOrgInternal(DeploymentParams memory params) internal returns (DeploymentResult memory result) {
+    function _deployFullOrgInternal(DeploymentParams calldata params) internal returns (DeploymentResult memory result) {
         Layout storage l = _layout();
 
         /* 1. Create Org in bootstrap mode */
@@ -185,9 +185,9 @@ contract OrgDeployer is Initializable {
         AccessFactory.AccessResult memory access;
         {
             AccessFactory.RoleAssignments memory accessRoles = AccessFactory.RoleAssignments({
-                quickJoinRoles: params.roleAssignments.quickJoinRoles,
-                tokenMemberRoles: params.roleAssignments.tokenMemberRoles,
-                tokenApproverRoles: params.roleAssignments.tokenApproverRoles
+                quickJoinRolesBitmap: params.roleAssignments.quickJoinRolesBitmap,
+                tokenMemberRolesBitmap: params.roleAssignments.tokenMemberRolesBitmap,
+                tokenApproverRolesBitmap: params.roleAssignments.tokenApproverRolesBitmap
             });
 
             AccessFactory.AccessParams memory accessParams = AccessFactory.AccessParams({
@@ -213,9 +213,9 @@ contract OrgDeployer is Initializable {
         ModulesFactory.ModulesResult memory modules;
         {
             ModulesFactory.RoleAssignments memory moduleRoles = ModulesFactory.RoleAssignments({
-                taskCreatorRoles: params.roleAssignments.taskCreatorRoles,
-                educationCreatorRoles: params.roleAssignments.educationCreatorRoles,
-                educationMemberRoles: params.roleAssignments.educationMemberRoles
+                taskCreatorRolesBitmap: params.roleAssignments.taskCreatorRolesBitmap,
+                educationCreatorRolesBitmap: params.roleAssignments.educationCreatorRolesBitmap,
+                educationMemberRolesBitmap: params.roleAssignments.educationMemberRolesBitmap
             });
 
             ModulesFactory.ModulesParams memory moduleParams = ModulesFactory.ModulesParams({
@@ -369,7 +369,7 @@ contract OrgDeployer is Initializable {
      * @notice Internal helper to deploy governance infrastructure
      * @dev Extracted to reduce stack depth in main deployment function
      */
-    function _deployGovernanceInfrastructure(DeploymentParams memory params)
+    function _deployGovernanceInfrastructure(DeploymentParams calldata params)
         internal
         returns (GovernanceFactory.GovernanceResult memory)
     {
@@ -388,9 +388,9 @@ contract OrgDeployer is Initializable {
         govParams.hybridQuorumPct = params.hybridQuorumPct;
         govParams.ddQuorumPct = params.ddQuorumPct;
         govParams.hybridClasses = params.hybridClasses;
-        govParams.hybridProposalCreatorRoles = params.roleAssignments.hybridProposalCreatorRoles;
-        govParams.ddVotingRoles = params.roleAssignments.ddVotingRoles;
-        govParams.ddCreatorRoles = params.roleAssignments.ddCreatorRoles;
+        govParams.hybridProposalCreatorRolesBitmap = params.roleAssignments.hybridProposalCreatorRolesBitmap;
+        govParams.ddVotingRolesBitmap = params.roleAssignments.ddVotingRolesBitmap;
+        govParams.ddCreatorRolesBitmap = params.roleAssignments.ddCreatorRolesBitmap;
         govParams.ddInitialTargets = params.ddInitialTargets;
         govParams.roleNames = params.roleNames;
         govParams.roleImages = params.roleImages;
@@ -404,7 +404,7 @@ contract OrgDeployer is Initializable {
      * @dev Extracted to reduce stack depth in main deployment function
      */
     function _deployVotingMechanisms(
-        DeploymentParams memory params,
+        DeploymentParams calldata params,
         address executor,
         address participationToken,
         uint256[] memory roleHatIds
@@ -424,9 +424,9 @@ contract OrgDeployer is Initializable {
         votingParams.hybridQuorumPct = params.hybridQuorumPct;
         votingParams.ddQuorumPct = params.ddQuorumPct;
         votingParams.hybridClasses = params.hybridClasses;
-        votingParams.hybridProposalCreatorRoles = params.roleAssignments.hybridProposalCreatorRoles;
-        votingParams.ddVotingRoles = params.roleAssignments.ddVotingRoles;
-        votingParams.ddCreatorRoles = params.roleAssignments.ddCreatorRoles;
+        votingParams.hybridProposalCreatorRolesBitmap = params.roleAssignments.hybridProposalCreatorRolesBitmap;
+        votingParams.ddVotingRolesBitmap = params.roleAssignments.ddVotingRolesBitmap;
+        votingParams.ddCreatorRolesBitmap = params.roleAssignments.ddCreatorRolesBitmap;
         votingParams.ddInitialTargets = params.ddInitialTargets;
         votingParams.roleNames = params.roleNames;
         votingParams.roleImages = params.roleImages;
@@ -464,5 +464,36 @@ contract OrgDeployer is Initializable {
 
         // Forward registration to OrgRegistry (we are the owner)
         l.orgRegistry.registerOrgContract(orgId, typeId, proxy, beacon, autoUpgrade, moduleOwner, lastRegister);
+    }
+
+    /**
+     * @notice Batch register multiple contracts from factories
+     * @dev Only callable by approved factory contracts. Reduces gas overhead by batching registrations.
+     * @param orgId The organization identifier
+     * @param registrations Array of contracts to register
+     * @param autoUpgrade Whether contracts auto-upgrade with their beacons
+     */
+    function batchRegisterContracts(
+        bytes32 orgId,
+        OrgRegistry.ContractRegistration[] calldata registrations,
+        bool autoUpgrade,
+        bool lastRegister
+    ) external {
+        Layout storage l = _layout();
+
+        // Only allow factory contracts to call this
+        if (
+            msg.sender != address(l.governanceFactory) && msg.sender != address(l.accessFactory)
+                && msg.sender != address(l.modulesFactory)
+        ) {
+            revert InvalidAddress();
+        }
+
+        // Only allow during bootstrap (deployment phase)
+        (,, bool bootstrap,) = l.orgRegistry.orgOf(orgId);
+        if (!bootstrap) revert("Deployment complete");
+
+        // Forward batch registration to OrgRegistry (we are the owner)
+        l.orgRegistry.batchRegisterOrgContracts(orgId, registrations, autoUpgrade, lastRegister);
     }
 }
