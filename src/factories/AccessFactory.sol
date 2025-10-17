@@ -7,6 +7,17 @@ import {ModuleDeploymentLib} from "../libs/ModuleDeploymentLib.sol";
 import {ModuleTypes} from "../libs/ModuleTypes.sol";
 import {RoleResolver} from "../libs/RoleResolver.sol";
 import {IPoaManager} from "../libs/ModuleDeploymentLib.sol";
+
+/*──────────────────── OrgDeployer interface ────────────────────*/
+interface IOrgDeployer {
+    function batchRegisterContracts(
+        bytes32 orgId,
+        OrgRegistry.ContractRegistration[] calldata registrations,
+        bool autoUpgrade,
+        bool lastRegister
+    ) external;
+}
+
 /*────────────────────────────  Errors  ───────────────────────────────*/
 
 error InvalidAddress();
@@ -20,9 +31,9 @@ error UnsupportedType();
 contract AccessFactory {
     /*──────────────────── Role Assignments ────────────────────*/
     struct RoleAssignments {
-        uint256[] quickJoinRoles;
-        uint256[] tokenMemberRoles;
-        uint256[] tokenApproverRoles;
+        uint256 quickJoinRolesBitmap;      // Bit N set = Role N assigned on join
+        uint256 tokenMemberRolesBitmap;    // Bit N set = Role N can hold tokens
+        uint256 tokenApproverRolesBitmap;  // Bit N set = Role N can approve transfers
     }
 
     /*──────────────────── Access Deployment Params ────────────────────*/
@@ -61,14 +72,17 @@ contract AccessFactory {
             revert InvalidAddress();
         }
 
-        /* 1. Deploy QuickJoin */
+        address quickJoinBeacon;
+        address participationTokenBeacon;
+
+        /* 1. Deploy QuickJoin (without registration) */
         {
             // Get the role hat IDs for new members
-            uint256[] memory memberHats = RoleResolver.resolveRoleHats(
-                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.quickJoinRoles
+            uint256[] memory memberHats = RoleResolver.resolveRoleBitmap(
+                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.quickJoinRolesBitmap
             );
 
-            address beacon = _createBeacon(
+            quickJoinBeacon = _createBeacon(
                 ModuleTypes.QUICK_JOIN_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
             );
 
@@ -79,30 +93,29 @@ contract AccessFactory {
                 orgId: params.orgId,
                 moduleOwner: params.executor,
                 autoUpgrade: params.autoUpgrade,
-                customImpl: address(0),
-                registrar: params.deployer // Callback to OrgDeployer for registration
+                customImpl: address(0)
             });
 
             result.quickJoin = ModuleDeploymentLib.deployQuickJoin(
-                config, params.executor, params.registryAddr, address(this), memberHats, beacon
+                config, params.executor, params.registryAddr, address(this), memberHats, quickJoinBeacon
             );
         }
 
-        /* 2. Deploy Participation Token */
+        /* 2. Deploy Participation Token (without registration) */
         {
             string memory tName = string(abi.encodePacked(params.orgName, " Token"));
             string memory tSymbol = "PT";
 
             // Get the role hat IDs for member and approver permissions
-            uint256[] memory memberHats = RoleResolver.resolveRoleHats(
-                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.tokenMemberRoles
+            uint256[] memory memberHats = RoleResolver.resolveRoleBitmap(
+                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.tokenMemberRolesBitmap
             );
 
-            uint256[] memory approverHats = RoleResolver.resolveRoleHats(
-                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.tokenApproverRoles
+            uint256[] memory approverHats = RoleResolver.resolveRoleBitmap(
+                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.tokenApproverRolesBitmap
             );
 
-            address beacon = _createBeacon(
+            participationTokenBeacon = _createBeacon(
                 ModuleTypes.PARTICIPATION_TOKEN_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
             );
 
@@ -113,13 +126,34 @@ contract AccessFactory {
                 orgId: params.orgId,
                 moduleOwner: params.executor,
                 autoUpgrade: params.autoUpgrade,
-                customImpl: address(0),
-                registrar: params.deployer // Callback to OrgDeployer for registration
+                customImpl: address(0)
             });
 
             result.participationToken = ModuleDeploymentLib.deployParticipationToken(
-                config, params.executor, tName, tSymbol, memberHats, approverHats, beacon
+                config, params.executor, tName, tSymbol, memberHats, approverHats, participationTokenBeacon
             );
+        }
+
+        /* 3. Batch register both contracts */
+        {
+            OrgRegistry.ContractRegistration[] memory registrations = new OrgRegistry.ContractRegistration[](2);
+
+            registrations[0] = OrgRegistry.ContractRegistration({
+                typeId: ModuleTypes.QUICK_JOIN_ID,
+                proxy: result.quickJoin,
+                beacon: quickJoinBeacon,
+                owner: params.executor
+            });
+
+            registrations[1] = OrgRegistry.ContractRegistration({
+                typeId: ModuleTypes.PARTICIPATION_TOKEN_ID,
+                proxy: result.participationToken,
+                beacon: participationTokenBeacon,
+                owner: params.executor
+            });
+
+            // Call OrgDeployer to batch register (not the last batch)
+            IOrgDeployer(params.deployer).batchRegisterContracts(params.orgId, registrations, params.autoUpgrade, false);
         }
 
         return result;

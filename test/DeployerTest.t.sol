@@ -178,24 +178,20 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
     /// @dev Helper to build default role assignments (index 0 = members, index 1 = executives)
     function _buildDefaultRoleAssignments() internal pure returns (OrgDeployer.RoleAssignments memory) {
-        uint256[] memory defaultRole = new uint256[](1);
-        defaultRole[0] = 0; // First role is for regular members
-
-        uint256[] memory executiveRole = new uint256[](1);
-        executiveRole[0] = 1; // Second role is for executives
-
-        uint256[] memory emptyRoles = new uint256[](0);
+        // Bitmap encoding: bit 0 = role 0, bit 1 = role 1
+        // 1 = 0b001 (role 0 only)
+        // 2 = 0b010 (role 1 only)
 
         return OrgDeployer.RoleAssignments({
-            quickJoinRoles: defaultRole, // New members get role 0
-            tokenMemberRoles: defaultRole, // Role 0 can hold tokens
-            tokenApproverRoles: executiveRole, // Role 1 can approve transfers
-            taskCreatorRoles: executiveRole, // Role 1 can create tasks
-            educationCreatorRoles: executiveRole, // Role 1 can create education
-            educationMemberRoles: defaultRole, // Role 0 can access education
-            hybridProposalCreatorRoles: executiveRole, // Role 1 can create governance proposals
-            ddVotingRoles: defaultRole, // Role 0 can vote in direct democracy polls
-            ddCreatorRoles: executiveRole // Role 1 can create direct democracy polls
+            quickJoinRolesBitmap: 1,        // Role 0: new members
+            tokenMemberRolesBitmap: 1,      // Role 0: can hold tokens
+            tokenApproverRolesBitmap: 2,    // Role 1: can approve transfers
+            taskCreatorRolesBitmap: 2,      // Role 1: can create tasks
+            educationCreatorRolesBitmap: 2, // Role 1: can create education
+            educationMemberRolesBitmap: 1,  // Role 0: can access education
+            hybridProposalCreatorRolesBitmap: 2, // Role 1: can create proposals
+            ddVotingRolesBitmap: 1,         // Role 0: can vote in polls
+            ddCreatorRolesBitmap: 2         // Role 1: can create polls
         });
     }
 
