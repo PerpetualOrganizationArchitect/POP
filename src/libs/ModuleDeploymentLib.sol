@@ -118,7 +118,10 @@ library ModuleDeploymentLib {
         bytes32 typeId, // Pass pre-computed hash instead of string
         bytes memory initData,
         address beacon
-    ) internal returns (address proxy) {
+    )
+        internal
+        returns (address proxy)
+    {
         if (initData.length == 0) revert EmptyInit();
 
         // Create proxy using the provided beacon
@@ -253,12 +256,10 @@ library ModuleDeploymentLib {
         hvProxy = deployCore(config, ModuleTypes.HYBRID_VOTING_ID, init, beacon);
     }
 
-    function deployPaymentManager(
-        DeployConfig memory config,
-        address owner,
-        address revenueShareToken,
-        address beacon
-    ) internal returns (address pmProxy) {
+    function deployPaymentManager(DeployConfig memory config, address owner, address revenueShareToken, address beacon)
+        internal
+        returns (address pmProxy)
+    {
         bytes memory init = abi.encodeWithSelector(IPaymentManagerInit.initialize.selector, owner, revenueShareToken);
         pmProxy = deployCore(config, ModuleTypes.PAYMENT_MANAGER_ID, init, beacon);
     }

@@ -7,7 +7,9 @@ import {PackedUserOperation, UserOpLib} from "./interfaces/PackedUserOperation.s
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {Initializable} from "lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import {ReentrancyGuardUpgradeable} from "lib/openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import {
+    ReentrancyGuardUpgradeable
+} from "lib/openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC165} from "lib/openzeppelin-contracts/contracts/utils/introspection/IERC165.sol";
 
 /**
@@ -67,7 +69,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     // ============ Events ============
     event PaymasterInitialized(address indexed entryPoint, address indexed hats, address indexed poaManager);
     event OrgRegistered(bytes32 indexed orgId, uint256 adminHatId, uint256 operatorHatId);
-    event RuleSet(bytes32 indexed orgId, address indexed target, bytes4 indexed selector, bool allowed, uint32 maxCallGasHint);
+    event RuleSet(
+        bytes32 indexed orgId, address indexed target, bytes4 indexed selector, bool allowed, uint32 maxCallGasHint
+    );
     event BudgetSet(bytes32 indexed orgId, bytes32 subjectKey, uint128 capPerEpoch, uint32 epochLen, uint32 epochStart);
     event FeeCapsSet(
         bytes32 indexed orgId,
@@ -86,7 +90,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     event BountySweep(address indexed to, uint256 amount);
     event BountyPaid(bytes32 indexed userOpHash, address indexed to, uint256 amount);
     event BountyPayFailed(bytes32 indexed userOpHash, address indexed to, uint256 amount);
-    event UsageIncreased(bytes32 indexed orgId, bytes32 subjectKey, uint256 delta, uint128 usedInEpoch, uint32 epochStart);
+    event UsageIncreased(
+        bytes32 indexed orgId, bytes32 subjectKey, uint256 delta, uint128 usedInEpoch, uint32 epochStart
+    );
     event UserOpPosted(bytes32 indexed opHash, address indexed postedBy);
     event EmergencyWithdraw(address indexed to, uint256 amount);
     event OrgDepositReceived(bytes32 indexed orgId, address indexed from, uint256 amount);
@@ -104,8 +110,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     }
 
     // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.main")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant MAIN_STORAGE_LOCATION =
-        0x9a7a9f40de2a7f2c3b8e6d5c4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b;
+    bytes32 private constant MAIN_STORAGE_LOCATION = 0x9a7a9f40de2a7f2c3b8e6d5c4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b;
 
     // ============ Storage Structs ============
 
@@ -114,10 +119,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * Storage optimization: registeredAt packed with paused to save gas
      */
     struct OrgConfig {
-        uint256 adminHatId;      // Slot 0
-        uint256 operatorHatId;   // Slot 1: Optional role for budget/rule management
-        bool paused;             // Slot 2 (1 byte)
-        uint40 registeredAt;     // Slot 2 (5 bytes): UNIX timestamp, good until year 36812
+        uint256 adminHatId; // Slot 0
+        uint256 operatorHatId; // Slot 1: Optional role for budget/rule management
+        bool paused; // Slot 2 (1 byte)
+        uint40 registeredAt; // Slot 2 (5 bytes): UNIX timestamp, good until year 36812
         bool bannedFromSolidarity; // Slot 2 (1 byte)
         // 25 bytes remaining in slot 2 for future use
     }
@@ -126,31 +131,31 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @dev Per-org financial tracking for solidarity fund accounting
      */
     struct OrgFinancials {
-        uint128 deposited;                  // Current balance deposited by org
-        uint128 totalDeposited;             // Cumulative lifetime deposits (never decreases)
-        uint128 spent;                      // Total spent from org's own deposits
-        uint128 solidarityUsedThisPeriod;   // Solidarity used in current 90-day period
-        uint32 periodStart;                 // Timestamp when current 90-day period started
-        uint224 reserved;                   // Padding for future use
+        uint128 deposited; // Current balance deposited by org
+        uint128 totalDeposited; // Cumulative lifetime deposits (never decreases)
+        uint128 spent; // Total spent from org's own deposits
+        uint128 solidarityUsedThisPeriod; // Solidarity used in current 90-day period
+        uint32 periodStart; // Timestamp when current 90-day period started
+        uint224 reserved; // Padding for future use
     }
 
     /**
      * @dev Global solidarity fund state
      */
     struct SolidarityFund {
-        uint128 balance;              // Current solidarity fund balance
-        uint32 numActiveOrgs;         // Number of orgs with deposits > 0
-        uint16 feePercentageBps;      // Fee as basis points (100 = 1%)
-        uint208 reserved;             // Padding
+        uint128 balance; // Current solidarity fund balance
+        uint32 numActiveOrgs; // Number of orgs with deposits > 0
+        uint16 feePercentageBps; // Fee as basis points (100 = 1%)
+        uint208 reserved; // Padding
     }
 
     /**
      * @dev Grace period configuration for unfunded orgs
      */
     struct GracePeriodConfig {
-        uint32 initialGraceDays;      // Startup period with zero deposits (default 90)
-        uint128 maxSpendDuringGrace;  // Max spending during grace period (default 0.01 ETH ~$30)
-        uint128 minDepositRequired;   // Minimum balance to maintain after grace (default 0.003 ETH ~$10)
+        uint32 initialGraceDays; // Startup period with zero deposits (default 90)
+        uint128 maxSpendDuringGrace; // Max spending during grace period (default 0.01 ETH ~$30)
+        uint128 minDepositRequired; // Minimum balance to maintain after grace (default 0.003 ETH ~$10)
     }
 
     struct FeeCaps {
@@ -182,8 +187,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
     // ============ ERC-7201 Storage Locations ============
     // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.orgs")) - 1))
-    bytes32 private constant ORGS_STORAGE_LOCATION =
-        0x7e8e7f71b618a8d3f4c7c1c6c0e8f8e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0;
+    bytes32 private constant ORGS_STORAGE_LOCATION = 0x7e8e7f71b618a8d3f4c7c1c6c0e8f8e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0;
 
     // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.feeCaps")) - 1))
     bytes32 private constant FEECAPS_STORAGE_LOCATION =
@@ -256,8 +260,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Initialize grace period with defaults (90 days, 0.01 ETH ~$30 spend, 0.003 ETH ~$10 deposit)
         GracePeriodConfig storage grace = _getGracePeriodStorage();
         grace.initialGraceDays = 90;
-        grace.maxSpendDuringGrace = 0.01 ether;  // ~$30 worth of gas (~3000 tx on cheap L2s)
-        grace.minDepositRequired = 0.003 ether;  // ~$10 minimum deposit
+        grace.maxSpendDuringGrace = 0.01 ether; // ~$30 worth of gas (~3000 tx on cheap L2s)
+        grace.minDepositRequired = 0.003 ether; // ~$10 minimum deposit
 
         emit PaymasterInitialized(_entryPoint, _hats, _poaManager);
     }
@@ -553,8 +557,14 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         onlyEntryPoint
         nonReentrant
     {
-        (bytes32 orgId, bytes32 subjectKey, uint32 epochStart, bytes32 userOpHash, uint64 mailboxCommit8, address bundlerOrigin) =
-            abi.decode(context, (bytes32, bytes32, uint32, bytes32, uint64, address));
+        (
+            bytes32 orgId,
+            bytes32 subjectKey,
+            uint32 epochStart,
+            bytes32 userOpHash,
+            uint64 mailboxCommit8,
+            address bundlerOrigin
+        ) = abi.decode(context, (bytes32, bytes32, uint32, bytes32, uint64, address));
 
         // Update per-subject budget usage (existing functionality)
         _updateUsage(orgId, subjectKey, epochStart, actualGasCost);
@@ -642,14 +652,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         } else {
             // Post-grace: 50/50 split with tier-based solidarity allowance
             uint256 matchAllowance = _calculateMatchAllowance(org.deposited, grace.minDepositRequired);
-            uint256 solidarityRemaining = matchAllowance > org.solidarityUsedThisPeriod
-                ? matchAllowance - org.solidarityUsedThisPeriod
-                : 0;
+            uint256 solidarityRemaining =
+                matchAllowance > org.solidarityUsedThisPeriod ? matchAllowance - org.solidarityUsedThisPeriod : 0;
 
             uint256 halfCost = actualGasCost / 2;
-            uint256 depositAvailable = org.deposited > org.spent
-                ? org.deposited - org.spent
-                : 0;
+            uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
 
             // Try 50/50 split
             fromDeposits = halfCost < depositAvailable ? halfCost : depositAvailable;
@@ -703,7 +710,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @dev Only callable by org admin or operator
      */
     function setRule(bytes32 orgId, address target, bytes4 selector, bool allowed, uint32 maxCallGasHint)
-        external onlyOrgOperator(orgId) {
+        external
+        onlyOrgOperator(orgId)
+    {
         if (target == address(0)) revert ZeroAddress();
 
         mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
@@ -755,7 +764,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @dev Validates epoch length and initializes epoch start
      */
     function setBudget(bytes32 orgId, bytes32 subjectKey, uint128 capPerEpoch, uint32 epochLen)
-        external onlyOrgOperator(orgId) {
+        external
+        onlyOrgOperator(orgId)
+    {
         if (epochLen < MIN_EPOCH_LENGTH || epochLen > MAX_EPOCH_LENGTH) {
             revert InvalidEpochLength();
         }
@@ -811,7 +822,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         feeCaps.maxVerificationGas = maxVerificationGas;
         feeCaps.maxPreVerificationGas = maxPreVerificationGas;
 
-        emit FeeCapsSet(orgId, maxFeePerGas, maxPriorityFeePerGas, maxCallGas, maxVerificationGas, maxPreVerificationGas);
+        emit FeeCapsSet(
+            orgId, maxFeePerGas, maxPriorityFeePerGas, maxCallGas, maxVerificationGas, maxPreVerificationGas
+        );
     }
 
     /**
@@ -835,7 +848,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @notice Configure bounty parameters for an org
      */
     function setBounty(bytes32 orgId, bool enabled, uint96 maxBountyWeiPerOp, uint16 pctBpCap)
-        external onlyOrgAdmin(orgId) {
+        external
+        onlyOrgAdmin(orgId)
+    {
         if (pctBpCap > MAX_BOUNTY_PCT_BP) revert InvalidBountyConfig();
 
         Bounty storage bounty = _getBountyStorage()[orgId];
@@ -900,11 +915,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param _maxSpendDuringGrace Maximum spending during grace period (default 0.01 ETH ~$30, represents ~3000 tx)
      * @param _minDepositRequired Minimum balance to maintain after grace (default 0.003 ETH ~$10)
      */
-    function setGracePeriodConfig(
-        uint32 _initialGraceDays,
-        uint128 _maxSpendDuringGrace,
-        uint128 _minDepositRequired
-    ) external {
+    function setGracePeriodConfig(uint32 _initialGraceDays, uint128 _maxSpendDuringGrace, uint128 _minDepositRequired)
+        external
+    {
         if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
         if (_initialGraceDays == 0) revert InvalidEpochLength();
         if (_maxSpendDuringGrace == 0) revert InvalidEpochLength();
@@ -1042,12 +1055,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @return requiresDeposit True if org needs to deposit to access solidarity
      * @return solidarityLimit Current solidarity allocation for org (per 90-day period)
      */
-    function getOrgGraceStatus(bytes32 orgId) external view returns (
-        bool inGrace,
-        uint128 spendRemaining,
-        bool requiresDeposit,
-        uint256 solidarityLimit
-    ) {
+    function getOrgGraceStatus(bytes32 orgId)
+        external
+        view
+        returns (bool inGrace, uint128 spendRemaining, bool requiresDeposit, uint256 solidarityLimit)
+    {
         mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
         mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
         GracePeriodConfig storage grace = _getGracePeriodStorage();
@@ -1091,7 +1103,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
     }
 
-    function _getRulesStorage() private pure returns (mapping(bytes32 => mapping(address => mapping(bytes4 => Rule))) storage $) {
+    function _getRulesStorage()
+        private
+        pure
+        returns (mapping(bytes32 => mapping(address => mapping(bytes4 => Rule))) storage $)
+    {
         assembly {
             $.slot := RULES_STORAGE_LOCATION
         }
@@ -1171,7 +1187,14 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     function _decodePaymasterData(bytes calldata paymasterAndData)
         private
         pure
-        returns (uint8 version, bytes32 orgId, uint8 subjectType, bytes20 subjectId, uint32 ruleId, uint64 mailboxCommit8)
+        returns (
+            uint8 version,
+            bytes32 orgId,
+            uint8 subjectType,
+            bytes20 subjectId,
+            uint32 ruleId,
+            uint64 mailboxCommit8
+        )
     {
         // New format: [paymaster(20) | version(1) | orgId(32) | subjectType(1) | subjectId(20) | ruleId(4) | mailboxCommit(8)] = 86 bytes
         if (paymasterAndData.length < 86) revert InvalidPaymasterData();
@@ -1293,7 +1316,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
     }
 
-    function _checkBudget(bytes32 orgId, bytes32 subjectKey, uint256 maxCost) private returns (uint32 currentEpochStart) {
+    function _checkBudget(bytes32 orgId, bytes32 subjectKey, uint256 maxCost)
+        private
+        returns (uint32 currentEpochStart)
+    {
         mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
         Budget storage budget = budgets[subjectKey];
 

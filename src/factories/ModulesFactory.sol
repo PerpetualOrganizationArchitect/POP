@@ -31,9 +31,9 @@ error UnsupportedType();
 contract ModulesFactory {
     /*──────────────────── Role Assignments ────────────────────*/
     struct RoleAssignments {
-        uint256 taskCreatorRolesBitmap;       // Bit N set = Role N can create tasks
-        uint256 educationCreatorRolesBitmap;  // Bit N set = Role N can create education
-        uint256 educationMemberRolesBitmap;   // Bit N set = Role N can access education
+        uint256 taskCreatorRolesBitmap; // Bit N set = Role N can create tasks
+        uint256 educationCreatorRolesBitmap; // Bit N set = Role N can create education
+        uint256 educationMemberRolesBitmap; // Bit N set = Role N can access education
     }
 
     /*──────────────────── Modules Deployment Params ────────────────────*/

@@ -186,15 +186,15 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // 2 = 0b010 (role 1 only)
 
         return OrgDeployer.RoleAssignments({
-            quickJoinRolesBitmap: 1,        // Role 0: new members
-            tokenMemberRolesBitmap: 1,      // Role 0: can hold tokens
-            tokenApproverRolesBitmap: 2,    // Role 1: can approve transfers
-            taskCreatorRolesBitmap: 2,      // Role 1: can create tasks
+            quickJoinRolesBitmap: 1, // Role 0: new members
+            tokenMemberRolesBitmap: 1, // Role 0: can hold tokens
+            tokenApproverRolesBitmap: 2, // Role 1: can approve transfers
+            taskCreatorRolesBitmap: 2, // Role 1: can create tasks
             educationCreatorRolesBitmap: 2, // Role 1: can create education
-            educationMemberRolesBitmap: 1,  // Role 0: can access education
+            educationMemberRolesBitmap: 1, // Role 0: can access education
             hybridProposalCreatorRolesBitmap: 2, // Role 1: can create proposals
-            ddVotingRolesBitmap: 1,         // Role 0: can vote in polls
-            ddCreatorRolesBitmap: 2         // Role 1: can create polls
+            ddVotingRolesBitmap: 1, // Role 0: can vote in polls
+            ddCreatorRolesBitmap: 2 // Role 1: can create polls
         });
     }
 
@@ -589,8 +589,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         poaManager.addContractType("PaymasterHub", address(paymasterHubImpl));
         address paymasterHubBeacon = poaManager.getBeaconById(keccak256("PaymasterHub"));
         bytes memory paymasterHubInit = abi.encodeWithSignature(
-            "initialize(address,address,address)",
-            ENTRY_POINT_V07, SEPOLIA_HATS, address(poaManager)
+            "initialize(address,address,address)", ENTRY_POINT_V07, SEPOLIA_HATS, address(poaManager)
         );
         paymasterHub = PaymasterHub(payable(address(new BeaconProxy(paymasterHubBeacon, paymasterHubInit))));
 

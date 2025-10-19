@@ -31,9 +31,9 @@ error UnsupportedType();
 contract AccessFactory {
     /*──────────────────── Role Assignments ────────────────────*/
     struct RoleAssignments {
-        uint256 quickJoinRolesBitmap;      // Bit N set = Role N assigned on join
-        uint256 tokenMemberRolesBitmap;    // Bit N set = Role N can hold tokens
-        uint256 tokenApproverRolesBitmap;  // Bit N set = Role N can approve transfers
+        uint256 quickJoinRolesBitmap; // Bit N set = Role N assigned on join
+        uint256 tokenMemberRolesBitmap; // Bit N set = Role N can hold tokens
+        uint256 tokenApproverRolesBitmap; // Bit N set = Role N can approve transfers
     }
 
     /*──────────────────── Access Deployment Params ────────────────────*/

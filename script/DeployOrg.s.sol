@@ -24,7 +24,6 @@ import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
  *   - DEPLOYER_PRIVATE_KEY: Private key for deployment
  */
 contract DeployOrg is Script {
-
     /*═══════════════════════════ STRUCTS ═══════════════════════════*/
 
     // JSON parsing structs - must match org config JSON structure
@@ -107,10 +106,7 @@ contract DeployOrg is Script {
         console.log("  Voting Classes:", config.votingClasses.length);
 
         // Build deployment params
-        OrgDeployer.DeploymentParams memory params = _buildDeploymentParams(
-            config,
-            globalAccountRegistry
-        );
+        OrgDeployer.DeploymentParams memory params = _buildDeploymentParams(config, globalAccountRegistry);
 
         // Deploy organization
         vm.startBroadcast(deployerPrivateKey);
@@ -152,10 +148,12 @@ contract DeployOrg is Script {
         config.quorum.directDemocracy = uint8(vm.parseJsonUint(configJson, ".quorum.directDemocracy"));
 
         // Parse roles array - use serializeJson to work around struct array limitations
-        // First, manually count by trying to parse until we fail
+        // First, manually count by trying to parse until we fail (reasonable max: 100)
         uint256 rolesLength = 0;
-        for (uint256 i = 0; i < 100; i++) { // reasonable max
-            try vm.parseJsonString(configJson, string.concat(".roles[", vm.toString(i), "].name")) returns (string memory) {
+        for (uint256 i = 0; i < 100; i++) {
+            try vm.parseJsonString(
+                configJson, string.concat(".roles[", vm.toString(i), "].name")
+            ) returns (string memory) {
                 rolesLength++;
             } catch {
                 break;
@@ -170,10 +168,12 @@ contract DeployOrg is Script {
             config.roles[i].canVote = vm.parseJsonBool(configJson, string.concat(basePath, ".canVote"));
         }
 
-        // Parse voting classes array
+        // Parse voting classes array (reasonable max: 100)
         uint256 votingClassesLength = 0;
-        for (uint256 i = 0; i < 100; i++) { // reasonable max
-            try vm.parseJsonString(configJson, string.concat(".votingClasses[", vm.toString(i), "].strategy")) returns (string memory) {
+        for (uint256 i = 0; i < 100; i++) {
+            try vm.parseJsonString(
+                configJson, string.concat(".votingClasses[", vm.toString(i), "].strategy")
+            ) returns (string memory) {
                 votingClassesLength++;
             } catch {
                 break;
@@ -244,11 +244,11 @@ contract DeployOrg is Script {
         }
     }
 
-    function _buildDeploymentParams(
-        OrgConfigJson memory config,
-        address globalAccountRegistry
-    ) internal pure returns (OrgDeployer.DeploymentParams memory params) {
-
+    function _buildDeploymentParams(OrgConfigJson memory config, address globalAccountRegistry)
+        internal
+        pure
+        returns (OrgDeployer.DeploymentParams memory params)
+    {
         // Set basic params
         params.orgId = keccak256(bytes(config.orgId));
         params.orgName = config.orgName;
@@ -312,10 +312,7 @@ contract DeployOrg is Script {
 
     /*═══════════════════════════ OUTPUT ═══════════════════════════*/
 
-    function _outputDeployment(
-        OrgConfigJson memory config,
-        OrgDeployer.DeploymentResult memory result
-    ) internal view {
+    function _outputDeployment(OrgConfigJson memory config, OrgDeployer.DeploymentResult memory result) internal view {
         console.log("\n--- Deployed Organization Addresses ---");
         console.log("{");
         console.log('  "orgId": "%s",', config.orgId);
@@ -329,7 +326,7 @@ contract DeployOrg is Script {
         console.log('    "taskManager": "%s",', result.taskManager);
         console.log('    "educationHub": "%s",', result.educationHub);
         console.log('    "paymentManager": "%s"', result.paymentManager);
-        console.log('  }');
+        console.log("  }");
         console.log("}");
     }
 }

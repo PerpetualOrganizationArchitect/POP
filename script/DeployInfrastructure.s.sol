@@ -46,7 +46,6 @@ import {HatsTreeSetup} from "../src/HatsTreeSetup.sol";
  *   - DEPLOYER_PRIVATE_KEY: Private key for deployment
  */
 contract DeployInfrastructure is Script {
-
     /*═══════════════════════════ CONSTANTS ═══════════════════════════*/
 
     // Hats Protocol on Sepolia (constant across deployments)
@@ -146,10 +145,8 @@ contract DeployInfrastructure is Script {
 
         // Deploy PaymasterHub proxy
         address paymasterHubBeacon = PoaManager(poaManager).getBeaconById(keccak256("PaymasterHub"));
-        bytes memory paymasterHubInit = abi.encodeWithSignature(
-            "initialize(address,address,address)",
-            ENTRY_POINT_V07, HATS_PROTOCOL, poaManager
-        );
+        bytes memory paymasterHubInit =
+            abi.encodeWithSignature("initialize(address,address,address)", ENTRY_POINT_V07, HATS_PROTOCOL, poaManager);
         paymasterHub = address(new BeaconProxy(paymasterHubBeacon, paymasterHubInit));
         console.log("PaymasterHub:", paymasterHub);
 
@@ -157,7 +154,14 @@ contract DeployInfrastructure is Script {
         address deployerBeacon = PoaManager(poaManager).getBeaconById(keccak256("OrgDeployer"));
         bytes memory deployerInit = abi.encodeWithSignature(
             "initialize(address,address,address,address,address,address,address,address)",
-            govFactory, accFactory, modFactory, poaManager, orgRegistry, HATS_PROTOCOL, hatsSetup, paymasterHub
+            govFactory,
+            accFactory,
+            modFactory,
+            poaManager,
+            orgRegistry,
+            HATS_PROTOCOL,
+            hatsSetup,
+            paymasterHub
         );
         orgDeployer = address(new BeaconProxy(deployerBeacon, deployerInit));
         console.log("OrgDeployer:", orgDeployer);
@@ -203,13 +207,27 @@ contract DeployInfrastructure is Script {
         // Write addresses to JSON file for easy org deployment
         string memory addressesJson = string.concat(
             "{\n",
-            '  "orgDeployer": "', vm.toString(orgDeployer), '",\n',
-            '  "globalAccountRegistry": "', vm.toString(globalAccountRegistry), '",\n',
-            '  "paymasterHub": "', vm.toString(paymasterHub), '",\n',
-            '  "poaManager": "', vm.toString(poaManager), '",\n',
-            '  "orgRegistry": "', vm.toString(orgRegistry), '",\n',
-            '  "implRegistry": "', vm.toString(implRegistry), '",\n',
-            '  "hatsProtocol": "', vm.toString(HATS_PROTOCOL), '"\n',
+            '  "orgDeployer": "',
+            vm.toString(orgDeployer),
+            '",\n',
+            '  "globalAccountRegistry": "',
+            vm.toString(globalAccountRegistry),
+            '",\n',
+            '  "paymasterHub": "',
+            vm.toString(paymasterHub),
+            '",\n',
+            '  "poaManager": "',
+            vm.toString(poaManager),
+            '",\n',
+            '  "orgRegistry": "',
+            vm.toString(orgRegistry),
+            '",\n',
+            '  "implRegistry": "',
+            vm.toString(implRegistry),
+            '",\n',
+            '  "hatsProtocol": "',
+            vm.toString(HATS_PROTOCOL),
+            '"\n',
             "}\n"
         );
 

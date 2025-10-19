@@ -8,8 +8,10 @@ out/
 /broadcast/**/dry-run/
 broadcast/
 
-# Docs
-docs/
+# Docs (generated)
+# Note: PAYMASTER_HUB.md is tracked explicitly
+docs/src/
+docs/book.toml
 
 # Dotenv file
 .env
