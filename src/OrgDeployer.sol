@@ -122,15 +122,15 @@ contract OrgDeployer is Initializable {
     }
 
     struct RoleAssignments {
-        uint256 quickJoinRolesBitmap;           // Bit N set = Role N assigned on join
-        uint256 tokenMemberRolesBitmap;         // Bit N set = Role N can hold tokens
-        uint256 tokenApproverRolesBitmap;       // Bit N set = Role N can approve transfers
-        uint256 taskCreatorRolesBitmap;         // Bit N set = Role N can create tasks
-        uint256 educationCreatorRolesBitmap;    // Bit N set = Role N can create education
-        uint256 educationMemberRolesBitmap;     // Bit N set = Role N can access education
+        uint256 quickJoinRolesBitmap; // Bit N set = Role N assigned on join
+        uint256 tokenMemberRolesBitmap; // Bit N set = Role N can hold tokens
+        uint256 tokenApproverRolesBitmap; // Bit N set = Role N can approve transfers
+        uint256 taskCreatorRolesBitmap; // Bit N set = Role N can create tasks
+        uint256 educationCreatorRolesBitmap; // Bit N set = Role N can create education
+        uint256 educationMemberRolesBitmap; // Bit N set = Role N can access education
         uint256 hybridProposalCreatorRolesBitmap; // Bit N set = Role N can create proposals
-        uint256 ddVotingRolesBitmap;            // Bit N set = Role N can vote in polls
-        uint256 ddCreatorRolesBitmap;           // Bit N set = Role N can create polls
+        uint256 ddVotingRolesBitmap; // Bit N set = Role N can vote in polls
+        uint256 ddCreatorRolesBitmap; // Bit N set = Role N can create polls
     }
 
     struct DeploymentParams {
@@ -166,7 +166,10 @@ contract OrgDeployer is Initializable {
 
     /*════════════════  INTERNAL ORCHESTRATION  ════════════════*/
 
-    function _deployFullOrgInternal(DeploymentParams calldata params) internal returns (DeploymentResult memory result) {
+    function _deployFullOrgInternal(DeploymentParams calldata params)
+        internal
+        returns (DeploymentResult memory result)
+    {
         Layout storage l = _layout();
 
         /* 1. Create Org in bootstrap mode */

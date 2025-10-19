@@ -40,14 +40,49 @@ contract MockHats is IHats {
     }
 
     // Stub implementations for required interface functions
-    function createHat(uint256, string calldata, uint32, address, address, bool, string calldata) external pure returns (uint256) { return 0; }
-    function batchCreateHats(uint256[] calldata, string[] calldata, uint32[] calldata, address[] calldata, address[] calldata, bool[] calldata, string[] calldata) external pure returns (bool) { return true; }
-    function getNextId(uint256) external pure returns (uint256) { return 0; }
-    function batchMintHats(uint256[] calldata, address[] calldata) external pure returns (bool) { return true; }
-    function setHatStatus(uint256, bool) external pure returns (bool) { return true; }
-    function checkHatStatus(uint256) external pure returns (bool) { return true; }
-    function setHatWearerStatus(uint256, address, bool, bool) external pure returns (bool) { return true; }
-    function checkHatWearerStatus(uint256, address) external pure returns (bool) { return true; }
+    function createHat(uint256, string calldata, uint32, address, address, bool, string calldata)
+        external
+        pure
+        returns (uint256)
+    {
+        return 0;
+    }
+
+    function batchCreateHats(
+        uint256[] calldata,
+        string[] calldata,
+        uint32[] calldata,
+        address[] calldata,
+        address[] calldata,
+        bool[] calldata,
+        string[] calldata
+    ) external pure returns (bool) {
+        return true;
+    }
+
+    function getNextId(uint256) external pure returns (uint256) {
+        return 0;
+    }
+
+    function batchMintHats(uint256[] calldata, address[] calldata) external pure returns (bool) {
+        return true;
+    }
+
+    function setHatStatus(uint256, bool) external pure returns (bool) {
+        return true;
+    }
+
+    function checkHatStatus(uint256) external pure returns (bool) {
+        return true;
+    }
+
+    function setHatWearerStatus(uint256, address, bool, bool) external pure returns (bool) {
+        return true;
+    }
+
+    function checkHatWearerStatus(uint256, address) external pure returns (bool) {
+        return true;
+    }
     function renounceHat(uint256) external {}
     function transferHat(uint256, address, address) external {}
     function makeHatImmutable(uint256) external {}
@@ -58,44 +93,145 @@ contract MockHats is IHats {
     function changeHatMaxSupply(uint256, uint32) external {}
     function requestLinkTopHatToTree(uint32, uint256) external {}
     function unlinkTopHatFromTree(uint32, address) external {}
-    function viewHat(uint256) external pure returns (string memory, uint32, uint32, address, address, string memory, uint16, bool, bool) {
+
+    function viewHat(uint256)
+        external
+        pure
+        returns (string memory, uint32, uint32, address, address, string memory, uint16, bool, bool)
+    {
         return ("", 0, 0, address(0), address(0), "", 0, false, true);
     }
     function changeHatDetails(uint256, string memory) external {}
     function approveLinkTopHatToTree(uint32, uint256, address, address, string calldata, string calldata) external {}
     function relinkTopHatWithinTree(uint32, uint256, address, address, string calldata, string calldata) external {}
-    function isTopHat(uint256) external pure returns (bool) { return false; }
-    function isLocalTopHat(uint256) external pure returns (bool) { return false; }
-    function isValidHatId(uint256) external pure returns (bool) { return true; }
-    function getLocalHatLevel(uint256) external pure returns (uint32) { return 0; }
-    function getTopHatDomain(uint256) external pure returns (uint32) { return 0; }
-    function getTippyTopHatDomain(uint32) external pure returns (uint32) { return 0; }
-    function noCircularLinkage(uint32, uint256) external pure returns (bool) { return true; }
-    function sameTippyTopHatDomain(uint32, uint256) external pure returns (bool) { return true; }
-    function getAdminAtLevel(uint256, uint32) external pure returns (uint256) { return 0; }
-    function getAdminAtLocalLevel(uint256, uint32) external pure returns (uint256) { return 0; }
-    function getTopHatDomainOfHat(uint256) external pure returns (uint32) { return 0; }
-    function getTippyTopHatDomainOfHat(uint256) external pure returns (uint32) { return 0; }
-    function tippyHatDomain() external pure returns (uint32) { return 0; }
-    function noCircularLinkage(uint32) external pure returns (uint256) { return 0; }
-    function linkedTreeAdmins(uint32) external pure returns (uint256) { return 0; }
-    function linkedTreeRequests(uint32) external pure returns (uint256) { return 0; }
-    function lastTopHatId() external pure returns (uint256) { return 0; }
-    function baseImageURI() external pure returns (string memory) { return ""; }
-    function balanceOf(address, uint256) external pure returns (uint256) { return 0; }
-    function balanceOfBatch(address[] calldata, uint256[] calldata) external pure returns (uint256[] memory) { return new uint256[](0); }
-    function buildHatId(uint256, uint16) external pure returns (uint256) { return 0; }
-    function getHatEligibilityModule(uint256) external pure returns (address) { return address(0); }
-    function getHatLevel(uint256) external pure returns (uint32) { return 0; }
-    function getHatMaxSupply(uint256) external pure returns (uint32) { return 0; }
-    function getHatToggleModule(uint256) external pure returns (address) { return address(0); }
-    function getImageURIForHat(uint256) external pure returns (string memory) { return ""; }
-    function hatSupply(uint256) external pure returns (uint32) { return 0; }
-    function isAdminOfHat(address, uint256) external pure returns (bool) { return false; }
-    function isEligible(address, uint256) external pure returns (bool) { return true; }
-    function isInGoodStanding(address, uint256) external pure returns (bool) { return true; }
-    function mintTopHat(address, string memory, string memory) external pure returns (uint256) { return 0; }
-    function uri(uint256) external pure returns (string memory) { return ""; }
+
+    function isTopHat(uint256) external pure returns (bool) {
+        return false;
+    }
+
+    function isLocalTopHat(uint256) external pure returns (bool) {
+        return false;
+    }
+
+    function isValidHatId(uint256) external pure returns (bool) {
+        return true;
+    }
+
+    function getLocalHatLevel(uint256) external pure returns (uint32) {
+        return 0;
+    }
+
+    function getTopHatDomain(uint256) external pure returns (uint32) {
+        return 0;
+    }
+
+    function getTippyTopHatDomain(uint32) external pure returns (uint32) {
+        return 0;
+    }
+
+    function noCircularLinkage(uint32, uint256) external pure returns (bool) {
+        return true;
+    }
+
+    function sameTippyTopHatDomain(uint32, uint256) external pure returns (bool) {
+        return true;
+    }
+
+    function getAdminAtLevel(uint256, uint32) external pure returns (uint256) {
+        return 0;
+    }
+
+    function getAdminAtLocalLevel(uint256, uint32) external pure returns (uint256) {
+        return 0;
+    }
+
+    function getTopHatDomainOfHat(uint256) external pure returns (uint32) {
+        return 0;
+    }
+
+    function getTippyTopHatDomainOfHat(uint256) external pure returns (uint32) {
+        return 0;
+    }
+
+    function tippyHatDomain() external pure returns (uint32) {
+        return 0;
+    }
+
+    function noCircularLinkage(uint32) external pure returns (uint256) {
+        return 0;
+    }
+
+    function linkedTreeAdmins(uint32) external pure returns (uint256) {
+        return 0;
+    }
+
+    function linkedTreeRequests(uint32) external pure returns (uint256) {
+        return 0;
+    }
+
+    function lastTopHatId() external pure returns (uint256) {
+        return 0;
+    }
+
+    function baseImageURI() external pure returns (string memory) {
+        return "";
+    }
+
+    function balanceOf(address, uint256) external pure returns (uint256) {
+        return 0;
+    }
+
+    function balanceOfBatch(address[] calldata, uint256[] calldata) external pure returns (uint256[] memory) {
+        return new uint256[](0);
+    }
+
+    function buildHatId(uint256, uint16) external pure returns (uint256) {
+        return 0;
+    }
+
+    function getHatEligibilityModule(uint256) external pure returns (address) {
+        return address(0);
+    }
+
+    function getHatLevel(uint256) external pure returns (uint32) {
+        return 0;
+    }
+
+    function getHatMaxSupply(uint256) external pure returns (uint32) {
+        return 0;
+    }
+
+    function getHatToggleModule(uint256) external pure returns (address) {
+        return address(0);
+    }
+
+    function getImageURIForHat(uint256) external pure returns (string memory) {
+        return "";
+    }
+
+    function hatSupply(uint256) external pure returns (uint32) {
+        return 0;
+    }
+
+    function isAdminOfHat(address, uint256) external pure returns (bool) {
+        return false;
+    }
+
+    function isEligible(address, uint256) external pure returns (bool) {
+        return true;
+    }
+
+    function isInGoodStanding(address, uint256) external pure returns (bool) {
+        return true;
+    }
+
+    function mintTopHat(address, string memory, string memory) external pure returns (uint256) {
+        return 0;
+    }
+
+    function uri(uint256) external pure returns (string memory) {
+        return "";
+    }
 }
 
 /**
@@ -136,12 +272,8 @@ contract PaymasterHubSolidarityTest is Test {
         PaymasterHub implementation = new PaymasterHub();
 
         // Deploy proxy and initialize
-        bytes memory initData = abi.encodeWithSelector(
-            PaymasterHub.initialize.selector,
-            address(entryPoint),
-            address(hats),
-            poaManager
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(PaymasterHub.initialize.selector, address(entryPoint), address(hats), poaManager);
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         hub = PaymasterHub(payable(address(proxy)));
 

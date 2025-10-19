@@ -175,10 +175,7 @@ contract GovernanceFactory {
             OrgRegistry.ContractRegistration[] memory registrations = new OrgRegistry.ContractRegistration[](3);
 
             registrations[0] = OrgRegistry.ContractRegistration({
-                typeId: ModuleTypes.EXECUTOR_ID,
-                proxy: result.executor,
-                beacon: execBeacon,
-                owner: address(this)
+                typeId: ModuleTypes.EXECUTOR_ID, proxy: result.executor, beacon: execBeacon, owner: address(this)
             });
 
             registrations[1] = OrgRegistry.ContractRegistration({
@@ -260,11 +257,13 @@ contract GovernanceFactory {
         /* 2. Deploy DirectDemocracyVoting (Polling Mechanism) - without registration */
         {
             // Resolve voting and creator roles to hat IDs
-            uint256[] memory votingHats =
-                RoleResolver.resolveRoleBitmap(OrgRegistry(params.orgRegistry), params.orgId, params.ddVotingRolesBitmap);
+            uint256[] memory votingHats = RoleResolver.resolveRoleBitmap(
+                OrgRegistry(params.orgRegistry), params.orgId, params.ddVotingRolesBitmap
+            );
 
-            uint256[] memory creatorHats =
-                RoleResolver.resolveRoleBitmap(OrgRegistry(params.orgRegistry), params.orgId, params.ddCreatorRolesBitmap);
+            uint256[] memory creatorHats = RoleResolver.resolveRoleBitmap(
+                OrgRegistry(params.orgRegistry), params.orgId, params.ddCreatorRolesBitmap
+            );
 
             ddBeacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.DIRECT_DEMOCRACY_VOTING_ID, params.poaManager, executor, params.autoUpgrade, address(0)
@@ -290,10 +289,7 @@ contract GovernanceFactory {
             OrgRegistry.ContractRegistration[] memory registrations = new OrgRegistry.ContractRegistration[](2);
 
             registrations[0] = OrgRegistry.ContractRegistration({
-                typeId: ModuleTypes.HYBRID_VOTING_ID,
-                proxy: hybridVoting,
-                beacon: hybridBeacon,
-                owner: executor
+                typeId: ModuleTypes.HYBRID_VOTING_ID, proxy: hybridVoting, beacon: hybridBeacon, owner: executor
             });
 
             registrations[1] = OrgRegistry.ContractRegistration({
