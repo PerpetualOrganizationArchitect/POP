@@ -44,11 +44,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     error ArrayLengthMismatch();
     error OrgNotRegistered();
     error OrgAlreadyRegistered();
-    error GracePeriodTxLimitReached();
+    error GracePeriodSpendLimitReached();
     error InsufficientDepositForSolidarity();
     error SolidarityLimitExceeded();
     error InsufficientOrgBalance();
     error OrgIsBanned();
+    error InsufficientFunds();
 
     // ============ Constants ============
     uint8 private constant PAYMASTER_DATA_VERSION = 1;
@@ -91,7 +92,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     event OrgDepositReceived(bytes32 indexed orgId, address indexed from, uint256 amount);
     event SolidarityFeeCollected(bytes32 indexed orgId, uint256 amount);
     event SolidarityDonationReceived(address indexed from, uint256 amount);
-    event GracePeriodConfigUpdated(uint32 initialGraceDays, uint32 maxTxDuringGrace, uint128 minDepositRequired);
+    event GracePeriodConfigUpdated(uint32 initialGraceDays, uint128 maxSpendDuringGrace, uint128 minDepositRequired);
     event OrgBannedFromSolidarity(bytes32 indexed orgId, bool banned);
 
     // ============ Storage Variables ============
@@ -125,13 +126,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @dev Per-org financial tracking for solidarity fund accounting
      */
     struct OrgFinancials {
-        uint128 deposited;        // Current balance deposited by org
-        uint128 totalDeposited;   // Cumulative lifetime deposits (never decreases)
-        uint128 spent;            // Total spent from org's own deposits
-        uint128 solidarityUsed;   // Total spent from solidarity fund
-        uint128 feesContributed;  // Total 1% solidarity fees paid
-        uint32 lifetimeTxCount;   // Transaction count during initial grace period
-        uint96 reserved;          // Padding for future use
+        uint128 deposited;                  // Current balance deposited by org
+        uint128 totalDeposited;             // Cumulative lifetime deposits (never decreases)
+        uint128 spent;                      // Total spent from org's own deposits
+        uint128 solidarityUsedThisPeriod;   // Solidarity used in current 90-day period
+        uint32 periodStart;                 // Timestamp when current 90-day period started
+        uint224 reserved;                   // Padding for future use
     }
 
     /**
@@ -139,10 +139,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      */
     struct SolidarityFund {
         uint128 balance;              // Current solidarity fund balance
-        uint128 totalFeesCollected;   // Cumulative fees collected
         uint32 numActiveOrgs;         // Number of orgs with deposits > 0
         uint16 feePercentageBps;      // Fee as basis points (100 = 1%)
-        uint80 reserved;              // Padding
+        uint208 reserved;             // Padding
     }
 
     /**
@@ -150,7 +149,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      */
     struct GracePeriodConfig {
         uint32 initialGraceDays;      // Startup period with zero deposits (default 90)
-        uint32 maxTxDuringGrace;      // Max transactions during startup (default 3000)
+        uint128 maxSpendDuringGrace;  // Max spending during grace period (default 0.01 ETH ~$30)
         uint128 minDepositRequired;   // Minimum balance to maintain after grace (default 0.003 ETH ~$10)
     }
 
@@ -254,11 +253,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         SolidarityFund storage solidarity = _getSolidarityStorage();
         solidarity.feePercentageBps = 100; // 1%
 
-        // Initialize grace period with defaults (90 days, 3000 tx, 0.003 ETH ~$10)
+        // Initialize grace period with defaults (90 days, 0.01 ETH ~$30 spend, 0.003 ETH ~$10 deposit)
         GracePeriodConfig storage grace = _getGracePeriodStorage();
         grace.initialGraceDays = 90;
-        grace.maxTxDuringGrace = 3000;
-        grace.minDepositRequired = 0.003 ether; // ~$10 on L2s
+        grace.maxSpendDuringGrace = 0.01 ether;  // ~$30 worth of gas (~3000 tx on cheap L2s)
+        grace.minDepositRequired = 0.003 ether;  // ~$10 minimum deposit
 
         emit PaymasterInitialized(_entryPoint, _hats, _poaManager);
     }
@@ -360,9 +359,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         if (inInitialGrace) {
             // Startup phase: can use solidarity even with zero deposits
-            // But enforce transaction limit to prevent spam
-            if (org.lifetimeTxCount >= grace.maxTxDuringGrace) {
-                revert GracePeriodTxLimitReached();
+            // Enforce spending limit only (configured to represent ~3000 tx worth of value)
+            if (org.solidarityUsedThisPeriod + maxCost > grace.maxSpendDuringGrace) {
+                revert GracePeriodSpendLimitReached();
             }
         } else {
             // After startup: must MAINTAIN minimum deposit (like $10/month commitment)
@@ -371,50 +370,16 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             if (org.deposited < grace.minDepositRequired) {
                 revert InsufficientDepositForSolidarity();
             }
+
+            // Check against tier-based allowance (calculated in payment logic)
+            // Tier 1: deposit 0.003 ETH → 0.006 ETH match → 0.009 ETH total per 90 days
+            // Tier 2: deposit 0.006 ETH → 0.009 ETH match → 0.015 ETH total per 90 days
+            // Tier 3: deposit >= 0.017 ETH → no match, self-funded
+            uint256 matchAllowance = _calculateMatchAllowance(org.deposited, grace.minDepositRequired);
+            if (org.solidarityUsedThisPeriod + maxCost > matchAllowance) {
+                revert SolidarityLimitExceeded();
+            }
         }
-
-        // Calculate org's solidarity allocation and check limit
-        uint256 solidarityLimit = _calculateSolidarityLimit(orgId);
-        if (org.solidarityUsed + maxCost > solidarityLimit) {
-            revert SolidarityLimitExceeded();
-        }
-    }
-
-    /**
-     * @notice Calculate solidarity fund allocation for an org
-     * @dev Algorithmic allocation based on pool size, org count, and usage
-     * @param orgId The organization identifier
-     * @return Solidarity allocation in wei
-     */
-    function _calculateSolidarityLimit(bytes32 orgId) internal view returns (uint256) {
-        SolidarityFund storage solidarity = _getSolidarityStorage();
-        mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
-
-        // If no solidarity fund, return 0
-        if (solidarity.balance == 0 || solidarity.numActiveOrgs == 0) {
-            return 0;
-        }
-
-        // Base allocation: equal share of fund
-        uint256 baseAllocation = uint256(solidarity.balance) / solidarity.numActiveOrgs;
-
-        // Adjust based on org's contribution ratio
-        OrgFinancials storage org = financials[orgId];
-        uint256 contributionRatio = solidarity.totalFeesCollected > 0
-            ? (uint256(org.feesContributed) * 10000) / solidarity.totalFeesCollected
-            : 0;
-
-        // Orgs that contribute more get higher allocation (up to 2x base)
-        // contributionRatio is in basis points (10000 = 100%)
-        uint256 bonusMultiplier = 10000 + contributionRatio; // 100% base + contribution%
-        uint256 allocation = (baseAllocation * bonusMultiplier) / 10000;
-
-        // Cap at total fund balance
-        if (allocation > solidarity.balance) {
-            allocation = solidarity.balance;
-        }
-
-        return allocation;
     }
 
     /**
@@ -439,20 +404,35 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         OrgFinancials storage org = financials[orgId];
 
-        // Check if crossing minimum threshold (deposit-to-reset mechanism)
+        // Check if period should reset (dual trigger)
+        bool shouldResetPeriod = false;
+
+        // Trigger 1: Time-based (90 days elapsed)
+        if (org.periodStart > 0 && block.timestamp >= org.periodStart + 90 days) {
+            shouldResetPeriod = true;
+        }
+
+        // Trigger 2: Crossing minimum threshold
         bool wasBelowMinimum = org.deposited < grace.minDepositRequired;
         bool willBeAboveMinimum = org.deposited + msg.value >= grace.minDepositRequired;
+        if (wasBelowMinimum && willBeAboveMinimum) {
+            shouldResetPeriod = true;
+        }
 
-        // Track if this is first deposit (for numActiveOrgs counter)
+        // Track if this is first deposit (for numActiveOrgs counter and period init)
         bool wasUnfunded = org.deposited == 0;
 
         // Update org financials
         org.deposited += uint128(msg.value);
         org.totalDeposited += uint128(msg.value);
 
-        // Reset solidarity allowance when crossing threshold (deposit-to-reset)
-        if (wasBelowMinimum && willBeAboveMinimum) {
-            org.solidarityUsed = 0;  // Reset allowance for new period
+        // Reset period when triggered
+        if (shouldResetPeriod) {
+            org.solidarityUsedThisPeriod = 0;
+            org.periodStart = uint32(block.timestamp);
+        } else if (wasUnfunded) {
+            // Initialize period start on first deposit
+            org.periodStart = uint32(block.timestamp);
         }
 
         // Update active org count if this is first deposit
@@ -589,12 +569,49 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     }
 
     /**
+     * @notice Calculate solidarity match allowance based on deposit tier
+     * @dev Progressive tier system with declining marginal match rates
+     *
+     * Tier 1: deposit = 1x min → match = 2x → total budget = 3x (e.g. 0.003 ETH → 0.009 ETH)
+     * Tier 2: deposit = 2x min → match = 3x → total budget = 5x (e.g. 0.006 ETH → 0.015 ETH)
+     * Tier 3: deposit >= 5x min → no match, self-funded
+     *
+     * @param deposited Current deposit balance
+     * @param minDeposit Minimum deposit requirement (from grace config)
+     * @return matchAllowance How much solidarity can be used per 90-day period
+     */
+    function _calculateMatchAllowance(uint256 deposited, uint256 minDeposit) internal pure returns (uint256) {
+        // Below minimum = no match
+        if (deposited < minDeposit) {
+            return 0;
+        }
+
+        // Tier 1: 1x deposit → 2x match
+        // E.g., 0.003 ETH deposit → 0.006 ETH match → 0.009 ETH total
+        if (deposited <= minDeposit) {
+            return deposited * 2;
+        }
+
+        // Tier 2: First 1x at 2x, second 1x at 1x
+        // E.g., 0.006 ETH deposit → 0.006 (first) + 0.003 (second) = 0.009 ETH match → 0.015 ETH total
+        if (deposited <= minDeposit * 2) {
+            uint256 firstTierMatch = minDeposit * 2;
+            uint256 secondTierMatch = deposited - minDeposit;
+            return firstTierMatch + secondTierMatch;
+        }
+
+        // Tier 3: Self-sufficient, no match
+        // Organizations with >= 5x minimum deposit don't need solidarity support
+        return 0;
+    }
+
+    /**
      * @notice Update org's financial tracking and collect 1% solidarity fee
      * @dev Called in postOp after actual gas cost is known
      *
      * Payment Priority:
-     * - Initial grace period (first 90 days): ALL from solidarity
-     * - After grace period: Deposits FIRST, then solidarity (skin in the game)
+     * - Initial grace period (first 90 days): 100% from solidarity
+     * - After grace period: 50/50 split between deposits and solidarity
      *
      * @param orgId The organization identifier
      * @param actualGasCost Actual gas cost paid
@@ -620,35 +637,61 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         uint256 fromSolidarity = 0;
 
         if (inInitialGrace) {
-            // First 90 days: ALL from solidarity (deposits untouched)
+            // Grace period: 100% from solidarity (deposits untouched)
             fromSolidarity = actualGasCost;
         } else {
-            // After 90 days: Use deposits FIRST (skin in the game), then solidarity
-            if (org.deposited >= org.spent + actualGasCost) {
-                // Org has enough in deposits to cover full cost
-                fromDeposits = actualGasCost;
-            } else {
-                // Use deposits first, then solidarity kicks in
-                uint256 depositAvailable = uint256(org.deposited) - uint256(org.spent);
-                fromDeposits = depositAvailable;
-                fromSolidarity = actualGasCost - depositAvailable;
+            // Post-grace: 50/50 split with tier-based solidarity allowance
+            uint256 matchAllowance = _calculateMatchAllowance(org.deposited, grace.minDepositRequired);
+            uint256 solidarityRemaining = matchAllowance > org.solidarityUsedThisPeriod
+                ? matchAllowance - org.solidarityUsedThisPeriod
+                : 0;
+
+            uint256 halfCost = actualGasCost / 2;
+            uint256 depositAvailable = org.deposited > org.spent
+                ? org.deposited - org.spent
+                : 0;
+
+            // Try 50/50 split
+            fromDeposits = halfCost < depositAvailable ? halfCost : depositAvailable;
+            fromSolidarity = halfCost < solidarityRemaining ? halfCost : solidarityRemaining;
+
+            // If one pool is short, try to make up from the other
+            uint256 covered = fromDeposits + fromSolidarity;
+            if (covered < actualGasCost) {
+                uint256 shortfall = actualGasCost - covered;
+
+                // Try deposits first
+                uint256 depositExtra = depositAvailable - fromDeposits;
+                if (depositExtra > 0) {
+                    uint256 additional = shortfall < depositExtra ? shortfall : depositExtra;
+                    fromDeposits += additional;
+                    shortfall -= additional;
+                }
+
+                // Then try solidarity
+                if (shortfall > 0) {
+                    uint256 solidarityExtra = solidarityRemaining - fromSolidarity;
+                    if (solidarityExtra > 0) {
+                        uint256 additional = shortfall < solidarityExtra ? shortfall : solidarityExtra;
+                        fromSolidarity += additional;
+                        shortfall -= additional;
+                    }
+                }
+
+                // If still can't cover, revert
+                if (shortfall > 0) {
+                    revert InsufficientFunds();
+                }
             }
         }
 
         // Update org spending
         org.spent += uint128(fromDeposits);
-        org.solidarityUsed += uint128(fromSolidarity);
-        org.feesContributed += uint128(solidarityFee);
+        org.solidarityUsedThisPeriod += uint128(fromSolidarity);
 
         // Update solidarity fund
-        solidarity.balance -= uint128(fromSolidarity); // Deduct solidarity usage
-        solidarity.balance += uint128(solidarityFee);  // Add collected fee
-        solidarity.totalFeesCollected += uint128(solidarityFee);
-
-        // Increment lifetime tx count if in initial grace period
-        if (inInitialGrace) {
-            org.lifetimeTxCount++;
-        }
+        solidarity.balance -= uint128(fromSolidarity);
+        solidarity.balance += uint128(solidarityFee);
 
         emit SolidarityFeeCollected(orgId, solidarityFee);
     }
@@ -854,25 +897,25 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @notice Set grace period configuration (global setting)
      * @dev Only PoaManager can modify grace period parameters
      * @param _initialGraceDays Number of days for initial grace period (default 90)
-     * @param _maxTxDuringGrace Maximum transactions during grace period (default 3000)
+     * @param _maxSpendDuringGrace Maximum spending during grace period (default 0.01 ETH ~$30, represents ~3000 tx)
      * @param _minDepositRequired Minimum balance to maintain after grace (default 0.003 ETH ~$10)
      */
     function setGracePeriodConfig(
         uint32 _initialGraceDays,
-        uint32 _maxTxDuringGrace,
+        uint128 _maxSpendDuringGrace,
         uint128 _minDepositRequired
     ) external {
         if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
         if (_initialGraceDays == 0) revert InvalidEpochLength();
-        if (_maxTxDuringGrace == 0) revert InvalidEpochLength();
+        if (_maxSpendDuringGrace == 0) revert InvalidEpochLength();
         if (_minDepositRequired == 0) revert InvalidEpochLength();
 
         GracePeriodConfig storage grace = _getGracePeriodStorage();
         grace.initialGraceDays = _initialGraceDays;
-        grace.maxTxDuringGrace = _maxTxDuringGrace;
+        grace.maxSpendDuringGrace = _maxSpendDuringGrace;
         grace.minDepositRequired = _minDepositRequired;
 
-        emit GracePeriodConfigUpdated(_initialGraceDays, _maxTxDuringGrace, _minDepositRequired);
+        emit GracePeriodConfigUpdated(_initialGraceDays, _maxSpendDuringGrace, _minDepositRequired);
     }
 
     /**
@@ -995,13 +1038,13 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @notice Get org's grace period status and limits
      * @param orgId The organization identifier
      * @return inGrace True if in initial grace period
-     * @return txRemaining Transactions remaining during grace (0 if not in grace)
+     * @return spendRemaining Spending remaining during grace (0 if not in grace)
      * @return requiresDeposit True if org needs to deposit to access solidarity
-     * @return solidarityLimit Current solidarity allocation for org
+     * @return solidarityLimit Current solidarity allocation for org (per 90-day period)
      */
     function getOrgGraceStatus(bytes32 orgId) external view returns (
         bool inGrace,
-        uint32 txRemaining,
+        uint128 spendRemaining,
         bool requiresDeposit,
         uint256 solidarityLimit
     ) {
@@ -1016,15 +1059,17 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         inGrace = block.timestamp < graceEndTime;
 
         if (inGrace) {
-            uint32 txUsed = org.lifetimeTxCount;
-            txRemaining = txUsed < grace.maxTxDuringGrace ? grace.maxTxDuringGrace - txUsed : 0;
+            // During grace: track spending limit
+            uint128 spendUsed = org.solidarityUsedThisPeriod;
+            spendRemaining = spendUsed < grace.maxSpendDuringGrace ? grace.maxSpendDuringGrace - spendUsed : 0;
             requiresDeposit = false;
+            solidarityLimit = uint256(grace.maxSpendDuringGrace);
         } else {
-            txRemaining = 0;
+            // After grace: no spending tracked, but need minimum deposit
+            spendRemaining = 0;
             requiresDeposit = org.deposited < grace.minDepositRequired;
+            solidarityLimit = _calculateMatchAllowance(org.deposited, grace.minDepositRequired);
         }
-
-        solidarityLimit = _calculateSolidarityLimit(orgId);
     }
 
     // ============ Storage Accessors ============
