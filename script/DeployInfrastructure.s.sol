@@ -140,8 +140,17 @@ contract DeployInfrastructure is Script {
         console.log("ModulesFactory:", modFactory);
         console.log("HatsTreeSetup:", hatsSetup);
 
-        // Deploy shared PaymasterHub (singleton for all orgs)
-        paymasterHub = address(new PaymasterHub(ENTRY_POINT_V07, HATS_PROTOCOL));
+        // Deploy PaymasterHub implementation and register
+        address paymasterHubImpl = address(new PaymasterHub());
+        PoaManager(poaManager).addContractType("PaymasterHub", paymasterHubImpl);
+
+        // Deploy PaymasterHub proxy
+        address paymasterHubBeacon = PoaManager(poaManager).getBeaconById(keccak256("PaymasterHub"));
+        bytes memory paymasterHubInit = abi.encodeWithSignature(
+            "initialize(address,address,address)",
+            ENTRY_POINT_V07, HATS_PROTOCOL, poaManager
+        );
+        paymasterHub = address(new BeaconProxy(paymasterHubBeacon, paymasterHubInit));
         console.log("PaymasterHub:", paymasterHub);
 
         // Deploy OrgDeployer proxy

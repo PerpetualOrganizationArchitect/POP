@@ -584,8 +584,15 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         accessFactory = new AccessFactory();
         modulesFactory = new ModulesFactory();
 
-        // Deploy shared PaymasterHub
-        paymasterHub = new PaymasterHub(ENTRY_POINT_V07, SEPOLIA_HATS);
+        // Deploy PaymasterHub as beacon proxy
+        PaymasterHub paymasterHubImpl = new PaymasterHub();
+        poaManager.addContractType("PaymasterHub", address(paymasterHubImpl));
+        address paymasterHubBeacon = poaManager.getBeaconById(keccak256("PaymasterHub"));
+        bytes memory paymasterHubInit = abi.encodeWithSignature(
+            "initialize(address,address,address)",
+            ENTRY_POINT_V07, SEPOLIA_HATS, address(poaManager)
+        );
+        paymasterHub = PaymasterHub(payable(address(new BeaconProxy(paymasterHubBeacon, paymasterHubInit))));
 
         // Create OrgDeployer proxy - initialize with factory addresses
         bytes memory deployerInit = abi.encodeWithSignature(
