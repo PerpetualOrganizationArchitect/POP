@@ -504,7 +504,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
     /*══════════════════════════════════════════ SET‑UP ══════════════════════════════════════════*/
     function setUp() public {
         // Fork Sepolia using the RPC URL from foundry.toml
-        vm.createSelectFork("sepolia");
+        vm.createSelectFork("hoodi");
 
         /*–– deploy bare implementations ––*/
         hybridImpl = new HybridVoting();
