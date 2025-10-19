@@ -23,6 +23,10 @@ interface IExecutorAdmin {
     function setHatMinterAuthorization(address minter, bool authorized) external;
 }
 
+interface IPaymasterHub {
+    function registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId) external;
+}
+
 /*────────────────────────────  Errors  ───────────────────────────────*/
 error InvalidAddress();
 error OrgExistsMismatch();
@@ -41,8 +45,6 @@ event OrgDeployed(
     address paymentManager
 );
 
-event PaymasterDeployed(bytes32 indexed orgId, address indexed paymasterHub, address entryPoint);
-
 /**
  * @title OrgDeployer
  * @notice Thin orchestrator for deploying complete organizations using factory pattern
@@ -58,6 +60,7 @@ contract OrgDeployer is Initializable {
         OrgRegistry orgRegistry;
         address poaManager;
         address hatsTreeSetup;
+        address paymasterHub; // Shared PaymasterHub for all orgs
         uint256 _status; // manual reentrancy guard
     }
 
@@ -82,12 +85,13 @@ contract OrgDeployer is Initializable {
         address _poaManager,
         address _orgRegistry,
         address _hats,
-        address _hatsTreeSetup
+        address _hatsTreeSetup,
+        address _paymasterHub
     ) public initializer {
         if (
             _governanceFactory == address(0) || _accessFactory == address(0) || _modulesFactory == address(0)
                 || _poaManager == address(0) || _orgRegistry == address(0) || _hats == address(0)
-                || _hatsTreeSetup == address(0)
+                || _hatsTreeSetup == address(0) || _paymasterHub == address(0)
         ) {
             revert InvalidAddress();
         }
@@ -99,6 +103,7 @@ contract OrgDeployer is Initializable {
         l.orgRegistry = OrgRegistry(_orgRegistry);
         l.poaManager = _poaManager;
         l.hatsTreeSetup = _hatsTreeSetup;
+        l.paymasterHub = _paymasterHub;
         l._status = 1; // Initialize manual reentrancy guard
         hats = IHats(_hats);
     }
@@ -181,7 +186,10 @@ contract OrgDeployer is Initializable {
         /* 4. Register Hats tree in OrgRegistry */
         l.orgRegistry.registerHatsTree(params.orgId, gov.topHatId, gov.roleHatIds);
 
-        /* 5. Deploy Access Infrastructure (QuickJoin, Token) */
+        /* 5. Register org with shared PaymasterHub */
+        IPaymasterHub(l.paymasterHub).registerOrg(params.orgId, gov.topHatId, 0);
+
+        /* 6. Deploy Access Infrastructure (QuickJoin, Token) */
         AccessFactory.AccessResult memory access;
         {
             AccessFactory.RoleAssignments memory accessRoles = AccessFactory.RoleAssignments({
@@ -269,93 +277,6 @@ contract OrgDeployer is Initializable {
         );
 
         return result;
-    }
-
-    /*════════════════  PAYMASTER DEPLOYMENT  ════════════════*/
-
-    struct PaymasterParams {
-        bytes paymasterBytecode;
-        address entryPoint;
-    }
-
-    /**
-     * @notice Deploys a complete organization WITH PaymasterHub in a single transaction
-     * @dev Uses bytecode-as-calldata pattern to avoid embedding PaymasterHub bytecode
-     * @param params Standard deployment parameters (same as deployFullOrg)
-     * @param paymasterParams PaymasterHub-specific parameters
-     * @return result Deployed organization components
-     * @return paymasterHub Deployed PaymasterHub address
-     */
-    function deployFullOrgWithPaymaster(DeploymentParams calldata params, PaymasterParams calldata paymasterParams)
-        external
-        returns (DeploymentResult memory result, address paymasterHub)
-    {
-        // Manual reentrancy guard
-        Layout storage l = _layout();
-        if (l._status == 2) revert Reentrant();
-        l._status = 2;
-
-        // Deploy core organization using provided params
-        result = _deployFullOrgInternal(params);
-
-        // Get topHatId from org registry (needed for PaymasterHub)
-        uint256 topHatId = l.orgRegistry.getTopHat(params.orgId);
-
-        // Deploy PaymasterHub using bytecode from calldata (no embedding!)
-        bytes memory initCode = abi.encodePacked(
-            paymasterParams.paymasterBytecode,
-            abi.encode(paymasterParams.entryPoint, address(hats), topHatId) // Constructor args
-        );
-
-        assembly {
-            paymasterHub := create(0, add(initCode, 0x20), mload(initCode))
-            if iszero(paymasterHub) { revert(0, 0) }
-        }
-
-        // Emit paymaster deployment event
-        emit PaymasterDeployed(params.orgId, paymasterHub, paymasterParams.entryPoint);
-
-        // Reset reentrancy guard
-        l._status = 1;
-
-        return (result, paymasterHub);
-    }
-
-    /**
-     * @notice Deploys a PaymasterHub for an existing organization
-     * @dev Can be called after deployFullOrg() to add gas sponsorship capability
-     * @param orgId Organization identifier (must exist)
-     * @param paymasterBytecode PaymasterHub creation bytecode
-     * @param entryPoint ERC-4337 EntryPoint address
-     * @return paymasterHub Deployed PaymasterHub address
-     */
-    function deployPaymasterForOrg(bytes32 orgId, bytes calldata paymasterBytecode, address entryPoint)
-        external
-        returns (address paymasterHub)
-    {
-        Layout storage l = _layout();
-
-        // Verify org exists
-        if (!_orgExists(orgId)) revert OrgExistsMismatch();
-
-        // Get topHatId from org registry
-        uint256 topHatId = l.orgRegistry.getTopHat(orgId);
-
-        // Deploy PaymasterHub using bytecode from calldata
-        bytes memory initCode = abi.encodePacked(
-            paymasterBytecode,
-            abi.encode(entryPoint, address(hats), topHatId) // Constructor args
-        );
-
-        assembly {
-            paymasterHub := create(0, add(initCode, 0x20), mload(initCode))
-            if iszero(paymasterHub) { revert(0, 0) }
-        }
-
-        // Emit paymaster deployment event
-        emit PaymasterDeployed(orgId, paymasterHub, entryPoint);
-
-        return paymasterHub;
     }
 
     /*══════════════  UTILITIES  ═════════════=*/

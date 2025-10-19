@@ -23,6 +23,7 @@ import {ImplementationRegistry} from "../src/ImplementationRegistry.sol";
 import {PoaManager} from "../src/PoaManager.sol";
 import {OrgRegistry} from "../src/OrgRegistry.sol";
 import {OrgDeployer} from "../src/OrgDeployer.sol";
+import {PaymasterHub} from "../src/PaymasterHub.sol";
 
 // Factories
 import {GovernanceFactory} from "../src/factories/GovernanceFactory.sol";
@@ -51,6 +52,9 @@ contract DeployInfrastructure is Script {
     // Hats Protocol on Sepolia (constant across deployments)
     address public constant HATS_PROTOCOL = 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137;
 
+    // EntryPoint v0.7 (canonical address on all chains)
+    address public constant ENTRY_POINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
+
     /*═══════════════════════════ STORAGE ═══════════════════════════*/
 
     // Core infrastructure
@@ -59,6 +63,7 @@ contract DeployInfrastructure is Script {
     address public poaManager;
     address public orgRegistry;
     address public implRegistry;
+    address public paymasterHub;
 
     /*═══════════════════════════ MAIN DEPLOYMENT ═══════════════════════════*/
 
@@ -135,11 +140,15 @@ contract DeployInfrastructure is Script {
         console.log("ModulesFactory:", modFactory);
         console.log("HatsTreeSetup:", hatsSetup);
 
+        // Deploy shared PaymasterHub (singleton for all orgs)
+        paymasterHub = address(new PaymasterHub(ENTRY_POINT_V07, HATS_PROTOCOL));
+        console.log("PaymasterHub:", paymasterHub);
+
         // Deploy OrgDeployer proxy
         address deployerBeacon = PoaManager(poaManager).getBeaconById(keccak256("OrgDeployer"));
         bytes memory deployerInit = abi.encodeWithSignature(
-            "initialize(address,address,address,address,address,address,address)",
-            govFactory, accFactory, modFactory, poaManager, orgRegistry, HATS_PROTOCOL, hatsSetup
+            "initialize(address,address,address,address,address,address,address,address)",
+            govFactory, accFactory, modFactory, poaManager, orgRegistry, HATS_PROTOCOL, hatsSetup, paymasterHub
         );
         orgDeployer = address(new BeaconProxy(deployerBeacon, deployerInit));
         console.log("OrgDeployer:", orgDeployer);
@@ -187,6 +196,7 @@ contract DeployInfrastructure is Script {
             "{\n",
             '  "orgDeployer": "', vm.toString(orgDeployer), '",\n',
             '  "globalAccountRegistry": "', vm.toString(globalAccountRegistry), '",\n',
+            '  "paymasterHub": "', vm.toString(paymasterHub), '",\n',
             '  "poaManager": "', vm.toString(poaManager), '",\n',
             '  "orgRegistry": "', vm.toString(orgRegistry), '",\n',
             '  "implRegistry": "', vm.toString(implRegistry), '",\n',

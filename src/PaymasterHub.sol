@@ -11,8 +11,8 @@ import {IERC165} from "lib/openzeppelin-contracts/contracts/utils/introspection/
 /**
  * @title PaymasterHub
  * @author POA Engineering
- * @notice Production-grade ERC-4337 paymaster with rule-driven policy, per-subject budgets, and optional inclusion bounty
- * @dev Implements ERC-7201 storage pattern with comprehensive security features
+ * @notice Production-grade ERC-4337 paymaster shared across all POA organizations
+ * @dev Implements ERC-7201 storage pattern with org-scoped configuration and budgets
  * @custom:security-contact security@poa.org
  */
 contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
@@ -38,6 +38,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     error InvalidBountyConfig();
     error ContractNotDeployed();
     error ArrayLengthMismatch();
+    error OrgNotRegistered();
+    error OrgAlreadyRegistered();
 
     // ============ Constants ============
     uint8 private constant PAYMASTER_DATA_VERSION = 1;
@@ -53,40 +55,40 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     uint256 private constant MAX_BOUNTY_PCT_BP = 10000; // 100%
 
     // ============ Events ============
-    event PaymasterInitialized(address indexed entryPoint, address indexed hats, uint256 adminHatId);
-    event RuleSet(address indexed target, bytes4 indexed selector, bool allowed, uint32 maxCallGasHint);
-    event BudgetSet(bytes32 indexed subjectKey, uint128 capPerEpoch, uint32 epochLen, uint32 epochStart);
+    event PaymasterInitialized(address indexed entryPoint, address indexed hats);
+    event OrgRegistered(bytes32 indexed orgId, uint256 adminHatId, uint256 operatorHatId);
+    event RuleSet(bytes32 indexed orgId, address indexed target, bytes4 indexed selector, bool allowed, uint32 maxCallGasHint);
+    event BudgetSet(bytes32 indexed orgId, bytes32 subjectKey, uint128 capPerEpoch, uint32 epochLen, uint32 epochStart);
     event FeeCapsSet(
+        bytes32 indexed orgId,
         uint256 maxFeePerGas,
         uint256 maxPriorityFeePerGas,
         uint32 maxCallGas,
         uint32 maxVerificationGas,
         uint32 maxPreVerificationGas
     );
-    event PauseSet(bool paused);
-    event OperatorHatSet(uint256 operatorHatId);
+    event PauseSet(bytes32 indexed orgId, bool paused);
+    event OperatorHatSet(bytes32 indexed orgId, uint256 operatorHatId);
     event DepositIncrease(uint256 amount, uint256 newDeposit);
     event DepositWithdraw(address indexed to, uint256 amount);
-    event BountyConfig(bool enabled, uint96 maxPerOp, uint16 pctBpCap);
+    event BountyConfig(bytes32 indexed orgId, bool enabled, uint96 maxPerOp, uint16 pctBpCap);
     event BountyFunded(uint256 amount, uint256 newBalance);
     event BountySweep(address indexed to, uint256 amount);
     event BountyPaid(bytes32 indexed userOpHash, address indexed to, uint256 amount);
     event BountyPayFailed(bytes32 indexed userOpHash, address indexed to, uint256 amount);
-    event UsageIncreased(bytes32 indexed subjectKey, uint256 delta, uint128 usedInEpoch, uint32 epochStart);
+    event UsageIncreased(bytes32 indexed orgId, bytes32 subjectKey, uint256 delta, uint128 usedInEpoch, uint32 epochStart);
     event UserOpPosted(bytes32 indexed opHash, address indexed postedBy);
     event EmergencyWithdraw(address indexed to, uint256 amount);
 
     // ============ Immutables ============
     address public immutable ENTRY_POINT;
+    address public immutable HATS;
 
     // ============ Storage Structs ============
-    struct Config {
-        address hats;
+    struct OrgConfig {
         uint256 adminHatId;
         uint256 operatorHatId; // Optional role for budget/rule management
         bool paused;
-        uint8 version;
-        uint24 reserved; // For future use
     }
 
     struct FeeCaps {
@@ -103,8 +105,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     }
 
     struct Budget {
-        uint128 capPerEpoch; // Increased from uint64 for larger budgets
-        uint128 usedInEpoch; // Increased from uint64
+        uint128 capPerEpoch;
+        uint128 usedInEpoch;
         uint32 epochLen;
         uint32 epochStart;
     }
@@ -113,13 +115,13 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         bool enabled;
         uint96 maxBountyWeiPerOp;
         uint16 pctBpCap;
-        uint144 totalPaid; // Track total bounties paid
+        uint144 totalPaid;
     }
 
     // ============ ERC-7201 Storage Locations ============
-    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.config")) - 1))
-    bytes32 private constant CONFIG_STORAGE_LOCATION =
-        0xabfaccef10a57a6be41f1fbc4a8a7f1b6e210db05ae07b44b3a1bb95e2c7978e;
+    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.orgs")) - 1))
+    bytes32 private constant ORGS_STORAGE_LOCATION =
+        0x7e8e7f71b618a8d3f4c7c1c6c0e8f8e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0;
 
     // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.feeCaps")) - 1))
     bytes32 private constant FEECAPS_STORAGE_LOCATION =
@@ -138,10 +140,9 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         0x5aefd14c2f5001261e819816e3c40d9d9cc763af84e5df87cd5955f0f5cfd09e;
 
     // ============ Constructor ============
-    constructor(address _entryPoint, address _hats, uint256 _adminHatId) {
+    constructor(address _entryPoint, address _hats) {
         if (_entryPoint == address(0)) revert ZeroAddress();
         if (_hats == address(0)) revert ZeroAddress();
-        if (_adminHatId == 0) revert ZeroAddress();
 
         // Verify entryPoint is a contract
         uint256 codeSize;
@@ -151,14 +152,33 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         if (codeSize == 0) revert ContractNotDeployed();
 
         ENTRY_POINT = _entryPoint;
+        HATS = _hats;
 
-        Config storage config = _getConfigStorage();
-        config.hats = _hats;
-        config.adminHatId = _adminHatId;
-        config.version = PAYMASTER_DATA_VERSION;
-        config.paused = false;
+        emit PaymasterInitialized(_entryPoint, _hats);
+    }
 
-        emit PaymasterInitialized(_entryPoint, _hats, _adminHatId);
+    // ============ Org Registration ============
+
+    /**
+     * @notice Register a new organization with the paymaster
+     * @dev Called by OrgDeployer during org creation
+     * @param orgId Unique organization identifier
+     * @param adminHatId Hat ID for org admin (topHat)
+     * @param operatorHatId Optional hat ID for operators (0 if none)
+     */
+    function registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId) external {
+        if (adminHatId == 0) revert ZeroAddress();
+
+        mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
+        if (orgs[orgId].adminHatId != 0) revert OrgAlreadyRegistered();
+
+        orgs[orgId] = OrgConfig({
+            adminHatId: adminHatId,
+            operatorHatId: operatorHatId,
+            paused: false
+        });
+
+        emit OrgRegistered(orgId, adminHatId, operatorHatId);
     }
 
     // ============ Modifiers ============
@@ -167,25 +187,28 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         _;
     }
 
-    modifier onlyAdmin() {
-        Config storage config = _getConfigStorage();
-        if (!IHats(config.hats).isWearerOfHat(msg.sender, config.adminHatId)) {
+    modifier onlyOrgAdmin(bytes32 orgId) {
+        OrgConfig storage org = _getOrgsStorage()[orgId];
+        if (org.adminHatId == 0) revert OrgNotRegistered();
+        if (!IHats(HATS).isWearerOfHat(msg.sender, org.adminHatId)) {
             revert NotAdmin();
         }
         _;
     }
 
-    modifier onlyOperator() {
-        Config storage config = _getConfigStorage();
-        bool isAdmin = IHats(config.hats).isWearerOfHat(msg.sender, config.adminHatId);
+    modifier onlyOrgOperator(bytes32 orgId) {
+        OrgConfig storage org = _getOrgsStorage()[orgId];
+        if (org.adminHatId == 0) revert OrgNotRegistered();
+
+        bool isAdmin = IHats(HATS).isWearerOfHat(msg.sender, org.adminHatId);
         bool isOperator =
-            config.operatorHatId != 0 && IHats(config.hats).isWearerOfHat(msg.sender, config.operatorHatId);
+            org.operatorHatId != 0 && IHats(HATS).isWearerOfHat(msg.sender, org.operatorHatId);
         if (!isAdmin && !isOperator) revert NotOperator();
         _;
     }
 
-    modifier whenNotPaused() {
-        if (_getConfigStorage().paused) revert Paused();
+    modifier whenOrgNotPaused(bytes32 orgId) {
+        if (_getOrgsStorage()[orgId].paused) revert Paused();
         _;
     }
 
@@ -209,29 +232,33 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         external
         override
         onlyEntryPoint
-        whenNotPaused
         returns (bytes memory context, uint256 validationData)
     {
         // Decode and validate paymasterAndData
-        (uint8 version, uint8 subjectType, bytes20 subjectId, uint32 ruleId, uint64 mailboxCommit8) =
+        (uint8 version, bytes32 orgId, uint8 subjectType, bytes20 subjectId, uint32 ruleId, uint64 mailboxCommit8) =
             _decodePaymasterData(userOp.paymasterAndData);
 
         if (version != PAYMASTER_DATA_VERSION) revert InvalidVersion();
+
+        // Validate org is registered and not paused
+        OrgConfig storage org = _getOrgsStorage()[orgId];
+        if (org.adminHatId == 0) revert OrgNotRegistered();
+        if (org.paused) revert Paused();
 
         // Validate subject eligibility
         bytes32 subjectKey = _validateSubjectEligibility(userOp.sender, subjectType, subjectId);
 
         // Validate target/selector rules
-        _validateRules(userOp, ruleId);
+        _validateRules(userOp, ruleId, orgId);
 
         // Validate fee and gas caps
-        _validateFeeCaps(userOp);
+        _validateFeeCaps(userOp, orgId);
 
         // Check and update budget
-        uint32 currentEpochStart = _checkBudget(subjectKey, maxCost);
+        uint32 currentEpochStart = _checkBudget(orgId, subjectKey, maxCost);
 
         // Prepare context for postOp
-        context = abi.encode(subjectKey, currentEpochStart, userOpHash, mailboxCommit8, uint160(tx.origin));
+        context = abi.encode(orgId, subjectKey, currentEpochStart, userOpHash, mailboxCommit8, uint160(tx.origin));
 
         // Return 0 for no signature failure and no time restrictions
         validationData = 0;
@@ -250,15 +277,15 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         onlyEntryPoint
         nonReentrant
     {
-        (bytes32 subjectKey, uint32 epochStart, bytes32 userOpHash, uint64 mailboxCommit8, address bundlerOrigin) =
-            abi.decode(context, (bytes32, uint32, bytes32, uint64, address));
+        (bytes32 orgId, bytes32 subjectKey, uint32 epochStart, bytes32 userOpHash, uint64 mailboxCommit8, address bundlerOrigin) =
+            abi.decode(context, (bytes32, bytes32, uint32, bytes32, uint64, address));
 
         // Update usage regardless of execution mode
-        _updateUsage(subjectKey, epochStart, actualGasCost);
+        _updateUsage(orgId, subjectKey, epochStart, actualGasCost);
 
         // Process bounty only on successful execution
         if (mode == IPaymaster.PostOpMode.opSucceeded && mailboxCommit8 != 0) {
-            _processBounty(userOpHash, bundlerOrigin, actualGasCost);
+            _processBounty(orgId, userOpHash, bundlerOrigin, actualGasCost);
         }
     }
 
@@ -266,38 +293,40 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
 
     /**
      * @notice Set a rule for target/selector combination
-     * @dev Only callable by admin or operator
+     * @dev Only callable by org admin or operator
      */
-    function setRule(address target, bytes4 selector, bool allowed, uint32 maxCallGasHint) external onlyOperator {
+    function setRule(bytes32 orgId, address target, bytes4 selector, bool allowed, uint32 maxCallGasHint)
+        external onlyOrgOperator(orgId) {
         if (target == address(0)) revert ZeroAddress();
 
-        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage();
+        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
         rules[target][selector] = Rule({allowed: allowed, maxCallGasHint: maxCallGasHint});
-        emit RuleSet(target, selector, allowed, maxCallGasHint);
+        emit RuleSet(orgId, target, selector, allowed, maxCallGasHint);
     }
 
     /**
      * @notice Batch set rules for multiple target/selector combinations
      */
     function setRulesBatch(
+        bytes32 orgId,
         address[] calldata targets,
         bytes4[] calldata selectors,
         bool[] calldata allowed,
         uint32[] calldata maxCallGasHints
-    ) external onlyOperator {
+    ) external onlyOrgOperator(orgId) {
         uint256 length = targets.length;
         if (length != selectors.length || length != allowed.length || length != maxCallGasHints.length) {
             revert ArrayLengthMismatch();
         }
 
-        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage();
+        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
 
         for (uint256 i; i < length;) {
             if (targets[i] == address(0)) revert ZeroAddress();
 
             rules[targets[i]][selectors[i]] = Rule({allowed: allowed[i], maxCallGasHint: maxCallGasHints[i]});
 
-            emit RuleSet(targets[i], selectors[i], allowed[i], maxCallGasHints[i]);
+            emit RuleSet(orgId, targets[i], selectors[i], allowed[i], maxCallGasHints[i]);
 
             unchecked {
                 ++i;
@@ -308,22 +337,23 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     /**
      * @notice Clear a rule for target/selector combination
      */
-    function clearRule(address target, bytes4 selector) external onlyOperator {
-        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage();
+    function clearRule(bytes32 orgId, address target, bytes4 selector) external onlyOrgOperator(orgId) {
+        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
         delete rules[target][selector];
-        emit RuleSet(target, selector, false, 0);
+        emit RuleSet(orgId, target, selector, false, 0);
     }
 
     /**
      * @notice Set budget for a subject
      * @dev Validates epoch length and initializes epoch start
      */
-    function setBudget(bytes32 subjectKey, uint128 capPerEpoch, uint32 epochLen) external onlyOperator {
+    function setBudget(bytes32 orgId, bytes32 subjectKey, uint128 capPerEpoch, uint32 epochLen)
+        external onlyOrgOperator(orgId) {
         if (epochLen < MIN_EPOCH_LENGTH || epochLen > MAX_EPOCH_LENGTH) {
             revert InvalidEpochLength();
         }
 
-        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage();
+        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
         Budget storage budget = budgets[subjectKey];
 
         // If changing epoch length, reset usage
@@ -339,33 +369,34 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
             budget.epochStart = uint32(block.timestamp);
         }
 
-        emit BudgetSet(subjectKey, capPerEpoch, epochLen, budget.epochStart);
+        emit BudgetSet(orgId, subjectKey, capPerEpoch, epochLen, budget.epochStart);
     }
 
     /**
      * @notice Manually set epoch start for a subject
      */
-    function setEpochStart(bytes32 subjectKey, uint32 epochStart) external onlyOperator {
-        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage();
+    function setEpochStart(bytes32 orgId, bytes32 subjectKey, uint32 epochStart) external onlyOrgOperator(orgId) {
+        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
         Budget storage budget = budgets[subjectKey];
 
         budget.epochStart = epochStart;
         budget.usedInEpoch = 0; // Reset usage when manually setting epoch
 
-        emit BudgetSet(subjectKey, budget.capPerEpoch, budget.epochLen, epochStart);
+        emit BudgetSet(orgId, subjectKey, budget.capPerEpoch, budget.epochLen, epochStart);
     }
 
     /**
      * @notice Set fee and gas caps
      */
     function setFeeCaps(
+        bytes32 orgId,
         uint256 maxFeePerGas,
         uint256 maxPriorityFeePerGas,
         uint32 maxCallGas,
         uint32 maxVerificationGas,
         uint32 maxPreVerificationGas
-    ) external onlyOperator {
-        FeeCaps storage feeCaps = _getFeeCapsStorage();
+    ) external onlyOrgOperator(orgId) {
+        FeeCaps storage feeCaps = _getFeeCapsStorage()[orgId];
 
         feeCaps.maxFeePerGas = maxFeePerGas;
         feeCaps.maxPriorityFeePerGas = maxPriorityFeePerGas;
@@ -373,44 +404,46 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         feeCaps.maxVerificationGas = maxVerificationGas;
         feeCaps.maxPreVerificationGas = maxPreVerificationGas;
 
-        emit FeeCapsSet(maxFeePerGas, maxPriorityFeePerGas, maxCallGas, maxVerificationGas, maxPreVerificationGas);
+        emit FeeCapsSet(orgId, maxFeePerGas, maxPriorityFeePerGas, maxCallGas, maxVerificationGas, maxPreVerificationGas);
     }
 
     /**
-     * @notice Pause or unpause the paymaster
-     * @dev Only admin can pause/unpause
+     * @notice Pause or unpause the paymaster for an org
+     * @dev Only org admin can pause/unpause
      */
-    function setPause(bool paused) external onlyAdmin {
-        _getConfigStorage().paused = paused;
-        emit PauseSet(paused);
+    function setPause(bytes32 orgId, bool paused) external onlyOrgAdmin(orgId) {
+        _getOrgsStorage()[orgId].paused = paused;
+        emit PauseSet(orgId, paused);
     }
 
     /**
      * @notice Set optional operator hat for delegated management
      */
-    function setOperatorHat(uint256 operatorHatId) external onlyAdmin {
-        _getConfigStorage().operatorHatId = operatorHatId;
-        emit OperatorHatSet(operatorHatId);
+    function setOperatorHat(bytes32 orgId, uint256 operatorHatId) external onlyOrgAdmin(orgId) {
+        _getOrgsStorage()[orgId].operatorHatId = operatorHatId;
+        emit OperatorHatSet(orgId, operatorHatId);
     }
 
     /**
-     * @notice Configure bounty parameters
+     * @notice Configure bounty parameters for an org
      */
-    function setBounty(bool enabled, uint96 maxBountyWeiPerOp, uint16 pctBpCap) external onlyAdmin {
+    function setBounty(bytes32 orgId, bool enabled, uint96 maxBountyWeiPerOp, uint16 pctBpCap)
+        external onlyOrgAdmin(orgId) {
         if (pctBpCap > MAX_BOUNTY_PCT_BP) revert InvalidBountyConfig();
 
-        (Bounty storage bounty,) = _getBountyStorage();
+        Bounty storage bounty = _getBountyStorage()[orgId];
         bounty.enabled = enabled;
         bounty.maxBountyWeiPerOp = maxBountyWeiPerOp;
         bounty.pctBpCap = pctBpCap;
 
-        emit BountyConfig(enabled, maxBountyWeiPerOp, pctBpCap);
+        emit BountyConfig(orgId, enabled, maxBountyWeiPerOp, pctBpCap);
     }
 
     /**
-     * @notice Deposit funds to EntryPoint for gas reimbursement
+     * @notice Deposit funds to EntryPoint for gas reimbursement (shared pool)
+     * @dev Any org operator can deposit to shared pool
      */
-    function depositToEntryPoint() external payable onlyOperator {
+    function depositToEntryPoint(bytes32 orgId) external payable onlyOrgOperator(orgId) {
         IEntryPoint(ENTRY_POINT).depositTo{value: msg.value}(address(this));
 
         uint256 newDeposit = IEntryPoint(ENTRY_POINT).balanceOf(address(this));
@@ -418,13 +451,13 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     }
 
     /**
-     * @notice Withdraw funds from EntryPoint deposit
+     * @notice Withdraw funds from EntryPoint deposit (requires global admin)
+     * @dev Withdrawals affect shared pool, so restricted to prevent abuse
      */
-    function withdrawFromEntryPoint(address payable to, uint256 amount) external onlyAdmin {
-        if (to == address(0)) revert ZeroAddress();
-
-        IEntryPoint(ENTRY_POINT).withdrawTo(to, amount);
-        emit DepositWithdraw(to, amount);
+    function withdrawFromEntryPoint(address payable to, uint256 amount) external {
+        // TODO: Add global admin mechanism or require multi-org consensus
+        // For now, disabled to protect shared pool
+        revert NotAdmin();
     }
 
     /**
@@ -436,30 +469,20 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
 
     /**
      * @notice Withdraw from bounty pool
+     * @dev Bounties are shared across all orgs, requires careful governance
      */
-    function sweepBounty(address payable to, uint256 amount) external onlyAdmin {
-        if (to == address(0)) revert ZeroAddress();
-        if (amount > address(this).balance) revert PaymentFailed();
-
-        (bool success,) = to.call{value: amount}("");
-        if (!success) revert PaymentFailed();
-
-        emit BountySweep(to, amount);
+    function sweepBounty(address payable to, uint256 amount) external {
+        // TODO: Add global admin mechanism
+        revert NotAdmin();
     }
 
     /**
      * @notice Emergency withdrawal in case of critical issues
+     * @dev Requires global admin - affects all orgs
      */
-    function emergencyWithdraw(address payable to) external onlyAdmin {
-        if (to == address(0)) revert ZeroAddress();
-
-        uint256 balance = address(this).balance;
-        if (balance > 0) {
-            (bool success,) = to.call{value: balance}("");
-            if (!success) revert PaymentFailed();
-        }
-
-        emit EmergencyWithdraw(to, balance);
+    function emergencyWithdraw(address payable to) external {
+        // TODO: Add global admin mechanism
+        revert NotAdmin();
     }
 
     // ============ Mailbox Function ============
@@ -477,83 +500,80 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     // ============ Storage Getters (for Lens) ============
 
     /**
-     * @notice Get the current configuration
-     * @return The Config struct
+     * @notice Get the configuration for an org
+     * @return The OrgConfig struct
      */
-    function getConfig() external view returns (Config memory) {
-        return _getConfigStorage();
+    function getOrgConfig(bytes32 orgId) external view returns (OrgConfig memory) {
+        return _getOrgsStorage()[orgId];
     }
 
     /**
-     * @notice Get budget for a specific subject
+     * @notice Get budget for a specific subject within an org
+     * @param orgId Organization identifier
      * @param key The subject key (user, role, or org)
      * @return The Budget struct
      */
-    function getBudget(bytes32 key) external view returns (Budget memory) {
-        return _getBudgetsStorage()[key];
+    function getBudget(bytes32 orgId, bytes32 key) external view returns (Budget memory) {
+        return _getBudgetsStorage()[orgId][key];
     }
 
     /**
-     * @notice Get rule for a specific target and selector
+     * @notice Get rule for a specific target and selector within an org
+     * @param orgId Organization identifier
      * @param target The target contract address
      * @param selector The function selector
      * @return The Rule struct
      */
-    function getRule(address target, bytes4 selector) external view returns (Rule memory) {
-        return _getRulesStorage()[target][selector];
+    function getRule(bytes32 orgId, address target, bytes4 selector) external view returns (Rule memory) {
+        return _getRulesStorage()[orgId][target][selector];
     }
 
     /**
-     * @notice Get the current fee caps
+     * @notice Get the fee caps for an org
+     * @param orgId Organization identifier
      * @return The FeeCaps struct
      */
-    function getFeeCaps() external view returns (FeeCaps memory) {
-        return _getFeeCapsStorage();
+    function getFeeCaps(bytes32 orgId) external view returns (FeeCaps memory) {
+        return _getFeeCapsStorage()[orgId];
     }
 
     /**
-     * @notice Get the bounty configuration
+     * @notice Get the bounty configuration for an org
+     * @param orgId Organization identifier
      * @return The Bounty struct
      */
-    function getBountyConfig() external view returns (Bounty memory) {
-        (Bounty storage b,) = _getBountyStorage();
-        return b;
+    function getBountyConfig(bytes32 orgId) external view returns (Bounty memory) {
+        return _getBountyStorage()[orgId];
     }
 
     // ============ Storage Accessors ============
-    function _getConfigStorage() private pure returns (Config storage $) {
+    function _getOrgsStorage() private pure returns (mapping(bytes32 => OrgConfig) storage $) {
         assembly {
-            $.slot := CONFIG_STORAGE_LOCATION
+            $.slot := ORGS_STORAGE_LOCATION
         }
     }
 
-    function _getFeeCapsStorage() private pure returns (FeeCaps storage $) {
+    function _getFeeCapsStorage() private pure returns (mapping(bytes32 => FeeCaps) storage $) {
         assembly {
             $.slot := FEECAPS_STORAGE_LOCATION
         }
     }
 
-    function _getRulesStorage() private pure returns (mapping(address => mapping(bytes4 => Rule)) storage $) {
+    function _getRulesStorage() private pure returns (mapping(bytes32 => mapping(address => mapping(bytes4 => Rule))) storage $) {
         assembly {
             $.slot := RULES_STORAGE_LOCATION
         }
     }
 
-    function _getBudgetsStorage() private pure returns (mapping(bytes32 => Budget) storage $) {
+    function _getBudgetsStorage() private pure returns (mapping(bytes32 => mapping(bytes32 => Budget)) storage $) {
         assembly {
             $.slot := BUDGETS_STORAGE_LOCATION
         }
     }
 
-    function _getBountyStorage()
-        private
-        pure
-        returns (Bounty storage bounty, mapping(bytes32 => bool) storage paidOnce)
-    {
+    function _getBountyStorage() private pure returns (mapping(bytes32 => Bounty) storage $) {
         assembly {
-            bounty.slot := BOUNTY_STORAGE_LOCATION
-            mstore(0x00, BOUNTY_STORAGE_LOCATION)
-            paidOnce.slot := add(keccak256(0x00, 0x20), 1)
+            $.slot := BOUNTY_STORAGE_LOCATION
         }
     }
 
@@ -562,24 +582,26 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     function _decodePaymasterData(bytes calldata paymasterAndData)
         private
         pure
-        returns (uint8 version, uint8 subjectType, bytes20 subjectId, uint32 ruleId, uint64 mailboxCommit8)
+        returns (uint8 version, bytes32 orgId, uint8 subjectType, bytes20 subjectId, uint32 ruleId, uint64 mailboxCommit8)
     {
-        if (paymasterAndData.length < 54) revert InvalidPaymasterData();
+        // New format: [paymaster(20) | version(1) | orgId(32) | subjectType(1) | subjectId(20) | ruleId(4) | mailboxCommit(8)] = 86 bytes
+        if (paymasterAndData.length < 86) revert InvalidPaymasterData();
 
         // Skip first 20 bytes (paymaster address) and decode the rest
         version = uint8(paymasterAndData[20]);
-        subjectType = uint8(paymasterAndData[21]);
+        orgId = bytes32(paymasterAndData[21:53]);
+        subjectType = uint8(paymasterAndData[53]);
 
-        // Extract bytes20 subjectId from bytes 22-41
+        // Extract bytes20 subjectId from bytes 54-73
         assembly {
-            subjectId := calldataload(add(paymasterAndData.offset, 22))
+            subjectId := calldataload(add(paymasterAndData.offset, 54))
         }
 
-        // Extract ruleId from bytes 42-45
-        ruleId = uint32(bytes4(paymasterAndData[42:46]));
+        // Extract ruleId from bytes 74-77
+        ruleId = uint32(bytes4(paymasterAndData[74:78]));
 
-        // Extract mailboxCommit8 from bytes 46-53
-        mailboxCommit8 = uint64(bytes8(paymasterAndData[46:54]));
+        // Extract mailboxCommit8 from bytes 78-85
+        mailboxCommit8 = uint64(bytes8(paymasterAndData[78:86]));
     }
 
     function _validateSubjectEligibility(address sender, uint8 subjectType, bytes20 subjectId)
@@ -592,7 +614,7 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
             subjectKey = keccak256(abi.encodePacked(subjectType, subjectId));
         } else if (subjectType == SUBJECT_TYPE_HAT) {
             uint256 hatId = uint256(uint160(subjectId));
-            if (!IHats(_getConfigStorage().hats).isWearerOfHat(sender, hatId)) {
+            if (!IHats(HATS).isWearerOfHat(sender, hatId)) {
                 revert Ineligible();
             }
             subjectKey = keccak256(abi.encodePacked(subjectType, subjectId));
@@ -601,10 +623,10 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         }
     }
 
-    function _validateRules(PackedUserOperation calldata userOp, uint32 ruleId) private view {
+    function _validateRules(PackedUserOperation calldata userOp, uint32 ruleId, bytes32 orgId) private view {
         (address target, bytes4 selector) = _extractTargetSelector(userOp, ruleId);
 
-        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage();
+        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
         Rule storage rule = rules[target][selector];
 
         if (!rule.allowed) revert RuleDenied(target, selector);
@@ -659,8 +681,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         }
     }
 
-    function _validateFeeCaps(PackedUserOperation calldata userOp) private view {
-        FeeCaps storage caps = _getFeeCapsStorage();
+    function _validateFeeCaps(PackedUserOperation calldata userOp, bytes32 orgId) private view {
+        FeeCaps storage caps = _getFeeCapsStorage()[orgId];
 
         if (caps.maxFeePerGas > 0 && userOp.maxFeePerGas > caps.maxFeePerGas) {
             revert FeeTooHigh();
@@ -682,8 +704,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         }
     }
 
-    function _checkBudget(bytes32 subjectKey, uint256 maxCost) private returns (uint32 currentEpochStart) {
-        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage();
+    function _checkBudget(bytes32 orgId, bytes32 subjectKey, uint256 maxCost) private returns (uint32 currentEpochStart) {
+        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
         Budget storage budget = budgets[subjectKey];
 
         // Check if epoch needs rolling
@@ -703,8 +725,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         currentEpochStart = budget.epochStart;
     }
 
-    function _updateUsage(bytes32 subjectKey, uint32 epochStart, uint256 actualGasCost) private {
-        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage();
+    function _updateUsage(bytes32 orgId, bytes32 subjectKey, uint32 epochStart, uint256 actualGasCost) private {
+        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
         Budget storage budget = budgets[subjectKey];
 
         // Only update if we're still in the same epoch
@@ -712,17 +734,14 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
             // Safe to cast as actualGasCost is bounded
             uint128 cost = uint128(actualGasCost);
             budget.usedInEpoch += cost;
-            emit UsageIncreased(subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
+            emit UsageIncreased(orgId, subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
         }
     }
 
-    function _processBounty(bytes32 userOpHash, address bundlerOrigin, uint256 actualGasCost) private {
-        (Bounty storage bounty, mapping(bytes32 => bool) storage paidOnce) = _getBountyStorage();
+    function _processBounty(bytes32 orgId, bytes32 userOpHash, address bundlerOrigin, uint256 actualGasCost) private {
+        Bounty storage bounty = _getBountyStorage()[orgId];
 
         if (!bounty.enabled) return;
-        if (paidOnce[userOpHash]) return;
-
-        paidOnce[userOpHash] = true;
 
         // Calculate tip amount
         uint256 tip = bounty.maxBountyWeiPerOp;
