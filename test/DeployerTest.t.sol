@@ -37,6 +37,7 @@ import {ToggleModule} from "../src/ToggleModule.sol";
 import {IExecutor} from "../src/Executor.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {PaymasterHub} from "../src/PaymasterHub.sol";
 
 // Define events for testing
 interface IEligibilityModuleEvents {
@@ -86,9 +87,11 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
     GovernanceFactory governanceFactory;
     AccessFactory accessFactory;
     ModulesFactory modulesFactory;
+    PaymasterHub paymasterHub;
 
     /*–––– addresses ––––*/
     address public constant poaAdmin = address(1);
+    address public constant ENTRY_POINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     address public constant orgOwner = address(2);
     address public constant voter1 = address(3);
     address public constant voter2 = address(4);
@@ -581,16 +584,20 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         accessFactory = new AccessFactory();
         modulesFactory = new ModulesFactory();
 
+        // Deploy shared PaymasterHub
+        paymasterHub = new PaymasterHub(ENTRY_POINT_V07, SEPOLIA_HATS);
+
         // Create OrgDeployer proxy - initialize with factory addresses
         bytes memory deployerInit = abi.encodeWithSignature(
-            "initialize(address,address,address,address,address,address,address)",
+            "initialize(address,address,address,address,address,address,address,address)",
             address(governanceFactory),
             address(accessFactory),
             address(modulesFactory),
             address(poaManager),
             address(orgRegistry),
             SEPOLIA_HATS,
-            address(hatsTreeSetup)
+            address(hatsTreeSetup),
+            address(paymasterHub)
         );
         deployer = OrgDeployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
 
