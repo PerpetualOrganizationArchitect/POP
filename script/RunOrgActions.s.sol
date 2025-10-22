@@ -540,9 +540,9 @@ contract RunOrgActions is Script {
         uint256 rolesLength = 0;
         for (uint256 i = 0; i < 100; i++) {
             // reasonable max
-            try vm.parseJsonString(
-                configJson, string.concat(".roles[", vm.toString(i), "].name")
-            ) returns (string memory) {
+            try vm.parseJsonString(configJson, string.concat(".roles[", vm.toString(i), "].name")) returns (
+                string memory
+            ) {
                 rolesLength++;
             } catch {
                 break;
@@ -561,9 +561,9 @@ contract RunOrgActions is Script {
         uint256 votingClassesLength = 0;
         for (uint256 i = 0; i < 100; i++) {
             // reasonable max
-            try vm.parseJsonString(
-                configJson, string.concat(".votingClasses[", vm.toString(i), "].strategy")
-            ) returns (string memory) {
+            try vm.parseJsonString(configJson, string.concat(".votingClasses[", vm.toString(i), "].strategy")) returns (
+                string memory
+            ) {
                 votingClassesLength++;
             } catch {
                 break;

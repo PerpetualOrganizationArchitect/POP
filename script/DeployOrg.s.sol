@@ -151,9 +151,9 @@ contract DeployOrg is Script {
         // First, manually count by trying to parse until we fail (reasonable max: 100)
         uint256 rolesLength = 0;
         for (uint256 i = 0; i < 100; i++) {
-            try vm.parseJsonString(
-                configJson, string.concat(".roles[", vm.toString(i), "].name")
-            ) returns (string memory) {
+            try vm.parseJsonString(configJson, string.concat(".roles[", vm.toString(i), "].name")) returns (
+                string memory
+            ) {
                 rolesLength++;
             } catch {
                 break;
@@ -171,9 +171,9 @@ contract DeployOrg is Script {
         // Parse voting classes array (reasonable max: 100)
         uint256 votingClassesLength = 0;
         for (uint256 i = 0; i < 100; i++) {
-            try vm.parseJsonString(
-                configJson, string.concat(".votingClasses[", vm.toString(i), "].strategy")
-            ) returns (string memory) {
+            try vm.parseJsonString(configJson, string.concat(".votingClasses[", vm.toString(i), "].strategy")) returns (
+                string memory
+            ) {
                 votingClassesLength++;
             } catch {
                 break;
