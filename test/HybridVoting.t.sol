@@ -573,7 +573,12 @@ contract MockERC20 is IERC20 {
             // Expect the NewHatProposal event to be emitted
             vm.expectEmit(true, true, true, true);
             emit HybridVotingProposals.NewHatProposal(
-                0, bytes("ipfs://test"), 2, uint64(block.timestamp + 15 minutes), uint64(block.timestamp), hatIds
+                0,
+                bytes("ipfs://test"),
+                2,
+                uint64(block.timestamp + 15 minutes),
+                uint64(block.timestamp),
+                hatIds
             );
 
             uint256 id = _createHatPoll(2, hatIds);

@@ -9,7 +9,7 @@ library HybridVotingConfig {
 
     uint8 public constant MAX_CLASSES = 8;
 
-    event ClassesReplaced(uint256 version, bytes32 classesHash);
+    event ClassesReplaced(uint256 indexed version, bytes32 indexed classesHash, uint256 numClasses, uint64 timestamp);
 
     function _layout() private pure returns (HybridVoting.Layout storage s) {
         assembly {
@@ -47,7 +47,7 @@ library HybridVotingConfig {
         }
 
         bytes32 classesHash = keccak256(abi.encode(newClasses));
-        emit ClassesReplaced(block.number, classesHash);
+        emit ClassesReplaced(block.number, classesHash, newClasses.length, uint64(block.timestamp));
     }
 
     function validateAndInitClasses(HybridVoting.ClassConfig[] calldata initialClasses) external {
@@ -73,6 +73,6 @@ library HybridVotingConfig {
         if (totalSlice != 100) revert VotingErrors.InvalidSliceSum();
 
         bytes32 classesHash = keccak256(abi.encode(_layout().classes));
-        emit ClassesReplaced(block.number, classesHash);
+        emit ClassesReplaced(block.number, classesHash, initialClasses.length, uint64(block.timestamp));
     }
 }

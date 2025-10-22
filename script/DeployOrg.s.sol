@@ -105,8 +105,8 @@ contract DeployOrg is Script {
         console.log("  Roles:", config.roles.length);
         console.log("  Voting Classes:", config.votingClasses.length);
 
-        // Build deployment params
-        OrgDeployer.DeploymentParams memory params = _buildDeploymentParams(config, globalAccountRegistry);
+        // Build deployment params (deployer will receive ADMIN hat)
+        OrgDeployer.DeploymentParams memory params = _buildDeploymentParams(config, globalAccountRegistry, deployer);
 
         // Deploy organization
         vm.startBroadcast(deployerPrivateKey);
@@ -244,7 +244,7 @@ contract DeployOrg is Script {
         }
     }
 
-    function _buildDeploymentParams(OrgConfigJson memory config, address globalAccountRegistry)
+    function _buildDeploymentParams(OrgConfigJson memory config, address globalAccountRegistry, address deployerAddress)
         internal
         pure
         returns (OrgDeployer.DeploymentParams memory params)
@@ -253,6 +253,7 @@ contract DeployOrg is Script {
         params.orgId = keccak256(bytes(config.orgId));
         params.orgName = config.orgName;
         params.registryAddr = globalAccountRegistry;
+        params.deployerAddress = deployerAddress; // Address to receive ADMIN hat
         params.autoUpgrade = config.autoUpgrade;
         params.hybridQuorumPct = config.quorum.hybrid;
         params.ddQuorumPct = config.quorum.directDemocracy;

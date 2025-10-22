@@ -27,6 +27,7 @@ interface IHatsTreeSetup {
         address eligibilityModule;
         address toggleModule;
         address deployer;
+        address deployerAddress; // Address to receive ADMIN hat
         address executor;
         string orgName;
         string[] roleNames;
@@ -66,6 +67,7 @@ contract GovernanceFactory {
         address hats;
         address hatsTreeSetup;
         address deployer; // OrgDeployer address for registration callbacks
+        address deployerAddress; // Address to receive ADMIN hat
         address participationToken; // Token for HybridVoting
         bool autoUpgrade;
         uint8 hybridQuorumPct; // Quorum for HybridVoting
@@ -156,6 +158,7 @@ contract GovernanceFactory {
                 eligibilityModule: result.eligibilityModule,
                 toggleModule: result.toggleModule,
                 deployer: address(this),
+                deployerAddress: params.deployerAddress, // Address to receive ADMIN hat
                 executor: result.executor,
                 orgName: params.orgName,
                 roleNames: params.roleNames,

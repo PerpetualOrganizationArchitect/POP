@@ -146,6 +146,62 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
         emit Swept(to, bal);
     }
 
+    /* ─────────── Module Configuration ─────────── */
+    /**
+     * @notice Configure vouching on EligibilityModule during initial setup
+     * @dev Only callable by owner before renouncing ownership
+     * @param eligibilityModule Address of the EligibilityModule
+     * @param hatId Hat ID to configure vouching for
+     * @param quorum Number of vouches required
+     * @param membershipHatId Hat ID whose wearers can vouch
+     * @param combineWithHierarchy Whether to combine with parent hat eligibility
+     */
+    function configureVouching(
+        address eligibilityModule,
+        uint256 hatId,
+        uint32 quorum,
+        uint256 membershipHatId,
+        bool combineWithHierarchy
+    ) external onlyOwner {
+        if (eligibilityModule == address(0)) revert ZeroAddress();
+        (bool success,) = eligibilityModule.call(
+            abi.encodeWithSignature(
+                "configureVouching(uint256,uint32,uint256,bool)",
+                hatId,
+                quorum,
+                membershipHatId,
+                combineWithHierarchy
+            )
+        );
+        require(success, "configureVouching failed");
+    }
+
+    /**
+     * @notice Set default eligibility for a hat during initial setup
+     * @dev Only callable by owner before renouncing ownership
+     * @param eligibilityModule Address of the EligibilityModule
+     * @param hatId Hat ID to set default eligibility for
+     * @param eligible Whether wearers are eligible by default
+     * @param standing Whether wearers have good standing by default
+     */
+    function setDefaultEligibility(
+        address eligibilityModule,
+        uint256 hatId,
+        bool eligible,
+        bool standing
+    ) external onlyOwner {
+        if (eligibilityModule == address(0)) revert ZeroAddress();
+        (bool success,) = eligibilityModule.call(
+            abi.encodeWithSignature(
+                "setDefaultEligibility(uint256,bool,bool)",
+                hatId,
+                eligible,
+                standing
+            )
+        );
+        require(success, "setDefaultEligibility failed");
+    }
+
     /* ─────────── View Helpers ─────────── */
     function allowedCaller() external view returns (address) {
         return _layout().allowedCaller;
