@@ -651,12 +651,15 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             fromSolidarity = actualGasCost;
         } else {
             // Post-grace: 50/50 split with tier-based solidarity allowance
-            uint256 matchAllowance = _calculateMatchAllowance(org.deposited, grace.minDepositRequired);
+            // Calculate available balance (not cumulative deposits)
+            uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
+
+            // Match allowance based on CURRENT BALANCE, not lifetime deposits
+            uint256 matchAllowance = _calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
             uint256 solidarityRemaining =
                 matchAllowance > org.solidarityUsedThisPeriod ? matchAllowance - org.solidarityUsedThisPeriod : 0;
 
             uint256 halfCost = actualGasCost / 2;
-            uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
 
             // Try 50/50 split
             fromDeposits = halfCost < depositAvailable ? halfCost : depositAvailable;
@@ -1077,10 +1080,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             requiresDeposit = false;
             solidarityLimit = uint256(grace.maxSpendDuringGrace);
         } else {
-            // After grace: no spending tracked, but need minimum deposit
+            // After grace: check current balance (not cumulative deposits)
             spendRemaining = 0;
-            requiresDeposit = org.deposited < grace.minDepositRequired;
-            solidarityLimit = _calculateMatchAllowance(org.deposited, grace.minDepositRequired);
+            uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
+            requiresDeposit = depositAvailable < grace.minDepositRequired;
+            solidarityLimit = _calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
         }
     }
 
