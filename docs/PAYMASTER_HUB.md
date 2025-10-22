@@ -1,792 +1,1205 @@
-# PaymasterHub - Technical Documentation
+# PaymasterHub Documentation
 
-## Overview
-
-PaymasterHub is a shared gas sponsorship system for worker cooperatives built on ERC-4337 account abstraction. Instead of each organization deploying their own expensive paymaster contract, a single PaymasterHub serves unlimited organizations through a multi-tenant architecture.
-
-### The Solidarity Fund
-
-At the core of PaymasterHub is a solidarity fund that enables mutual aid at the protocol level. Every transaction automatically contributes 1% of its gas cost to a shared pool. This pool is then redistributed based on a progressive tier system designed to support small organizations.
-
-**How it works:**
-- **Grace Period (90 days):** New cooperatives get 0.01 ETH (~$30) worth of free gas with zero deposits required (spending-only limit, ~3000 tx on cheap L2s)
-- **Tier 1 ($10 deposit):** Organizations deposit 0.003 ETH (~$10) and receive 0.006 ETH match (2x) → 0.009 ETH (~$30) total budget per 90 days
-- **Tier 2 ($20 deposit):** Organizations deposit 0.006 ETH (~$20) and receive 0.009 ETH match (declining rate) → 0.015 ETH (~$50) total budget per 90 days
-- **Tier 3 (Self-Sufficient):** Organizations with larger deposits (0.017+ ETH) are self-funded and become net contributors
-
-**Progressive design:** The first $10 you deposit gets the BEST match rate (2x). The next $10 gets a lower match rate (1x). This maximizes support for small organizations while keeping the fund sustainable.
-
-**50/50 split:** Every transaction splits costs between your deposit and solidarity - you benefit immediately, even if you don't use your full allowance.
-
-**Native currency only:** All limits are enforced in native currency (ETH). Transaction counts mentioned throughout are reference values only - PoaManager adjusts native currency amounts to target approximate transaction counts based on network gas prices.
-
-This creates infrastructure where cooperatives support each other automatically, with the most support going to those who need it most.
-
-### Technical Specs
-
-- **Standard:** ERC-4337 (Account Abstraction)
-- **Pattern:** UUPS Upgradeable Proxy
-- **Storage:** ERC-7201 Namespaced
-- **Access Control:** Hats Protocol
-- **Entry Point:** v0.7 (`0x0000000071727De22E5E9d8BAf0edAc6f37da032`)
-- **Solidarity Fee:** 1% automatic contribution
+**Version:** 1.0
+**Author:** POA Engineering Team
+**License:** MIT
 
 ---
 
 ## Table of Contents
 
-1. [Core Architecture](#core-architecture)
-2. [Features](#features)
-3. [Solidarity Fund](#solidarity-fund)
-4. [Grace Period](#grace-period)
-5. [Progressive Tier System](#progressive-tier-system)
-6. [Real-World Scenarios](#real-world-scenarios)
-7. [Configuration](#configuration)
-8. [Gas Costs](#gas-costs)
-9. [Upgrades](#upgrades)
-10. [Security](#security)
+1. [What is PaymasterHub?](#what-is-paymasterhub)
+2. [Core Features Overview](#core-features-overview)
+3. [Feature Details](#feature-details)
+   - [Multi-Tenant Architecture](#multi-tenant-architecture)
+   - [Solidarity Fund System](#solidarity-fund-system)
+   - [Rules Engine](#rules-engine)
+   - [Budget System](#budget-system)
+   - [Fee & Gas Caps](#fee--gas-caps)
+   - [Bundler Bounties](#bundler-bounties)
+   - [Access Control](#access-control)
+4. [How Features Work (With Examples)](#how-features-work-with-examples)
+5. [Technical Overview](#technical-overview)
 
 ---
 
-## Core Architecture
+## What is PaymasterHub?
 
-### Multi-Tenant Design
+**PaymasterHub is a shared gas sponsorship system for worker cooperatives** built on ERC-4337 Account Abstraction. It solves a critical infrastructure problem: deploying a separate paymaster contract for each organization costs ~$500 on mainnet (~40M gas), making it prohibitively expensive for small cooperatives.
+
+### The Problem
+
+Traditional ERC-4337 paymasters are **single-tenant** - each organization needs its own contract:
+- ❌ **Expensive deployment:** $500 per org on mainnet
+- ❌ **No shared resources:** Each org siloed
+- ❌ **No mutual aid:** Organizations can't help each other
+
+### The Solution
+
+PaymasterHub is **multi-tenant** - unlimited organizations share one contract:
+- ✅ **99.8% cost reduction:** Deploy once, use forever
+- ✅ **Shared solidarity fund:** 1% automatic contribution → redistributed progressively
+- ✅ **Protocol-level cooperation:** Small orgs get most support automatically
+
+### What It Does
+
+1. **Sponsors gas costs** for any user operation (transaction) from organizations registered with the hub
+2. **Validates transactions** against configurable rules (which contracts/functions are allowed)
+3. **Enforces budgets** per user, per role, or per organization over time periods
+4. **Collects 1% fees** into a solidarity fund that redistributes to organizations based on need
+5. **Incentivizes bundlers** with optional bounties for fast transaction inclusion
+
+---
+
+## Core Features Overview
+
+### 1. **Multi-Tenant Architecture**
+Unlimited organizations share one PaymasterHub contract. Each org has isolated configuration, rules, budgets, and financial tracking. No cross-contamination.
+
+### 2. **Solidarity Fund System**
+- **Grace Period:** New co-ops get 0.01 ETH (~$30) free gas for 90 days with zero deposits
+- **Progressive Tiers:** Small deposits get best match rates (2x), large orgs self-fund
+- **Automatic Contribution:** 1% of all gas spending goes to solidarity fund
+- **50/50 Payment Split:** Every transaction splits costs between org's deposits and solidarity
+
+### 3. **Rules Engine**
+Per-organization whitelist/blacklist of which smart contracts and functions users can call. Three validation modes:
+- **Generic:** For accounts that execute nested calls (most common)
+- **Executor:** For the organization's executor contract itself
+- **Coarse:** Account-level only, skip function validation
+
+### 4. **Budget System**
+Time-based spending limits with automatic epoch rolling:
+- **Per-Account budgets:** Limit individual user spending
+- **Per-Role budgets:** Limit spending for all users with a Hats Protocol role
+- **Per-Org budgets:** Global organization-wide caps
+
+### 5. **Fee & Gas Caps**
+Protect against gas price spikes and expensive operations:
+- Max fee per gas (base fee)
+- Max priority fee per gas (tip)
+- Max call gas, verification gas, pre-verification gas
+
+### 6. **Bundler Bounties**
+Optional rewards to incentivize fast transaction inclusion:
+- Pay bundlers a % of gas cost or fixed amount (whichever is lower)
+- Org-specific configuration
+- Funded separately from main paymaster deposits
+
+### 7. **Access Control**
+Hats Protocol integration for decentralized governance:
+- **Admin Hat:** Full control (pause, rules, budgets, fee caps, bounties)
+- **Operator Hat:** Delegated management (rules, budgets, fee caps only)
+- **PoaManager:** Protocol-level governance (upgrades, grace period, bans)
+
+---
+
+## Feature Details
+
+### Multi-Tenant Architecture
+
+#### How It Works
+
+Each organization is identified by a unique `bytes32 orgId` (typically `keccak256(abi.encodePacked(orgName))`). All configuration and state is scoped to this ID using **ERC-7201 namespaced storage**:
+
+```solidity
+// Each org has isolated storage
+mapping(bytes32 orgId => OrgConfig) private _orgs;
+mapping(bytes32 orgId => OrgFinancials) private _financials;
+mapping(bytes32 orgId => mapping(address => mapping(bytes4 => Rule))) private _rules;
+mapping(bytes32 orgId => mapping(bytes32 => Budget)) private _budgets;
+```
+
+#### Storage Isolation
+
+**What gets isolated per org:**
+- Configuration (admin hat, operator hat, pause state, registration time)
+- Financial tracking (deposits, spending, solidarity usage)
+- Rules (which contracts/functions are allowed)
+- Budgets (spending limits per user/role/org)
+- Fee caps (gas price limits)
+- Bounty config (bundler incentives)
+
+**What is shared globally:**
+- Solidarity fund balance
+- Grace period configuration (days, spending limit, minimum deposit)
+- Entry point, Hats Protocol, PoaManager addresses
+
+#### Benefits
+
+- ✅ **Cost:** Deploy once ($500), add unlimited orgs ($8 each)
+- ✅ **Security:** Orgs cannot access each other's funds or configuration
+- ✅ **Upgradeability:** One upgrade applies to all organizations
+- ✅ **Solidarity:** Shared pool enables mutual aid at scale
+
+---
+
+### Solidarity Fund System
+
+The solidarity fund is **automatic mutual aid at the protocol level**. Every transaction contributes 1% of its gas cost to a shared pool, which is then redistributed to organizations based on need using a progressive tier system.
+
+#### Components
+
+**1. Grace Period (First 90 Days)**
+- **Free gas:** 0.01 ETH (~$30 value) with zero deposits required
+- **Purpose:** Bootstrap new cooperatives, prove legitimacy
+- **Limit:** Spending-only (no transaction counting)
+- **Example:** On Base L2 with $0.01 per tx, 0.01 ETH = ~3000 transactions
+
+**2. Progressive Tier System (After Grace)**
+
+Organizations are assigned to tiers based on their **current deposit balance**:
+
+| Tier | Deposit | Match Allowance | Total Budget (90 days) | Target Orgs |
+|------|---------|-----------------|------------------------|-------------|
+| **1** | 0.003 ETH (~$10) | 0.006 ETH (2x) | 0.009 ETH (~$30) | Micro co-ops |
+| **2** | 0.006 ETH (~$20) | 0.009 ETH (1.5x avg) | 0.015 ETH (~$50) | Small co-ops |
+| **3** | 0.017+ ETH (~$50+) | 0 (no match) | Deposits only | Large/profitable co-ops |
+
+**Match Calculation Logic:**
+```solidity
+// Tier 1: 1x deposit → 2x match
+if (deposited <= minDeposit) {
+    return deposited * 2; // 0.003 ETH → 0.006 ETH match
+}
+
+// Tier 2: First 1x at 2x, second 1x at 1x
+if (deposited <= minDeposit * 2) {
+    return (minDeposit * 2) + (deposited - minDeposit);
+    // 0.006 ETH → 0.006 + 0.003 = 0.009 ETH match
+}
+
+// Tier 3: Self-sufficient, no match
+return 0;
+```
+
+**3. 50/50 Payment Split**
+
+Every transaction tries to split costs evenly between the org's deposits and solidarity:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│              PaymasterHub (Proxy)                   │
-│                                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐ │
-│  │  Org Alpha   │  │   Org Beta   │  │ Org Gamma│ │
-│  │              │  │              │  │          │ │
-│  │ Rules        │  │ Rules        │  │ Rules    │ │
-│  │ Budgets      │  │ Budgets      │  │ Budgets  │ │
-│  │ Financials   │  │ Financials   │  │Financial │ │
-│  └──────────────┘  └──────────────┘  └──────────┘ │
-│                                                     │
-│         ┌────────────────────────┐                 │
-│         │   Solidarity Fund      │                 │
-│         │   (Shared Pool)        │                 │
-│         └────────────────────────┘                 │
-└─────────────────────────────────────────────────────┘
-                        │
-                        ▼
-            ┌───────────────────────┐
-            │  EntryPoint v0.7      │
-            │  (Canonical Singleton)│
-            └───────────────────────┘
+During Grace (Day 0-90):
+  fromSolidarity = 100% of gas cost
+  fromDeposits = 0%
+
+After Grace (Day 91+):
+  halfCost = actualGasCost / 2
+
+  // Try 50/50 split
+  fromDeposits = min(halfCost, depositAvailable)
+  fromSolidarity = min(halfCost, solidarityRemaining)
+
+  // If one pool is short, use the other
+  if (fromDeposits + fromSolidarity < actualGasCost) {
+      Try deposits first, then solidarity
+  }
 ```
+
+**Why 50/50?**
+- ✅ Immediate benefit even if you don't exhaust deposits
+- ✅ Prevents gaming (can't hoard deposits to maximize solidarity)
+- ✅ Fair to all participants
+
+**4. 90-Day Periods with Dual Reset**
+
+Solidarity allowances reset when:
+- **Time-based:** 90 days elapse since period start, OR
+- **Deposit-based:** Deposit balance crosses minimum threshold from below
+
+This creates a natural commitment mechanism without per-transaction overhead.
+
+**5. Automatic Fee Collection**
+
+Every transaction automatically collects **1% solidarity fee**:
+
+```solidity
+solidarityFee = (actualGasCost * 100) / 10000; // 1%
+
+// Update org spending
+org.spent += fromDeposits;
+org.solidarityUsedThisPeriod += fromSolidarity;
+
+// Update solidarity fund
+solidarity.balance -= fromSolidarity; // Paid out
+solidarity.balance += solidarityFee;  // Collected
+```
+
+#### Deposit & Donation Functions
+
+**Anyone can support any organization:**
+
+```solidity
+// Support specific org (anyone can deposit)
+hub.depositForOrg{value: 0.01 ether}(orgId);
+
+// Donate to solidarity pool directly
+hub.donateToSolidarity{value: 1 ether}();
+```
+
+Deposits increment:
+- `org.deposited` (current balance)
+- `org.totalDeposited` (lifetime cumulative, never decreases)
+- `solidarity.numActiveOrgs` (if first deposit)
+
+#### Ban Mechanism
+
+PoaManager can ban malicious actors from solidarity access:
+
+```solidity
+// Ban org from solidarity (they can still use own deposits)
+hub.setBanFromSolidarity(orgId, true);
+
+// Unban
+hub.setBanFromSolidarity(orgId, false);
+```
+
+Banned orgs:
+- ✅ Can still deposit and use own funds
+- ❌ Cannot access solidarity during grace period
+- ❌ Cannot receive solidarity match after grace
+- ✅ Still contribute 1% fee (become net contributors)
+
+#### Configuration (PoaManager Only)
+
+```solidity
+// Adjust grace period parameters
+hub.setGracePeriodConfig(
+    90,              // initialGraceDays
+    0.01 ether,      // maxSpendDuringGrace
+    0.003 ether      // minDepositRequired
+);
+
+// Adjust solidarity fee (1% default, max 10%)
+hub.setSolidarityFee(100); // basis points (100 = 1%)
+```
+
+---
+
+### Rules Engine
+
+The rules engine validates **which smart contracts and functions** users can call. Organizations whitelist/blacklist specific targets and selectors.
+
+#### Rule Structure
+
+```solidity
+struct Rule {
+    bool allowed;           // Is this target/selector allowed?
+    uint32 maxCallGasHint;  // Optional gas limit hint
+}
+
+// Storage: orgId → target → selector → Rule
+mapping(bytes32 => mapping(address => mapping(bytes4 => Rule))) private _rules;
+```
+
+#### Validation Modes
+
+**1. Generic Mode (RULE_ID = 0x00000000)**
+
+For accounts that execute **nested calls** (e.g., SimpleAccount calling `execute(target, data)`):
+
+```solidity
+// Extracts target and selector from calldata
+target = extractTarget(userOp.callData);
+selector = extractSelector(userOp.callData);
+
+// Check rule
+if (!rules[target][selector].allowed) {
+    revert RuleDenied(target, selector);
+}
+```
+
+**2. Executor Mode (RULE_ID = 0x00000001)**
+
+For the **org's executor contract** itself:
+
+```solidity
+// Validates executor's own functions
+target = userOp.sender; // The executor
+selector = bytes4(userOp.callData);
+
+if (!rules[target][selector].allowed) {
+    revert RuleDenied(target, selector);
+}
+```
+
+**3. Coarse Mode (RULE_ID = 0x000000FF)**
+
+**Skip validation entirely** - account-level approval only.
+
+#### Setting Rules
+
+```solidity
+// Single rule
+hub.setRule(
+    orgId,
+    0x1234...5678,              // target contract
+    0xabcdef00,                 // function selector
+    true,                       // allowed
+    500000                      // maxCallGasHint (optional)
+);
+
+// Batch rules
+hub.setRulesBatch(
+    orgId,
+    [target1, target2, target3],
+    [selector1, selector2, selector3],
+    [true, true, false],
+    [500000, 300000, 0]
+);
+
+// Clear rule
+hub.clearRule(orgId, target, selector);
+```
+
+**Access:** Admin or Operator hat
+
+#### Example: Whitelist DEX and Token
+
+```solidity
+// Allow Uniswap V3 Router swaps
+hub.setRule(
+    orgId,
+    0xE592427A0AEce92De3Edee1F18E0157C05861564, // Uniswap V3 Router
+    0x414bf389,                                   // exactInputSingle(params)
+    true,
+    1000000
+);
+
+// Allow USDC transfers
+hub.setRule(
+    orgId,
+    0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, // USDC
+    0xa9059cbb,                                   // transfer(to, amount)
+    true,
+    100000
+);
+
+// Block everything else by default
+```
+
+---
+
+### Budget System
+
+Time-based spending limits with automatic **epoch rolling**. Budgets can be per-account, per-role (Hats Protocol), or per-org.
+
+#### Budget Structure
+
+```solidity
+struct Budget {
+    uint128 capPerEpoch;   // Maximum spending per epoch
+    uint128 usedInEpoch;   // Current epoch usage
+    uint32 epochLen;       // Epoch length in seconds
+    uint32 epochStart;     // When current epoch started
+}
+
+// Storage: orgId → subjectKey → Budget
+mapping(bytes32 => mapping(bytes32 => Budget)) private _budgets;
+```
+
+#### Subject Types
+
+**1. Account Budget**
+```solidity
+// Key: keccak256(abi.encodePacked(uint8(0), bytes20(accountAddress)))
+bytes32 key = keccak256(abi.encodePacked(uint8(0), bytes20(0x1234...)));
+hub.setBudget(orgId, key, 0.1 ether, 7 days);
+```
+
+**2. Hat (Role) Budget**
+```solidity
+// Key: keccak256(abi.encodePacked(uint8(1), bytes20(hatId)))
+bytes32 key = keccak256(abi.encodePacked(uint8(1), bytes20(uint160(hatId))));
+hub.setBudget(orgId, key, 1 ether, 30 days);
+```
+
+**3. Org-Wide Budget**
+```solidity
+// Key: bytes32(0)
+hub.setBudget(orgId, bytes32(0), 10 ether, 90 days);
+```
+
+#### Automatic Epoch Rolling
+
+Budgets automatically roll to a new epoch when time elapses:
+
+```solidity
+function _checkBudget(bytes32 orgId, bytes32 subjectKey, uint256 maxCost) {
+    Budget storage budget = _budgets[orgId][subjectKey];
+
+    // Auto-roll if epoch has passed
+    if (block.timestamp >= budget.epochStart + budget.epochLen) {
+        budget.epochStart = uint32(block.timestamp);
+        budget.usedInEpoch = 0;
+    }
+
+    // Check if transaction would exceed cap
+    if (budget.usedInEpoch + maxCost > budget.capPerEpoch) {
+        revert BudgetExceeded();
+    }
+
+    return budget.epochStart; // Used in postOp
+}
+```
+
+After transaction succeeds, usage is updated:
+
+```solidity
+function _updateUsage(bytes32 orgId, bytes32 subjectKey, uint32 epochStart, uint256 actualGasCost) {
+    Budget storage budget = _budgets[orgId][subjectKey];
+
+    // Only update if we're still in the same epoch
+    if (budget.epochStart == epochStart) {
+        budget.usedInEpoch += uint128(actualGasCost);
+        emit UsageIncreased(orgId, subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
+    }
+}
+```
+
+#### Epoch Length Constraints
+
+```solidity
+MIN_EPOCH_LENGTH = 1 hour
+MAX_EPOCH_LENGTH = 365 days
+```
+
+#### Setting Budgets
+
+```solidity
+// Set budget
+hub.setBudget(
+    orgId,
+    subjectKey,
+    0.1 ether,     // capPerEpoch
+    7 days         // epochLen
+);
+
+// Manually reset epoch start
+hub.setEpochStart(orgId, subjectKey, uint32(block.timestamp));
+```
+
+**Access:** Admin or Operator hat
+
+---
+
+### Fee & Gas Caps
+
+Protect organizations from gas price spikes and expensive operations.
+
+#### Fee Caps Structure
+
+```solidity
+struct FeeCaps {
+    uint256 maxFeePerGas;           // Max base fee
+    uint256 maxPriorityFeePerGas;   // Max priority fee (tip)
+    uint32 maxCallGas;              // Max gas for main execution
+    uint32 maxVerificationGas;      // Max gas for signature verification
+    uint32 maxPreVerificationGas;   // Max gas for bundler overhead
+}
+
+// Storage: orgId → FeeCaps
+mapping(bytes32 => FeeCaps) private _feeCaps;
+```
+
+#### Validation
+
+During `validatePaymasterUserOp`, fees are checked:
+
+```solidity
+function _validateFeeCaps(PackedUserOperation calldata userOp, bytes32 orgId) {
+    FeeCaps storage caps = _feeCaps[orgId];
+
+    // Unpack fees from userOp.gasFees
+    uint256 maxPriorityFeePerGas = uint128(userOp.gasFees);
+    uint256 maxFeePerGas = uint128(userOp.gasFees >> 128);
+
+    // Check base fee
+    if (caps.maxFeePerGas != 0 && maxFeePerGas > caps.maxFeePerGas) {
+        revert FeeTooHigh();
+    }
+
+    // Check priority fee
+    if (caps.maxPriorityFeePerGas != 0 && maxPriorityFeePerGas > caps.maxPriorityFeePerGas) {
+        revert FeeTooHigh();
+    }
+
+    // Unpack gas limits from userOp.accountGasLimits
+    uint256 verificationGasLimit = uint128(userOp.accountGasLimits);
+    uint256 callGasLimit = uint128(userOp.accountGasLimits >> 128);
+    uint256 preVerificationGas = userOp.preVerificationGas;
+
+    // Check gas limits
+    if (caps.maxCallGas != 0 && callGasLimit > caps.maxCallGas) {
+        revert GasTooHigh();
+    }
+
+    if (caps.maxVerificationGas != 0 && verificationGasLimit > caps.maxVerificationGas) {
+        revert GasTooHigh();
+    }
+
+    if (caps.maxPreVerificationGas != 0 && preVerificationGas > caps.maxPreVerificationGas) {
+        revert GasTooHigh();
+    }
+}
+```
+
+#### Setting Fee Caps
+
+```solidity
+hub.setFeeCaps(
+    orgId,
+    200 gwei,   // maxFeePerGas
+    20 gwei,    // maxPriorityFeePerGas
+    2000000,    // maxCallGas
+    1000000,    // maxVerificationGas
+    500000      // maxPreVerificationGas
+);
+```
+
+**Zero value = no limit**
+
+**Access:** Admin or Operator hat
+
+---
+
+### Bundler Bounties
+
+Optional rewards to incentivize fast transaction inclusion.
+
+#### Bounty Structure
+
+```solidity
+struct Bounty {
+    bool enabled;               // Is bounty system enabled?
+    uint96 maxBountyWeiPerOp;   // Max bounty per operation
+    uint16 pctBpCap;            // Max % of gas cost (basis points)
+    uint144 totalPaid;          // Lifetime bounties paid (tracking)
+}
+
+// Storage: orgId → Bounty
+mapping(bytes32 => Bounty) private _bounty;
+```
+
+#### Bounty Calculation
+
+```solidity
+bountyAmount = min(
+    maxBountyWeiPerOp,
+    (actualGasCost * pctBpCap) / 10000
+);
+```
+
+**Example:**
+- `maxBountyWeiPerOp = 0.001 ether` (1 finney)
+- `pctBpCap = 500` (5%)
+- `actualGasCost = 0.05 ether`
+
+Calculation: `min(0.001 ether, 0.05 ether * 500 / 10000) = min(0.001, 0.0025) = 0.001 ether`
+
+#### Bounty Payment
+
+Bounties are paid in `postOp` **only on successful execution**:
+
+```solidity
+function _processBounty(bytes32 orgId, bytes32 userOpHash, address bundlerOrigin, uint256 actualGasCost) {
+    Bounty storage bounty = _bounty[orgId];
+
+    if (!bounty.enabled) return;
+
+    uint256 bountyAmount = min(
+        bounty.maxBountyWeiPerOp,
+        (actualGasCost * bounty.pctBpCap) / 10000
+    );
+
+    if (bountyAmount == 0) return;
+
+    // Check bounty balance (separate from deposits)
+    if (address(this).balance < bountyAmount) {
+        emit BountyPayFailed(userOpHash, bundlerOrigin, bountyAmount);
+        return;
+    }
+
+    // Pay bundler
+    (bool success,) = payable(bundlerOrigin).call{value: bountyAmount}("");
+
+    if (success) {
+        bounty.totalPaid += uint144(bountyAmount);
+        emit BountyPaid(userOpHash, bundlerOrigin, bountyAmount);
+    } else {
+        emit BountyPayFailed(userOpHash, bundlerOrigin, bountyAmount);
+    }
+}
+```
+
+#### Funding Bounties
+
+Bounties are funded **separately** from paymaster deposits:
+
+```solidity
+// Anyone can fund bounty pool
+hub.fundBounty{value: 1 ether}();
+
+// Admin can sweep unused bounty funds
+hub.sweepBounty(payable(recipient), amount);
+```
+
+#### Setting Bounty Config
+
+```solidity
+hub.setBounty(
+    orgId,
+    true,           // enabled
+    0.001 ether,    // maxBountyWeiPerOp (1 finney)
+    500             // pctBpCap (5%)
+);
+```
+
+**Access:** Admin hat only
+
+---
+
+### Access Control
+
+PaymasterHub uses **Hats Protocol** for decentralized, role-based access control. Each organization has two hats:
+
+#### 1. Admin Hat (Required)
+
+**Who:** Typically the organization's top hat (hat tree root)
+
+**Permissions:**
+- ✅ All Operator permissions (below)
+- ✅ Pause/unpause paymaster
+- ✅ Set operator hat (delegate management)
+- ✅ Configure bounties
+
+**Examples:**
+- Emergency pause during security incident
+- Delegate day-to-day management to treasurer
+- Enable bundler bounties for fast inclusion
+
+#### 2. Operator Hat (Optional)
+
+**Who:** Delegated role (e.g., treasurer, operations manager)
+
+**Permissions:**
+- ✅ Set rules (whitelist contracts/functions)
+- ✅ Set budgets (spending limits)
+- ✅ Set fee caps (gas price protection)
+- ✅ Deposit to EntryPoint (fund paymaster)
+
+**Cannot:**
+- ❌ Pause paymaster
+- ❌ Change admin/operator hats
+- ❌ Configure bounties
+
+**Examples:**
+- Treasurer manages budgets and deposits
+- Operations manager whitelists new contracts
+- Security team adjusts fee caps
+
+#### 3. PoaManager (Protocol Governance)
+
+**Who:** Protocol-level governance (not org-specific)
+
+**Permissions:**
+- ✅ Upgrade PaymasterHub implementation (UUPS)
+- ✅ Set grace period config (days, spending limit, min deposit)
+- ✅ Ban orgs from solidarity (anti-fraud)
+- ✅ Adjust solidarity fee percentage (1% default, max 10%)
+
+**Cannot:**
+- ❌ Access org-specific configuration
+- ❌ Withdraw org deposits
+- ❌ Override org rules/budgets
+
+#### Modifier Implementation
+
+```solidity
+modifier onlyOrgAdmin(bytes32 orgId) {
+    OrgConfig storage org = _orgs[orgId];
+    if (org.adminHatId == 0) revert OrgNotRegistered();
+    if (!IHats(hats).isWearerOfHat(msg.sender, org.adminHatId)) {
+        revert NotAdmin();
+    }
+    _;
+}
+
+modifier onlyOrgOperator(bytes32 orgId) {
+    OrgConfig storage org = _orgs[orgId];
+    if (org.adminHatId == 0) revert OrgNotRegistered();
+
+    bool isAdmin = IHats(hats).isWearerOfHat(msg.sender, org.adminHatId);
+    bool isOperator = org.operatorHatId != 0 &&
+                      IHats(hats).isWearerOfHat(msg.sender, org.operatorHatId);
+
+    if (!isAdmin && !isOperator) revert NotOperator();
+    _;
+}
+```
+
+#### Setting Operator Hat
+
+```solidity
+// Admin delegates management to treasurer hat
+hub.setOperatorHat(orgId, treasurerHatId);
+
+// Admin revokes delegation
+hub.setOperatorHat(orgId, 0);
+```
+
+---
+
+## How Features Work (With Examples)
+
+### Example 1: Bootstrapping Food Co-op
+
+**Scenario:** New food co-op on Base L2 with zero funds.
+
+**Month 1-3 (Grace Period):**
+
+1. **Register org:**
+```solidity
+hub.registerOrg(
+    keccak256("FoodCoOp"),
+    topHatId,
+    treasurerHatId
+);
+```
+
+2. **Set basic rules:**
+```solidity
+// Allow POS system contract
+hub.setRule(orgId, posSystemAddress, 0x12345678, true, 300000);
+
+// Allow USDC payments
+hub.setRule(orgId, usdcAddress, 0xa9059cbb, true, 100000);
+```
+
+3. **Members use the system:**
+- User operation: POS records sale → USDC transfer
+- Gas cost: 0.01 ETH per transaction ($0.01 on Base)
+- Payment: 100% from solidarity (grace period)
+- Usage: ~250 transactions = 0.0025 ETH spent
+- Remaining: 0.0075 ETH grace limit left
+
+**Month 4 (Enter Tier 1):**
+
+Grace period ends (90 days). Co-op deposits first funds:
+
+```solidity
+// Community member donates $10
+hub.depositForOrg{value: 0.003 ether}(orgId);
+```
+
+Now in **Tier 1:**
+- Deposit: 0.003 ETH
+- Match allowance: 0.006 ETH (2x)
+- Total budget: 0.009 ETH per 90 days
+
+**Month 4-6 (First Period):**
+- Spending: 0.0027 ETH over 3 months (~270 tx)
+- Payment via 50/50:
+  - From deposits: 0.001 ETH (exhausted)
+  - From solidarity: 0.0017 ETH (used 0.0017 of 0.006 allowance)
+- Fee contributed: ~0.000027 ETH (1%)
+
+**Result:** $10 deposit enabled $27 in gas spending → $17 net benefit
+
+---
+
+### Example 2: Tech Co-op with Growing Userbase
+
+**Scenario:** Worker-owned tech co-op on Arbitrum, 3 months old, 20 active users.
+
+**Month 4 (Post-Grace):**
+
+Treasurer deposits operating budget:
+
+```solidity
+hub.depositForOrg{value: 0.006 ether}(orgId);
+```
+
+Now in **Tier 2:**
+- Deposit: 0.006 ETH (~$20)
+- Match calculation:
+  - First 0.003 at 2x = 0.006 ETH
+  - Second 0.003 at 1x = 0.003 ETH
+  - Total match: 0.009 ETH (~$30)
+- Total budget: 0.015 ETH (~$50) per 90 days
+
+**Set per-user budgets:**
+
+```solidity
+// Limit each developer to 0.01 ETH per week
+for (uint256 i = 0; i < 20; i++) {
+    bytes32 key = keccak256(abi.encodePacked(uint8(0), bytes20(userAccounts[i])));
+    hub.setBudget(orgId, key, 0.01 ether, 7 days);
+}
+```
+
+**Month 4-6 (First Period):**
+- Spending: 0.0045 ETH over 3 months (~450 tx)
+- Payment via 50/50:
+  - From deposits: 0.002 ETH
+  - From solidarity: 0.0025 ETH (used 0.0025 of 0.009 allowance)
+- Fee contributed: ~0.000045 ETH (1%)
+
+**Result:** $20 deposit enabled $45 in spending → $25 net benefit from solidarity
+
+---
+
+### Example 3: Established Co-op with Profitable Operations
+
+**Scenario:** Successful worker co-op with 200 users, $300/month in gas costs.
+
+**Month 4 (Post-Grace):**
+
+Treasurer deposits operating budget:
+
+```solidity
+hub.depositForOrg{value: 0.05 ether}(orgId);
+```
+
+Now in **Tier 3:**
+- Deposit: 0.05 ETH (~$150)
+- Match allowance: 0 (self-sufficient threshold)
+- Total budget: Deposits only
+
+**Monthly spending:**
+- Gas costs: ~0.1 ETH ($300)
+- From deposits: 0.1 ETH (100%)
+- From solidarity: 0 (no match)
+- Fee contributed: ~0.001 ETH ($3)
+
+**Result:** Net contributor to ecosystem ($36/year in fees) → Supports 3-4 Tier 1 orgs
+
+---
+
+### Example 4: Emergency Budget Controls
+
+**Scenario:** Organization needs to limit spending during cash flow crunch.
+
+**Set org-wide monthly cap:**
+
+```solidity
+// Limit entire org to 0.05 ETH per 30 days
+hub.setBudget(
+    orgId,
+    bytes32(0),      // Org-wide budget (key = 0)
+    0.05 ether,
+    30 days
+);
+```
+
+**Limit high-risk operations:**
+
+```solidity
+// Block expensive DeFi protocols
+hub.setRule(orgId, uniswapRouterAddress, 0x414bf389, false, 0);
+hub.setRule(orgId, aavePoolAddress, 0xabcdef00, false, 0);
+
+// Set conservative gas caps
+hub.setFeeCaps(
+    orgId,
+    50 gwei,    // maxFeePerGas (conservative)
+    5 gwei,     // maxPriorityFeePerGas
+    500000,     // maxCallGas
+    300000,     // maxVerificationGas
+    100000      // maxPreVerificationGas
+);
+```
+
+**Pause if needed:**
+
+```solidity
+// Emergency pause (admin only)
+hub.setPause(orgId, true);
+
+// Resume when resolved
+hub.setPause(orgId, false);
+```
+
+---
+
+### Example 5: Delegated Management
+
+**Scenario:** Admin delegates day-to-day management to treasurer.
+
+**Set operator hat:**
+
+```solidity
+// Admin delegates to treasurer hat
+hub.setOperatorHat(orgId, treasurerHatId);
+```
+
+**Now treasurer can:**
+- ✅ Add/remove contract rules
+- ✅ Adjust user/role budgets
+- ✅ Update fee caps
+- ✅ Deposit to EntryPoint
+
+**But cannot:**
+- ❌ Pause the paymaster
+- ❌ Change admin/operator hats
+- ❌ Configure bounties
+
+**Revoke delegation:**
+
+```solidity
+// Admin revokes operator privileges
+hub.setOperatorHat(orgId, 0);
+```
+
+---
+
+## Technical Overview
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                  PaymasterHub (Proxy)                    │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │            ERC-7201 Namespaced Storage           │   │
+│  │                                                  │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐      │   │
+│  │  │ Org Alpha│  │ Org Beta │  │ Org Gamma│      │   │
+│  │  │          │  │          │  │          │      │   │
+│  │  │ Config   │  │ Config   │  │ Config   │      │   │
+│  │  │ Rules    │  │ Rules    │  │ Rules    │      │   │
+│  │  │ Budgets  │  │ Budgets  │  │ Budgets  │      │   │
+│  │  │Financial │  │Financial │  │Financial │      │   │
+│  │  └──────────┘  └──────────┘  └──────────┘      │   │
+│  │                                                  │   │
+│  │         ┌───────────────────────┐               │   │
+│  │         │  Solidarity Fund      │               │   │
+│  │         │  (Shared Pool)        │               │   │
+│  │         │  - Balance            │               │   │
+│  │         │  - Active Orgs        │               │   │
+│  │         │  - Fee % (1%)         │               │   │
+│  │         └───────────────────────┘               │   │
+│  │                                                  │   │
+│  │         ┌───────────────────────┐               │   │
+│  │         │  Grace Period Config  │               │   │
+│  │         │  - Days (90)          │               │   │
+│  │         │  - Max Spend (0.01Ξ)  │               │   │
+│  │         │  - Min Deposit (0.003Ξ)│              │   │
+│  │         └───────────────────────┘               │   │
+│  └──────────────────────────────────────────────────┘   │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+                       ▼
+          ┌────────────────────────┐
+          │   EntryPoint v0.7      │
+          │  (Canonical Singleton) │
+          │   0x0000...da032       │
+          └────────────────────────┘
+```
+
+### ERC-4337 Integration
+
+PaymasterHub implements the **IPaymaster** interface from ERC-4337:
+
+```solidity
+interface IPaymaster {
+    enum PostOpMode { opSucceeded, opReverted, postOpReverted }
+
+    function validatePaymasterUserOp(
+        PackedUserOperation calldata userOp,
+        bytes32 userOpHash,
+        uint256 maxCost
+    ) external returns (bytes memory context, uint256 validationData);
+
+    function postOp(
+        PostOpMode mode,
+        bytes calldata context,
+        uint256 actualGasCost
+    ) external;
+}
+```
+
+**Validation Flow:**
+
+1. **User creates UserOp** with paymaster field:
+```
+paymasterAndData = PaymasterHub address (20 bytes)
+                 + version (1 byte)
+                 + orgId (32 bytes)
+                 + subjectType (1 byte)
+                 + subjectId (20 bytes)
+                 + ruleId (4 bytes)
+                 + mailboxCommit8 (8 bytes)
+```
+
+2. **EntryPoint calls `validatePaymasterUserOp`:**
+   - Decode paymaster data
+   - Check org is registered and not paused
+   - Validate subject eligibility (user or hat)
+   - Validate rules (target/selector whitelist)
+   - Validate fee/gas caps
+   - Check per-subject budget
+   - Check org balance (deposits)
+   - Check solidarity access (grace or tier)
+   - Return context for postOp
+
+3. **EntryPoint executes UserOp**
+
+4. **EntryPoint calls `postOp`:**
+   - Update per-subject budget usage
+   - Update org financials (50/50 split)
+   - Collect 1% solidarity fee
+   - Pay bundler bounty (if configured)
 
 ### Storage Layout (ERC-7201)
 
-All storage uses **namespaced slots** to prevent collisions:
+All storage uses **namespaced slots** to prevent collisions and enable safe upgrades:
 
 ```solidity
-// Main config
-MAIN_STORAGE_LOCATION = keccak256("poa.paymasterhub.main") - 1
-  └─ entryPoint, hats, poaManager
+// Slot calculation: keccak256(abi.encode(uint256(keccak256("namespace")) - 1)) & ~bytes32(uint256(0xff))
 
-// Per-org data (isolated by orgId)
-ORGS_STORAGE_LOCATION = keccak256("poa.paymasterhub.orgs") - 1
-  └─ mapping(bytes32 orgId => OrgConfig)
-
-FINANCIALS_STORAGE_LOCATION = keccak256("poa.paymasterhub.financials") - 1
-  └─ mapping(bytes32 orgId => OrgFinancials)
-
-RULES_STORAGE_LOCATION = keccak256("poa.paymasterhub.rules") - 1
-  └─ mapping(bytes32 orgId => mapping(address target => mapping(bytes4 selector => Rule)))
-
-BUDGETS_STORAGE_LOCATION = keccak256("poa.paymasterhub.budgets") - 1
-  └─ mapping(bytes32 orgId => mapping(bytes32 subjectKey => Budget))
-
-// Global pools
-SOLIDARITY_STORAGE_LOCATION = keccak256("poa.paymasterhub.solidarity") - 1
-  └─ SolidarityFund (balance, fees, numOrgs)
-
-GRACEPERIOD_STORAGE_LOCATION = keccak256("poa.paymasterhub.graceperiod") - 1
-  └─ GracePeriodConfig (days, maxSpend, minDeposit)
+MAIN_STORAGE_LOCATION           = 0x9a7a... // entryPoint, hats, poaManager
+ORGS_STORAGE_LOCATION           = 0x7e8e... // orgId → OrgConfig
+FINANCIALS_STORAGE_LOCATION     = 0x1234... // orgId → OrgFinancials
+FEECAPS_STORAGE_LOCATION        = 0x31c1... // orgId → FeeCaps
+RULES_STORAGE_LOCATION          = 0xbe22... // orgId → target → selector → Rule
+BUDGETS_STORAGE_LOCATION        = 0xf14d... // orgId → subjectKey → Budget
+BOUNTY_STORAGE_LOCATION         = 0x5aef... // orgId → Bounty
+SOLIDARITY_STORAGE_LOCATION     = 0xabcd... // SolidarityFund
+GRACEPERIOD_STORAGE_LOCATION    = 0xfedc... // GracePeriodConfig
 ```
 
 **Benefits:**
 - ✅ No storage collisions between orgs
-- ✅ Safe upgrades (can add new storage)
-- ✅ Gas-efficient lookups
+- ✅ Safe upgrades (can add new namespaced storage)
+- ✅ Gas-efficient (no extra indirection)
 - ✅ Clear separation of concerns
 
----
+### UUPS Upgradeability
 
-## Features
-
-### Organization Registration
-
-`registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId)`
-
-Creates isolated namespace with:
-- Admin hat (full control)
-- Optional operator hat (delegated management)
-- Grace period tracking (90 days from registration)
-- Solidarity fund access
-
-### Access Control (Hats Protocol)
-
-**Roles:**
-- **Admin Hat:** Full control (pause, rules, budgets, fee caps, bounties)
-- **Operator Hat:** Delegated management (rules, budgets, fee caps only)
-- **PoaManager:** Protocol governance (upgrades, grace config, bans)
-
-### Rules Engine
-
-`setRule(bytes32 orgId, address target, bytes4 selector, bool allowed, uint32 maxCallGasHint)`
-
-Per-target, per-selector validation with optional gas limits.
-
-**Modes:**
-- **GENERIC:** Validates nested calls (default for SimpleAccount)
-- **EXECUTOR:** Validates account's own functions
-- **COARSE:** Account-level only
-
-### Budget System
-
-`setBudget(bytes32 orgId, bytes32 subjectKey, uint128 capPerEpoch, uint32 epochLen)`
-
-Time-based spending limits per:
-- Account: `keccak256(abi.encodePacked(uint8(0), bytes20(account)))`
-- Hat: `keccak256(abi.encodePacked(uint8(1), bytes20(hatId)))`
-- Org: `bytes32(0)`
-
-Auto-rolls epochs.
-
-### Fee & Gas Caps
-
-`setFeeCaps(...)` - Protect against gas spikes
-
-### Bundler Bounties
-
-`setBounty(bytes32 orgId, bool enabled, uint96 maxBountyWeiPerOp, uint16 pctBpCap)`
-
-Incentivize fast inclusion. Bounty = `min(maxBountyWeiPerOp, gasCost * pctBpCap / 10000)`
-
----
-
-## Solidarity Fund
-
-### Structure
+PaymasterHub uses **Universal Upgradeable Proxy Standard**:
 
 ```solidity
-struct SolidarityFund {
-    uint128 balance;              // Current solidarity fund balance
-    uint32 numActiveOrgs;         // Number of orgs with deposits > 0
-    uint16 feePercentageBps;      // Fee as basis points (100 = 1%)
-    uint208 reserved;             // Padding for future use
-}
-
-struct OrgFinancials {
-    uint128 deposited;                  // Current balance deposited by org
-    uint128 totalDeposited;             // Cumulative lifetime deposits (never decreases)
-    uint128 spent;                      // Total spent from org's own deposits
-    uint128 solidarityUsedThisPeriod;   // Solidarity used in current 90-day period
-    uint32 periodStart;                 // Timestamp when current 90-day period started
-    uint224 reserved;                   // Padding for future use
-}
-```
-
-### Fee Collection
-
-1% automatic fee on all gas spending:
-```solidity
-solidarityFee = (actualGasCost * 100) / 10000
-```
-
-### Donations
-
-```javascript
-depositForOrg(orgId, {value: amount})  // Support specific org
-donateToSolidarity({value: amount})    // Support solidarity pool
-```
-
----
-
-## Grace Period
-
-### Configuration
-
-```solidity
-struct GracePeriodConfig {
-    uint32 initialGraceDays;      // Default: 90
-    uint128 maxSpendDuringGrace;  // Default: 0.01 ETH (~$30, represents ~3000 tx on L2s)
-    uint128 minDepositRequired;   // Default: 0.003 ETH (~$10)
-}
-```
-
-### Initial Grace (Day 0-90)
-
-- Zero deposits required
-- **Spending limit:** 0.01 ETH (~$30 value)
-  - Represents ~3000 transactions on cheap L2s (~$0.01 each)
-  - Or ~100 transactions on mainnet (~$0.30 each)
-  - Configurable by PoaManager to adapt to gas prices
-- All spending from solidarity pool
-- Purpose: Prove you're real, bootstrap with zero capital
-
-**Example:** On Base with 0.01 ETH limit, you can do ~3000 transactions at $0.01 each. On mainnet with same limit, you get ~100 transactions at $0.30 each. PoaManager can adjust the native currency amount to target a specific transaction count.
-
-### Post-Grace (Day 91+)
-
-Enter tier system based on deposit size. Must maintain minimum deposit (0.003 ETH) to access solidarity.
-
-Checks current `deposited` balance, not cumulative.
-
-### Network Configs
-
-| Network | Grace Days | Max Spend | Equivalent TX Count | Min Deposit |
-|---------|-----------|-----------|---------------------|-------------|
-| Mainnet | 90 | 0.01 ETH (~$30) | ~100 tx @ $0.30 each | 0.01 ETH (~$30) |
-| L2s | 90 | 0.01 ETH (~$30) | ~3000 tx @ $0.01 each | 0.003 ETH (~$10) |
-| Cheap L2s | 90 | 0.01 ETH (~$30) | ~30000 tx @ $0.001 each | 0.003 ETH (~$10) |
-
-**Note:** Only native currency amounts are enforced on-chain. Transaction counts are reference values that PoaManager uses when setting `maxSpendDuringGrace` to adapt to gas prices.
-
----
-
-## Progressive Tier System
-
-### Tiers Based on Deposit Size
-
-**Tier 1: Micro Orgs**
-- Deposit: 0.003 ETH (~$10)
-- Match: 2x (0.006 ETH)
-- Total budget: 0.009 ETH (~$30) per 90 days
-- Best for: Small co-ops spending ~$10/month
-
-**Tier 2: Small Orgs**
-- Deposit: 0.006 ETH (~$20)
-- Match: First 0.003 at 2x (=0.006) + second 0.003 at 1x (=0.003) = 0.009 ETH total
-- Total budget: 0.015 ETH (~$50) per 90 days
-- Best for: Growing co-ops spending ~$16/month on gas
-
-**Tier 3: Self-Sufficient**
-- Deposit: 0.017+ ETH (~$50+)
-- Match: None (self-funded threshold)
-- Net contributors to ecosystem via 1% fee on all their spending
-
-### Match Calculation
-
-```solidity
-function _calculateMatchAllowance(uint256 deposited, uint256 minDeposit) internal pure returns (uint256) {
-    if (deposited < minDeposit) return 0;
-
-    // Tier 1: 2x match
-    if (deposited <= minDeposit) {
-        return deposited * 2;
-    }
-
-    // Tier 2: Declining match (2x first, 1x second)
-    if (deposited <= minDeposit * 2) {
-        return (minDeposit * 2) + (deposited - minDeposit);
-    }
-
-    // Tier 3: No match
-    return 0;
-}
-```
-
-Gas cost: ~150 gas (pure function)
-
-### 90-Day Periods with Dual Reset
-
-Solidarity allowances reset when:
-1. **Time-based:** 90 days elapse since period start, OR
-2. **Deposit-based:** Balance crosses minimum threshold
-
-```solidity
-// Reset triggers
-if (block.timestamp >= periodStart + 90 days) {
-    resetPeriod();  // Time trigger
-}
-if (wasBelowMinimum && willBeAboveMinimum) {
-    resetPeriod();  // Deposit trigger
-}
-```
-
-**Why:** Natural commitment mechanism without per-tx overhead. Only costs gas on deposit (~3000 gas per reset).
-
-### Payment Priority
-
-**During grace (Day 0-90):**
-```solidity
-fromSolidarity = actualGasCost;  // 100% from solidarity
-fromDeposits = 0;
-```
-
-**After grace (Day 91+):**
-```solidity
-// Calculate tier-based allowance
-matchAllowance = _calculateMatchAllowance(deposited, minDeposit);
-solidarityRemaining = matchAllowance - solidarityUsedThisPeriod;
-
-// Try 50/50 split
-halfCost = actualGasCost / 2;
-fromDeposits = min(halfCost, depositAvailable);
-fromSolidarity = min(halfCost, solidarityRemaining);
-
-// If one pool short, use the other
-if (fromDeposits + fromSolidarity < actualGasCost) {
-    // Try deposits first, then solidarity
-    // Revert if neither can cover
-}
-```
-
-**Result:** Immediate benefit from 50/50 split. Even if you don't use full deposit, you still got solidarity support.
-
----
-
-## Future Feature: Micro-Org Exemption (V2)
-
-**Concept:** Organizations with consistently low activity (< $5/month rolling average) can operate indefinitely without deposits.
-
-**Rationale:**
-- Small community groups shouldn't be forced to deposit
-- Example: Neighborhood garden with 10 governance votes/month
-- Still subject to anti-gaming checks (PoaManager can ban)
-
-**Implementation considerations:**
-- Track 30-day rolling average spending
-- Exempt from deposit requirement if below threshold
-- Still subject to algorithmic allocation limits
-- Prevents forcing tiny legitimate orgs to maintain minimum balance
-
-**Status:** Documented for future implementation. Not in current version.
-
----
-
-## Real-World Scenarios
-
-### Bootstrapping Co-op (Tier 1)
-
-New food co-op on Base with zero funds:
-
-**Month 1-3 (Grace Period):**
-- Spending: 0.0083 ETH (~$25, ~2500 tx)
-- From solidarity: 0.0083 ETH (100%)
-- Deposits: 0 ETH
-- Status: Within 0.01 ETH grace limit ✅
-
-**Month 4 (Enter Tier 1):**
-- Deposits: 0.003 ETH ($10)
-- Match allowance: 0.006 ETH ($20)
-- Total budget: 0.009 ETH ($30) per 90 days
-- Period starts: April 1
-
-**Month 4-6 (First Period):**
-- Spending: $27 over 3 months
-- Payment via 50/50 split + fallback:
-  - From deposits: $10 (fully exhausted)
-  - From solidarity: $17 (used $17 of $20 allowance, $3 remaining)
-- Contributed via 1% fee: ~$0.27
-
-**Month 7 (Second Period):**
-- Deposits another $10 (crosses threshold → period resets!)
-- Fresh allowance: $20
-- Can spend: $30 total
-- **Annual total:** Deposit $40, spend $110 in gas → $70 net benefit
-
-### Growing Co-op (Tier 2)
-
-Tech co-op with growing user base on Arbitrum:
-
-**Month 4:**
-- Deposits: 0.006 ETH ($20)
-- Match calculation:
-  - First 0.003 ETH at 2x rate = 0.006 ETH
-  - Second 0.003 ETH at 1x rate = 0.003 ETH
-  - Total match allowance: 0.009 ETH ($30)
-- Total budget: 0.015 ETH ($50) per 90 days (can spend $20 from deposits + $30 from solidarity)
-
-**Month 4-6 (First Period):**
-- Spending: $45 over 3 months
-- Payment via 50/50 split + fallback:
-  - From deposits: $20 (fully exhausted)
-  - From solidarity: $25 (used $25 of $30 allowance, $5 remaining)
-- Contributed via 1% fee: ~$0.45
-
-**Result:** $20 deposit enables $45 in spending → $25 net benefit from solidarity
-
-### Established Co-op (Tier 3)
-
-Profitable co-op with 200 users:
-
-**Month 4:**
-- Deposits: 0.05 ETH ($150) for operations
-- Match: $0 (Tier 3, self-sufficient)
-- Spending: $300/month
-
-**Monthly:**
-- From deposits: $150
-- From solidarity: $0 (opted out or no match)
-- Contributes via 1% fee: $3/month
-
-**Result:** Net contributor to ecosystem ($36/year in fees)
-
-### Temporary Hardship
-
-Normal co-op hits rough patch:
-- **Month 1-11:** Normal operations with $10/month deposits
-- **Month 12:** Can't deposit, solidarity access cut off
-- **Month 13:** Community donates $50 via `depositForOrg()`, access restored
-
-### Malicious Actor
-
-Scam tries to exploit:
-- **Day 1-90:** Burns through grace period with spam
-- **Day 95:** PoaManager bans from solidarity via `setBanFromSolidarity()`
-- **Result:** Can only use own deposits, pool protected
-
----
-
-## Configuration
-
-### Network Settings
-
-| Network | Max Fee | Priority Fee | Call Gas | Ver Gas | PreVer Gas |
-|---------|---------|--------------|----------|---------|------------|
-| Mainnet | 200 gwei | 20 gwei | 1M | 500k | 200k |
-| L2s | 1 gwei | 0.1 gwei | 2M | 1M | 500k |
-| Cheap L2s | 0.1 gwei | 0.01 gwei | 3M | 1.5M | 700k |
-
-### Example Configs
-
-**Conservative:**
-- Whitelist specific contracts/functions
-- Daily per-member budgets
-- Low gas caps
-- No bounties
-
-**Progressive:**
-- Block only high-risk operations
-- Weekly budgets
-- High gas caps
-- High bounties for fast inclusion
-
-**Hybrid:**
-- Tiered rules by risk
-- Role-based budgets (member/operator/treasurer)
-- Moderate caps and bounties
-
----
-
-## Gas Costs
-
-### Deployment
-
-| Operation | Gas | Mainnet | L2 |
-|-----------|-----|---------|-----|
-| Implementation | ~4M | ~$500 | ~$1 |
-| Beacon proxy | ~200k | ~$25 | ~$0.05 |
-| Register org | ~65k | ~$8 | ~$0.02 |
-
-**Savings:** 99.8% vs traditional paymaster (~40M gas per org)
-
-### Per-Transaction Overhead
-
-After gas optimizations (removed transaction counting and unused tracking):
-
-| Component | Gas Cost | Notes |
-|-----------|----------|-------|
-| Budget check | ~600 | Includes epoch rolling logic |
-| Rule validation | ~400 | Target/selector extraction |
-| Solidarity checks | ~250 | Grace period or tier validation |
-| Financial updates (postOp) | ~10,300 | 2 SSTOREs + fee calculation |
-| **Total per transaction** | **~11,550** | ~7% of typical 150k gas UserOp |
-
-**Breakdown of postOp (where most cost is):**
-- `org.spent` update: 5,000 gas (warm SSTORE)
-- `org.solidarityUsedThisPeriod` update: 5,000 gas (warm SSTORE)
-- `solidarity.balance` updates (2x): ~300 gas (same slot)
-- Fee calculation: ~100 gas
-- Match calculation: ~150 gas (pure function)
-
-**Optimizations applied:**
-- ✅ Removed transaction counting (-2,900 gas)
-- ✅ Removed unused `solidarityUsed` lifetime tracking (-2,900 gas)
-- ✅ Removed unused `feesContributed` tracking (-2,900 gas)
-- ✅ Removed `totalFeesCollected` tracking (-2,900 gas)
-- **Total saved:** ~11,600 gas per transaction (reduced from 19k to ~10.3k)
-
-Overhead is ~7% of total UserOp cost (~150k gas), which is excellent for a multi-tenant paymaster with solidarity fund accounting.
-
----
-
-## Upgrade System
-
-### UUPS Pattern
-
-PaymasterHub uses **Universal Upgradeable Proxy Standard (UUPS)**.
-
-**Architecture:**
-```
-User/Bundler
-    │
-    ▼
-┌─────────────────┐
-│  Proxy Contract │ ← Permanent address
-│  (Storage)      │
-└────────┬────────┘
-         │ delegatecall
-         ▼
-┌─────────────────┐
-│ Implementation  │ ← Can be upgraded
-│ (Logic)         │
-└─────────────────┘
-```
-
-**Benefits:**
-- ✅ Address stays the same
-- ✅ Storage preserved
-- ✅ Can fix bugs
-- ✅ Can add features
-
-### Governance
-
-**Only PoaManager can upgrade:**
-
-```solidity
-function _authorizeUpgrade(address newImplementation) internal override {
-    if (msg.sender != _getMainStorage().poaManager) {
-        revert NotPoaManager();
+contract PaymasterHub is
+    IPaymaster,
+    Initializable,
+    UUPSUpgradeable,
+    ReentrancyGuardUpgradeable
+{
+    function _authorizeUpgrade(address newImplementation) internal override {
+        if (msg.sender != _getMainStorage().poaManager) {
+            revert NotPoaManager();
+        }
     }
 }
 ```
 
 **Upgrade Process:**
 
-1. **PoaManager** deploys new implementation
-   ```javascript
-   PaymasterHub newImpl = new PaymasterHub()
-   ```
+1. PoaManager deploys new implementation
+2. PoaManager calls `upgradeToAndCall()` on proxy
+3. All orgs automatically use new logic
+4. Storage preserved (ERC-7201 namespace protection)
 
-2. **Register** with PoaManager
-   ```javascript
-   poaManager.addContractType("PaymasterHub", address(newImpl))
-   ```
+**Only PoaManager can upgrade** - individual orgs cannot.
 
-3. **Upgrade** proxy
-   ```javascript
-   // From PoaManager or authorized account
-   UUPSUpgradeable(paymasterHubProxy).upgradeTo(address(newImpl))
-   ```
+### Gas Costs
 
-4. **All orgs** automatically use new logic
-   - No redeployment needed ✅
-   - Storage intact ✅
-   - Solidarity fund preserved ✅
+**Deployment:**
+- Implementation: ~4M gas (~$500 on mainnet)
+- Organization registration: ~65k gas (~$8)
+- **Savings:** 99.8% vs traditional paymaster (~40M gas per org)
 
-### Storage Safety
+**Per-Transaction Overhead:**
 
-**ERC-7201 Namespaced Storage:**
+| Component | Gas Cost | Notes |
+|-----------|----------|-------|
+| Budget check | ~600 | Includes epoch rolling |
+| Rule validation | ~400 | Target/selector extraction |
+| Solidarity checks | ~250 | Grace or tier validation |
+| Financial updates (postOp) | ~10,300 | 2 SSTOREs + calculations |
+| **Total** | **~11,550** | ~7% of typical 150k UserOp |
+
+**Optimizations Applied:**
+- Removed transaction counting (-2,900 gas)
+- Removed unused lifetime solidarity tracking (-2,900 gas)
+- Removed unused fees contributed tracking (-2,900 gas)
+- Removed total fees collected tracking (-2,900 gas)
+- **Total saved:** ~11,600 gas/tx (reduced from 19k to 10.3k)
+
+### Security Considerations
+
+**1. Reentrancy Protection**
 ```solidity
-// Each feature has dedicated slot
-ORGS_STORAGE_LOCATION = keccak256("poa.paymasterhub.orgs") - 1
-SOLIDARITY_STORAGE_LOCATION = keccak256("poa.paymasterhub.solidarity") - 1
-```
-
-**Storage Gap:**
-```solidity
-uint256[50] private __gap;
-```
-
-Reserves 50 storage slots for future additions without breaking existing storage layout.
-
-**Example Upgrade:**
-```solidity
-// v1 (current)
-struct OrgFinancials {
-    uint128 deposited;
-    uint128 totalDeposited;
-    uint128 spent;
-    uint128 solidarityUsedThisPeriod;
-    uint32 periodStart;
-    uint224 reserved;
-}
-
-// v2 (future upgrade - example)
-struct OrgFinancials {
-    uint128 deposited;
-    uint128 totalDeposited;
-    uint128 spent;
-    uint128 solidarityUsedThisPeriod;
-    uint32 periodStart;
-    uint32 reputationScore;  // ← NEW FIELD (using reserved space)
-    uint192 reserved;        // ← Reduced reserved space
+function postOp(...) external override onlyEntryPoint nonReentrant {
+    // Protected from extraction attacks
 }
 ```
 
-Storage positions unchanged, new data added safely.
+**2. Financial Isolation**
+- Each org has separate `OrgFinancials` struct
+- Cannot spend other orgs' deposits
+- Solidarity tracked separately per 90-day period
 
----
+**3. Access Control**
+- Hats Protocol role-based permissions
+- Org admin cannot affect other orgs
+- PoaManager cannot access org deposits
+- Operator hat limits delegation scope
 
-## Security Considerations
+**4. Overflow Protection**
+- Solidity 0.8+ built-in checks
+- Safe casting with explicit checks
+- Packed storage with bounded types
 
-### Access Control
+**5. Upgrade Safety**
+- Only PoaManager can upgrade
+- ERC-7201 namespaced storage prevents collisions
+- Initializer protection prevents re-initialization
 
-**Three-Tier Permissions:**
+**6. Grace Period Abuse Prevention**
+- Spending limit (0.01 ETH default)
+- Ban mechanism for malicious actors
+- Off-chain monitoring + on-chain enforcement
 
-1. **Org Admin** (Hats Protocol)
-   - Set rules, budgets, fee caps
-   - Pause org
-   - Set operator hat
-   - Configure bounties
+### Contract Size
 
-2. **Org Operator** (Optional delegation)
-   - Set rules, budgets, fee caps
-   - Cannot pause
-   - Cannot change admin/operator hats
+**Current:** ~25 KB compiled bytecode
+**Limit:** 24 KB (Spurious Dragon)
+**Status:** ✅ Within limit after optimizations
 
-3. **PoaManager** (Protocol governance)
-   - Upgrade PaymasterHub
-   - Set grace period config
-   - Ban malicious orgs
-   - Adjust solidarity fee
+### Events
 
-**Decentralization:** No single point of failure. Hats-based admin means multiple members can manage.
-
-### Financial Isolation
-
-**Per-Org Accounting:**
-```solidity
-struct OrgFinancials {
-    uint128 deposited;                  // Org's current balance
-    uint128 totalDeposited;             // Lifetime deposits (never decreases)
-    uint128 spent;                      // Spent from own deposits
-    uint128 solidarityUsedThisPeriod;   // Solidarity used this 90-day period
-    uint32 periodStart;                 // When current period started
-    uint224 reserved;                   // Future use
-}
-```
-
-**Protections:**
-- ✅ Orgs can't spend each other's deposits
-- ✅ Solidarity usage tracked separately per 90-day period
-- ✅ Tier-based limits prevent pool drainage (small orgs get most support)
-- ✅ Grace period spending limits (0.01 ETH max during first 90 days)
-- ✅ Minimum deposit requirement after grace (must maintain 0.003 ETH)
-- ✅ Ban mechanism for malicious actors (PoaManager can ban from solidarity)
-
-### Reentrancy Protection
+Complete audit trail via events:
 
 ```solidity
-contract PaymasterHub is ... ReentrancyGuardUpgradeable {
+// Organization lifecycle
+event OrgRegistered(bytes32 indexed orgId, uint256 adminHatId, uint256 operatorHatId);
+event PauseSet(bytes32 indexed orgId, bool paused);
 
-    function postOp(...) external override onlyEntryPoint nonReentrant {
-        // Can't be called recursively
-        // Protects solidarity fund from extraction attacks
-    }
-}
+// Financial tracking
+event OrgDepositReceived(bytes32 indexed orgId, address indexed from, uint256 amount);
+event SolidarityDonationReceived(address indexed from, uint256 amount);
+event SolidarityFeeCollected(bytes32 indexed orgId, uint256 amount);
+
+// Configuration
+event RuleSet(bytes32 indexed orgId, address indexed target, bytes4 indexed selector, bool allowed, uint32 maxCallGasHint);
+event BudgetSet(bytes32 indexed orgId, bytes32 subjectKey, uint128 capPerEpoch, uint32 epochLen, uint32 epochStart);
+event FeeCapsSet(bytes32 indexed orgId, uint256 maxFeePerGas, ...);
+
+// Usage tracking
+event UsageIncreased(bytes32 indexed orgId, bytes32 subjectKey, uint256 delta, uint128 usedInEpoch, uint32 epochStart);
+event UserOpPosted(bytes32 indexed opHash, address indexed postedBy);
+
+// Bounties
+event BountyPaid(bytes32 indexed userOpHash, address indexed to, uint256 amount);
+event BountyPayFailed(bytes32 indexed userOpHash, address indexed to, uint256 amount);
+
+// Governance
+event GracePeriodConfigUpdated(uint32 initialGraceDays, uint128 maxSpendDuringGrace, uint128 minDepositRequired);
+event OrgBannedFromSolidarity(bytes32 indexed orgId, bool banned);
 ```
 
-### Overflow Protection
-
-```solidity
-// Solidity 0.8+ has built-in overflow checks
-org.deposited += uint128(msg.value);  // Reverts on overflow
-solidarity.balance += uint128(solidarityFee);
-```
-
-**Safe casting:**
-```solidity
-// Always check before casting
-if (value > type(uint128).max) revert ValueTooLarge();
-uint128 safeValue = uint128(value);
-```
-
-### Signature Validation
-
-**Not required!** Unlike CitizenWallet's paymaster:
-- ✅ No off-chain signer needed
-- ✅ All validation on-chain
-- ✅ No private key management
-- ✅ Rules enforced autonomously
-
-### Upgrade Safety
-
-**UUPS requires explicit authorization:**
-```solidity
-function _authorizeUpgrade(address newImplementation) internal override {
-    if (msg.sender != poaManager) revert NotPoaManager();
-}
-```
-
-**Cannot be upgraded by:**
-- ❌ Org admins
-- ❌ Random users
-- ❌ Bundlers
-- ❌ EntryPoint
-
-**Only:** PoaManager (decentralized governance)
-
-### Grace Period Abuse Prevention
-
-**Spending Limits:**
-```solidity
-// During initial grace period (first 90 days)
-if (org.solidarityUsedThisPeriod + maxCost > grace.maxSpendDuringGrace) {
-    revert GracePeriodSpendLimitReached();
-}
-```
-
-**Minimum Deposit Requirement:**
-```solidity
-// After grace period
-if (org.deposited < grace.minDepositRequired) {
-    revert InsufficientDepositForSolidarity();
-}
-```
-
-**Ban Mechanism:**
-```solidity
-if (config.bannedFromSolidarity) {
-    revert OrgIsBanned();
-}
-```
-
-**Monitoring:** Off-chain services can detect suspicious patterns (e.g., burning through grace period with spam transactions) and report to PoaManager for banning.
-
----
-
-## Conclusion
-
-**PaymasterHub** represents a new paradigm in blockchain infrastructure: **solidarity economics at the protocol level**.
-
-### Technical Achievements
-
-- ✅ 99.8% reduction in deployment costs
-- ✅ Multi-tenant architecture (unlimited orgs)
-- ✅ ERC-7201 storage (safe upgrades)
-- ✅ Hats Protocol integration (decentralized control)
-- ✅ UUPS upgradeable (future-proof)
-- ✅ <1% gas overhead per transaction
-
-### Economic Achievements
-
-- ✅ Automatic mutual aid (1% contribution on all transactions)
-- ✅ Progressive tier-based fairness (small orgs get best match rates)
-- ✅ Bootstrapping support (90-day grace period with spending limit)
-- ✅ Dual-reset model (90 days OR deposit threshold crossing)
-- ✅ Immediate 50/50 benefit (don't have to exhaust deposits first)
-- ✅ Permissionless donations (anyone can support any org)
-
-### Social Achievements
-
-- ✅ Built for worker cooperatives
-- ✅ Enables zero-capital startups
-- ✅ Rewards contribution over extraction
-- ✅ Self-balancing economic model
-- ✅ Protocol-level solidarity
-
-**This isn't just code. It's infrastructure for a cooperative economy.**
-
----
-
-## Further Reading
+### Further Reading
 
 - [ERC-4337: Account Abstraction](https://eips.ethereum.org/EIPS/eip-4337)
 - [ERC-7201: Namespaced Storage Layout](https://eips.ethereum.org/EIPS/eip-7201)
@@ -796,7 +1209,7 @@ if (config.bannedFromSolidarity) {
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** 2024
+**Version:** 1.0
+**Last Updated:** 2025
 **Maintainers:** POA Engineering Team
 **License:** MIT
