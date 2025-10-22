@@ -305,11 +305,7 @@ contract DeviceWrapRegistry is Initializable, OwnableUpgradeable, ReentrancyGuar
         return (T.from, T.to, T.executed, T.createdAt, T.approvals);
     }
 
-    function hasGuardianVotedOnWrap(address ownerAddr, uint256 idx, address guardian)
-        external
-        view
-        returns (bool)
-    {
+    function hasGuardianVotedOnWrap(address ownerAddr, uint256 idx, address guardian) external view returns (bool) {
         return _l().votedWrap[ownerAddr][idx][guardian];
     }
 

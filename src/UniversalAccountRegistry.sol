@@ -29,7 +29,7 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         mapping(address => string) addressToUsername;
         mapping(bytes32 => address) ownerOfUsernameHash;
         address recoveryCaller; // Contract authorized to perform recoverAccount
-        address orgApprover;    // Optional: org-level approver for recovery
+        address orgApprover; // Optional: org-level approver for recovery
     }
 
     // keccak256("poa.universalaccountregistry.storage") to unique, collision-free slot
