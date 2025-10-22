@@ -244,11 +244,11 @@ contract DeployOrg is Script {
         }
     }
 
-    function _buildDeploymentParams(OrgConfigJson memory config, address globalAccountRegistry, address deployerAddress)
-        internal
-        pure
-        returns (OrgDeployer.DeploymentParams memory params)
-    {
+    function _buildDeploymentParams(
+        OrgConfigJson memory config,
+        address globalAccountRegistry,
+        address deployerAddress
+    ) internal pure returns (OrgDeployer.DeploymentParams memory params) {
         // Set basic params
         params.orgId = keccak256(bytes(config.orgId));
         params.orgName = config.orgName;

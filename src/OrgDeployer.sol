@@ -28,12 +28,7 @@ interface IExecutorAdmin {
         uint256 membershipHatId,
         bool combineWithHierarchy
     ) external;
-    function setDefaultEligibility(
-        address eligibilityModule,
-        uint256 hatId,
-        bool eligible,
-        bool standing
-    ) external;
+    function setDefaultEligibility(address eligibilityModule, uint256 hatId, bool eligible, bool standing) external;
 }
 
 interface IPaymasterHub {
@@ -291,21 +286,23 @@ contract OrgDeployer is Initializable {
                 uint256 memberHatId = gov.roleHatIds[0]; // MEMBER
 
                 // Configure vouching: quorum=1, membershipHat=MEMBER, combineWithHierarchy=false
-                IExecutorAdmin(result.executor).configureVouching(
-                    gov.eligibilityModule,
-                    coordinatorHatId,
-                    1, // quorum: only 1 vouch needed
-                    memberHatId, // MEMBER hat wearers can vouch
-                    false // don't combine with hierarchy
-                );
+                IExecutorAdmin(result.executor)
+                    .configureVouching(
+                        gov.eligibilityModule,
+                        coordinatorHatId,
+                        1, // quorum: only 1 vouch needed
+                        memberHatId, // MEMBER hat wearers can vouch
+                        false // don't combine with hierarchy
+                    );
 
                 // Set COORDINATOR default eligibility to false (forces vouching)
-                IExecutorAdmin(result.executor).setDefaultEligibility(
-                    gov.eligibilityModule,
-                    coordinatorHatId,
-                    false, // not eligible by default
-                    true // good standing by default
-                );
+                IExecutorAdmin(result.executor)
+                    .setDefaultEligibility(
+                        gov.eligibilityModule,
+                        coordinatorHatId,
+                        false, // not eligible by default
+                        true // good standing by default
+                    );
             }
         }
 
