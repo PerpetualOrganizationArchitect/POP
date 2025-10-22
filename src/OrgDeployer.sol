@@ -21,6 +21,19 @@ interface IParticipationToken {
 interface IExecutorAdmin {
     function setCaller(address) external;
     function setHatMinterAuthorization(address minter, bool authorized) external;
+    function configureVouching(
+        address eligibilityModule,
+        uint256 hatId,
+        uint32 quorum,
+        uint256 membershipHatId,
+        bool combineWithHierarchy
+    ) external;
+    function setDefaultEligibility(
+        address eligibilityModule,
+        uint256 hatId,
+        bool eligible,
+        bool standing
+    ) external;
 }
 
 interface IPaymasterHub {
@@ -137,6 +150,7 @@ contract OrgDeployer is Initializable {
         bytes32 orgId;
         string orgName;
         address registryAddr;
+        address deployerAddress; // Address to receive ADMIN hat
         bool autoUpgrade;
         uint8 hybridQuorumPct;
         uint8 ddQuorumPct;
@@ -172,7 +186,12 @@ contract OrgDeployer is Initializable {
     {
         Layout storage l = _layout();
 
-        /* 1. Create Org in bootstrap mode */
+        /* 1. Validate deployer address */
+        if (params.deployerAddress == address(0)) {
+            revert InvalidAddress();
+        }
+
+        /* 2. Create Org in bootstrap mode */
         if (!_orgExists(params.orgId)) {
             l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName));
         } else {
@@ -263,6 +282,33 @@ contract OrgDeployer is Initializable {
         /* 10. Link executor to governor */
         IExecutorAdmin(result.executor).setCaller(result.hybridVoting);
 
+        /* 10.5. Configure vouching system before renouncing ownership */
+        {
+            // Only configure vouching for orgs with 4+ roles (MEMBER, COORDINATOR, CONTRIBUTOR, ADMIN)
+            // This avoids breaking simple 2-role test orgs (DEFAULT, EXECUTIVE)
+            if (gov.roleHatIds.length >= 4) {
+                uint256 coordinatorHatId = gov.roleHatIds[1]; // COORDINATOR
+                uint256 memberHatId = gov.roleHatIds[0]; // MEMBER
+
+                // Configure vouching: quorum=1, membershipHat=MEMBER, combineWithHierarchy=false
+                IExecutorAdmin(result.executor).configureVouching(
+                    gov.eligibilityModule,
+                    coordinatorHatId,
+                    1, // quorum: only 1 vouch needed
+                    memberHatId, // MEMBER hat wearers can vouch
+                    false // don't combine with hierarchy
+                );
+
+                // Set COORDINATOR default eligibility to false (forces vouching)
+                IExecutorAdmin(result.executor).setDefaultEligibility(
+                    gov.eligibilityModule,
+                    coordinatorHatId,
+                    false, // not eligible by default
+                    true // good standing by default
+                );
+            }
+        }
+
         /* 11. Renounce executor ownership - now only governed by voting */
         OwnableUpgradeable(result.executor).renounceOwnership();
 
@@ -307,6 +353,7 @@ contract OrgDeployer is Initializable {
         govParams.hats = address(hats);
         govParams.hatsTreeSetup = l.hatsTreeSetup;
         govParams.deployer = address(this);
+        govParams.deployerAddress = params.deployerAddress; // Pass deployer address for ADMIN hat
         govParams.participationToken = address(0);
         govParams.autoUpgrade = params.autoUpgrade;
         govParams.hybridQuorumPct = params.hybridQuorumPct;
@@ -343,6 +390,7 @@ contract OrgDeployer is Initializable {
         votingParams.hats = address(hats);
         votingParams.hatsTreeSetup = l.hatsTreeSetup;
         votingParams.deployer = address(this);
+        votingParams.deployerAddress = params.deployerAddress;
         votingParams.participationToken = participationToken;
         votingParams.autoUpgrade = params.autoUpgrade;
         votingParams.hybridQuorumPct = params.hybridQuorumPct;

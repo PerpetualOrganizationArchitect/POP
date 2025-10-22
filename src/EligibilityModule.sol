@@ -126,7 +126,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     /*═══════════════════════════════════ RATE LIMITING CONSTANTS ═══════════════════════════════════*/
 
     uint32 private constant MAX_DAILY_VOUCHES = 3;
-    uint256 private constant NEW_USER_RESTRICTION_DAYS = 2;
+    uint256 private constant NEW_USER_RESTRICTION_DAYS = 0; // Removed wait period for immediate vouching
     uint256 private constant SECONDS_PER_DAY = 86400;
 
     /*═══════════════════════════════════════════ EVENTS ═══════════════════════════════════════════*/
@@ -467,16 +467,16 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         Layout storage l = _layout();
 
         // Check if user has been around long enough to vouch
+        // NEW_USER_RESTRICTION_DAYS = 0, so anyone can vouch immediately
         uint256 joinTime = l.userJoinTime[user];
-        if (joinTime == 0) {
-            // User never set join time, treat as new user
-            revert NewUserVouchingRestricted();
+        if (joinTime != 0) {
+            // Only check if join time is set
+            uint256 daysSinceJoined = (block.timestamp - joinTime) / SECONDS_PER_DAY;
+            if (daysSinceJoined < NEW_USER_RESTRICTION_DAYS) {
+                revert NewUserVouchingRestricted();
+            }
         }
-
-        uint256 daysSinceJoined = (block.timestamp - joinTime) / SECONDS_PER_DAY;
-        if (daysSinceJoined < NEW_USER_RESTRICTION_DAYS) {
-            revert NewUserVouchingRestricted();
-        }
+        // If joinTime is 0 (never set), allow vouching since NEW_USER_RESTRICTION_DAYS = 0
 
         // Check daily vouch limit
         uint256 currentDay = block.timestamp / SECONDS_PER_DAY;
