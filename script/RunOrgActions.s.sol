@@ -198,7 +198,8 @@ contract RunOrgActions is Script {
         console.log("  Voting Classes:", config.votingClasses.length);
 
         // Build deployment params (deployer will receive ADMIN hat)
-        OrgDeployer.DeploymentParams memory params = _buildDeploymentParams(config, globalAccountRegistry, members.deployer);
+        OrgDeployer.DeploymentParams memory params =
+            _buildDeploymentParams(config, globalAccountRegistry, members.deployer);
 
         // Deploy
         vm.startBroadcast(deployerPrivateKey);
@@ -537,7 +538,8 @@ contract RunOrgActions is Script {
 
         // Parse roles array
         uint256 rolesLength = 0;
-        for (uint256 i = 0; i < 100; i++) { // reasonable max
+        for (uint256 i = 0; i < 100; i++) {
+            // reasonable max
             try vm.parseJsonString(
                 configJson, string.concat(".roles[", vm.toString(i), "].name")
             ) returns (string memory) {
@@ -557,7 +559,8 @@ contract RunOrgActions is Script {
 
         // Parse voting classes array
         uint256 votingClassesLength = 0;
-        for (uint256 i = 0; i < 100; i++) { // reasonable max
+        for (uint256 i = 0; i < 100; i++) {
+            // reasonable max
             try vm.parseJsonString(
                 configJson, string.concat(".votingClasses[", vm.toString(i), "].strategy")
             ) returns (string memory) {
@@ -625,11 +628,11 @@ contract RunOrgActions is Script {
         }
     }
 
-    function _buildDeploymentParams(OrgConfigJson memory config, address globalAccountRegistry, address deployerAddress)
-        internal
-        pure
-        returns (OrgDeployer.DeploymentParams memory params)
-    {
+    function _buildDeploymentParams(
+        OrgConfigJson memory config,
+        address globalAccountRegistry,
+        address deployerAddress
+    ) internal pure returns (OrgDeployer.DeploymentParams memory params) {
         // Set basic params
         params.orgId = keccak256(bytes(config.orgId));
         params.orgName = config.orgName;

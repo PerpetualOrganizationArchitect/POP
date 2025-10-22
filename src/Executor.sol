@@ -166,11 +166,7 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
         if (eligibilityModule == address(0)) revert ZeroAddress();
         (bool success,) = eligibilityModule.call(
             abi.encodeWithSignature(
-                "configureVouching(uint256,uint32,uint256,bool)",
-                hatId,
-                quorum,
-                membershipHatId,
-                combineWithHierarchy
+                "configureVouching(uint256,uint32,uint256,bool)", hatId, quorum, membershipHatId, combineWithHierarchy
             )
         );
         require(success, "configureVouching failed");
@@ -184,20 +180,13 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
      * @param eligible Whether wearers are eligible by default
      * @param standing Whether wearers have good standing by default
      */
-    function setDefaultEligibility(
-        address eligibilityModule,
-        uint256 hatId,
-        bool eligible,
-        bool standing
-    ) external onlyOwner {
+    function setDefaultEligibility(address eligibilityModule, uint256 hatId, bool eligible, bool standing)
+        external
+        onlyOwner
+    {
         if (eligibilityModule == address(0)) revert ZeroAddress();
         (bool success,) = eligibilityModule.call(
-            abi.encodeWithSignature(
-                "setDefaultEligibility(uint256,bool,bool)",
-                hatId,
-                eligible,
-                standing
-            )
+            abi.encodeWithSignature("setDefaultEligibility(uint256,bool,bool)", hatId, eligible, standing)
         );
         require(success, "setDefaultEligibility failed");
     }

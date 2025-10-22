@@ -91,7 +91,8 @@ contract HatsTreeSetup {
 
             // Set eligibility for both executor and deployer (ADMIN hat will be minted to deployer)
             IEligibilityModule(params.eligibilityModule).setWearerEligibility(params.executor, newHatId, true, true);
-            IEligibilityModule(params.eligibilityModule).setWearerEligibility(params.deployerAddress, newHatId, true, true);
+            IEligibilityModule(params.eligibilityModule)
+                .setWearerEligibility(params.deployerAddress, newHatId, true, true);
             IToggleModule(params.toggleModule).setHatStatus(newHatId, true);
 
             // ADMIN hat (last role, highest in hierarchy) is minted to deployer address
