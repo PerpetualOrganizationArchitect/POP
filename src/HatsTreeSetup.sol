@@ -26,6 +26,7 @@ contract HatsTreeSetup {
         address eligibilityModule;
         address toggleModule;
         address deployer;
+        address deployerAddress; // Address to receive ADMIN hat
         address executor;
         string orgName;
         string[] roleNames;
@@ -88,11 +89,21 @@ contract HatsTreeSetup {
                 );
             result.roleHatIds[idx] = newHatId;
 
+            // Set eligibility for both executor and deployer (ADMIN hat will be minted to deployer)
             IEligibilityModule(params.eligibilityModule).setWearerEligibility(params.executor, newHatId, true, true);
+            IEligibilityModule(params.eligibilityModule)
+                .setWearerEligibility(params.deployerAddress, newHatId, true, true);
             IToggleModule(params.toggleModule).setHatStatus(newHatId, true);
 
+            // ADMIN hat (last role, highest in hierarchy) is minted to deployer address
+            // All other voting hats are minted to executor contract
+            bool isAdminHat = (idx == len - 1);
             if (params.roleCanVote[idx]) {
-                IEligibilityModule(params.eligibilityModule).mintHatToAddress(newHatId, params.executor);
+                if (isAdminHat) {
+                    IEligibilityModule(params.eligibilityModule).mintHatToAddress(newHatId, params.deployerAddress);
+                } else {
+                    IEligibilityModule(params.eligibilityModule).mintHatToAddress(newHatId, params.executor);
+                }
             }
         }
 

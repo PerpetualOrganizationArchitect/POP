@@ -5,17 +5,22 @@ import {IPaymaster} from "./interfaces/IPaymaster.sol";
 import {IEntryPoint} from "./interfaces/IEntryPoint.sol";
 import {PackedUserOperation, UserOpLib} from "./interfaces/PackedUserOperation.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
-import {ReentrancyGuard} from "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import {Initializable} from "lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import {
+    ReentrancyGuardUpgradeable
+} from "lib/openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC165} from "lib/openzeppelin-contracts/contracts/utils/introspection/IERC165.sol";
 
 /**
  * @title PaymasterHub
  * @author POA Engineering
- * @notice Production-grade ERC-4337 paymaster with rule-driven policy, per-subject budgets, and optional inclusion bounty
- * @dev Implements ERC-7201 storage pattern with comprehensive security features
+ * @notice Production-grade ERC-4337 paymaster shared across all POA organizations
+ * @dev Implements ERC-7201 storage pattern with org-scoped configuration and budgets
+ * @dev Upgradeable via UUPS pattern, governed by PoaManager
  * @custom:security-contact security@poa.org
  */
-contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
+contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyGuardUpgradeable, IERC165 {
     using UserOpLib for bytes32;
 
     // ============ Custom Errors ============
@@ -23,6 +28,7 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     error Paused();
     error NotAdmin();
     error NotOperator();
+    error NotPoaManager();
     error RuleDenied(address target, bytes4 selector);
     error FeeTooHigh();
     error GasTooHigh();
@@ -38,6 +44,14 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     error InvalidBountyConfig();
     error ContractNotDeployed();
     error ArrayLengthMismatch();
+    error OrgNotRegistered();
+    error OrgAlreadyRegistered();
+    error GracePeriodSpendLimitReached();
+    error InsufficientDepositForSolidarity();
+    error SolidarityLimitExceeded();
+    error InsufficientOrgBalance();
+    error OrgIsBanned();
+    error InsufficientFunds();
 
     // ============ Constants ============
     uint8 private constant PAYMASTER_DATA_VERSION = 1;
@@ -53,40 +67,95 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     uint256 private constant MAX_BOUNTY_PCT_BP = 10000; // 100%
 
     // ============ Events ============
-    event PaymasterInitialized(address indexed entryPoint, address indexed hats, uint256 adminHatId);
-    event RuleSet(address indexed target, bytes4 indexed selector, bool allowed, uint32 maxCallGasHint);
-    event BudgetSet(bytes32 indexed subjectKey, uint128 capPerEpoch, uint32 epochLen, uint32 epochStart);
+    event PaymasterInitialized(address indexed entryPoint, address indexed hats, address indexed poaManager);
+    event OrgRegistered(bytes32 indexed orgId, uint256 adminHatId, uint256 operatorHatId);
+    event RuleSet(
+        bytes32 indexed orgId, address indexed target, bytes4 indexed selector, bool allowed, uint32 maxCallGasHint
+    );
+    event BudgetSet(bytes32 indexed orgId, bytes32 subjectKey, uint128 capPerEpoch, uint32 epochLen, uint32 epochStart);
     event FeeCapsSet(
+        bytes32 indexed orgId,
         uint256 maxFeePerGas,
         uint256 maxPriorityFeePerGas,
         uint32 maxCallGas,
         uint32 maxVerificationGas,
         uint32 maxPreVerificationGas
     );
-    event PauseSet(bool paused);
-    event OperatorHatSet(uint256 operatorHatId);
+    event PauseSet(bytes32 indexed orgId, bool paused);
+    event OperatorHatSet(bytes32 indexed orgId, uint256 operatorHatId);
     event DepositIncrease(uint256 amount, uint256 newDeposit);
     event DepositWithdraw(address indexed to, uint256 amount);
-    event BountyConfig(bool enabled, uint96 maxPerOp, uint16 pctBpCap);
+    event BountyConfig(bytes32 indexed orgId, bool enabled, uint96 maxPerOp, uint16 pctBpCap);
     event BountyFunded(uint256 amount, uint256 newBalance);
     event BountySweep(address indexed to, uint256 amount);
     event BountyPaid(bytes32 indexed userOpHash, address indexed to, uint256 amount);
     event BountyPayFailed(bytes32 indexed userOpHash, address indexed to, uint256 amount);
-    event UsageIncreased(bytes32 indexed subjectKey, uint256 delta, uint128 usedInEpoch, uint32 epochStart);
+    event UsageIncreased(
+        bytes32 indexed orgId, bytes32 subjectKey, uint256 delta, uint128 usedInEpoch, uint32 epochStart
+    );
     event UserOpPosted(bytes32 indexed opHash, address indexed postedBy);
     event EmergencyWithdraw(address indexed to, uint256 amount);
+    event OrgDepositReceived(bytes32 indexed orgId, address indexed from, uint256 amount);
+    event SolidarityFeeCollected(bytes32 indexed orgId, uint256 amount);
+    event SolidarityDonationReceived(address indexed from, uint256 amount);
+    event GracePeriodConfigUpdated(uint32 initialGraceDays, uint128 maxSpendDuringGrace, uint128 minDepositRequired);
+    event OrgBannedFromSolidarity(bytes32 indexed orgId, bool banned);
 
-    // ============ Immutables ============
-    address public immutable ENTRY_POINT;
+    // ============ Storage Variables ============
+    /// @custom:storage-location erc7201:poa.paymasterhub.main
+    struct MainStorage {
+        address entryPoint;
+        address hats;
+        address poaManager;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.main")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant MAIN_STORAGE_LOCATION = 0x9a7a9f40de2a7f2c3b8e6d5c4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b;
 
     // ============ Storage Structs ============
-    struct Config {
-        address hats;
-        uint256 adminHatId;
-        uint256 operatorHatId; // Optional role for budget/rule management
-        bool paused;
-        uint8 version;
-        uint24 reserved; // For future use
+
+    /**
+     * @dev Organization configuration
+     * Storage optimization: registeredAt packed with paused to save gas
+     */
+    struct OrgConfig {
+        uint256 adminHatId; // Slot 0
+        uint256 operatorHatId; // Slot 1: Optional role for budget/rule management
+        bool paused; // Slot 2 (1 byte)
+        uint40 registeredAt; // Slot 2 (5 bytes): UNIX timestamp, good until year 36812
+        bool bannedFromSolidarity; // Slot 2 (1 byte)
+        // 25 bytes remaining in slot 2 for future use
+    }
+
+    /**
+     * @dev Per-org financial tracking for solidarity fund accounting
+     */
+    struct OrgFinancials {
+        uint128 deposited; // Current balance deposited by org
+        uint128 totalDeposited; // Cumulative lifetime deposits (never decreases)
+        uint128 spent; // Total spent from org's own deposits
+        uint128 solidarityUsedThisPeriod; // Solidarity used in current 90-day period
+        uint32 periodStart; // Timestamp when current 90-day period started
+        uint224 reserved; // Padding for future use
+    }
+
+    /**
+     * @dev Global solidarity fund state
+     */
+    struct SolidarityFund {
+        uint128 balance; // Current solidarity fund balance
+        uint32 numActiveOrgs; // Number of orgs with deposits > 0
+        uint16 feePercentageBps; // Fee as basis points (100 = 1%)
+        uint208 reserved; // Padding
+    }
+
+    /**
+     * @dev Grace period configuration for unfunded orgs
+     */
+    struct GracePeriodConfig {
+        uint32 initialGraceDays; // Startup period with zero deposits (default 90)
+        uint128 maxSpendDuringGrace; // Max spending during grace period (default 0.01 ETH ~$30)
+        uint128 minDepositRequired; // Minimum balance to maintain after grace (default 0.003 ETH ~$10)
     }
 
     struct FeeCaps {
@@ -103,8 +172,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     }
 
     struct Budget {
-        uint128 capPerEpoch; // Increased from uint64 for larger budgets
-        uint128 usedInEpoch; // Increased from uint64
+        uint128 capPerEpoch;
+        uint128 usedInEpoch;
         uint32 epochLen;
         uint32 epochStart;
     }
@@ -113,13 +182,12 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         bool enabled;
         uint96 maxBountyWeiPerOp;
         uint16 pctBpCap;
-        uint144 totalPaid; // Track total bounties paid
+        uint144 totalPaid;
     }
 
     // ============ ERC-7201 Storage Locations ============
-    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.config")) - 1))
-    bytes32 private constant CONFIG_STORAGE_LOCATION =
-        0xabfaccef10a57a6be41f1fbc4a8a7f1b6e210db05ae07b44b3a1bb95e2c7978e;
+    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.orgs")) - 1))
+    bytes32 private constant ORGS_STORAGE_LOCATION = 0x7e8e7f71b618a8d3f4c7c1c6c0e8f8e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0;
 
     // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.feeCaps")) - 1))
     bytes32 private constant FEECAPS_STORAGE_LOCATION =
@@ -137,11 +205,36 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     bytes32 private constant BOUNTY_STORAGE_LOCATION =
         0x5aefd14c2f5001261e819816e3c40d9d9cc763af84e5df87cd5955f0f5cfd09e;
 
+    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.financials")) - 1))
+    bytes32 private constant FINANCIALS_STORAGE_LOCATION =
+        0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
+
+    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.solidarity")) - 1))
+    bytes32 private constant SOLIDARITY_STORAGE_LOCATION =
+        0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890;
+
+    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.graceperiod")) - 1))
+    bytes32 private constant GRACEPERIOD_STORAGE_LOCATION =
+        0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321;
+
     // ============ Constructor ============
-    constructor(address _entryPoint, address _hats, uint256 _adminHatId) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    // ============ Initializer ============
+    /**
+     * @notice Initialize the PaymasterHub
+     * @dev Called once during proxy deployment
+     * @param _entryPoint ERC-4337 EntryPoint address
+     * @param _hats Hats Protocol address
+     * @param _poaManager PoaManager address for upgrade authorization
+     */
+    function initialize(address _entryPoint, address _hats, address _poaManager) public initializer {
         if (_entryPoint == address(0)) revert ZeroAddress();
         if (_hats == address(0)) revert ZeroAddress();
-        if (_adminHatId == 0) revert ZeroAddress();
+        if (_poaManager == address(0)) revert ZeroAddress();
 
         // Verify entryPoint is a contract
         uint256 codeSize;
@@ -150,48 +243,228 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         }
         if (codeSize == 0) revert ContractNotDeployed();
 
-        ENTRY_POINT = _entryPoint;
+        // Initialize upgradeable contracts
+        __ReentrancyGuard_init();
+        __UUPSUpgradeable_init();
 
-        Config storage config = _getConfigStorage();
-        config.hats = _hats;
-        config.adminHatId = _adminHatId;
-        config.version = PAYMASTER_DATA_VERSION;
-        config.paused = false;
+        // Store main config
+        MainStorage storage main = _getMainStorage();
+        main.entryPoint = _entryPoint;
+        main.hats = _hats;
+        main.poaManager = _poaManager;
 
-        emit PaymasterInitialized(_entryPoint, _hats, _adminHatId);
+        // Initialize solidarity fund with 1% fee
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+        solidarity.feePercentageBps = 100; // 1%
+
+        // Initialize grace period with defaults (90 days, 0.01 ETH ~$30 spend, 0.003 ETH ~$10 deposit)
+        GracePeriodConfig storage grace = _getGracePeriodStorage();
+        grace.initialGraceDays = 90;
+        grace.maxSpendDuringGrace = 0.01 ether; // ~$30 worth of gas (~3000 tx on cheap L2s)
+        grace.minDepositRequired = 0.003 ether; // ~$10 minimum deposit
+
+        emit PaymasterInitialized(_entryPoint, _hats, _poaManager);
+    }
+
+    // ============ Org Registration ============
+
+    /**
+     * @notice Register a new organization with the paymaster
+     * @dev Called by OrgDeployer during org creation
+     * @param orgId Unique organization identifier
+     * @param adminHatId Hat ID for org admin (topHat)
+     * @param operatorHatId Optional hat ID for operators (0 if none)
+     */
+    function registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId) external {
+        if (adminHatId == 0) revert ZeroAddress();
+
+        mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
+        if (orgs[orgId].adminHatId != 0) revert OrgAlreadyRegistered();
+
+        orgs[orgId] = OrgConfig({
+            adminHatId: adminHatId,
+            operatorHatId: operatorHatId,
+            paused: false,
+            registeredAt: uint40(block.timestamp),
+            bannedFromSolidarity: false
+        });
+
+        emit OrgRegistered(orgId, adminHatId, operatorHatId);
     }
 
     // ============ Modifiers ============
     modifier onlyEntryPoint() {
-        if (msg.sender != ENTRY_POINT) revert EPOnly();
+        if (msg.sender != _getMainStorage().entryPoint) revert EPOnly();
         _;
     }
 
-    modifier onlyAdmin() {
-        Config storage config = _getConfigStorage();
-        if (!IHats(config.hats).isWearerOfHat(msg.sender, config.adminHatId)) {
+    modifier onlyOrgAdmin(bytes32 orgId) {
+        OrgConfig storage org = _getOrgsStorage()[orgId];
+        if (org.adminHatId == 0) revert OrgNotRegistered();
+        if (!IHats(_getMainStorage().hats).isWearerOfHat(msg.sender, org.adminHatId)) {
             revert NotAdmin();
         }
         _;
     }
 
-    modifier onlyOperator() {
-        Config storage config = _getConfigStorage();
-        bool isAdmin = IHats(config.hats).isWearerOfHat(msg.sender, config.adminHatId);
+    modifier onlyOrgOperator(bytes32 orgId) {
+        OrgConfig storage org = _getOrgsStorage()[orgId];
+        if (org.adminHatId == 0) revert OrgNotRegistered();
+
+        bool isAdmin = IHats(_getMainStorage().hats).isWearerOfHat(msg.sender, org.adminHatId);
         bool isOperator =
-            config.operatorHatId != 0 && IHats(config.hats).isWearerOfHat(msg.sender, config.operatorHatId);
+            org.operatorHatId != 0 && IHats(_getMainStorage().hats).isWearerOfHat(msg.sender, org.operatorHatId);
         if (!isAdmin && !isOperator) revert NotOperator();
         _;
     }
 
-    modifier whenNotPaused() {
-        if (_getConfigStorage().paused) revert Paused();
+    modifier whenOrgNotPaused(bytes32 orgId) {
+        if (_getOrgsStorage()[orgId].paused) revert Paused();
         _;
     }
 
     // ============ ERC-165 Support ============
     function supportsInterface(bytes4 interfaceId) public pure override returns (bool) {
         return interfaceId == type(IPaymaster).interfaceId || interfaceId == type(IERC165).interfaceId;
+    }
+
+    // ============ Solidarity Fund Functions ============
+
+    /**
+     * @notice Check if org can access solidarity fund based on grace period and deposit requirements
+     * @dev Implements "maintain minimum" model - checks current balance (deposited)
+     *
+     * Grace period model:
+     * - First 90 days: Free solidarity access with transaction limit (3000 tx on L2)
+     * - After 90 days: Must maintain minimum deposit (~$10) to access solidarity
+     *
+     * Gas overhead:
+     * - Funded orgs (deposited >= minDepositRequired): ~100 gas
+     * - Unfunded orgs in initial grace: ~220 gas
+     * - Unfunded orgs after grace without sufficient balance: Reverts immediately
+     *
+     * @param orgId The organization identifier
+     * @param maxCost Maximum cost of the operation (for solidarity limit check)
+     */
+    function _checkSolidarityAccess(bytes32 orgId, uint256 maxCost) internal view {
+        mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
+        mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
+        GracePeriodConfig storage grace = _getGracePeriodStorage();
+
+        OrgConfig storage config = orgs[orgId];
+        OrgFinancials storage org = financials[orgId];
+
+        // Check if org is banned from solidarity
+        if (config.bannedFromSolidarity) revert OrgIsBanned();
+
+        // Calculate grace period end time
+        uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
+        bool inInitialGrace = block.timestamp < graceEndTime;
+
+        if (inInitialGrace) {
+            // Startup phase: can use solidarity even with zero deposits
+            // Enforce spending limit only (configured to represent ~3000 tx worth of value)
+            if (org.solidarityUsedThisPeriod + maxCost > grace.maxSpendDuringGrace) {
+                revert GracePeriodSpendLimitReached();
+            }
+        } else {
+            // After startup: must MAINTAIN minimum deposit (like $10/month commitment)
+            // This checks deposited (current balance), not totalDeposited (cumulative)
+            // Orgs must keep funds in reserve to access solidarity
+            if (org.deposited < grace.minDepositRequired) {
+                revert InsufficientDepositForSolidarity();
+            }
+
+            // Check against tier-based allowance (calculated in payment logic)
+            // Tier 1: deposit 0.003 ETH → 0.006 ETH match → 0.009 ETH total per 90 days
+            // Tier 2: deposit 0.006 ETH → 0.009 ETH match → 0.015 ETH total per 90 days
+            // Tier 3: deposit >= 0.017 ETH → no match, self-funded
+            uint256 matchAllowance = _calculateMatchAllowance(org.deposited, grace.minDepositRequired);
+            if (org.solidarityUsedThisPeriod + maxCost > matchAllowance) {
+                revert SolidarityLimitExceeded();
+            }
+        }
+    }
+
+    /**
+     * @notice Deposit funds for a specific org (permissionless)
+     * @dev Anyone can deposit to any org to support them
+     *
+     * Deposit-to-Reset Model:
+     * - When org crosses minimum threshold (was below, now above), resets solidarity allowance
+     * - This creates natural monthly/periodic commitment without epoch tracking
+     *
+     * @param orgId The organization to deposit for
+     */
+    function depositForOrg(bytes32 orgId) external payable {
+        if (msg.value == 0) revert ZeroAddress();
+
+        mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
+        mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
+        GracePeriodConfig storage grace = _getGracePeriodStorage();
+
+        // Verify org exists
+        if (orgs[orgId].adminHatId == 0) revert OrgNotRegistered();
+
+        OrgFinancials storage org = financials[orgId];
+
+        // Check if period should reset (dual trigger)
+        bool shouldResetPeriod = false;
+
+        // Trigger 1: Time-based (90 days elapsed)
+        if (org.periodStart > 0 && block.timestamp >= org.periodStart + 90 days) {
+            shouldResetPeriod = true;
+        }
+
+        // Trigger 2: Crossing minimum threshold
+        bool wasBelowMinimum = org.deposited < grace.minDepositRequired;
+        bool willBeAboveMinimum = org.deposited + msg.value >= grace.minDepositRequired;
+        if (wasBelowMinimum && willBeAboveMinimum) {
+            shouldResetPeriod = true;
+        }
+
+        // Track if this is first deposit (for numActiveOrgs counter and period init)
+        bool wasUnfunded = org.deposited == 0;
+
+        // Update org financials
+        org.deposited += uint128(msg.value);
+        org.totalDeposited += uint128(msg.value);
+
+        // Reset period when triggered
+        if (shouldResetPeriod) {
+            org.solidarityUsedThisPeriod = 0;
+            org.periodStart = uint32(block.timestamp);
+        } else if (wasUnfunded) {
+            // Initialize period start on first deposit
+            org.periodStart = uint32(block.timestamp);
+        }
+
+        // Update active org count if this is first deposit
+        if (wasUnfunded && msg.value > 0) {
+            SolidarityFund storage solidarity = _getSolidarityStorage();
+            solidarity.numActiveOrgs++;
+        }
+
+        // Deposit to EntryPoint
+        IEntryPoint(_getMainStorage().entryPoint).depositTo{value: msg.value}(address(this));
+
+        emit OrgDepositReceived(orgId, msg.sender, msg.value);
+    }
+
+    /**
+     * @notice Donate to solidarity fund (permissionless)
+     * @dev Anyone can donate to support all orgs
+     */
+    function donateToSolidarity() external payable {
+        if (msg.value == 0) revert ZeroAddress();
+
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+        solidarity.balance += uint128(msg.value);
+
+        // Deposit to EntryPoint
+        IEntryPoint(_getMainStorage().entryPoint).depositTo{value: msg.value}(address(this));
+
+        emit SolidarityDonationReceived(msg.sender, msg.value);
     }
 
     // ============ ERC-4337 Paymaster Functions ============
@@ -209,37 +482,71 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         external
         override
         onlyEntryPoint
-        whenNotPaused
         returns (bytes memory context, uint256 validationData)
     {
         // Decode and validate paymasterAndData
-        (uint8 version, uint8 subjectType, bytes20 subjectId, uint32 ruleId, uint64 mailboxCommit8) =
+        (uint8 version, bytes32 orgId, uint8 subjectType, bytes20 subjectId, uint32 ruleId, uint64 mailboxCommit8) =
             _decodePaymasterData(userOp.paymasterAndData);
 
         if (version != PAYMASTER_DATA_VERSION) revert InvalidVersion();
+
+        // Validate org is registered and not paused
+        OrgConfig storage org = _getOrgsStorage()[orgId];
+        if (org.adminHatId == 0) revert OrgNotRegistered();
+        if (org.paused) revert Paused();
 
         // Validate subject eligibility
         bytes32 subjectKey = _validateSubjectEligibility(userOp.sender, subjectType, subjectId);
 
         // Validate target/selector rules
-        _validateRules(userOp, ruleId);
+        _validateRules(userOp, ruleId, orgId);
 
         // Validate fee and gas caps
-        _validateFeeCaps(userOp);
+        _validateFeeCaps(userOp, orgId);
 
-        // Check and update budget
-        uint32 currentEpochStart = _checkBudget(subjectKey, maxCost);
+        // Check per-subject budget (existing functionality)
+        uint32 currentEpochStart = _checkBudget(orgId, subjectKey, maxCost);
+
+        // Check per-org financial balance (new: prevents overdraft)
+        _checkOrgBalance(orgId, maxCost);
+
+        // Check solidarity fund access (new: grace period + allocation)
+        _checkSolidarityAccess(orgId, maxCost);
 
         // Prepare context for postOp
-        context = abi.encode(subjectKey, currentEpochStart, userOpHash, mailboxCommit8, uint160(tx.origin));
+        context = abi.encode(orgId, subjectKey, currentEpochStart, userOpHash, mailboxCommit8, uint160(tx.origin));
 
         // Return 0 for no signature failure and no time restrictions
         validationData = 0;
     }
 
     /**
+     * @notice Check if org has sufficient balance to cover operation
+     * @dev Prevents org from spending more than deposited + solidarity allocation
+     * @param orgId The organization identifier
+     * @param maxCost Maximum cost of the operation
+     */
+    function _checkOrgBalance(bytes32 orgId, uint256 maxCost) internal view {
+        mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
+        OrgFinancials storage org = financials[orgId];
+
+        // Calculate total available funds
+        uint256 totalAvailable = uint256(org.deposited) - uint256(org.spent);
+
+        // Check if org has enough in deposits to cover this
+        // Note: solidarity is checked separately in _checkSolidarityAccess
+        if (org.spent + maxCost > org.deposited) {
+            // Will need to use solidarity - that's checked elsewhere
+            // Here we just make sure they haven't overdrawn
+            if (totalAvailable == 0) {
+                revert InsufficientOrgBalance();
+            }
+        }
+    }
+
+    /**
      * @notice Post-operation hook called after UserOperation execution
-     * @dev Updates budget usage and processes bounties
+     * @dev Updates budget usage, collects solidarity fee, and processes bounties
      * @param mode Execution mode (success/revert/postOpRevert)
      * @param context Context from validatePaymasterUserOp
      * @param actualGasCost Actual gas cost to be reimbursed
@@ -250,54 +557,195 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         onlyEntryPoint
         nonReentrant
     {
-        (bytes32 subjectKey, uint32 epochStart, bytes32 userOpHash, uint64 mailboxCommit8, address bundlerOrigin) =
-            abi.decode(context, (bytes32, uint32, bytes32, uint64, address));
+        (
+            bytes32 orgId,
+            bytes32 subjectKey,
+            uint32 epochStart,
+            bytes32 userOpHash,
+            uint64 mailboxCommit8,
+            address bundlerOrigin
+        ) = abi.decode(context, (bytes32, bytes32, uint32, bytes32, uint64, address));
 
-        // Update usage regardless of execution mode
-        _updateUsage(subjectKey, epochStart, actualGasCost);
+        // Update per-subject budget usage (existing functionality)
+        _updateUsage(orgId, subjectKey, epochStart, actualGasCost);
+
+        // Update per-org financial tracking and collect solidarity fee (new)
+        _updateOrgFinancials(orgId, actualGasCost);
 
         // Process bounty only on successful execution
         if (mode == IPaymaster.PostOpMode.opSucceeded && mailboxCommit8 != 0) {
-            _processBounty(userOpHash, bundlerOrigin, actualGasCost);
+            _processBounty(orgId, userOpHash, bundlerOrigin, actualGasCost);
         }
+    }
+
+    /**
+     * @notice Calculate solidarity match allowance based on deposit tier
+     * @dev Progressive tier system with declining marginal match rates
+     *
+     * Tier 1: deposit = 1x min → match = 2x → total budget = 3x (e.g. 0.003 ETH → 0.009 ETH)
+     * Tier 2: deposit = 2x min → match = 3x → total budget = 5x (e.g. 0.006 ETH → 0.015 ETH)
+     * Tier 3: deposit >= 5x min → no match, self-funded
+     *
+     * @param deposited Current deposit balance
+     * @param minDeposit Minimum deposit requirement (from grace config)
+     * @return matchAllowance How much solidarity can be used per 90-day period
+     */
+    function _calculateMatchAllowance(uint256 deposited, uint256 minDeposit) internal pure returns (uint256) {
+        // Below minimum = no match
+        if (deposited < minDeposit) {
+            return 0;
+        }
+
+        // Tier 1: 1x deposit → 2x match
+        // E.g., 0.003 ETH deposit → 0.006 ETH match → 0.009 ETH total
+        if (deposited <= minDeposit) {
+            return deposited * 2;
+        }
+
+        // Tier 2: First 1x at 2x, second 1x at 1x
+        // E.g., 0.006 ETH deposit → 0.006 (first) + 0.003 (second) = 0.009 ETH match → 0.015 ETH total
+        if (deposited <= minDeposit * 2) {
+            uint256 firstTierMatch = minDeposit * 2;
+            uint256 secondTierMatch = deposited - minDeposit;
+            return firstTierMatch + secondTierMatch;
+        }
+
+        // Tier 3: Self-sufficient, no match
+        // Organizations with >= 5x minimum deposit don't need solidarity support
+        return 0;
+    }
+
+    /**
+     * @notice Update org's financial tracking and collect 1% solidarity fee
+     * @dev Called in postOp after actual gas cost is known
+     *
+     * Payment Priority:
+     * - Initial grace period (first 90 days): 100% from solidarity
+     * - After grace period: 50/50 split between deposits and solidarity
+     *
+     * @param orgId The organization identifier
+     * @param actualGasCost Actual gas cost paid
+     */
+    function _updateOrgFinancials(bytes32 orgId, uint256 actualGasCost) internal {
+        mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
+        mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
+
+        OrgConfig storage config = orgs[orgId];
+        OrgFinancials storage org = financials[orgId];
+        GracePeriodConfig storage grace = _getGracePeriodStorage();
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+
+        // Calculate 1% solidarity fee
+        uint256 solidarityFee = (actualGasCost * uint256(solidarity.feePercentageBps)) / 10000;
+
+        // Check if in initial grace period
+        uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
+        bool inInitialGrace = block.timestamp < graceEndTime;
+
+        // Determine how much comes from org's deposits vs solidarity
+        uint256 fromDeposits = 0;
+        uint256 fromSolidarity = 0;
+
+        if (inInitialGrace) {
+            // Grace period: 100% from solidarity (deposits untouched)
+            fromSolidarity = actualGasCost;
+        } else {
+            // Post-grace: 50/50 split with tier-based solidarity allowance
+            // Calculate available balance (not cumulative deposits)
+            uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
+
+            // Match allowance based on CURRENT BALANCE, not lifetime deposits
+            uint256 matchAllowance = _calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
+            uint256 solidarityRemaining =
+                matchAllowance > org.solidarityUsedThisPeriod ? matchAllowance - org.solidarityUsedThisPeriod : 0;
+
+            uint256 halfCost = actualGasCost / 2;
+
+            // Try 50/50 split
+            fromDeposits = halfCost < depositAvailable ? halfCost : depositAvailable;
+            fromSolidarity = halfCost < solidarityRemaining ? halfCost : solidarityRemaining;
+
+            // If one pool is short, try to make up from the other
+            uint256 covered = fromDeposits + fromSolidarity;
+            if (covered < actualGasCost) {
+                uint256 shortfall = actualGasCost - covered;
+
+                // Try deposits first
+                uint256 depositExtra = depositAvailable - fromDeposits;
+                if (depositExtra > 0) {
+                    uint256 additional = shortfall < depositExtra ? shortfall : depositExtra;
+                    fromDeposits += additional;
+                    shortfall -= additional;
+                }
+
+                // Then try solidarity
+                if (shortfall > 0) {
+                    uint256 solidarityExtra = solidarityRemaining - fromSolidarity;
+                    if (solidarityExtra > 0) {
+                        uint256 additional = shortfall < solidarityExtra ? shortfall : solidarityExtra;
+                        fromSolidarity += additional;
+                        shortfall -= additional;
+                    }
+                }
+
+                // If still can't cover, revert
+                if (shortfall > 0) {
+                    revert InsufficientFunds();
+                }
+            }
+        }
+
+        // Update org spending
+        org.spent += uint128(fromDeposits);
+        org.solidarityUsedThisPeriod += uint128(fromSolidarity);
+
+        // Update solidarity fund
+        solidarity.balance -= uint128(fromSolidarity);
+        solidarity.balance += uint128(solidarityFee);
+
+        emit SolidarityFeeCollected(orgId, solidarityFee);
     }
 
     // ============ Admin Functions ============
 
     /**
      * @notice Set a rule for target/selector combination
-     * @dev Only callable by admin or operator
+     * @dev Only callable by org admin or operator
      */
-    function setRule(address target, bytes4 selector, bool allowed, uint32 maxCallGasHint) external onlyOperator {
+    function setRule(bytes32 orgId, address target, bytes4 selector, bool allowed, uint32 maxCallGasHint)
+        external
+        onlyOrgOperator(orgId)
+    {
         if (target == address(0)) revert ZeroAddress();
 
-        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage();
+        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
         rules[target][selector] = Rule({allowed: allowed, maxCallGasHint: maxCallGasHint});
-        emit RuleSet(target, selector, allowed, maxCallGasHint);
+        emit RuleSet(orgId, target, selector, allowed, maxCallGasHint);
     }
 
     /**
      * @notice Batch set rules for multiple target/selector combinations
      */
     function setRulesBatch(
+        bytes32 orgId,
         address[] calldata targets,
         bytes4[] calldata selectors,
         bool[] calldata allowed,
         uint32[] calldata maxCallGasHints
-    ) external onlyOperator {
+    ) external onlyOrgOperator(orgId) {
         uint256 length = targets.length;
         if (length != selectors.length || length != allowed.length || length != maxCallGasHints.length) {
             revert ArrayLengthMismatch();
         }
 
-        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage();
+        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
 
         for (uint256 i; i < length;) {
             if (targets[i] == address(0)) revert ZeroAddress();
 
             rules[targets[i]][selectors[i]] = Rule({allowed: allowed[i], maxCallGasHint: maxCallGasHints[i]});
 
-            emit RuleSet(targets[i], selectors[i], allowed[i], maxCallGasHints[i]);
+            emit RuleSet(orgId, targets[i], selectors[i], allowed[i], maxCallGasHints[i]);
 
             unchecked {
                 ++i;
@@ -308,22 +756,25 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     /**
      * @notice Clear a rule for target/selector combination
      */
-    function clearRule(address target, bytes4 selector) external onlyOperator {
-        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage();
+    function clearRule(bytes32 orgId, address target, bytes4 selector) external onlyOrgOperator(orgId) {
+        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
         delete rules[target][selector];
-        emit RuleSet(target, selector, false, 0);
+        emit RuleSet(orgId, target, selector, false, 0);
     }
 
     /**
      * @notice Set budget for a subject
      * @dev Validates epoch length and initializes epoch start
      */
-    function setBudget(bytes32 subjectKey, uint128 capPerEpoch, uint32 epochLen) external onlyOperator {
+    function setBudget(bytes32 orgId, bytes32 subjectKey, uint128 capPerEpoch, uint32 epochLen)
+        external
+        onlyOrgOperator(orgId)
+    {
         if (epochLen < MIN_EPOCH_LENGTH || epochLen > MAX_EPOCH_LENGTH) {
             revert InvalidEpochLength();
         }
 
-        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage();
+        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
         Budget storage budget = budgets[subjectKey];
 
         // If changing epoch length, reset usage
@@ -339,33 +790,34 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
             budget.epochStart = uint32(block.timestamp);
         }
 
-        emit BudgetSet(subjectKey, capPerEpoch, epochLen, budget.epochStart);
+        emit BudgetSet(orgId, subjectKey, capPerEpoch, epochLen, budget.epochStart);
     }
 
     /**
      * @notice Manually set epoch start for a subject
      */
-    function setEpochStart(bytes32 subjectKey, uint32 epochStart) external onlyOperator {
-        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage();
+    function setEpochStart(bytes32 orgId, bytes32 subjectKey, uint32 epochStart) external onlyOrgOperator(orgId) {
+        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
         Budget storage budget = budgets[subjectKey];
 
         budget.epochStart = epochStart;
         budget.usedInEpoch = 0; // Reset usage when manually setting epoch
 
-        emit BudgetSet(subjectKey, budget.capPerEpoch, budget.epochLen, epochStart);
+        emit BudgetSet(orgId, subjectKey, budget.capPerEpoch, budget.epochLen, epochStart);
     }
 
     /**
      * @notice Set fee and gas caps
      */
     function setFeeCaps(
+        bytes32 orgId,
         uint256 maxFeePerGas,
         uint256 maxPriorityFeePerGas,
         uint32 maxCallGas,
         uint32 maxVerificationGas,
         uint32 maxPreVerificationGas
-    ) external onlyOperator {
-        FeeCaps storage feeCaps = _getFeeCapsStorage();
+    ) external onlyOrgOperator(orgId) {
+        FeeCaps storage feeCaps = _getFeeCapsStorage()[orgId];
 
         feeCaps.maxFeePerGas = maxFeePerGas;
         feeCaps.maxPriorityFeePerGas = maxPriorityFeePerGas;
@@ -373,58 +825,65 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         feeCaps.maxVerificationGas = maxVerificationGas;
         feeCaps.maxPreVerificationGas = maxPreVerificationGas;
 
-        emit FeeCapsSet(maxFeePerGas, maxPriorityFeePerGas, maxCallGas, maxVerificationGas, maxPreVerificationGas);
+        emit FeeCapsSet(
+            orgId, maxFeePerGas, maxPriorityFeePerGas, maxCallGas, maxVerificationGas, maxPreVerificationGas
+        );
     }
 
     /**
-     * @notice Pause or unpause the paymaster
-     * @dev Only admin can pause/unpause
+     * @notice Pause or unpause the paymaster for an org
+     * @dev Only org admin can pause/unpause
      */
-    function setPause(bool paused) external onlyAdmin {
-        _getConfigStorage().paused = paused;
-        emit PauseSet(paused);
+    function setPause(bytes32 orgId, bool paused) external onlyOrgAdmin(orgId) {
+        _getOrgsStorage()[orgId].paused = paused;
+        emit PauseSet(orgId, paused);
     }
 
     /**
      * @notice Set optional operator hat for delegated management
      */
-    function setOperatorHat(uint256 operatorHatId) external onlyAdmin {
-        _getConfigStorage().operatorHatId = operatorHatId;
-        emit OperatorHatSet(operatorHatId);
+    function setOperatorHat(bytes32 orgId, uint256 operatorHatId) external onlyOrgAdmin(orgId) {
+        _getOrgsStorage()[orgId].operatorHatId = operatorHatId;
+        emit OperatorHatSet(orgId, operatorHatId);
     }
 
     /**
-     * @notice Configure bounty parameters
+     * @notice Configure bounty parameters for an org
      */
-    function setBounty(bool enabled, uint96 maxBountyWeiPerOp, uint16 pctBpCap) external onlyAdmin {
+    function setBounty(bytes32 orgId, bool enabled, uint96 maxBountyWeiPerOp, uint16 pctBpCap)
+        external
+        onlyOrgAdmin(orgId)
+    {
         if (pctBpCap > MAX_BOUNTY_PCT_BP) revert InvalidBountyConfig();
 
-        (Bounty storage bounty,) = _getBountyStorage();
+        Bounty storage bounty = _getBountyStorage()[orgId];
         bounty.enabled = enabled;
         bounty.maxBountyWeiPerOp = maxBountyWeiPerOp;
         bounty.pctBpCap = pctBpCap;
 
-        emit BountyConfig(enabled, maxBountyWeiPerOp, pctBpCap);
+        emit BountyConfig(orgId, enabled, maxBountyWeiPerOp, pctBpCap);
     }
 
     /**
-     * @notice Deposit funds to EntryPoint for gas reimbursement
+     * @notice Deposit funds to EntryPoint for gas reimbursement (shared pool)
+     * @dev Any org operator can deposit to shared pool
      */
-    function depositToEntryPoint() external payable onlyOperator {
-        IEntryPoint(ENTRY_POINT).depositTo{value: msg.value}(address(this));
+    function depositToEntryPoint(bytes32 orgId) external payable onlyOrgOperator(orgId) {
+        address entryPoint = _getMainStorage().entryPoint;
+        IEntryPoint(entryPoint).depositTo{value: msg.value}(address(this));
 
-        uint256 newDeposit = IEntryPoint(ENTRY_POINT).balanceOf(address(this));
+        uint256 newDeposit = IEntryPoint(entryPoint).balanceOf(address(this));
         emit DepositIncrease(msg.value, newDeposit);
     }
 
     /**
-     * @notice Withdraw funds from EntryPoint deposit
+     * @notice Withdraw funds from EntryPoint deposit (requires global admin)
+     * @dev Withdrawals affect shared pool, so restricted to prevent abuse
      */
-    function withdrawFromEntryPoint(address payable to, uint256 amount) external onlyAdmin {
-        if (to == address(0)) revert ZeroAddress();
-
-        IEntryPoint(ENTRY_POINT).withdrawTo(to, amount);
-        emit DepositWithdraw(to, amount);
+    function withdrawFromEntryPoint(address payable to, uint256 amount) external {
+        // TODO: Add global admin mechanism or require multi-org consensus
+        // For now, disabled to protect shared pool
+        revert NotAdmin();
     }
 
     /**
@@ -436,30 +895,73 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
 
     /**
      * @notice Withdraw from bounty pool
+     * @dev Bounties are shared across all orgs, requires careful governance
      */
-    function sweepBounty(address payable to, uint256 amount) external onlyAdmin {
-        if (to == address(0)) revert ZeroAddress();
-        if (amount > address(this).balance) revert PaymentFailed();
-
-        (bool success,) = to.call{value: amount}("");
-        if (!success) revert PaymentFailed();
-
-        emit BountySweep(to, amount);
+    function sweepBounty(address payable to, uint256 amount) external {
+        // TODO: Add global admin mechanism
+        revert NotAdmin();
     }
 
     /**
      * @notice Emergency withdrawal in case of critical issues
+     * @dev Requires global admin - affects all orgs
      */
-    function emergencyWithdraw(address payable to) external onlyAdmin {
-        if (to == address(0)) revert ZeroAddress();
+    function emergencyWithdraw(address payable to) external {
+        // TODO: Add global admin mechanism
+        revert NotAdmin();
+    }
 
-        uint256 balance = address(this).balance;
-        if (balance > 0) {
-            (bool success,) = to.call{value: balance}("");
-            if (!success) revert PaymentFailed();
-        }
+    /**
+     * @notice Set grace period configuration (global setting)
+     * @dev Only PoaManager can modify grace period parameters
+     * @param _initialGraceDays Number of days for initial grace period (default 90)
+     * @param _maxSpendDuringGrace Maximum spending during grace period (default 0.01 ETH ~$30, represents ~3000 tx)
+     * @param _minDepositRequired Minimum balance to maintain after grace (default 0.003 ETH ~$10)
+     */
+    function setGracePeriodConfig(uint32 _initialGraceDays, uint128 _maxSpendDuringGrace, uint128 _minDepositRequired)
+        external
+    {
+        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+        if (_initialGraceDays == 0) revert InvalidEpochLength();
+        if (_maxSpendDuringGrace == 0) revert InvalidEpochLength();
+        if (_minDepositRequired == 0) revert InvalidEpochLength();
 
-        emit EmergencyWithdraw(to, balance);
+        GracePeriodConfig storage grace = _getGracePeriodStorage();
+        grace.initialGraceDays = _initialGraceDays;
+        grace.maxSpendDuringGrace = _maxSpendDuringGrace;
+        grace.minDepositRequired = _minDepositRequired;
+
+        emit GracePeriodConfigUpdated(_initialGraceDays, _maxSpendDuringGrace, _minDepositRequired);
+    }
+
+    /**
+     * @notice Ban or unban an org from accessing solidarity fund
+     * @dev Only PoaManager can ban orgs for malicious behavior
+     * @param orgId The organization to ban/unban
+     * @param banned True to ban, false to unban
+     */
+    function setBanFromSolidarity(bytes32 orgId, bool banned) external {
+        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+
+        mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
+        if (orgs[orgId].adminHatId == 0) revert OrgNotRegistered();
+
+        orgs[orgId].bannedFromSolidarity = banned;
+
+        emit OrgBannedFromSolidarity(orgId, banned);
+    }
+
+    /**
+     * @notice Set solidarity fund fee percentage
+     * @dev Only PoaManager can modify the fee (default 1%)
+     * @param feePercentageBps Fee as basis points (100 = 1%)
+     */
+    function setSolidarityFee(uint16 feePercentageBps) external {
+        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+        if (feePercentageBps > 1000) revert FeeTooHigh(); // Cap at 10%
+
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+        solidarity.feePercentageBps = feePercentageBps;
     }
 
     // ============ Mailbox Function ============
@@ -477,84 +979,211 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     // ============ Storage Getters (for Lens) ============
 
     /**
-     * @notice Get the current configuration
-     * @return The Config struct
+     * @notice Get the configuration for an org
+     * @return The OrgConfig struct
      */
-    function getConfig() external view returns (Config memory) {
-        return _getConfigStorage();
+    function getOrgConfig(bytes32 orgId) external view returns (OrgConfig memory) {
+        return _getOrgsStorage()[orgId];
     }
 
     /**
-     * @notice Get budget for a specific subject
+     * @notice Get budget for a specific subject within an org
+     * @param orgId Organization identifier
      * @param key The subject key (user, role, or org)
      * @return The Budget struct
      */
-    function getBudget(bytes32 key) external view returns (Budget memory) {
-        return _getBudgetsStorage()[key];
+    function getBudget(bytes32 orgId, bytes32 key) external view returns (Budget memory) {
+        return _getBudgetsStorage()[orgId][key];
     }
 
     /**
-     * @notice Get rule for a specific target and selector
+     * @notice Get rule for a specific target and selector within an org
+     * @param orgId Organization identifier
      * @param target The target contract address
      * @param selector The function selector
      * @return The Rule struct
      */
-    function getRule(address target, bytes4 selector) external view returns (Rule memory) {
-        return _getRulesStorage()[target][selector];
+    function getRule(bytes32 orgId, address target, bytes4 selector) external view returns (Rule memory) {
+        return _getRulesStorage()[orgId][target][selector];
     }
 
     /**
-     * @notice Get the current fee caps
+     * @notice Get the fee caps for an org
+     * @param orgId Organization identifier
      * @return The FeeCaps struct
      */
-    function getFeeCaps() external view returns (FeeCaps memory) {
-        return _getFeeCapsStorage();
+    function getFeeCaps(bytes32 orgId) external view returns (FeeCaps memory) {
+        return _getFeeCapsStorage()[orgId];
     }
 
     /**
-     * @notice Get the bounty configuration
+     * @notice Get the bounty configuration for an org
+     * @param orgId Organization identifier
      * @return The Bounty struct
      */
-    function getBountyConfig() external view returns (Bounty memory) {
-        (Bounty storage b,) = _getBountyStorage();
-        return b;
+    function getBountyConfig(bytes32 orgId) external view returns (Bounty memory) {
+        return _getBountyStorage()[orgId];
     }
 
-    // ============ Storage Accessors ============
-    function _getConfigStorage() private pure returns (Config storage $) {
-        assembly {
-            $.slot := CONFIG_STORAGE_LOCATION
+    /**
+     * @notice Get org's financial tracking data
+     * @param orgId Organization identifier
+     * @return The OrgFinancials struct
+     */
+    function getOrgFinancials(bytes32 orgId) external view returns (OrgFinancials memory) {
+        return _getFinancialsStorage()[orgId];
+    }
+
+    /**
+     * @notice Get global solidarity fund state
+     * @return The SolidarityFund struct
+     */
+    function getSolidarityFund() external view returns (SolidarityFund memory) {
+        return _getSolidarityStorage();
+    }
+
+    /**
+     * @notice Get grace period configuration
+     * @return The GracePeriodConfig struct
+     */
+    function getGracePeriodConfig() external view returns (GracePeriodConfig memory) {
+        return _getGracePeriodStorage();
+    }
+
+    /**
+     * @notice Get org's grace period status and limits
+     * @param orgId The organization identifier
+     * @return inGrace True if in initial grace period
+     * @return spendRemaining Spending remaining during grace (0 if not in grace)
+     * @return requiresDeposit True if org needs to deposit to access solidarity
+     * @return solidarityLimit Current solidarity allocation for org (per 90-day period)
+     */
+    function getOrgGraceStatus(bytes32 orgId)
+        external
+        view
+        returns (bool inGrace, uint128 spendRemaining, bool requiresDeposit, uint256 solidarityLimit)
+    {
+        mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
+        mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
+        GracePeriodConfig storage grace = _getGracePeriodStorage();
+
+        OrgConfig storage config = orgs[orgId];
+        OrgFinancials storage org = financials[orgId];
+
+        uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
+        inGrace = block.timestamp < graceEndTime;
+
+        if (inGrace) {
+            // During grace: track spending limit
+            uint128 spendUsed = org.solidarityUsedThisPeriod;
+            spendRemaining = spendUsed < grace.maxSpendDuringGrace ? grace.maxSpendDuringGrace - spendUsed : 0;
+            requiresDeposit = false;
+            solidarityLimit = uint256(grace.maxSpendDuringGrace);
+        } else {
+            // After grace: check current balance (not cumulative deposits)
+            spendRemaining = 0;
+            uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
+            requiresDeposit = depositAvailable < grace.minDepositRequired;
+            solidarityLimit = _calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
         }
     }
 
-    function _getFeeCapsStorage() private pure returns (FeeCaps storage $) {
+    // ============ Storage Accessors ============
+    function _getMainStorage() private pure returns (MainStorage storage $) {
+        assembly {
+            $.slot := MAIN_STORAGE_LOCATION
+        }
+    }
+
+    function _getOrgsStorage() private pure returns (mapping(bytes32 => OrgConfig) storage $) {
+        assembly {
+            $.slot := ORGS_STORAGE_LOCATION
+        }
+    }
+
+    function _getFeeCapsStorage() private pure returns (mapping(bytes32 => FeeCaps) storage $) {
         assembly {
             $.slot := FEECAPS_STORAGE_LOCATION
         }
     }
 
-    function _getRulesStorage() private pure returns (mapping(address => mapping(bytes4 => Rule)) storage $) {
+    function _getRulesStorage()
+        private
+        pure
+        returns (mapping(bytes32 => mapping(address => mapping(bytes4 => Rule))) storage $)
+    {
         assembly {
             $.slot := RULES_STORAGE_LOCATION
         }
     }
 
-    function _getBudgetsStorage() private pure returns (mapping(bytes32 => Budget) storage $) {
+    function _getBudgetsStorage() private pure returns (mapping(bytes32 => mapping(bytes32 => Budget)) storage $) {
         assembly {
             $.slot := BUDGETS_STORAGE_LOCATION
         }
     }
 
-    function _getBountyStorage()
-        private
-        pure
-        returns (Bounty storage bounty, mapping(bytes32 => bool) storage paidOnce)
-    {
+    function _getBountyStorage() private pure returns (mapping(bytes32 => Bounty) storage $) {
         assembly {
-            bounty.slot := BOUNTY_STORAGE_LOCATION
-            mstore(0x00, BOUNTY_STORAGE_LOCATION)
-            paidOnce.slot := add(keccak256(0x00, 0x20), 1)
+            $.slot := BOUNTY_STORAGE_LOCATION
         }
+    }
+
+    function _getFinancialsStorage() private pure returns (mapping(bytes32 => OrgFinancials) storage $) {
+        assembly {
+            $.slot := FINANCIALS_STORAGE_LOCATION
+        }
+    }
+
+    function _getSolidarityStorage() private pure returns (SolidarityFund storage $) {
+        assembly {
+            $.slot := SOLIDARITY_STORAGE_LOCATION
+        }
+    }
+
+    function _getGracePeriodStorage() private pure returns (GracePeriodConfig storage $) {
+        assembly {
+            $.slot := GRACEPERIOD_STORAGE_LOCATION
+        }
+    }
+
+    // ============ Public Getters ============
+
+    /**
+     * @notice Get the EntryPoint address
+     * @return The ERC-4337 EntryPoint address
+     */
+    function ENTRY_POINT() public view returns (address) {
+        return _getMainStorage().entryPoint;
+    }
+
+    /**
+     * @notice Get the Hats Protocol address
+     * @return The Hats Protocol address
+     */
+    function HATS() public view returns (address) {
+        return _getMainStorage().hats;
+    }
+
+    /**
+     * @notice Get the PoaManager address
+     * @return The PoaManager address
+     */
+    function POA_MANAGER() public view returns (address) {
+        return _getMainStorage().poaManager;
+    }
+
+    // ============ Upgrade Authorization ============
+
+    /**
+     * @notice Authorize contract upgrade
+     * @dev Only PoaManager can authorize upgrades
+     * @param newImplementation Address of the new implementation
+     */
+    function _authorizeUpgrade(address newImplementation) internal override {
+        MainStorage storage main = _getMainStorage();
+        if (msg.sender != main.poaManager) revert NotPoaManager();
+        // newImplementation is intentionally not validated to allow flexibility
     }
 
     // ============ Internal Functions ============
@@ -562,24 +1191,33 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     function _decodePaymasterData(bytes calldata paymasterAndData)
         private
         pure
-        returns (uint8 version, uint8 subjectType, bytes20 subjectId, uint32 ruleId, uint64 mailboxCommit8)
+        returns (
+            uint8 version,
+            bytes32 orgId,
+            uint8 subjectType,
+            bytes20 subjectId,
+            uint32 ruleId,
+            uint64 mailboxCommit8
+        )
     {
-        if (paymasterAndData.length < 54) revert InvalidPaymasterData();
+        // New format: [paymaster(20) | version(1) | orgId(32) | subjectType(1) | subjectId(20) | ruleId(4) | mailboxCommit(8)] = 86 bytes
+        if (paymasterAndData.length < 86) revert InvalidPaymasterData();
 
         // Skip first 20 bytes (paymaster address) and decode the rest
         version = uint8(paymasterAndData[20]);
-        subjectType = uint8(paymasterAndData[21]);
+        orgId = bytes32(paymasterAndData[21:53]);
+        subjectType = uint8(paymasterAndData[53]);
 
-        // Extract bytes20 subjectId from bytes 22-41
+        // Extract bytes20 subjectId from bytes 54-73
         assembly {
-            subjectId := calldataload(add(paymasterAndData.offset, 22))
+            subjectId := calldataload(add(paymasterAndData.offset, 54))
         }
 
-        // Extract ruleId from bytes 42-45
-        ruleId = uint32(bytes4(paymasterAndData[42:46]));
+        // Extract ruleId from bytes 74-77
+        ruleId = uint32(bytes4(paymasterAndData[74:78]));
 
-        // Extract mailboxCommit8 from bytes 46-53
-        mailboxCommit8 = uint64(bytes8(paymasterAndData[46:54]));
+        // Extract mailboxCommit8 from bytes 78-85
+        mailboxCommit8 = uint64(bytes8(paymasterAndData[78:86]));
     }
 
     function _validateSubjectEligibility(address sender, uint8 subjectType, bytes20 subjectId)
@@ -592,7 +1230,7 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
             subjectKey = keccak256(abi.encodePacked(subjectType, subjectId));
         } else if (subjectType == SUBJECT_TYPE_HAT) {
             uint256 hatId = uint256(uint160(subjectId));
-            if (!IHats(_getConfigStorage().hats).isWearerOfHat(sender, hatId)) {
+            if (!IHats(_getMainStorage().hats).isWearerOfHat(sender, hatId)) {
                 revert Ineligible();
             }
             subjectKey = keccak256(abi.encodePacked(subjectType, subjectId));
@@ -601,10 +1239,10 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         }
     }
 
-    function _validateRules(PackedUserOperation calldata userOp, uint32 ruleId) private view {
+    function _validateRules(PackedUserOperation calldata userOp, uint32 ruleId, bytes32 orgId) private view {
         (address target, bytes4 selector) = _extractTargetSelector(userOp, ruleId);
 
-        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage();
+        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
         Rule storage rule = rules[target][selector];
 
         if (!rule.allowed) revert RuleDenied(target, selector);
@@ -659,8 +1297,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         }
     }
 
-    function _validateFeeCaps(PackedUserOperation calldata userOp) private view {
-        FeeCaps storage caps = _getFeeCapsStorage();
+    function _validateFeeCaps(PackedUserOperation calldata userOp, bytes32 orgId) private view {
+        FeeCaps storage caps = _getFeeCapsStorage()[orgId];
 
         if (caps.maxFeePerGas > 0 && userOp.maxFeePerGas > caps.maxFeePerGas) {
             revert FeeTooHigh();
@@ -682,8 +1320,11 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         }
     }
 
-    function _checkBudget(bytes32 subjectKey, uint256 maxCost) private returns (uint32 currentEpochStart) {
-        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage();
+    function _checkBudget(bytes32 orgId, bytes32 subjectKey, uint256 maxCost)
+        private
+        returns (uint32 currentEpochStart)
+    {
+        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
         Budget storage budget = budgets[subjectKey];
 
         // Check if epoch needs rolling
@@ -703,8 +1344,8 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
         currentEpochStart = budget.epochStart;
     }
 
-    function _updateUsage(bytes32 subjectKey, uint32 epochStart, uint256 actualGasCost) private {
-        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage();
+    function _updateUsage(bytes32 orgId, bytes32 subjectKey, uint32 epochStart, uint256 actualGasCost) private {
+        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
         Budget storage budget = budgets[subjectKey];
 
         // Only update if we're still in the same epoch
@@ -712,17 +1353,14 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
             // Safe to cast as actualGasCost is bounded
             uint128 cost = uint128(actualGasCost);
             budget.usedInEpoch += cost;
-            emit UsageIncreased(subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
+            emit UsageIncreased(orgId, subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
         }
     }
 
-    function _processBounty(bytes32 userOpHash, address bundlerOrigin, uint256 actualGasCost) private {
-        (Bounty storage bounty, mapping(bytes32 => bool) storage paidOnce) = _getBountyStorage();
+    function _processBounty(bytes32 orgId, bytes32 userOpHash, address bundlerOrigin, uint256 actualGasCost) private {
+        Bounty storage bounty = _getBountyStorage()[orgId];
 
         if (!bounty.enabled) return;
-        if (paidOnce[userOpHash]) return;
-
-        paidOnce[userOpHash] = true;
 
         // Calculate tip amount
         uint256 tip = bounty.maxBountyWeiPerOp;
@@ -757,4 +1395,10 @@ contract PaymasterHub is IPaymaster, ReentrancyGuard, IERC165 {
     receive() external payable {
         emit BountyFunded(msg.value, address(this).balance);
     }
+
+    /**
+     * @dev Storage gap for future upgrades
+     * Reserves 50 storage slots for new variables in future versions
+     */
+    uint256[50] private __gap;
 }

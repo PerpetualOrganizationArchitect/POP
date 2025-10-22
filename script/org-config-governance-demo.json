@@ -1,0 +1,62 @@
+{
+  "orgId": "governance-demo-cooperative",
+  "orgName": "Governance Demo Cooperative",
+  "autoUpgrade": true,
+  "quorum": {
+    "hybrid": 50,
+    "directDemocracy": 60
+  },
+  "roles": [
+    {
+      "name": "MEMBER",
+      "image": "ipfs://QmMemberRole",
+      "canVote": true
+    },
+    {
+      "name": "COORDINATOR",
+      "image": "ipfs://QmCoordinatorRole",
+      "canVote": true
+    },
+    {
+      "name": "CONTRIBUTOR",
+      "image": "ipfs://QmContributorRole",
+      "canVote": false
+    },
+    {
+      "name": "ADMIN",
+      "image": "ipfs://QmAdminRole",
+      "canVote": true
+    }
+  ],
+  "votingClasses": [
+    {
+      "strategy": "DIRECT",
+      "slicePct": 60,
+      "quadratic": false,
+      "minBalance": 0,
+      "asset": "0x0000000000000000000000000000000000000000",
+      "hatIds": []
+    },
+    {
+      "strategy": "ERC20_BAL",
+      "slicePct": 40,
+      "quadratic": true,
+      "minBalance": "1000000000000000000",
+      "asset": "0x0000000000000000000000000000000000000000",
+      "hatIds": []
+    }
+  ],
+  "roleAssignments": {
+    "quickJoinRoles": [0],
+    "tokenMemberRoles": [0, 1, 3],
+    "tokenApproverRoles": [3],
+    "taskCreatorRoles": [0, 1, 3],
+    "educationCreatorRoles": [0, 1, 3],
+    "educationMemberRoles": [0, 1, 2, 3],
+    "hybridProposalCreatorRoles": [0, 1, 3],
+    "ddVotingRoles": [0, 1, 3],
+    "ddCreatorRoles": [0, 1, 3]
+  },
+  "ddInitialTargets": [],
+  "withPaymaster": false
+}

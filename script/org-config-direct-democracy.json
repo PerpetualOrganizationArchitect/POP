@@ -1,0 +1,39 @@
+{
+  "orgId": "direct-democracy-collective",
+  "orgName": "Direct Democracy Collective",
+  "autoUpgrade": true,
+  "quorum": {
+    "hybrid": 60,
+    "directDemocracy": 60
+  },
+  "roles": [
+    {
+      "name": "MEMBER",
+      "image": "ipfs://QmDirectDemocracyMember",
+      "canVote": true
+    }
+  ],
+  "votingClasses": [
+    {
+      "strategy": "DIRECT",
+      "slicePct": 100,
+      "quadratic": false,
+      "minBalance": 0,
+      "asset": "0x0000000000000000000000000000000000000000",
+      "hatIds": []
+    }
+  ],
+  "roleAssignments": {
+    "quickJoinRoles": [0],
+    "tokenMemberRoles": [0],
+    "tokenApproverRoles": [0],
+    "taskCreatorRoles": [0],
+    "educationCreatorRoles": [0],
+    "educationMemberRoles": [0],
+    "hybridProposalCreatorRoles": [0],
+    "ddVotingRoles": [0],
+    "ddCreatorRoles": [0]
+  },
+  "ddInitialTargets": [],
+  "withPaymaster": false
+}

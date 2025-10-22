@@ -9,6 +9,16 @@ import {ModuleTypes} from "../libs/ModuleTypes.sol";
 import {RoleResolver} from "../libs/RoleResolver.sol";
 import {IPoaManager} from "../libs/ModuleDeploymentLib.sol";
 
+/*──────────────────── OrgDeployer interface ────────────────────*/
+interface IOrgDeployer {
+    function batchRegisterContracts(
+        bytes32 orgId,
+        OrgRegistry.ContractRegistration[] calldata registrations,
+        bool autoUpgrade,
+        bool lastRegister
+    ) external;
+}
+
 /*────────────────────────────  Errors  ───────────────────────────────*/
 error InvalidAddress();
 error UnsupportedType();
@@ -21,9 +31,9 @@ error UnsupportedType();
 contract ModulesFactory {
     /*──────────────────── Role Assignments ────────────────────*/
     struct RoleAssignments {
-        uint256[] taskCreatorRoles;
-        uint256[] educationCreatorRoles;
-        uint256[] educationMemberRoles;
+        uint256 taskCreatorRolesBitmap; // Bit N set = Role N can create tasks
+        uint256 educationCreatorRolesBitmap; // Bit N set = Role N can create education
+        uint256 educationMemberRolesBitmap; // Bit N set = Role N can access education
     }
 
     /*──────────────────── Modules Deployment Params ────────────────────*/
@@ -63,14 +73,18 @@ contract ModulesFactory {
             revert InvalidAddress();
         }
 
-        /* 1. Deploy TaskManager */
+        address taskManagerBeacon;
+        address educationHubBeacon;
+        address paymentManagerBeacon;
+
+        /* 1. Deploy TaskManager (without registration) */
         {
             // Get the role hat IDs for creator permissions
-            uint256[] memory creatorHats = RoleResolver.resolveRoleHats(
-                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.taskCreatorRoles
+            uint256[] memory creatorHats = RoleResolver.resolveRoleBitmap(
+                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.taskCreatorRolesBitmap
             );
 
-            address beacon = BeaconDeploymentLib.createBeacon(
+            taskManagerBeacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.TASK_MANAGER_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
             );
 
@@ -81,27 +95,26 @@ contract ModulesFactory {
                 orgId: params.orgId,
                 moduleOwner: params.executor,
                 autoUpgrade: params.autoUpgrade,
-                customImpl: address(0),
-                registrar: params.deployer // Callback to OrgDeployer for registration
+                customImpl: address(0)
             });
 
             result.taskManager = ModuleDeploymentLib.deployTaskManager(
-                config, params.executor, params.participationToken, creatorHats, beacon
+                config, params.executor, params.participationToken, creatorHats, taskManagerBeacon
             );
         }
 
-        /* 2. Deploy EducationHub */
+        /* 2. Deploy EducationHub (without registration) */
         {
             // Get the role hat IDs for creator and member permissions
-            uint256[] memory creatorHats = RoleResolver.resolveRoleHats(
-                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.educationCreatorRoles
+            uint256[] memory creatorHats = RoleResolver.resolveRoleBitmap(
+                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.educationCreatorRolesBitmap
             );
 
-            uint256[] memory memberHats = RoleResolver.resolveRoleHats(
-                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.educationMemberRoles
+            uint256[] memory memberHats = RoleResolver.resolveRoleBitmap(
+                OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.educationMemberRolesBitmap
             );
 
-            address beacon = BeaconDeploymentLib.createBeacon(
+            educationHubBeacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.EDUCATION_HUB_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
             );
 
@@ -112,18 +125,17 @@ contract ModulesFactory {
                 orgId: params.orgId,
                 moduleOwner: params.executor,
                 autoUpgrade: params.autoUpgrade,
-                customImpl: address(0),
-                registrar: params.deployer // Callback to OrgDeployer for registration
+                customImpl: address(0)
             });
 
             result.educationHub = ModuleDeploymentLib.deployEducationHub(
-                config, params.executor, params.participationToken, creatorHats, memberHats, false, beacon
+                config, params.executor, params.participationToken, creatorHats, memberHats, educationHubBeacon
             );
         }
 
-        /* 3. Deploy PaymentManager */
+        /* 3. Deploy PaymentManager (without registration) */
         {
-            address beacon = BeaconDeploymentLib.createBeacon(
+            paymentManagerBeacon = BeaconDeploymentLib.createBeacon(
                 ModuleTypes.PAYMENT_MANAGER_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
             );
 
@@ -134,13 +146,41 @@ contract ModulesFactory {
                 orgId: params.orgId,
                 moduleOwner: params.executor,
                 autoUpgrade: params.autoUpgrade,
-                customImpl: address(0),
-                registrar: params.deployer // Callback to OrgDeployer for registration
+                customImpl: address(0)
             });
 
             result.paymentManager = ModuleDeploymentLib.deployPaymentManager(
-                config, params.executor, params.participationToken, beacon, false
+                config, params.executor, params.participationToken, paymentManagerBeacon
             );
+        }
+
+        /* 4. Batch register all 3 contracts */
+        {
+            OrgRegistry.ContractRegistration[] memory registrations = new OrgRegistry.ContractRegistration[](3);
+
+            registrations[0] = OrgRegistry.ContractRegistration({
+                typeId: ModuleTypes.TASK_MANAGER_ID,
+                proxy: result.taskManager,
+                beacon: taskManagerBeacon,
+                owner: params.executor
+            });
+
+            registrations[1] = OrgRegistry.ContractRegistration({
+                typeId: ModuleTypes.EDUCATION_HUB_ID,
+                proxy: result.educationHub,
+                beacon: educationHubBeacon,
+                owner: params.executor
+            });
+
+            registrations[2] = OrgRegistry.ContractRegistration({
+                typeId: ModuleTypes.PAYMENT_MANAGER_ID,
+                proxy: result.paymentManager,
+                beacon: paymentManagerBeacon,
+                owner: params.executor
+            });
+
+            // Call OrgDeployer to batch register (not the last batch)
+            IOrgDeployer(params.deployer).batchRegisterContracts(params.orgId, registrations, params.autoUpgrade, false);
         }
 
         return result;

@@ -8,14 +8,36 @@ via_ir = true
 bytecode_hash = "none"
 evm_version = "cancun"
 ignored_error_codes = ["unused-var"]
+fs_permissions = [{ access = "read-write", path = "./script/infrastructure.json" }, { access = "read-write", path = "./script/org-config-example.json" }, {access = "read-write", path = "./script/org-config-governance-demo.json"}]
+extra_output_files = ["abi"]
 
 # Production: optimizer enabled for 37% smaller contracts
 # Usage: FOUNDRY_PROFILE=production forge script script/Deploy.s.sol --broadcast
 [profile.production]
+via_ir = true
 optimizer = true
 optimizer_runs = 10000
+bytecode_hash = "none"
+evm_version = "cancun"
 
 [rpc_endpoints]
-sepolia = "https://sepolia.drpc.org"
+# Testnets (public dRPC endpoints - no API key needed)
+sepolia = "wss://sepolia.gateway.tenderly.co"
+holesky = "https://holesky.drpc.org"
+optimism-sepolia = "https://optimism-sepolia.drpc.org"
+base-sepolia = "https://base-sepolia.drpc.org"
+arbitrum-sepolia = "https://arbitrum-sepolia.drpc.org"
+polygon-amoy = "https://polygon-amoy.drpc.org"
+hoodi = "https://0xrpc.io/hoodi"
+
+# Mainnets (public dRPC endpoints)
+mainnet = "https://eth.drpc.org"
+optimism = "https://optimism.drpc.org"
+base = "https://base.drpc.org"
+arbitrum = "https://arbitrum.drpc.org"
+polygon = "https://polygon.drpc.org"
+
+# Local development
+local = "http://localhost:8545"
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

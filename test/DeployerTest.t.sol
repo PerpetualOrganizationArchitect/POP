@@ -37,6 +37,7 @@ import {ToggleModule} from "../src/ToggleModule.sol";
 import {IExecutor} from "../src/Executor.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {PaymasterHub} from "../src/PaymasterHub.sol";
 
 // Define events for testing
 interface IEligibilityModuleEvents {
@@ -86,9 +87,11 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
     GovernanceFactory governanceFactory;
     AccessFactory accessFactory;
     ModulesFactory modulesFactory;
+    PaymasterHub paymasterHub;
 
     /*–––– addresses ––––*/
     address public constant poaAdmin = address(1);
+    address public constant ENTRY_POINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     address public constant orgOwner = address(2);
     address public constant voter1 = address(3);
     address public constant voter2 = address(4);
@@ -150,6 +153,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: "Hybrid DAO",
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -178,24 +182,20 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
     /// @dev Helper to build default role assignments (index 0 = members, index 1 = executives)
     function _buildDefaultRoleAssignments() internal pure returns (OrgDeployer.RoleAssignments memory) {
-        uint256[] memory defaultRole = new uint256[](1);
-        defaultRole[0] = 0; // First role is for regular members
-
-        uint256[] memory executiveRole = new uint256[](1);
-        executiveRole[0] = 1; // Second role is for executives
-
-        uint256[] memory emptyRoles = new uint256[](0);
+        // Bitmap encoding: bit 0 = role 0, bit 1 = role 1
+        // 1 = 0b001 (role 0 only)
+        // 2 = 0b010 (role 1 only)
 
         return OrgDeployer.RoleAssignments({
-            quickJoinRoles: defaultRole, // New members get role 0
-            tokenMemberRoles: defaultRole, // Role 0 can hold tokens
-            tokenApproverRoles: executiveRole, // Role 1 can approve transfers
-            taskCreatorRoles: executiveRole, // Role 1 can create tasks
-            educationCreatorRoles: executiveRole, // Role 1 can create education
-            educationMemberRoles: defaultRole, // Role 0 can access education
-            hybridProposalCreatorRoles: executiveRole, // Role 1 can create governance proposals
-            ddVotingRoles: defaultRole, // Role 0 can vote in direct democracy polls
-            ddCreatorRoles: executiveRole // Role 1 can create direct democracy polls
+            quickJoinRolesBitmap: 1, // Role 0: new members
+            tokenMemberRolesBitmap: 1, // Role 0: can hold tokens
+            tokenApproverRolesBitmap: 2, // Role 1: can approve transfers
+            taskCreatorRolesBitmap: 2, // Role 1: can create tasks
+            educationCreatorRolesBitmap: 2, // Role 1: can create education
+            educationMemberRolesBitmap: 1, // Role 0: can access education
+            hybridProposalCreatorRolesBitmap: 2, // Role 1: can create proposals
+            ddVotingRolesBitmap: 1, // Role 0: can vote in polls
+            ddCreatorRolesBitmap: 2 // Role 1: can create polls
         });
     }
 
@@ -288,6 +288,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: orgName,
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -340,6 +341,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: orgName,
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -505,7 +507,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
     /*══════════════════════════════════════════ SET‑UP ══════════════════════════════════════════*/
     function setUp() public {
         // Fork Sepolia using the RPC URL from foundry.toml
-        vm.createSelectFork("sepolia");
+        vm.createSelectFork("hoodi");
 
         /*–– deploy bare implementations ––*/
         hybridImpl = new HybridVoting();
@@ -585,16 +587,26 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         accessFactory = new AccessFactory();
         modulesFactory = new ModulesFactory();
 
+        // Deploy PaymasterHub as beacon proxy
+        PaymasterHub paymasterHubImpl = new PaymasterHub();
+        poaManager.addContractType("PaymasterHub", address(paymasterHubImpl));
+        address paymasterHubBeacon = poaManager.getBeaconById(keccak256("PaymasterHub"));
+        bytes memory paymasterHubInit = abi.encodeWithSignature(
+            "initialize(address,address,address)", ENTRY_POINT_V07, SEPOLIA_HATS, address(poaManager)
+        );
+        paymasterHub = PaymasterHub(payable(address(new BeaconProxy(paymasterHubBeacon, paymasterHubInit))));
+
         // Create OrgDeployer proxy - initialize with factory addresses
         bytes memory deployerInit = abi.encodeWithSignature(
-            "initialize(address,address,address,address,address,address,address)",
+            "initialize(address,address,address,address,address,address,address,address)",
             address(governanceFactory),
             address(accessFactory),
             address(modulesFactory),
             address(poaManager),
             address(orgRegistry),
             SEPOLIA_HATS,
-            address(hatsTreeSetup)
+            address(hatsTreeSetup),
+            address(paymasterHub)
         );
         deployer = OrgDeployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
 
@@ -653,6 +665,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: "Hybrid DAO",
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -779,6 +792,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: "Hybrid DAO",
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -814,6 +828,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: "Hybrid DAO",
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -892,6 +907,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: "Hybrid DAO",
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1157,6 +1173,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: "Events Test DAO",
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1360,6 +1377,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: "Vouch Error Test DAO",
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1517,6 +1535,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: "Vouch Events Test DAO",
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1606,6 +1625,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: "Vouch Disable Test DAO",
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1706,6 +1726,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: "SuperAdmin Test DAO",
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1867,6 +1888,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             orgId: ORG_ID,
             orgName: "Unrestricted Hat Test DAO",
             registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,

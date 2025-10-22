@@ -21,6 +21,18 @@ interface IParticipationToken {
 interface IExecutorAdmin {
     function setCaller(address) external;
     function setHatMinterAuthorization(address minter, bool authorized) external;
+    function configureVouching(
+        address eligibilityModule,
+        uint256 hatId,
+        uint32 quorum,
+        uint256 membershipHatId,
+        bool combineWithHierarchy
+    ) external;
+    function setDefaultEligibility(address eligibilityModule, uint256 hatId, bool eligible, bool standing) external;
+}
+
+interface IPaymasterHub {
+    function registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId) external;
 }
 
 /*────────────────────────────  Errors  ───────────────────────────────*/
@@ -41,8 +53,6 @@ event OrgDeployed(
     address paymentManager
 );
 
-event PaymasterDeployed(bytes32 indexed orgId, address indexed paymasterHub, address entryPoint);
-
 /**
  * @title OrgDeployer
  * @notice Thin orchestrator for deploying complete organizations using factory pattern
@@ -58,6 +68,7 @@ contract OrgDeployer is Initializable {
         OrgRegistry orgRegistry;
         address poaManager;
         address hatsTreeSetup;
+        address paymasterHub; // Shared PaymasterHub for all orgs
         uint256 _status; // manual reentrancy guard
     }
 
@@ -82,12 +93,13 @@ contract OrgDeployer is Initializable {
         address _poaManager,
         address _orgRegistry,
         address _hats,
-        address _hatsTreeSetup
+        address _hatsTreeSetup,
+        address _paymasterHub
     ) public initializer {
         if (
             _governanceFactory == address(0) || _accessFactory == address(0) || _modulesFactory == address(0)
                 || _poaManager == address(0) || _orgRegistry == address(0) || _hats == address(0)
-                || _hatsTreeSetup == address(0)
+                || _hatsTreeSetup == address(0) || _paymasterHub == address(0)
         ) {
             revert InvalidAddress();
         }
@@ -99,6 +111,7 @@ contract OrgDeployer is Initializable {
         l.orgRegistry = OrgRegistry(_orgRegistry);
         l.poaManager = _poaManager;
         l.hatsTreeSetup = _hatsTreeSetup;
+        l.paymasterHub = _paymasterHub;
         l._status = 1; // Initialize manual reentrancy guard
         hats = IHats(_hats);
     }
@@ -117,21 +130,22 @@ contract OrgDeployer is Initializable {
     }
 
     struct RoleAssignments {
-        uint256[] quickJoinRoles;
-        uint256[] tokenMemberRoles;
-        uint256[] tokenApproverRoles;
-        uint256[] taskCreatorRoles;
-        uint256[] educationCreatorRoles;
-        uint256[] educationMemberRoles;
-        uint256[] hybridProposalCreatorRoles;
-        uint256[] ddVotingRoles;
-        uint256[] ddCreatorRoles;
+        uint256 quickJoinRolesBitmap; // Bit N set = Role N assigned on join
+        uint256 tokenMemberRolesBitmap; // Bit N set = Role N can hold tokens
+        uint256 tokenApproverRolesBitmap; // Bit N set = Role N can approve transfers
+        uint256 taskCreatorRolesBitmap; // Bit N set = Role N can create tasks
+        uint256 educationCreatorRolesBitmap; // Bit N set = Role N can create education
+        uint256 educationMemberRolesBitmap; // Bit N set = Role N can access education
+        uint256 hybridProposalCreatorRolesBitmap; // Bit N set = Role N can create proposals
+        uint256 ddVotingRolesBitmap; // Bit N set = Role N can vote in polls
+        uint256 ddCreatorRolesBitmap; // Bit N set = Role N can create polls
     }
 
     struct DeploymentParams {
         bytes32 orgId;
         string orgName;
         address registryAddr;
+        address deployerAddress; // Address to receive ADMIN hat
         bool autoUpgrade;
         uint8 hybridQuorumPct;
         uint8 ddQuorumPct;
@@ -161,10 +175,18 @@ contract OrgDeployer is Initializable {
 
     /*════════════════  INTERNAL ORCHESTRATION  ════════════════*/
 
-    function _deployFullOrgInternal(DeploymentParams memory params) internal returns (DeploymentResult memory result) {
+    function _deployFullOrgInternal(DeploymentParams calldata params)
+        internal
+        returns (DeploymentResult memory result)
+    {
         Layout storage l = _layout();
 
-        /* 1. Create Org in bootstrap mode */
+        /* 1. Validate deployer address */
+        if (params.deployerAddress == address(0)) {
+            revert InvalidAddress();
+        }
+
+        /* 2. Create Org in bootstrap mode */
         if (!_orgExists(params.orgId)) {
             l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName));
         } else {
@@ -181,13 +203,16 @@ contract OrgDeployer is Initializable {
         /* 4. Register Hats tree in OrgRegistry */
         l.orgRegistry.registerHatsTree(params.orgId, gov.topHatId, gov.roleHatIds);
 
-        /* 5. Deploy Access Infrastructure (QuickJoin, Token) */
+        /* 5. Register org with shared PaymasterHub */
+        IPaymasterHub(l.paymasterHub).registerOrg(params.orgId, gov.topHatId, 0);
+
+        /* 6. Deploy Access Infrastructure (QuickJoin, Token) */
         AccessFactory.AccessResult memory access;
         {
             AccessFactory.RoleAssignments memory accessRoles = AccessFactory.RoleAssignments({
-                quickJoinRoles: params.roleAssignments.quickJoinRoles,
-                tokenMemberRoles: params.roleAssignments.tokenMemberRoles,
-                tokenApproverRoles: params.roleAssignments.tokenApproverRoles
+                quickJoinRolesBitmap: params.roleAssignments.quickJoinRolesBitmap,
+                tokenMemberRolesBitmap: params.roleAssignments.tokenMemberRolesBitmap,
+                tokenApproverRolesBitmap: params.roleAssignments.tokenApproverRolesBitmap
             });
 
             AccessFactory.AccessParams memory accessParams = AccessFactory.AccessParams({
@@ -213,9 +238,9 @@ contract OrgDeployer is Initializable {
         ModulesFactory.ModulesResult memory modules;
         {
             ModulesFactory.RoleAssignments memory moduleRoles = ModulesFactory.RoleAssignments({
-                taskCreatorRoles: params.roleAssignments.taskCreatorRoles,
-                educationCreatorRoles: params.roleAssignments.educationCreatorRoles,
-                educationMemberRoles: params.roleAssignments.educationMemberRoles
+                taskCreatorRolesBitmap: params.roleAssignments.taskCreatorRolesBitmap,
+                educationCreatorRolesBitmap: params.roleAssignments.educationCreatorRolesBitmap,
+                educationMemberRolesBitmap: params.roleAssignments.educationMemberRolesBitmap
             });
 
             ModulesFactory.ModulesParams memory moduleParams = ModulesFactory.ModulesParams({
@@ -252,6 +277,35 @@ contract OrgDeployer is Initializable {
         /* 10. Link executor to governor */
         IExecutorAdmin(result.executor).setCaller(result.hybridVoting);
 
+        /* 10.5. Configure vouching system before renouncing ownership */
+        {
+            // Only configure vouching for orgs with 4+ roles (MEMBER, COORDINATOR, CONTRIBUTOR, ADMIN)
+            // This avoids breaking simple 2-role test orgs (DEFAULT, EXECUTIVE)
+            if (gov.roleHatIds.length >= 4) {
+                uint256 coordinatorHatId = gov.roleHatIds[1]; // COORDINATOR
+                uint256 memberHatId = gov.roleHatIds[0]; // MEMBER
+
+                // Configure vouching: quorum=1, membershipHat=MEMBER, combineWithHierarchy=false
+                IExecutorAdmin(result.executor)
+                    .configureVouching(
+                        gov.eligibilityModule,
+                        coordinatorHatId,
+                        1, // quorum: only 1 vouch needed
+                        memberHatId, // MEMBER hat wearers can vouch
+                        false // don't combine with hierarchy
+                    );
+
+                // Set COORDINATOR default eligibility to false (forces vouching)
+                IExecutorAdmin(result.executor)
+                    .setDefaultEligibility(
+                        gov.eligibilityModule,
+                        coordinatorHatId,
+                        false, // not eligible by default
+                        true // good standing by default
+                    );
+            }
+        }
+
         /* 11. Renounce executor ownership - now only governed by voting */
         OwnableUpgradeable(result.executor).renounceOwnership();
 
@@ -271,93 +325,6 @@ contract OrgDeployer is Initializable {
         return result;
     }
 
-    /*════════════════  PAYMASTER DEPLOYMENT  ════════════════*/
-
-    struct PaymasterParams {
-        bytes paymasterBytecode;
-        address entryPoint;
-    }
-
-    /**
-     * @notice Deploys a complete organization WITH PaymasterHub in a single transaction
-     * @dev Uses bytecode-as-calldata pattern to avoid embedding PaymasterHub bytecode
-     * @param params Standard deployment parameters (same as deployFullOrg)
-     * @param paymasterParams PaymasterHub-specific parameters
-     * @return result Deployed organization components
-     * @return paymasterHub Deployed PaymasterHub address
-     */
-    function deployFullOrgWithPaymaster(DeploymentParams calldata params, PaymasterParams calldata paymasterParams)
-        external
-        returns (DeploymentResult memory result, address paymasterHub)
-    {
-        // Manual reentrancy guard
-        Layout storage l = _layout();
-        if (l._status == 2) revert Reentrant();
-        l._status = 2;
-
-        // Deploy core organization using provided params
-        result = _deployFullOrgInternal(params);
-
-        // Get topHatId from org registry (needed for PaymasterHub)
-        uint256 topHatId = l.orgRegistry.getTopHat(params.orgId);
-
-        // Deploy PaymasterHub using bytecode from calldata (no embedding!)
-        bytes memory initCode = abi.encodePacked(
-            paymasterParams.paymasterBytecode,
-            abi.encode(paymasterParams.entryPoint, address(hats), topHatId) // Constructor args
-        );
-
-        assembly {
-            paymasterHub := create(0, add(initCode, 0x20), mload(initCode))
-            if iszero(paymasterHub) { revert(0, 0) }
-        }
-
-        // Emit paymaster deployment event
-        emit PaymasterDeployed(params.orgId, paymasterHub, paymasterParams.entryPoint);
-
-        // Reset reentrancy guard
-        l._status = 1;
-
-        return (result, paymasterHub);
-    }
-
-    /**
-     * @notice Deploys a PaymasterHub for an existing organization
-     * @dev Can be called after deployFullOrg() to add gas sponsorship capability
-     * @param orgId Organization identifier (must exist)
-     * @param paymasterBytecode PaymasterHub creation bytecode
-     * @param entryPoint ERC-4337 EntryPoint address
-     * @return paymasterHub Deployed PaymasterHub address
-     */
-    function deployPaymasterForOrg(bytes32 orgId, bytes calldata paymasterBytecode, address entryPoint)
-        external
-        returns (address paymasterHub)
-    {
-        Layout storage l = _layout();
-
-        // Verify org exists
-        if (!_orgExists(orgId)) revert OrgExistsMismatch();
-
-        // Get topHatId from org registry
-        uint256 topHatId = l.orgRegistry.getTopHat(orgId);
-
-        // Deploy PaymasterHub using bytecode from calldata
-        bytes memory initCode = abi.encodePacked(
-            paymasterBytecode,
-            abi.encode(entryPoint, address(hats), topHatId) // Constructor args
-        );
-
-        assembly {
-            paymasterHub := create(0, add(initCode, 0x20), mload(initCode))
-            if iszero(paymasterHub) { revert(0, 0) }
-        }
-
-        // Emit paymaster deployment event
-        emit PaymasterDeployed(orgId, paymasterHub, entryPoint);
-
-        return paymasterHub;
-    }
-
     /*══════════════  UTILITIES  ═════════════=*/
 
     function _orgExists(bytes32 id) internal view returns (bool) {
@@ -369,7 +336,7 @@ contract OrgDeployer is Initializable {
      * @notice Internal helper to deploy governance infrastructure
      * @dev Extracted to reduce stack depth in main deployment function
      */
-    function _deployGovernanceInfrastructure(DeploymentParams memory params)
+    function _deployGovernanceInfrastructure(DeploymentParams calldata params)
         internal
         returns (GovernanceFactory.GovernanceResult memory)
     {
@@ -383,14 +350,15 @@ contract OrgDeployer is Initializable {
         govParams.hats = address(hats);
         govParams.hatsTreeSetup = l.hatsTreeSetup;
         govParams.deployer = address(this);
+        govParams.deployerAddress = params.deployerAddress; // Pass deployer address for ADMIN hat
         govParams.participationToken = address(0);
         govParams.autoUpgrade = params.autoUpgrade;
         govParams.hybridQuorumPct = params.hybridQuorumPct;
         govParams.ddQuorumPct = params.ddQuorumPct;
         govParams.hybridClasses = params.hybridClasses;
-        govParams.hybridProposalCreatorRoles = params.roleAssignments.hybridProposalCreatorRoles;
-        govParams.ddVotingRoles = params.roleAssignments.ddVotingRoles;
-        govParams.ddCreatorRoles = params.roleAssignments.ddCreatorRoles;
+        govParams.hybridProposalCreatorRolesBitmap = params.roleAssignments.hybridProposalCreatorRolesBitmap;
+        govParams.ddVotingRolesBitmap = params.roleAssignments.ddVotingRolesBitmap;
+        govParams.ddCreatorRolesBitmap = params.roleAssignments.ddCreatorRolesBitmap;
         govParams.ddInitialTargets = params.ddInitialTargets;
         govParams.roleNames = params.roleNames;
         govParams.roleImages = params.roleImages;
@@ -404,7 +372,7 @@ contract OrgDeployer is Initializable {
      * @dev Extracted to reduce stack depth in main deployment function
      */
     function _deployVotingMechanisms(
-        DeploymentParams memory params,
+        DeploymentParams calldata params,
         address executor,
         address participationToken,
         uint256[] memory roleHatIds
@@ -419,14 +387,15 @@ contract OrgDeployer is Initializable {
         votingParams.hats = address(hats);
         votingParams.hatsTreeSetup = l.hatsTreeSetup;
         votingParams.deployer = address(this);
+        votingParams.deployerAddress = params.deployerAddress;
         votingParams.participationToken = participationToken;
         votingParams.autoUpgrade = params.autoUpgrade;
         votingParams.hybridQuorumPct = params.hybridQuorumPct;
         votingParams.ddQuorumPct = params.ddQuorumPct;
         votingParams.hybridClasses = params.hybridClasses;
-        votingParams.hybridProposalCreatorRoles = params.roleAssignments.hybridProposalCreatorRoles;
-        votingParams.ddVotingRoles = params.roleAssignments.ddVotingRoles;
-        votingParams.ddCreatorRoles = params.roleAssignments.ddCreatorRoles;
+        votingParams.hybridProposalCreatorRolesBitmap = params.roleAssignments.hybridProposalCreatorRolesBitmap;
+        votingParams.ddVotingRolesBitmap = params.roleAssignments.ddVotingRolesBitmap;
+        votingParams.ddCreatorRolesBitmap = params.roleAssignments.ddCreatorRolesBitmap;
         votingParams.ddInitialTargets = params.ddInitialTargets;
         votingParams.roleNames = params.roleNames;
         votingParams.roleImages = params.roleImages;
@@ -464,5 +433,36 @@ contract OrgDeployer is Initializable {
 
         // Forward registration to OrgRegistry (we are the owner)
         l.orgRegistry.registerOrgContract(orgId, typeId, proxy, beacon, autoUpgrade, moduleOwner, lastRegister);
+    }
+
+    /**
+     * @notice Batch register multiple contracts from factories
+     * @dev Only callable by approved factory contracts. Reduces gas overhead by batching registrations.
+     * @param orgId The organization identifier
+     * @param registrations Array of contracts to register
+     * @param autoUpgrade Whether contracts auto-upgrade with their beacons
+     */
+    function batchRegisterContracts(
+        bytes32 orgId,
+        OrgRegistry.ContractRegistration[] calldata registrations,
+        bool autoUpgrade,
+        bool lastRegister
+    ) external {
+        Layout storage l = _layout();
+
+        // Only allow factory contracts to call this
+        if (
+            msg.sender != address(l.governanceFactory) && msg.sender != address(l.accessFactory)
+                && msg.sender != address(l.modulesFactory)
+        ) {
+            revert InvalidAddress();
+        }
+
+        // Only allow during bootstrap (deployment phase)
+        (,, bool bootstrap,) = l.orgRegistry.orgOf(orgId);
+        if (!bootstrap) revert("Deployment complete");
+
+        // Forward batch registration to OrgRegistry (we are the owner)
+        l.orgRegistry.batchRegisterOrgContracts(orgId, registrations, autoUpgrade, lastRegister);
     }
 }
