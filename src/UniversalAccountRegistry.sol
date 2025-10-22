@@ -14,6 +14,10 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     error AccountExists();
     error AccountUnknown();
     error ArrayLenMismatch();
+    error NotAuthorizedRecoveryCaller();
+    error NoUsername();
+    error SameAddress();
+    error AddressAlreadyHasUsername();
 
     /*─────────────────────────── Constants ─────────────────────────────*/
     uint256 private constant MAX_LEN = 64;
@@ -24,6 +28,8 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     struct Layout {
         mapping(address => string) addressToUsername;
         mapping(bytes32 => address) ownerOfUsernameHash;
+        address recoveryCaller; // Contract authorized to perform recoverAccount
+        address orgApprover; // Optional: org-level approver for recovery
     }
 
     // keccak256("poa.universalaccountregistry.storage") to unique, collision-free slot
@@ -40,6 +46,9 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     event UsernameChanged(address indexed user, string newUsername);
     event UserDeleted(address indexed user, string oldUsername);
     event BatchRegistered(uint256 count);
+    event RecoveryCallerChanged(address indexed oldCaller, address indexed newCaller);
+    event OrgApproverChanged(address indexed oldApprover, address indexed newApprover);
+    event AccountRecovered(address indexed from, address indexed to, string username);
 
     /*────────────────────────── Initializer ────────────────────────────*/
     function initialize(address initialOwner) external initializer {
@@ -177,5 +186,72 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
             if (c >= 65 && c <= 90) b[i] = bytes1(c + 32);
         }
         return string(b);
+    }
+
+    /*──────────────────── Recovery Management ─────────────────────────*/
+    /**
+     * @notice Set the authorized recovery caller (typically DeviceWrapRegistry)
+     * @param newCaller Address authorized to call recoverAccount
+     */
+    function setRecoveryCaller(address newCaller) external onlyOwner {
+        Layout storage l = _layout();
+        address old = l.recoveryCaller;
+        l.recoveryCaller = newCaller;
+        emit RecoveryCallerChanged(old, newCaller);
+    }
+
+    /**
+     * @notice Set org-level approver for recovery (optional)
+     * @param newApprover Address authorized to approve recoveries
+     */
+    function setOrgApprover(address newApprover) external onlyOwner {
+        Layout storage l = _layout();
+        address old = l.orgApprover;
+        l.orgApprover = newApprover;
+        emit OrgApproverChanged(old, newApprover);
+    }
+
+    /**
+     * @notice Recover account from one address to another
+     * @dev Can only be called by authorized recovery caller or org approver
+     * @param from Current address holding the username
+     * @param to New address to receive the username
+     */
+    function recoverAccount(address from, address to) external {
+        Layout storage l = _layout();
+
+        // Authorization check
+        if (msg.sender != l.recoveryCaller && msg.sender != l.orgApprover) {
+            revert NotAuthorizedRecoveryCaller();
+        }
+
+        string storage uname = l.addressToUsername[from];
+        if (bytes(uname).length == 0) revert NoUsername();
+        if (from == to) revert SameAddress();
+        if (bytes(l.addressToUsername[to]).length != 0) revert AddressAlreadyHasUsername();
+
+        // Transfer username to new address
+        l.addressToUsername[to] = uname;
+        delete l.addressToUsername[from];
+
+        bytes32 h = keccak256(bytes(_toLower(uname)));
+        l.ownerOfUsernameHash[h] = to;
+
+        emit AccountRecovered(from, to, uname);
+        emit UsernameChanged(to, uname);
+    }
+
+    /**
+     * @notice Get the current recovery caller address
+     */
+    function getRecoveryCaller() external view returns (address) {
+        return _layout().recoveryCaller;
+    }
+
+    /**
+     * @notice Get the current org approver address
+     */
+    function getOrgApprover() external view returns (address) {
+        return _layout().orgApprover;
     }
 }
