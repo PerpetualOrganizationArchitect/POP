@@ -11,8 +11,16 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 library HybridVotingCore {
     bytes32 private constant _STORAGE_SLOT = 0x7a3e8e3d8e9c8f7b6a5d4c3b2a1908070605040302010009080706050403020a;
 
-    event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
-    event Winner(uint256 id, uint256 winningIdx, bool valid);
+    event VoteCast(
+        uint256 indexed id,
+        address indexed voter,
+        uint8[] idxs,
+        uint8[] weights,
+        uint256[] classRawPowers,
+        uint64 timestamp
+    );
+    event Winner(uint256 indexed id, uint256 indexed winningIdx, bool valid, bool executed, uint64 timestamp);
+    event ProposalExecuted(uint256 indexed id, uint256 indexed winningIdx, uint256 numCalls);
 
     function _layout() private pure returns (HybridVoting.Layout storage s) {
         assembly {
@@ -88,7 +96,7 @@ library HybridVotingCore {
         }
 
         p.hasVoted[voter] = true;
-        emit VoteCast(id, voter, idxs, weights);
+        emit VoteCast(id, voter, idxs, weights, classRawPowers, uint64(block.timestamp));
     }
 
     function _calculateClassPower(address voter, HybridVoting.ClassConfig memory cls, HybridVoting.Layout storage l)
@@ -143,7 +151,7 @@ library HybridVotingCore {
         }
 
         if (!hasVotes) {
-            emit Winner(id, 0, false);
+            emit Winner(id, 0, false, false, uint64(block.timestamp));
             return (0, false);
         }
 
@@ -183,6 +191,7 @@ library HybridVotingCore {
         );
 
         IExecutor.Call[] storage batch = p.batches[winner];
+        bool executed = false;
         if (valid && batch.length > 0) {
             uint256 batchLen = batch.length;
             for (uint256 i; i < batchLen;) {
@@ -192,7 +201,9 @@ library HybridVotingCore {
                 }
             }
             l.executor.execute(id, batch);
+            executed = true;
+            emit ProposalExecuted(id, winner, batchLen);
         }
-        emit Winner(id, winner, valid);
+        emit Winner(id, winner, valid, executed, uint64(block.timestamp));
     }
 }

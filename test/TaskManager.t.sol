@@ -386,8 +386,9 @@ contract MockToken is Test, IERC20 {
                 tm.updateTask(0, 2 ether, bytes("bar"), address(0), 0);
 
                 // spent should now be 2 ether
-                bytes memory result =
-                    lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(UPD_ID));
+                bytes memory result = lens.getStorage(
+                    address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(UPD_ID)
+                );
                 (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
                 assertEq(cap, 3 ether);
                 assertEq(spent, 2 ether);
@@ -452,8 +453,9 @@ contract MockToken is Test, IERC20 {
                 vm.prank(creator1);
                 tm.createTask(1 ether, bytes("foo"), CAN_ID, address(0), 0, false);
 
-                bytes memory result =
-                    lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(CAN_ID));
+                bytes memory result = lens.getStorage(
+                    address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(CAN_ID)
+                );
                 (uint256 cap, uint256 spentBefore, bool isManager) = abi.decode(result, (uint256, uint256, bool));
                 assertEq(spentBefore, 1 ether);
 
@@ -596,8 +598,8 @@ contract MockToken is Test, IERC20 {
                 );
                 PROJECT_C_ID =
                     tm.createProject(
-                        bytes("PROJECT_C"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats
-                    );
+                    bytes("PROJECT_C"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats
+                );
                 vm.stopPrank();
 
                 // Create multiple tasks across projects
@@ -712,8 +714,8 @@ contract MockToken is Test, IERC20 {
                 vm.prank(creator1);
                 MULTI_PM_ID =
                     tm.createProject(
-                        bytes("MULTI_PM"), 10 ether, managers, createHats, claimHats, reviewHats, assignHats
-                    );
+                    bytes("MULTI_PM"), 10 ether, managers, createHats, claimHats, reviewHats, assignHats
+                );
 
                 // Both PMs should be able to create tasks (as project managers)
                 vm.prank(pm1);
@@ -773,8 +775,8 @@ contract MockToken is Test, IERC20 {
                 vm.prank(creator1);
                 EDGE_ID =
                     tm.createProject(
-                        bytes("EDGE"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
-                    );
+                    bytes("EDGE"), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                );
 
                 // Create and immediately cancel a task
                 vm.startPrank(creator1);
@@ -909,8 +911,9 @@ contract MockToken is Test, IERC20 {
                 uint256 completedValue = 0;
 
                 for (uint256 i = 0; i < completedTasks; i++) {
-                    bytes memory result =
-                        lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(i));
+                    bytes memory result = lens.getStorage(
+                        address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(i)
+                    );
                     (
                         uint256 payout,
                         TaskManager.Status status,
@@ -1022,8 +1025,8 @@ contract MockToken is Test, IERC20 {
                 vm.prank(creator1);
                 ZERO_CAP_ID =
                     tm.createProject(
-                        bytes("ZERO_CAP"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats
-                    );
+                    bytes("ZERO_CAP"), 0, new address[](0), createHats, claimHats, reviewHats, assignHats
+                );
 
                 // Add tasks, verify we can still delete with non-zero spent
                 vm.prank(creator1);
@@ -1819,8 +1822,9 @@ contract MockToken is Test, IERC20 {
                 }
 
                 // Verify project budget tracking
-                bytes memory ret =
-                    lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(projectId));
+                bytes memory ret = lens.getStorage(
+                    address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(projectId)
+                );
                 (uint256 cap, uint256 spent,) = abi.decode(ret, (uint256, uint256, bool));
                 assertEq(spent, 3 ether, "Project should have spent 3 ether");
             }
@@ -2603,8 +2607,8 @@ contract MockToken is Test, IERC20 {
                 address nonApplicant = makeAddr("nonApplicant");
                 result =
                     lens.getStorage(
-                        address(tm), TaskManagerLens.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, nonApplicant)
-                    );
+                    address(tm), TaskManagerLens.StorageKey.HAS_APPLIED_FOR_TASK, abi.encode(0, nonApplicant)
+                );
                 hasApplied = abi.decode(result, (bytes32));
                 assertTrue(hasApplied == bytes32(0), "Non-applicant should not have applied");
             }

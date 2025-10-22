@@ -1,0 +1,57 @@
+{
+  "orgId": "worker-cooperative-alpha",
+  "orgName": "Worker Cooperative Alpha",
+  "autoUpgrade": true,
+  "quorum": {
+    "hybrid": 50,
+    "directDemocracy": 50
+  },
+  "roles": [
+    {
+      "name": "MEMBER",
+      "image": "ipfs://QmWorkerMemberBadge",
+      "canVote": true
+    },
+    {
+      "name": "EXECUTIVE",
+      "image": "ipfs://QmExecutiveBadge",
+      "canVote": true
+    },
+    {
+      "name": "CONTRIBUTOR",
+      "image": "ipfs://QmContributorBadge",
+      "canVote": false
+    }
+  ],
+  "votingClasses": [
+    {
+      "strategy": "DIRECT",
+      "slicePct": 50,
+      "quadratic": false,
+      "minBalance": 0,
+      "asset": "0x0000000000000000000000000000000000000000",
+      "hatIds": []
+    },
+    {
+      "strategy": "ERC20_BAL",
+      "slicePct": 50,
+      "quadratic": false,
+      "minBalance": "4000000000000000000",
+      "asset": "0x0000000000000000000000000000000000000000",
+      "hatIds": []
+    }
+  ],
+  "roleAssignments": {
+    "quickJoinRoles": [0],
+    "tokenMemberRoles": [0, 1],
+    "tokenApproverRoles": [1],
+    "taskCreatorRoles": [1],
+    "educationCreatorRoles": [1],
+    "educationMemberRoles": [0, 2],
+    "hybridProposalCreatorRoles": [1],
+    "ddVotingRoles": [0, 1],
+    "ddCreatorRoles": [1]
+  },
+  "ddInitialTargets": [],
+  "withPaymaster": false
+}

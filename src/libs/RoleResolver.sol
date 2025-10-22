@@ -53,4 +53,51 @@ library RoleResolver {
     function requireNonEmpty(uint256[] memory roleIndices) internal pure returns (bool) {
         return roleIndices.length > 0;
     }
+
+    /**
+     * @notice Resolves a bitmap of role indices to their corresponding Hat IDs
+     * @dev Uses bitmap where bit N represents role index N (supports up to 256 roles)
+     * @param orgRegistry The OrgRegistry contract address
+     * @param orgId The organization identifier
+     * @param rolesBitmap Bitmap where bit N set means role N is assigned
+     * @return hatIds Array of corresponding Hat IDs from the Hats Protocol
+     */
+    function resolveRoleBitmap(OrgRegistry orgRegistry, bytes32 orgId, uint256 rolesBitmap)
+        internal
+        view
+        returns (uint256[] memory hatIds)
+    {
+        if (rolesBitmap == 0) {
+            return new uint256[](0);
+        }
+
+        // Count number of set bits (number of roles)
+        uint256 count = _countSetBits(rolesBitmap);
+        hatIds = new uint256[](count);
+
+        // Extract role indices and resolve to hat IDs
+        uint256 index = 0;
+        for (uint256 roleIdx = 0; roleIdx < 256; roleIdx++) {
+            if ((rolesBitmap & (1 << roleIdx)) != 0) {
+                hatIds[index] = orgRegistry.getRoleHat(orgId, roleIdx);
+                index++;
+
+                // Early exit when all roles found
+                if (index == count) break;
+            }
+        }
+    }
+
+    /**
+     * @notice Count number of set bits in bitmap (population count)
+     * @dev Uses Brian Kernighan's algorithm for efficiency
+     * @param bitmap The bitmap to count
+     * @return count Number of set bits
+     */
+    function _countSetBits(uint256 bitmap) private pure returns (uint256 count) {
+        while (bitmap != 0) {
+            bitmap &= bitmap - 1; // Clear lowest set bit
+            count++;
+        }
+    }
 }

@@ -111,57 +111,23 @@ library ModuleDeploymentLib {
         address moduleOwner;
         bool autoUpgrade;
         address customImpl;
-        address registrar; // Optional: if set, use this for registration instead of orgRegistry owner
     }
 
     function deployCore(
         DeployConfig memory config,
         bytes32 typeId, // Pass pre-computed hash instead of string
         bytes memory initData,
-        bool lastRegister,
         address beacon
-    ) internal returns (address proxy) {
+    )
+        internal
+        returns (address proxy)
+    {
         if (initData.length == 0) revert EmptyInit();
 
         // Create proxy using the provided beacon
         proxy = address(new BeaconProxy(beacon, ""));
 
-        // Register in OrgRegistry BEFORE initialization
-        // Use registrar if provided (for factory pattern), otherwise direct registration
-        if (config.registrar != address(0)) {
-            // Call registrar's registerContract function (used by factories)
-            (bool success, bytes memory returnData) = config.registrar
-                .call(
-                    abi.encodeWithSignature(
-                        "registerContract(bytes32,bytes32,address,address,bool,address,bool)",
-                        config.orgId,
-                        typeId,
-                        proxy,
-                        beacon,
-                        config.autoUpgrade,
-                        config.moduleOwner,
-                        lastRegister
-                    )
-                );
-            if (!success) {
-                // Bubble up the revert reason
-                if (returnData.length > 0) {
-                    assembly {
-                        revert(add(32, returnData), mload(returnData))
-                    }
-                } else {
-                    revert("Registration failed");
-                }
-            }
-        } else {
-            // Direct registration (backwards compatible)
-            config.orgRegistry
-                .registerOrgContract(
-                    config.orgId, typeId, proxy, beacon, config.autoUpgrade, config.moduleOwner, lastRegister
-                );
-        }
-
-        // Now safely initialize the proxy after registration is complete
+        // Initialize the proxy (registration happens later via batch registration)
         (bool success, bytes memory returnData) = proxy.call(initData);
         if (!success) {
             // If initialization fails, bubble up the revert reason
@@ -186,7 +152,7 @@ library ModuleDeploymentLib {
         bytes memory init = abi.encodeWithSelector(IExecutorInit.initialize.selector, deployer, config.hats);
 
         // Deploy using provided beacon
-        execProxy = deployCore(config, ModuleTypes.EXECUTOR_ID, init, false, beacon);
+        execProxy = deployCore(config, ModuleTypes.EXECUTOR_ID, init, beacon);
     }
 
     function deployQuickJoin(
@@ -200,7 +166,7 @@ library ModuleDeploymentLib {
         bytes memory init = abi.encodeWithSelector(
             IQuickJoinInit.initialize.selector, executorAddr, config.hats, registry, masterDeploy, memberHats
         );
-        qjProxy = deployCore(config, ModuleTypes.QUICK_JOIN_ID, init, false, beacon);
+        qjProxy = deployCore(config, ModuleTypes.QUICK_JOIN_ID, init, beacon);
     }
 
     function deployParticipationToken(
@@ -221,7 +187,7 @@ library ModuleDeploymentLib {
             memberHats,
             approverHats
         );
-        ptProxy = deployCore(config, ModuleTypes.PARTICIPATION_TOKEN_ID, init, false, beacon);
+        ptProxy = deployCore(config, ModuleTypes.PARTICIPATION_TOKEN_ID, init, beacon);
     }
 
     function deployTaskManager(
@@ -234,7 +200,7 @@ library ModuleDeploymentLib {
         bytes memory init = abi.encodeWithSelector(
             ITaskManagerInit.initialize.selector, token, config.hats, creatorHats, executorAddr
         );
-        tmProxy = deployCore(config, ModuleTypes.TASK_MANAGER_ID, init, false, beacon);
+        tmProxy = deployCore(config, ModuleTypes.TASK_MANAGER_ID, init, beacon);
     }
 
     function deployEducationHub(
@@ -243,13 +209,12 @@ library ModuleDeploymentLib {
         address token,
         uint256[] memory creatorHats,
         uint256[] memory memberHats,
-        bool lastRegister,
         address beacon
     ) internal returns (address ehProxy) {
         bytes memory init = abi.encodeWithSelector(
             IEducationHubInit.initialize.selector, token, config.hats, executorAddr, creatorHats, memberHats
         );
-        ehProxy = deployCore(config, ModuleTypes.EDUCATION_HUB_ID, init, lastRegister, beacon);
+        ehProxy = deployCore(config, ModuleTypes.EDUCATION_HUB_ID, init, beacon);
     }
 
     function deployEligibilityModule(
@@ -262,7 +227,7 @@ library ModuleDeploymentLib {
             IEligibilityModuleInit.initialize.selector, deployer, config.hats, toggleModule
         );
 
-        emProxy = deployCore(config, ModuleTypes.ELIGIBILITY_MODULE_ID, init, false, beacon);
+        emProxy = deployCore(config, ModuleTypes.ELIGIBILITY_MODULE_ID, init, beacon);
     }
 
     function deployToggleModule(DeployConfig memory config, address adminAddr, address beacon)
@@ -271,7 +236,7 @@ library ModuleDeploymentLib {
     {
         bytes memory init = abi.encodeWithSelector(IToggleModuleInit.initialize.selector, adminAddr);
 
-        tmProxy = deployCore(config, ModuleTypes.TOGGLE_MODULE_ID, init, false, beacon);
+        tmProxy = deployCore(config, ModuleTypes.TOGGLE_MODULE_ID, init, beacon);
     }
 
     function deployHybridVoting(
@@ -280,7 +245,6 @@ library ModuleDeploymentLib {
         uint256[] memory creatorHats,
         uint8 quorumPct,
         IHybridVotingInit.ClassConfig[] memory classes,
-        bool lastRegister,
         address beacon
     ) internal returns (address hvProxy) {
         address[] memory targets = new address[](1);
@@ -289,18 +253,15 @@ library ModuleDeploymentLib {
         bytes memory init = abi.encodeWithSelector(
             IHybridVotingInit.initialize.selector, config.hats, executorAddr, creatorHats, targets, quorumPct, classes
         );
-        hvProxy = deployCore(config, ModuleTypes.HYBRID_VOTING_ID, init, lastRegister, beacon);
+        hvProxy = deployCore(config, ModuleTypes.HYBRID_VOTING_ID, init, beacon);
     }
 
-    function deployPaymentManager(
-        DeployConfig memory config,
-        address owner,
-        address revenueShareToken,
-        address beacon,
-        bool lastRegister
-    ) internal returns (address pmProxy) {
+    function deployPaymentManager(DeployConfig memory config, address owner, address revenueShareToken, address beacon)
+        internal
+        returns (address pmProxy)
+    {
         bytes memory init = abi.encodeWithSelector(IPaymentManagerInit.initialize.selector, owner, revenueShareToken);
-        pmProxy = deployCore(config, ModuleTypes.PAYMENT_MANAGER_ID, init, lastRegister, beacon);
+        pmProxy = deployCore(config, ModuleTypes.PAYMENT_MANAGER_ID, init, beacon);
     }
 
     function deployDirectDemocracyVoting(
@@ -310,8 +271,7 @@ library ModuleDeploymentLib {
         uint256[] memory creatorHats,
         address[] memory initialTargets,
         uint8 quorumPct,
-        address beacon,
-        bool lastRegister
+        address beacon
     ) internal returns (address ddProxy) {
         bytes memory init = abi.encodeWithSignature(
             "initialize(address,address,uint256[],uint256[],address[],uint8)",
@@ -322,6 +282,6 @@ library ModuleDeploymentLib {
             initialTargets,
             quorumPct
         );
-        ddProxy = deployCore(config, ModuleTypes.DIRECT_DEMOCRACY_VOTING_ID, init, lastRegister, beacon);
+        ddProxy = deployCore(config, ModuleTypes.DIRECT_DEMOCRACY_VOTING_ID, init, beacon);
     }
 }
