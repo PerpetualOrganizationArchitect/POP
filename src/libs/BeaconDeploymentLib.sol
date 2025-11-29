@@ -22,13 +22,10 @@ library BeaconDeploymentLib {
      * @param customImpl Optional custom implementation (address(0) for default)
      * @return beacon Address of the created SwitchableBeacon
      */
-    function createBeacon(
-        bytes32 typeId,
-        address poaManager,
-        address moduleOwner,
-        bool autoUpgrade,
-        address customImpl
-    ) internal returns (address beacon) {
+    function createBeacon(bytes32 typeId, address poaManager, address moduleOwner, bool autoUpgrade, address customImpl)
+        internal
+        returns (address beacon)
+    {
         IPoaManager poa = IPoaManager(poaManager);
 
         address poaBeacon = poa.getBeaconById(typeId);

@@ -47,13 +47,8 @@ interface IExecutorInit {
 }
 
 interface IQuickJoinInit {
-    function initialize(
-        address executor,
-        address hats,
-        address registry,
-        address master,
-        uint256[] calldata memberHats
-    ) external;
+    function initialize(address executor, address hats, address registry, address master, uint256[] calldata memberHats)
+        external;
 }
 
 interface IParticipationTokenInit {
@@ -217,15 +212,12 @@ library ModuleDeploymentLib {
         ehProxy = deployCore(config, ModuleTypes.EDUCATION_HUB_ID, init, beacon);
     }
 
-    function deployEligibilityModule(
-        DeployConfig memory config,
-        address deployer,
-        address toggleModule,
-        address beacon
-    ) internal returns (address emProxy) {
-        bytes memory init = abi.encodeWithSelector(
-            IEligibilityModuleInit.initialize.selector, deployer, config.hats, toggleModule
-        );
+    function deployEligibilityModule(DeployConfig memory config, address deployer, address toggleModule, address beacon)
+        internal
+        returns (address emProxy)
+    {
+        bytes memory init =
+            abi.encodeWithSelector(IEligibilityModuleInit.initialize.selector, deployer, config.hats, toggleModule);
 
         emProxy = deployCore(config, ModuleTypes.ELIGIBILITY_MODULE_ID, init, beacon);
     }

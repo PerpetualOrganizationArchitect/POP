@@ -140,7 +140,9 @@ contract MockToken is Test, IERC20 {
                 ) = _defaultRoleHats();
 
                 vm.prank(creator1);
-                id = tm.createProject(name, bytes32(0), cap, new address[](0), createHats, claimHats, reviewHats, assignHats);
+                id = tm.createProject(
+                    name, bytes32(0), cap, new address[](0), createHats, claimHats, reviewHats, assignHats
+                );
             }
 
             function setUpBase() internal {
@@ -507,7 +509,14 @@ contract MockToken is Test, IERC20 {
 
                 vm.prank(creator1);
                 bytes32 projectId = tm.createProject(
-                    bytes("PERM_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                    bytes("PERM_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Set up a custom hat with specific permissions
@@ -546,7 +555,14 @@ contract MockToken is Test, IERC20 {
 
                 vm.prank(creator1);
                 bytes32 projectId = tm.createProject(
-                    bytes("PERM_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                    bytes("PERM_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Set up a hat with global permissions
@@ -594,13 +610,26 @@ contract MockToken is Test, IERC20 {
                 // Create three projects with different caps
                 vm.startPrank(creator1);
                 PROJECT_A_ID = tm.createProject(
-                    bytes("PROJECT_A"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                    bytes("PROJECT_A"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
                 PROJECT_B_ID = tm.createProject(
-                    bytes("PROJECT_B"), bytes32(0), 3 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                    bytes("PROJECT_B"),
+                    bytes32(0),
+                    3 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
-                PROJECT_C_ID =
-                    tm.createProject(
+                PROJECT_C_ID = tm.createProject(
                     bytes("PROJECT_C"), bytes32(0), 0, new address[](0), createHats, claimHats, reviewHats, assignHats
                 );
                 vm.stopPrank();
@@ -662,7 +691,14 @@ contract MockToken is Test, IERC20 {
                 // Initial setup
                 vm.prank(creator1);
                 GOV_TEST_ID = tm.createProject(
-                    bytes("GOV_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                    bytes("GOV_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Add new hat to the creator hats using the executor
@@ -677,7 +713,14 @@ contract MockToken is Test, IERC20 {
                 // Test that new hat can create projects
                 vm.prank(newCreator);
                 NEW_PROJECT_ID = tm.createProject(
-                    bytes("NEW_PROJECT"), bytes32(0), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                    bytes("NEW_PROJECT"),
+                    bytes32(0),
+                    1 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Verify new project exists by creating a task
@@ -692,7 +735,14 @@ contract MockToken is Test, IERC20 {
                 vm.prank(newCreator);
                 vm.expectRevert(TaskManager.NotCreator.selector);
                 tm.createProject(
-                    bytes("SHOULD_FAIL"), bytes32(0), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                    bytes("SHOULD_FAIL"),
+                    bytes32(0),
+                    1 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
             }
 
@@ -715,8 +765,7 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                MULTI_PM_ID =
-                    tm.createProject(
+                MULTI_PM_ID = tm.createProject(
                     bytes("MULTI_PM"), bytes32(0), 10 ether, managers, createHats, claimHats, reviewHats, assignHats
                 );
 
@@ -776,8 +825,7 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                EDGE_ID =
-                    tm.createProject(
+                EDGE_ID = tm.createProject(
                     bytes("EDGE"), bytes32(0), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
                 );
 
@@ -932,8 +980,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create a second project with a hard cap
                 vm.prank(creator1);
-                CAPPED_BIG_ID =
-                    tm.createProject(bytes("CAPPED_BIG"), bytes32(0), 10 ether, pms, createHats, claimHats, reviewHats, assignHats);
+                CAPPED_BIG_ID = tm.createProject(
+                    bytes("CAPPED_BIG"), bytes32(0), 10 ether, pms, createHats, claimHats, reviewHats, assignHats
+                );
 
                 // Create tasks up to the cap
                 uint256 cappedTaskCount = 0;
@@ -985,7 +1034,15 @@ contract MockToken is Test, IERC20 {
 
                 // Create a project that will be deleted
                 vm.prank(creator1);
-                TO_DELETE_ID = tm.createProject(bytes("TO_DELETE"), bytes32(0), 3 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                TO_DELETE_ID = tm.createProject(
+                    bytes("TO_DELETE"),
+                    bytes32(0),
+                    3 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Create a task, complete it, then verify project can be deleted
@@ -1025,8 +1082,8 @@ contract MockToken is Test, IERC20 {
 
                 // Create a zero-cap project
                 vm.prank(creator1);
-                ZERO_CAP_ID =
-                    tm.createProject(bytes("ZERO_CAP"), bytes32(0), 0, new address[](0), createHats, claimHats, reviewHats, assignHats
+                ZERO_CAP_ID = tm.createProject(
+                    bytes("ZERO_CAP"), bytes32(0), 0, new address[](0), createHats, claimHats, reviewHats, assignHats
                 );
 
                 // Add tasks, verify we can still delete with non-zero spent
@@ -1077,7 +1134,15 @@ contract MockToken is Test, IERC20 {
 
                 // Verify the new hat works for creating projects
                 vm.prank(testCreator);
-                EXECUTOR_TEST_ID = tm.createProject(bytes("EXECUTOR_TEST"), bytes32(0), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                EXECUTOR_TEST_ID = tm.createProject(
+                    bytes("EXECUTOR_TEST"),
+                    bytes32(0),
+                    1 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // New executor can revoke the hat
@@ -1087,7 +1152,15 @@ contract MockToken is Test, IERC20 {
                 // Hat should no longer work
                 vm.prank(testCreator);
                 vm.expectRevert(TaskManager.NotCreator.selector);
-                tm.createProject(bytes("SHOULD_FAIL"), bytes32(0), 1 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                tm.createProject(
+                    bytes("SHOULD_FAIL"),
+                    bytes32(0),
+                    1 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
             }
 
@@ -1104,7 +1177,15 @@ contract MockToken is Test, IERC20 {
 
                 // Create project
                 vm.prank(creator1);
-                EXECUTOR_BYPASS_ID = tm.createProject(bytes("EXECUTOR_BYPASS"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                EXECUTOR_BYPASS_ID = tm.createProject(
+                    bytes("EXECUTOR_BYPASS"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Executor should be able to create tasks even without member role
@@ -1147,7 +1228,15 @@ contract MockToken is Test, IERC20 {
                 // Create project (use creator1 who has creator hat)
                 uint256[] memory emptyHats = new uint256[](0);
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("COMBINED_TEST"), bytes32(0), 5 ether, new address[](0), emptyHats, emptyHats, emptyHats, emptyHats
+                bytes32 projectId = tm.createProject(
+                    bytes("COMBINED_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    emptyHats,
+                    emptyHats,
+                    emptyHats,
+                    emptyHats
                 );
 
                 // User should be able to create tasks with CREATE permission
@@ -1178,7 +1267,15 @@ contract MockToken is Test, IERC20 {
                 // Create project
                 uint256[] memory emptyHats = new uint256[](0);
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("DYNAMIC_TEST"), bytes32(0), 5 ether, new address[](0), emptyHats, emptyHats, emptyHats, emptyHats
+                bytes32 projectId = tm.createProject(
+                    bytes("DYNAMIC_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    emptyHats,
+                    emptyHats,
+                    emptyHats,
+                    emptyHats
                 );
 
                 // User can't create tasks (no permissions)
@@ -1231,12 +1328,28 @@ contract MockToken is Test, IERC20 {
                 // Create project
                 uint256[] memory emptyHats = new uint256[](0);
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("OVERRIDE_TEST"), bytes32(0), 5 ether, new address[](0), emptyHats, emptyHats, emptyHats, emptyHats
+                bytes32 projectId = tm.createProject(
+                    bytes("OVERRIDE_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    emptyHats,
+                    emptyHats,
+                    emptyHats,
+                    emptyHats
                 );
 
                 // Create a second project to verify global perms still work there
                 vm.prank(creator1);
-                bytes32 projectId2 = tm.createProject(bytes("GLOBAL_TEST"), bytes32(0), 5 ether, new address[](0), emptyHats, emptyHats, emptyHats, emptyHats
+                bytes32 projectId2 = tm.createProject(
+                    bytes("GLOBAL_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    emptyHats,
+                    emptyHats,
+                    emptyHats,
+                    emptyHats
                 );
 
                 // Restrict permissions on the first project (only CREATE)
@@ -1291,7 +1404,11 @@ contract MockToken is Test, IERC20 {
 
                 // Create project
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("TEMP"), bytes32(0), 5 ether, new address[](0),
+                bytes32 projectId = tm.createProject(
+                    bytes("TEMP"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
                     new uint256[](0),
                     new uint256[](0),
                     new uint256[](0),
@@ -1340,7 +1457,11 @@ contract MockToken is Test, IERC20 {
 
                 // Create project
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("PERM_FLAGS"), bytes32(0), 5 ether, new address[](0),
+                bytes32 projectId = tm.createProject(
+                    bytes("PERM_FLAGS"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
                     new uint256[](0),
                     new uint256[](0),
                     new uint256[](0),
@@ -1414,7 +1535,11 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("CREATE_ASSIGN_TEST"), bytes32(0), 5 ether, new address[](0),
+                bytes32 projectId = tm.createProject(
+                    bytes("CREATE_ASSIGN_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
                     createHats,
                     claimHats,
                     reviewHats,
@@ -1423,7 +1548,9 @@ contract MockToken is Test, IERC20 {
 
                 // Test basic create and assign functionality
                 vm.prank(creator1);
-                uint256 taskId = tm.createAndAssignTask(1 ether, bytes("test_task"), bytes32(0), projectId, member1, address(0), 0, false
+                uint256 taskId =
+                    tm.createAndAssignTask(
+                    1 ether, bytes("test_task"), bytes32(0), projectId, member1, address(0), 0, false
                 );
 
                 // Verify task was created and assigned correctly
@@ -1460,7 +1587,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("PERM_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("PERM_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Test that user with only CREATE permission cannot use createAndAssignTask
@@ -1473,7 +1608,9 @@ contract MockToken is Test, IERC20 {
 
                 vm.prank(createOnlyUser);
                 vm.expectRevert(TaskManager.Unauthorized.selector);
-                tm.createAndAssignTask(1 ether, bytes("should_fail"), bytes32(0), projectId, member1, address(0), 0, false);
+                tm.createAndAssignTask(
+                    1 ether, bytes("should_fail"), bytes32(0), projectId, member1, address(0), 0, false
+                );
 
                 // Test that user with only ASSIGN permission cannot use createAndAssignTask
                 uint256 ASSIGN_ONLY_HAT = 301;
@@ -1485,7 +1622,9 @@ contract MockToken is Test, IERC20 {
 
                 vm.prank(assignOnlyUser);
                 vm.expectRevert(TaskManager.Unauthorized.selector);
-                tm.createAndAssignTask(1 ether, bytes("should_fail"), bytes32(0), projectId, member1, address(0), 0, false);
+                tm.createAndAssignTask(
+                    1 ether, bytes("should_fail"), bytes32(0), projectId, member1, address(0), 0, false
+                );
 
                 // Test that user with both CREATE and ASSIGN permissions can use createAndAssignTask
                 uint256 CREATE_ASSIGN_HAT = 302;
@@ -1499,7 +1638,9 @@ contract MockToken is Test, IERC20 {
 
                 vm.prank(createAssignUser);
                 uint256 taskId =
-                    tm.createAndAssignTask(1 ether, bytes("should_work"), bytes32(0), projectId, member1, address(0), 0, false);
+                    tm.createAndAssignTask(
+                    1 ether, bytes("should_work"), bytes32(0), projectId, member1, address(0), 0, false
+                );
 
                 // Verify task was created successfully
                 bytes memory result = lens.getStorage(
@@ -1530,12 +1671,15 @@ contract MockToken is Test, IERC20 {
                 managers[0] = pm1;
 
                 vm.prank(creator1);
-                bytes32 projectId =
-                    tm.createProject(bytes("PM_TEST"), bytes32(0), 5 ether, managers, createHats, claimHats, reviewHats, assignHats);
+                bytes32 projectId = tm.createProject(
+                    bytes("PM_TEST"), bytes32(0), 5 ether, managers, createHats, claimHats, reviewHats, assignHats
+                );
 
                 // Test that project manager can use createAndAssignTask
                 vm.prank(pm1);
-                uint256 taskId = tm.createAndAssignTask(1 ether, bytes("pm_task"), bytes32(0), projectId, member1, address(0), 0, false
+                uint256 taskId =
+                    tm.createAndAssignTask(
+                    1 ether, bytes("pm_task"), bytes32(0), projectId, member1, address(0), 0, false
                 );
 
                 // Verify task was created and assigned
@@ -1554,7 +1698,9 @@ contract MockToken is Test, IERC20 {
                 // Test that non-project manager cannot use createAndAssignTask
                 vm.prank(outsider);
                 vm.expectRevert(TaskManager.Unauthorized.selector);
-                tm.createAndAssignTask(1 ether, bytes("should_fail"), bytes32(0), projectId, member1, address(0), 0, false);
+                tm.createAndAssignTask(
+                    1 ether, bytes("should_fail"), bytes32(0), projectId, member1, address(0), 0, false
+                );
             }
 
             function test_CreateAndAssignTaskValidation() public {
@@ -1569,7 +1715,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("VALIDATION_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("VALIDATION_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Test zero address assignee
@@ -1595,7 +1749,9 @@ contract MockToken is Test, IERC20 {
                 // Test non-existent project - this will fail with NotCreator() because permission check happens first
                 vm.prank(creator1);
                 vm.expectRevert(TaskManager.Unauthorized.selector);
-                tm.createAndAssignTask(1 ether, bytes("test"), bytes32(0), bytes32(uint256(999)), member1, address(0), 0, false);
+                tm.createAndAssignTask(
+                    1 ether, bytes("test"), bytes32(0), bytes32(uint256(999)), member1, address(0), 0, false
+                );
             }
 
             function test_CreateAndAssignTaskBudgetEnforcement() public {
@@ -1610,17 +1766,29 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("BUDGET_TEST"), bytes32(0), 2 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("BUDGET_TEST"),
+                    bytes32(0),
+                    2 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Create first task within budget
                 vm.prank(creator1);
-                uint256 taskId1 = tm.createAndAssignTask(1 ether, bytes("task1"), bytes32(0), projectId, member1, address(0), 0, false
+                uint256 taskId1 =
+                    tm.createAndAssignTask(
+                    1 ether, bytes("task1"), bytes32(0), projectId, member1, address(0), 0, false
                 );
 
                 // Create second task within budget
                 vm.prank(creator1);
-                uint256 taskId2 = tm.createAndAssignTask(1 ether, bytes("task2"), bytes32(0), projectId, member1, address(0), 0, false
+                uint256 taskId2 =
+                    tm.createAndAssignTask(
+                    1 ether, bytes("task2"), bytes32(0), projectId, member1, address(0), 0, false
                 );
 
                 // Try to create third task that would exceed budget
@@ -1648,16 +1816,28 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("EVENT_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("EVENT_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Test that both TaskCreated and TaskAssigned events are emitted
                 vm.prank(creator1);
                 vm.expectEmit(true, true, true, true);
-                emit TaskManager.TaskCreated(0, projectId, 1 ether, address(0), 0, false, bytes("event_test"), bytes32(0));
+                emit TaskManager.TaskCreated(
+                    0, projectId, 1 ether, address(0), 0, false, bytes("event_test"), bytes32(0)
+                );
                 vm.expectEmit(true, true, true, true);
                 emit TaskManager.TaskAssigned(0, member1, creator1);
-                tm.createAndAssignTask(1 ether, bytes("event_test"), bytes32(0), projectId, member1, address(0), 0, false);
+                tm.createAndAssignTask(
+                    1 ether, bytes("event_test"), bytes32(0), projectId, member1, address(0), 0, false
+                );
             }
 
             function test_CreateAndAssignTaskLifecycle() public {
@@ -1672,13 +1852,22 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("LIFECYCLE_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("LIFECYCLE_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Create and assign task
                 vm.prank(creator1);
-                uint256 taskId =
-                    tm.createAndAssignTask(1 ether, bytes("lifecycle_test"), bytes32(0), projectId, member1, address(0), 0, false);
+                uint256 taskId = tm.createAndAssignTask(
+                    1 ether, bytes("lifecycle_test"), bytes32(0), projectId, member1, address(0), 0, false
+                );
 
                 // Verify task is in CLAIMED status
                 bytes memory ret = lens.getStorage(
@@ -1719,13 +1908,23 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("GAS_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("GAS_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Measure gas for createAndAssignTask
                 vm.prank(creator1);
                 uint256 gasBefore = gasleft();
-                uint256 taskId = tm.createAndAssignTask(1 ether, bytes("gas_test"), bytes32(0), projectId, member1, address(0), 0, false
+                uint256 taskId =
+                    tm.createAndAssignTask(
+                    1 ether, bytes("gas_test"), bytes32(0), projectId, member1, address(0), 0, false
                 );
                 uint256 gasUsed = gasBefore - gasleft();
 
@@ -1768,7 +1967,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("MULTI_USER_TEST"), bytes32(0), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("MULTI_USER_TEST"),
+                    bytes32(0),
+                    10 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Create multiple users
@@ -1781,8 +1988,8 @@ contract MockToken is Test, IERC20 {
                 // Create and assign tasks to different users
                 for (uint256 i = 0; i < users.length; i++) {
                     vm.prank(creator1);
-                    uint256 taskId =
-                        tm.createAndAssignTask(1 ether, bytes("multi_user_task"), bytes32(0), projectId, users[i], address(0), 0, false
+                    uint256 taskId = tm.createAndAssignTask(
+                        1 ether, bytes("multi_user_task"), bytes32(0), projectId, users[i], address(0), 0, false
                     );
 
                     // Verify each task is assigned to the correct user
@@ -1813,13 +2020,22 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("EDGE_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("EDGE_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Test assigning to self
                 vm.prank(creator1);
-                uint256 taskId =
-                    tm.createAndAssignTask(1 ether, bytes("self_assign"), bytes32(0), projectId, creator1, address(0), 0, false);
+                uint256 taskId = tm.createAndAssignTask(
+                    1 ether, bytes("self_assign"), bytes32(0), projectId, creator1, address(0), 0, false
+                );
                 bytes memory ret = lens.getStorage(
                     address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(taskId)
                 );
@@ -1828,7 +2044,8 @@ contract MockToken is Test, IERC20 {
 
                 // Test assigning to executor
                 vm.prank(creator1);
-                taskId = tm.createAndAssignTask(1 ether, bytes("executor_assign"), bytes32(0), projectId, executor, address(0), 0, false
+                taskId = tm.createAndAssignTask(
+                    1 ether, bytes("executor_assign"), bytes32(0), projectId, executor, address(0), 0, false
                 );
 
                 ret = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(taskId));
@@ -1837,11 +2054,22 @@ contract MockToken is Test, IERC20 {
 
                 // Test maximum payout - need to create a new project with higher cap
                 vm.prank(creator1);
-                bytes32 maxProjectId = tm.createProject(bytes("MAX_PAYOUT_TEST"), bytes32(0), 1e24, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 maxProjectId = tm.createProject(
+                    bytes("MAX_PAYOUT_TEST"),
+                    bytes32(0),
+                    1e24,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
-                taskId = tm.createAndAssignTask(1e24, bytes("max_payout"), bytes32(0), maxProjectId, member1, address(0), 0, false); // MAX_PAYOUT
+                taskId =
+                    tm.createAndAssignTask(
+                    1e24, bytes("max_payout"), bytes32(0), maxProjectId, member1, address(0), 0, false
+                ); // MAX_PAYOUT
 
                 ret = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(taskId));
                 (uint256 payout,,,,) = abi.decode(ret, (uint96, TaskManager.Status, address, bytes32, bool));
@@ -1861,13 +2089,23 @@ contract MockToken is Test, IERC20 {
                 // Create project
                 uint256[] memory emptyHats = new uint256[](0);
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("PROJECT_SPECIFIC"), bytes32(0), 5 ether, new address[](0), emptyHats, emptyHats, emptyHats, emptyHats
+                bytes32 projectId = tm.createProject(
+                    bytes("PROJECT_SPECIFIC"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    emptyHats,
+                    emptyHats,
+                    emptyHats,
+                    emptyHats
                 );
 
                 // User should not be able to createAndAssignTask (no ASSIGN permission)
                 vm.prank(globalUser);
                 vm.expectRevert(TaskManager.Unauthorized.selector);
-                tm.createAndAssignTask(1 ether, bytes("should_fail"), bytes32(0), projectId, member1, address(0), 0, false);
+                tm.createAndAssignTask(
+                    1 ether, bytes("should_fail"), bytes32(0), projectId, member1, address(0), 0, false
+                );
 
                 // Add ASSIGN permission at project level
                 vm.prank(creator1);
@@ -1876,7 +2114,9 @@ contract MockToken is Test, IERC20 {
                 // Now user should be able to createAndAssignTask
                 vm.prank(globalUser);
                 uint256 taskId =
-                    tm.createAndAssignTask(1 ether, bytes("should_work"), bytes32(0), projectId, member1, address(0), 0, false);
+                    tm.createAndAssignTask(
+                    1 ether, bytes("should_work"), bytes32(0), projectId, member1, address(0), 0, false
+                );
 
                 // Verify task was created and assigned
                 bytes memory ret = lens.getStorage(
@@ -1900,7 +2140,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("APPLICATION_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("APPLICATION_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Create a task that requires applications
@@ -1954,7 +2202,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("PERM_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("PERM_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -1995,7 +2251,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("VALIDATION_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("VALIDATION_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2032,7 +2296,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("APPROVAL_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("APPROVAL_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2066,7 +2338,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("PERM_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("PERM_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2105,7 +2385,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("VALIDATION_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("VALIDATION_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2146,7 +2434,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("EVENT_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("EVENT_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2179,7 +2475,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("LIFECYCLE_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("LIFECYCLE_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2220,7 +2524,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("CANCEL_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("CANCEL_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2257,7 +2569,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("MULTI_APP_TEST"), bytes32(0), 10 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("MULTI_APP_TEST"),
+                    bytes32(0),
+                    10 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Create multiple tasks
@@ -2313,7 +2633,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("PREVENT_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("PREVENT_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2357,7 +2685,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("APP_REQ_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("APP_REQ_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Create application-required task
@@ -2390,7 +2726,11 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("CLAIM_PREVENT_TEST"), bytes32(0), 5 ether, new address[](0),
+                bytes32 projectId = tm.createProject(
+                    bytes("CLAIM_PREVENT_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
                     createHats,
                     claimHats,
                     reviewHats,
@@ -2435,7 +2775,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("REGULAR_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("REGULAR_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 // Create regular task (doesn't require applications)
@@ -2484,7 +2832,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("MULTI_APP_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("MULTI_APP_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2576,7 +2932,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("APPROVE_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("APPROVE_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2636,7 +3000,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("PERSISTENCE_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("PERSISTENCE_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2687,7 +3059,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("CANCEL_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("CANCEL_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2759,7 +3139,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("DUPLICATE_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("DUPLICATE_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2798,7 +3186,15 @@ contract MockToken is Test, IERC20 {
                 assignHats[0] = PM_HAT;
 
                 vm.prank(creator1);
-                bytes32 projectId = tm.createProject(bytes("EVENT_TEST"), bytes32(0), 5 ether, new address[](0), createHats, claimHats, reviewHats, assignHats
+                bytes32 projectId = tm.createProject(
+                    bytes("EVENT_TEST"),
+                    bytes32(0),
+                    5 ether,
+                    new address[](0),
+                    createHats,
+                    claimHats,
+                    reviewHats,
+                    assignHats
                 );
 
                 vm.prank(creator1);
@@ -2848,7 +3244,15 @@ contract MockToken is Test, IERC20 {
             function test_CreateTaskWithBounty() public {
                 // Create task with bounty token
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("bounty_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.5 ether, false);
+                tm.createTask(
+                    1 ether,
+                    bytes("bounty_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken1),
+                    0.5 ether,
+                    false
+                );
 
                 // Verify task has bounty info
                 bytes memory result = lens.getStorage(
@@ -2896,7 +3300,13 @@ contract MockToken is Test, IERC20 {
                 // Create application task with bounty
                 vm.prank(creator1);
                 tm.createTask(
-                    1 ether, bytes("app_bounty_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether, true
+                    1 ether,
+                    bytes("app_bounty_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken1),
+                    0.3 ether,
+                    true
                 );
 
                 // Verify task has bounty info and requires application
@@ -2921,7 +3331,13 @@ contract MockToken is Test, IERC20 {
             function test_CreateAndAssignTaskWithBounty() public {
                 // Create and assign task with bounty
                 vm.prank(creator1);
-                uint256 taskId = tm.createAndAssignTask(1 ether, bytes("assign_bounty_task"), bytes32(0), BOUNTY_PROJECT_ID, member1, address(bountyToken1),
+                uint256 taskId = tm.createAndAssignTask(
+                    1 ether,
+                    bytes("assign_bounty_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    member1,
+                    address(bountyToken1),
                     0.4 ether,
                     false
                 );
@@ -2949,7 +3365,13 @@ contract MockToken is Test, IERC20 {
                 // Create task with bounty
                 vm.prank(creator1);
                 tm.createTask(
-                    1 ether, bytes("complete_bounty_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.5 ether, false
+                    1 ether,
+                    bytes("complete_bounty_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken1),
+                    0.5 ether,
+                    false
                 );
 
                 // Assign and complete task
@@ -2979,7 +3401,9 @@ contract MockToken is Test, IERC20 {
             function test_CompleteTaskWithoutBounty() public {
                 // Create task without bounty
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("complete_no_bounty_task"), bytes32(0), NO_BOUNTY_PROJECT_ID, address(0), 0, false);
+                tm.createTask(
+                    1 ether, bytes("complete_no_bounty_task"), bytes32(0), NO_BOUNTY_PROJECT_ID, address(0), 0, false
+                );
 
                 // Assign and complete task
                 vm.prank(creator1);
@@ -3004,7 +3428,13 @@ contract MockToken is Test, IERC20 {
                 // Create task with initial bounty
                 vm.prank(creator1);
                 tm.createTask(
-                    1 ether, bytes("update_bounty_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether, false
+                    1 ether,
+                    bytes("update_bounty_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken1),
+                    0.3 ether,
+                    false
                 );
 
                 // Update bounty before claim
@@ -3033,7 +3463,10 @@ contract MockToken is Test, IERC20 {
                 vm.prank(creator1);
                 tm.createTask(
                     1 ether,
-                    bytes("update_claimed_bounty_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1),
+                    bytes("update_claimed_bounty_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken1),
                     0.3 ether,
                     false
                 );
@@ -3052,7 +3485,13 @@ contract MockToken is Test, IERC20 {
                 // Create task with bounty
                 vm.prank(creator1);
                 tm.createTask(
-                    1 ether, bytes("remove_bounty_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether, false
+                    1 ether,
+                    bytes("remove_bounty_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken1),
+                    0.3 ether,
+                    false
                 );
 
                 // Remove bounty
@@ -3080,12 +3519,24 @@ contract MockToken is Test, IERC20 {
                 // Create two tasks with different bounty tokens
                 vm.prank(creator1);
                 tm.createTask(
-                    1 ether, bytes("bounty1_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether, false
+                    1 ether,
+                    bytes("bounty1_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken1),
+                    0.3 ether,
+                    false
                 );
 
                 vm.prank(creator1);
                 tm.createTask(
-                    1 ether, bytes("bounty2_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken2), 0.4 ether, false
+                    1 ether,
+                    bytes("bounty2_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken2),
+                    0.4 ether,
+                    false
                 );
 
                 // Complete both tasks
@@ -3120,24 +3571,42 @@ contract MockToken is Test, IERC20 {
                 // Test bounty token with zero payout
                 vm.prank(creator1);
                 vm.expectRevert(ValidationLib.InvalidPayout.selector);
-                tm.createTask(1 ether, bytes("invalid_bounty"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0, false);
+                tm.createTask(
+                    1 ether, bytes("invalid_bounty"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0, false
+                );
 
                 // Test excessive bounty payout
                 vm.prank(creator1);
                 vm.expectRevert(ValidationLib.InvalidPayout.selector);
-                tm.createTask(1 ether, bytes("excessive_bounty"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 1e25, false); // Over MAX_PAYOUT
+                tm.createTask(
+                    1 ether,
+                    bytes("excessive_bounty"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken1),
+                    1e25,
+                    false
+                ); // Over MAX_PAYOUT
 
                 // Test that zero bounty token with non-zero payout is not allowed
                 vm.prank(creator1);
                 vm.expectRevert(ValidationLib.ZeroAddress.selector);
-                tm.createTask(1 ether, bytes("invalid_zero_token"), bytes32(0), BOUNTY_PROJECT_ID, address(0), 0.5 ether, false);
+                tm.createTask(
+                    1 ether, bytes("invalid_zero_token"), bytes32(0), BOUNTY_PROJECT_ID, address(0), 0.5 ether, false
+                );
             }
 
             function test_ApplicationTaskWithBounty() public {
                 // Create application task with bounty
                 vm.prank(creator1);
                 tm.createTask(
-                    1 ether, bytes("app_bounty_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether, true
+                    1 ether,
+                    bytes("app_bounty_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken1),
+                    0.3 ether,
+                    true
                 );
 
                 // Apply for task
@@ -3173,7 +3642,13 @@ contract MockToken is Test, IERC20 {
                 // Create task with bounty
                 vm.prank(creator1);
                 tm.createTask(
-                    1 ether, bytes("cancel_bounty_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether, false
+                    1 ether,
+                    bytes("cancel_bounty_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken1),
+                    0.3 ether,
+                    false
                 );
 
                 // Cancel task
@@ -3201,7 +3676,9 @@ contract MockToken is Test, IERC20 {
             function test_GetTaskFullFunction() public {
                 // Create task with bounty
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("full_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether, false);
+                tm.createTask(
+                    1 ether, bytes("full_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether, false
+                );
 
                 // Test getTaskFull function
                 bytes memory result = lens.getStorage(
@@ -3249,10 +3726,23 @@ contract MockToken is Test, IERC20 {
                 vm.prank(creator1);
                 vm.expectEmit(true, true, true, true);
                 emit TaskManager.TaskCreated(
-                    0, BOUNTY_PROJECT_ID, 1 ether, address(bountyToken1), 0.3 ether, false, bytes("bounty_event_task"), bytes32(0)
+                    0,
+                    BOUNTY_PROJECT_ID,
+                    1 ether,
+                    address(bountyToken1),
+                    0.3 ether,
+                    false,
+                    bytes("bounty_event_task"),
+                    bytes32(0)
                 );
                 tm.createTask(
-                    1 ether, bytes("bounty_event_task"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.3 ether, false
+                    1 ether,
+                    bytes("bounty_event_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(bountyToken1),
+                    0.3 ether,
+                    false
                 );
 
                 // Complete task and verify events
@@ -3271,8 +3761,12 @@ contract MockToken is Test, IERC20 {
             function test_MultipleBountyTokensInProject() public {
                 // Create multiple tasks with different bounty tokens in same project
                 vm.startPrank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.2 ether, false);
-                tm.createTask(1 ether, bytes("task2"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken2), 0.3 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken1), 0.2 ether, false
+                );
+                tm.createTask(
+                    1 ether, bytes("task2"), bytes32(0), BOUNTY_PROJECT_ID, address(bountyToken2), 0.3 ether, false
+                );
                 tm.createTask(1 ether, bytes("task3"), bytes32(0), BOUNTY_PROJECT_ID, address(0), 0, false); // No bounty
                 vm.stopPrank();
 
@@ -3317,7 +3811,13 @@ contract MockToken is Test, IERC20 {
                 // Create task with failing bounty token
                 vm.prank(creator1);
                 tm.createTask(
-                    1 ether, bytes("failing_bounty_task"), bytes32(0), BOUNTY_PROJECT_ID, address(failingToken), 0.3 ether, false
+                    1 ether,
+                    bytes("failing_bounty_task"),
+                    bytes32(0),
+                    BOUNTY_PROJECT_ID,
+                    address(failingToken),
+                    0.3 ether,
+                    false
                 );
 
                 // Assign and submit task
@@ -3463,7 +3963,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create task within budget
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 1.5 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 1.5 ether, false
+                );
 
                 // Verify budget tracking
                 bytes memory result = lens.getStorage(
@@ -3477,7 +3979,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create another task within budget
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 1.5 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 1.5 ether, false
+                );
 
                 // Verify budget tracking
                 result = lens.getStorage(
@@ -3491,13 +3995,17 @@ contract MockToken is Test, IERC20 {
                 // Try to exceed budget
                 vm.prank(creator1);
                 vm.expectRevert(BudgetLib.BudgetExceeded.selector);
-                tm.createTask(1 ether, bytes("task3"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 0.1 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task3"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 0.1 ether, false
+                );
             }
 
             function test_CreateTaskWithoutBountyBudgetSet() public {
                 // Create task without setting bounty budget (should work - unlimited)
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 5 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 5 ether, false
+                );
 
                 // Verify budget tracking (cap should be 0, spent should be updated)
                 bytes memory result = lens.getStorage(
@@ -3511,7 +4019,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create another large task (should work since cap is 0 = unlimited)
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 10 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 10 ether, false
+                );
 
                 result = lens.getStorage(
                     address(tm),
@@ -3535,9 +4045,15 @@ contract MockToken is Test, IERC20 {
 
                 // Create tasks with different tokens
                 vm.startPrank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 1 ether, false);
-                tm.createTask(1 ether, bytes("task2"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 2 ether, false);
-                tm.createTask(1 ether, bytes("task3"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 1 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 1 ether, false
+                );
+                tm.createTask(
+                    1 ether, bytes("task2"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 2 ether, false
+                );
+                tm.createTask(
+                    1 ether, bytes("task3"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 1 ether, false
+                );
                 vm.stopPrank();
 
                 // Verify independent budget tracking
@@ -3562,11 +4078,15 @@ contract MockToken is Test, IERC20 {
                 // Try to exceed token1 budget
                 vm.prank(creator1);
                 vm.expectRevert(BudgetLib.BudgetExceeded.selector);
-                tm.createTask(1 ether, bytes("task4"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 0.1 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task4"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 0.1 ether, false
+                );
 
                 // But token2 should still work
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task5"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 1 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task5"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 1 ether, false
+                );
 
                 result = lens.getStorage(
                     address(tm),
@@ -3586,7 +4106,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create task
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false
+                );
 
                 // Verify initial budget
                 bytes memory result = lens.getStorage(
@@ -3629,7 +4151,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create task with token1
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false
+                );
 
                 // Verify initial budgets
                 bytes memory result = lens.getStorage(
@@ -3677,7 +4201,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create task with bounty
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, false
+                );
 
                 // Verify budget
                 bytes memory result = lens.getStorage(
@@ -3711,7 +4237,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create task
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false
+                );
 
                 // Verify budget
                 bytes memory result = lens.getStorage(
@@ -3745,7 +4273,15 @@ contract MockToken is Test, IERC20 {
 
                 // Create and assign task
                 vm.prank(creator1);
-                uint256 taskId = tm.createAndAssignTask(1 ether, bytes("assign_task"), bytes32(0), BUDGET_PROJECT_ID, member1, address(bountyToken1), 3 ether, false
+                uint256 taskId = tm.createAndAssignTask(
+                    1 ether,
+                    bytes("assign_task"),
+                    bytes32(0),
+                    BUDGET_PROJECT_ID,
+                    member1,
+                    address(bountyToken1),
+                    3 ether,
+                    false
                 );
 
                 // Verify budget tracking
@@ -3760,7 +4296,15 @@ contract MockToken is Test, IERC20 {
                 // Try to exceed budget with another task
                 vm.prank(creator1);
                 vm.expectRevert(BudgetLib.BudgetExceeded.selector);
-                tm.createAndAssignTask(1 ether, bytes("assign_task2"), bytes32(0), BUDGET_PROJECT_ID, member1, address(bountyToken1), 2.1 ether, false
+                tm.createAndAssignTask(
+                    1 ether,
+                    bytes("assign_task2"),
+                    bytes32(0),
+                    BUDGET_PROJECT_ID,
+                    member1,
+                    address(bountyToken1),
+                    2.1 ether,
+                    false
                 );
             }
 
@@ -3773,7 +4317,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create application task
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("app_task"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 4 ether, true);
+                tm.createTask(
+                    1 ether, bytes("app_task"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 4 ether, true
+                );
 
                 // Verify budget tracking
                 bytes memory result = lens.getStorage(
@@ -3787,13 +4333,17 @@ contract MockToken is Test, IERC20 {
                 // Try to create another task that would exceed budget
                 vm.prank(creator1);
                 vm.expectRevert(BudgetLib.BudgetExceeded.selector);
-                tm.createTask(1 ether, bytes("app_task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 1.1 ether, true);
+                tm.createTask(
+                    1 ether, bytes("app_task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 1.1 ether, true
+                );
             }
 
             function test_SetBountyCapBelowSpent() public {
                 // Create task first
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, false
+                );
 
                 // Verify spent
                 bytes memory result = lens.getStorage(
@@ -3868,7 +4418,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create task that uses both budgets
                 vm.prank(creator1);
-                tm.createTask(1.5 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
+                tm.createTask(
+                    1.5 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false
+                );
 
                 // Verify both budgets are tracked independently
                 bytes memory result =
@@ -3888,12 +4440,16 @@ contract MockToken is Test, IERC20 {
                 // Try to exceed participation token budget
                 vm.prank(creator1);
                 vm.expectRevert(BudgetLib.BudgetExceeded.selector);
-                tm.createTask(0.6 ether, bytes("task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 0.5 ether, false);
+                tm.createTask(
+                    0.6 ether, bytes("task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 0.5 ether, false
+                );
 
                 // Create task that only exceeds bounty budget
                 vm.prank(creator1);
                 vm.expectRevert(BudgetLib.BudgetExceeded.selector);
-                tm.createTask(0.5 ether, bytes("task3"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 1.1 ether, false);
+                tm.createTask(
+                    0.5 ether, bytes("task3"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 1.1 ether, false
+                );
             }
 
             function test_CompleteTaskWithBountyBudgetTracking() public {
@@ -3905,7 +4461,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create and complete task
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, false
+                );
 
                 vm.prank(creator1);
                 tm.assignTask(0, member1);
@@ -3952,7 +4510,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create and claim task
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false
+                );
 
                 vm.prank(creator1);
                 tm.assignTask(0, member1);
@@ -3968,7 +4528,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create large bounty task
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 100 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 100 ether, false
+                );
 
                 // Verify budget tracking
                 bytes memory result = lens.getStorage(
@@ -3982,7 +4544,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create another large task (should work)
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 200 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 200 ether, false
+                );
 
                 result = lens.getStorage(
                     address(tm),
@@ -4044,7 +4608,13 @@ contract MockToken is Test, IERC20 {
 
                     vm.prank(creator1);
                     tm.createTask(
-                        0.1 ether, abi.encodePacked("task", i), bytes32(0), MULTI_TOKEN_PROJECT_ID, token, bountyAmount, false
+                        0.1 ether,
+                        abi.encodePacked("task", i),
+                        bytes32(0),
+                        MULTI_TOKEN_PROJECT_ID,
+                        token,
+                        bountyAmount,
+                        false
                     );
                 }
 
@@ -4076,26 +4646,46 @@ contract MockToken is Test, IERC20 {
                 vm.prank(creator1);
                 vm.expectRevert(BudgetLib.BudgetExceeded.selector);
                 tm.createTask(
-                    0.1 ether, bytes("fail1"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken1), 7.6 ether, false
+                    0.1 ether,
+                    bytes("fail1"),
+                    bytes32(0),
+                    MULTI_TOKEN_PROJECT_ID,
+                    address(bountyToken1),
+                    7.6 ether,
+                    false
                 );
 
                 vm.prank(creator1);
                 vm.expectRevert(BudgetLib.BudgetExceeded.selector);
                 tm.createTask(
-                    0.1 ether, bytes("fail2"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken2), 11.1 ether, false
+                    0.1 ether,
+                    bytes("fail2"),
+                    bytes32(0),
+                    MULTI_TOKEN_PROJECT_ID,
+                    address(bountyToken2),
+                    11.1 ether,
+                    false
                 );
 
                 vm.prank(creator1);
                 vm.expectRevert(BudgetLib.BudgetExceeded.selector);
                 tm.createTask(
-                    0.1 ether, bytes("fail3"), bytes32(0), MULTI_TOKEN_PROJECT_ID, address(bountyToken3), 14.1 ether, false
+                    0.1 ether,
+                    bytes("fail3"),
+                    bytes32(0),
+                    MULTI_TOKEN_PROJECT_ID,
+                    address(bountyToken3),
+                    14.1 ether,
+                    false
                 );
             }
 
             function test_BountyBudgetUnderflowProtectionCancelTask() public {
                 // Create task with bounty
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false
+                );
 
                 // Artificially corrupt the bounty budget to simulate underflow scenario
 
@@ -4105,7 +4695,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create another task to test the protection
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 1 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task2"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 1 ether, false
+                );
 
                 // Verify budget is correct
                 bytes memory result = lens.getStorage(
@@ -4131,7 +4723,9 @@ contract MockToken is Test, IERC20 {
             function test_BountyBudgetUnderflowProtectionUpdateTask() public {
                 // Create task with bounty
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false
+                );
 
                 // Verify budget
                 bytes memory result = lens.getStorage(
@@ -4165,7 +4759,9 @@ contract MockToken is Test, IERC20 {
             function test_BountyBudgetUnderflowProtectionEdgeCase() public {
                 // Test edge case where bounty payout equals spent
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 3 ether, false
+                );
 
                 bytes memory result = lens.getStorage(
                     address(tm),
@@ -4201,7 +4797,9 @@ contract MockToken is Test, IERC20 {
 
                 // Create task with token1
                 vm.prank(creator1);
-                tm.createTask(1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false);
+                tm.createTask(
+                    1 ether, bytes("task1"), bytes32(0), BUDGET_PROJECT_ID, address(bountyToken1), 2 ether, false
+                );
 
                 // Update to token2 (should roll back token1 and apply token2)
                 vm.prank(creator1);

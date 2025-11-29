@@ -713,15 +713,19 @@ contract RunOrgActionsAdvanced is Script {
             // Parse nested vouching config (optional - use try/catch for backwards compat)
             try vm.parseJsonBool(configJson, string.concat(basePath, ".vouching.enabled")) returns (bool enabled) {
                 config.roles[i].vouching.enabled = enabled;
-                config.roles[i].vouching.quorum = uint32(vm.parseJsonUint(configJson, string.concat(basePath, ".vouching.quorum")));
-                config.roles[i].vouching.voucherRoleIndex = vm.parseJsonUint(configJson, string.concat(basePath, ".vouching.voucherRoleIndex"));
-                config.roles[i].vouching.combineWithHierarchy = vm.parseJsonBool(configJson, string.concat(basePath, ".vouching.combineWithHierarchy"));
+                config.roles[i].vouching.quorum =
+                    uint32(vm.parseJsonUint(configJson, string.concat(basePath, ".vouching.quorum")));
+                config.roles[i].vouching.voucherRoleIndex =
+                    vm.parseJsonUint(configJson, string.concat(basePath, ".vouching.voucherRoleIndex"));
+                config.roles[i].vouching.combineWithHierarchy =
+                    vm.parseJsonBool(configJson, string.concat(basePath, ".vouching.combineWithHierarchy"));
             } catch {}
 
             // Parse nested defaults config (optional)
             try vm.parseJsonBool(configJson, string.concat(basePath, ".defaults.eligible")) returns (bool eligible) {
                 config.roles[i].defaults.eligible = eligible;
-                config.roles[i].defaults.standing = vm.parseJsonBool(configJson, string.concat(basePath, ".defaults.standing"));
+                config.roles[i].defaults.standing =
+                    vm.parseJsonBool(configJson, string.concat(basePath, ".defaults.standing"));
             } catch {
                 // Default to eligible=true, standing=true for backwards compat
                 config.roles[i].defaults.eligible = true;
@@ -729,7 +733,9 @@ contract RunOrgActionsAdvanced is Script {
             }
 
             // Parse nested hierarchy config (optional)
-            try vm.parseJsonUint(configJson, string.concat(basePath, ".hierarchy.adminRoleIndex")) returns (uint256 adminIdx) {
+            try vm.parseJsonUint(configJson, string.concat(basePath, ".hierarchy.adminRoleIndex")) returns (
+                uint256 adminIdx
+            ) {
                 config.roles[i].hierarchy.adminRoleIndex = adminIdx;
             } catch {
                 // Default to type(uint256).max for backwards compat
@@ -737,17 +743,24 @@ contract RunOrgActionsAdvanced is Script {
             }
 
             // Parse nested distribution config (optional)
-            try vm.parseJsonBool(configJson, string.concat(basePath, ".distribution.mintToDeployer")) returns (bool mintToDeployer) {
+            try vm.parseJsonBool(configJson, string.concat(basePath, ".distribution.mintToDeployer")) returns (
+                bool mintToDeployer
+            ) {
                 config.roles[i].distribution.mintToDeployer = mintToDeployer;
-                config.roles[i].distribution.mintToExecutor = vm.parseJsonBool(configJson, string.concat(basePath, ".distribution.mintToExecutor"));
-                bytes memory additionalWearersData = vm.parseJson(configJson, string.concat(basePath, ".distribution.additionalWearers"));
+                config.roles[i].distribution.mintToExecutor =
+                    vm.parseJsonBool(configJson, string.concat(basePath, ".distribution.mintToExecutor"));
+                bytes memory additionalWearersData =
+                    vm.parseJson(configJson, string.concat(basePath, ".distribution.additionalWearers"));
                 config.roles[i].distribution.additionalWearers = abi.decode(additionalWearersData, (address[]));
             } catch {}
 
             // Parse nested hatConfig (optional)
-            try vm.parseJsonUint(configJson, string.concat(basePath, ".hatConfig.maxSupply")) returns (uint256 maxSupply) {
+            try vm.parseJsonUint(configJson, string.concat(basePath, ".hatConfig.maxSupply")) returns (
+                uint256 maxSupply
+            ) {
                 config.roles[i].hatConfig.maxSupply = uint32(maxSupply);
-                config.roles[i].hatConfig.mutableHat = vm.parseJsonBool(configJson, string.concat(basePath, ".hatConfig.mutableHat"));
+                config.roles[i].hatConfig.mutableHat =
+                    vm.parseJsonBool(configJson, string.concat(basePath, ".hatConfig.mutableHat"));
             } catch {
                 // Default to unlimited and mutable for backwards compat
                 config.roles[i].hatConfig.maxSupply = type(uint32).max;
@@ -826,11 +839,11 @@ contract RunOrgActionsAdvanced is Script {
         }
     }
 
-    function _buildDeploymentParams(
-        OrgConfigJson memory config,
-        address globalAccountRegistry,
-        address deployerAddress
-    ) internal pure returns (OrgDeployer.DeploymentParams memory params) {
+    function _buildDeploymentParams(OrgConfigJson memory config, address globalAccountRegistry, address deployerAddress)
+        internal
+        pure
+        returns (OrgDeployer.DeploymentParams memory params)
+    {
         // Set basic params
         params.orgId = keccak256(bytes(config.orgId));
         params.orgName = config.orgName;
@@ -859,20 +872,16 @@ contract RunOrgActionsAdvanced is Script {
                     combineWithHierarchy: role.vouching.combineWithHierarchy
                 }),
                 defaults: RoleConfigStructs.RoleEligibilityDefaults({
-                    eligible: role.defaults.eligible,
-                    standing: role.defaults.standing
+                    eligible: role.defaults.eligible, standing: role.defaults.standing
                 }),
-                hierarchy: RoleConfigStructs.RoleHierarchyConfig({
-                    adminRoleIndex: role.hierarchy.adminRoleIndex
-                }),
+                hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: role.hierarchy.adminRoleIndex}),
                 distribution: RoleConfigStructs.RoleDistributionConfig({
                     mintToDeployer: role.distribution.mintToDeployer,
                     mintToExecutor: role.distribution.mintToExecutor,
                     additionalWearers: role.distribution.additionalWearers
                 }),
                 hatConfig: RoleConfigStructs.HatConfig({
-                    maxSupply: role.hatConfig.maxSupply,
-                    mutableHat: role.hatConfig.mutableHat
+                    maxSupply: role.hatConfig.maxSupply, mutableHat: role.hatConfig.mutableHat
                 })
             });
         }

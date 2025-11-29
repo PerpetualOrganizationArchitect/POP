@@ -98,7 +98,10 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     }
 
     /* ═════════════════ ORG  LOGIC ═════════════════ */
-    function registerOrg(bytes32 orgId, address executorAddr, bytes calldata name, bytes32 metadataHash) external onlyOwner {
+    function registerOrg(bytes32 orgId, address executorAddr, bytes calldata name, bytes32 metadataHash)
+        external
+        onlyOwner
+    {
         ValidationLib.requireValidTitle(name);
         if (orgId == bytes32(0) || executorAddr == address(0)) revert InvalidParam();
 

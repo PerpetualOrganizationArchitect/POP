@@ -407,7 +407,13 @@ contract DDVotingTest is Test {
         // Expect the NewHatProposal event to be emitted
         vm.expectEmit(true, true, true, true);
         emit DirectDemocracyVoting.NewHatProposal(
-            0, bytes("Test Hat Poll"), bytes32(0), 1, uint64(block.timestamp + 10 minutes), uint64(block.timestamp), hatIds
+            0,
+            bytes("Test Hat Poll"),
+            bytes32(0),
+            1,
+            uint64(block.timestamp + 10 minutes),
+            uint64(block.timestamp),
+            hatIds
         );
 
         uint256 id = _createHatPoll(1, hatIds);
