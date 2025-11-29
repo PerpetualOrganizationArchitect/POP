@@ -2493,15 +2493,16 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Create a new hat using createHat directly (simulating external hat creation)
         vm.prank(executive);
-        uint256 newHatId = IHats(SEPOLIA_HATS).createHat(
-            setup.defaultRoleHat, // parent
-            "Test Hat",
-            100, // maxSupply
-            setup.eligibilityModule,
-            toggleModule,
-            true, // mutable
-            "ipfs://test-hat"
-        );
+        uint256 newHatId = IHats(SEPOLIA_HATS)
+            .createHat(
+                setup.defaultRoleHat, // parent
+                "Test Hat",
+                100, // maxSupply
+                setup.eligibilityModule,
+                toggleModule,
+                true, // mutable
+                "ipfs://test-hat"
+            );
 
         // Now register this hat creation - should emit HatCreatedWithEligibility event
         vm.expectEmit(true, true, true, true);
@@ -2515,12 +2516,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         );
 
         vm.prank(executive);
-        EligibilityModule(setup.eligibilityModule).registerHatCreation(
-            newHatId,
-            setup.defaultRoleHat,
-            true,
-            true
-        );
+        EligibilityModule(setup.eligibilityModule).registerHatCreation(newHatId, setup.defaultRoleHat, true, true);
     }
 
     // Test that registerHatCreation emits DefaultEligibilityUpdated event
@@ -2533,27 +2529,29 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         _mintAdminHat(setup.exec, setup.eligibilityModule, setup.executiveRoleHat, executive);
 
         vm.prank(executive);
-        uint256 newHatId = IHats(SEPOLIA_HATS).createHat(
-            setup.defaultRoleHat,
-            "Test Hat 2",
-            100,
-            setup.eligibilityModule,
-            toggleModule,
-            true,
-            "ipfs://test-hat-2"
-        );
+        uint256 newHatId = IHats(SEPOLIA_HATS)
+            .createHat(
+                setup.defaultRoleHat,
+                "Test Hat 2",
+                100,
+                setup.eligibilityModule,
+                toggleModule,
+                true,
+                "ipfs://test-hat-2"
+            );
 
         // Expect DefaultEligibilityUpdated event
         vm.expectEmit(true, false, false, true);
         emit DefaultEligibilityUpdated(newHatId, false, true, executive);
 
         vm.prank(executive);
-        EligibilityModule(setup.eligibilityModule).registerHatCreation(
-            newHatId,
-            setup.defaultRoleHat,
-            false, // not eligible by default
-            true // good standing by default
-        );
+        EligibilityModule(setup.eligibilityModule)
+            .registerHatCreation(
+                newHatId,
+                setup.defaultRoleHat,
+                false, // not eligible by default
+                true // good standing by default
+            );
     }
 
     // Test authorization - only superAdmin or hat admin can call registerHatCreation
@@ -2568,34 +2566,25 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Create a hat that we'll try to register
         vm.prank(executive);
-        uint256 newHatId = IHats(SEPOLIA_HATS).createHat(
-            setup.defaultRoleHat,
-            "Auth Test Hat",
-            100,
-            setup.eligibilityModule,
-            toggleModule,
-            true,
-            "ipfs://auth-test"
-        );
+        uint256 newHatId = IHats(SEPOLIA_HATS)
+            .createHat(
+                setup.defaultRoleHat,
+                "Auth Test Hat",
+                100,
+                setup.eligibilityModule,
+                toggleModule,
+                true,
+                "ipfs://auth-test"
+            );
 
         // Unauthorized user should not be able to register
         vm.prank(unauthorized);
         vm.expectRevert(abi.encodeWithSelector(EligibilityModule.NotAuthorizedAdmin.selector));
-        EligibilityModule(setup.eligibilityModule).registerHatCreation(
-            newHatId,
-            setup.defaultRoleHat,
-            true,
-            true
-        );
+        EligibilityModule(setup.eligibilityModule).registerHatCreation(newHatId, setup.defaultRoleHat, true, true);
 
         // Hat admin (executive) should be able to register
         vm.prank(executive);
-        EligibilityModule(setup.eligibilityModule).registerHatCreation(
-            newHatId,
-            setup.defaultRoleHat,
-            true,
-            true
-        );
+        EligibilityModule(setup.eligibilityModule).registerHatCreation(newHatId, setup.defaultRoleHat, true, true);
     }
 
     // Test that registerHatCreation sets default eligibility correctly
@@ -2609,27 +2598,30 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         _mintAdminHat(setup.exec, setup.eligibilityModule, setup.executiveRoleHat, executive);
 
         vm.prank(executive);
-        uint256 newHatId = IHats(SEPOLIA_HATS).createHat(
-            setup.defaultRoleHat,
-            "Eligibility Test Hat",
-            100,
-            setup.eligibilityModule,
-            toggleModule,
-            true,
-            "ipfs://eligibility-test"
-        );
+        uint256 newHatId = IHats(SEPOLIA_HATS)
+            .createHat(
+                setup.defaultRoleHat,
+                "Eligibility Test Hat",
+                100,
+                setup.eligibilityModule,
+                toggleModule,
+                true,
+                "ipfs://eligibility-test"
+            );
 
         // Register with specific eligibility settings (not eligible, good standing)
         vm.prank(executive);
-        EligibilityModule(setup.eligibilityModule).registerHatCreation(
-            newHatId,
-            setup.defaultRoleHat,
-            false, // not eligible by default
-            true // good standing by default
-        );
+        EligibilityModule(setup.eligibilityModule)
+            .registerHatCreation(
+                newHatId,
+                setup.defaultRoleHat,
+                false, // not eligible by default
+                true // good standing by default
+            );
 
         // Check that the default eligibility was set correctly
-        (bool eligible, bool standing) = EligibilityModule(setup.eligibilityModule).getWearerStatus(testWearer, newHatId);
+        (bool eligible, bool standing) =
+            EligibilityModule(setup.eligibilityModule).getWearerStatus(testWearer, newHatId);
         assertFalse(eligible, "Wearer should not be eligible by default");
         assertTrue(standing, "Wearer should have good standing by default");
     }
@@ -2704,27 +2696,24 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Create a hat
         vm.prank(executive);
-        uint256 newHatId = IHats(SEPOLIA_HATS).createHat(
-            setup.defaultRoleHat,
-            "SuperAdmin Test Hat",
-            100,
-            setup.eligibilityModule,
-            toggleModule,
-            true,
-            "ipfs://superadmin-test"
-        );
+        uint256 newHatId = IHats(SEPOLIA_HATS)
+            .createHat(
+                setup.defaultRoleHat,
+                "SuperAdmin Test Hat",
+                100,
+                setup.eligibilityModule,
+                toggleModule,
+                true,
+                "ipfs://superadmin-test"
+            );
 
         // SuperAdmin (executor) should be able to register even without being hat admin
         vm.prank(setup.exec);
-        EligibilityModule(setup.eligibilityModule).registerHatCreation(
-            newHatId,
-            setup.defaultRoleHat,
-            true,
-            true
-        );
+        EligibilityModule(setup.eligibilityModule).registerHatCreation(newHatId, setup.defaultRoleHat, true, true);
 
         // Verify eligibility was set
-        (bool eligible, bool standing) = EligibilityModule(setup.eligibilityModule).getWearerStatus(address(0x777), newHatId);
+        (bool eligible, bool standing) =
+            EligibilityModule(setup.eligibilityModule).getWearerStatus(address(0x777), newHatId);
         assertTrue(eligible, "Wearer should be eligible by default after registration");
         assertTrue(standing, "Wearer should have good standing by default after registration");
     }
