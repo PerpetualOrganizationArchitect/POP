@@ -504,6 +504,7 @@ contract RunOrgActionsAdvanced is Script {
         vm.broadcast(memberKeys.coordinator);
         bytes32 projectId = tm.createProject(
             abi.encode("metadata", "Building core governance infrastructure for the cooperative"),
+            bytes32(0), // metadataHash
             1000 ether, // Project cap
             managers,
             emptyHats, // createHats
@@ -522,6 +523,7 @@ contract RunOrgActionsAdvanced is Script {
         tm.createTask(
             10 ether, // payout in participation tokens
             abi.encode("task", "voting-deployment"),
+            bytes32(0), // metadataHash
             projectId,
             address(0), // bountyToken (0 = no bounty)
             0, // bountyPayout
@@ -535,6 +537,7 @@ contract RunOrgActionsAdvanced is Script {
         tm.createTask(
             5 ether, // payout
             abi.encode("task", "docs"),
+            bytes32(0), // metadataHash
             projectId,
             address(0),
             0,
@@ -564,12 +567,12 @@ contract RunOrgActionsAdvanced is Script {
         // Members submit task work
         console.log("\n-> Member 1 submitting Task 0...");
         vm.broadcast(memberKeys.member1);
-        tm.submitTask(task0, abi.encode("submission", "voting-system-deployed"));
+        tm.submitTask(task0, keccak256(abi.encode("submission", "voting-system-deployed")));
         console.log("  [OK] Task 0 Submitted for Review");
 
         console.log("-> Member 2 submitting Task 1...");
         vm.broadcast(memberKeys.member2);
-        tm.submitTask(task1, abi.encode("submission", "documentation-complete"));
+        tm.submitTask(task1, keccak256(abi.encode("submission", "documentation-complete")));
         console.log("  [OK] Task 1 Submitted for Review");
 
         // Coordinator completes tasks (approves the submissions)
@@ -622,6 +625,7 @@ contract RunOrgActionsAdvanced is Script {
         vm.broadcast(memberKeys.coordinator);
         voting.createProposal(
             abi.encode("ipfs://proposal-update-task-timeout"),
+            bytes32(0), // descriptionHash
             4320, // 3 days in minutes
             2, // 2 options (YES/NO)
             batches,

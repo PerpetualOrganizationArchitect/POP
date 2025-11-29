@@ -276,13 +276,14 @@ contract HybridVoting is Initializable {
 
     /* ─────── Proposal creation ─────── */
     function createProposal(
-        bytes calldata metadata,
+        bytes calldata title,
+        bytes32 descriptionHash,
         uint32 minutesDuration,
         uint8 numOptions,
         IExecutor.Call[][] calldata batches,
         uint256[] calldata hatIds
     ) external onlyCreator whenNotPaused {
-        HybridVotingProposals.createProposal(metadata, minutesDuration, numOptions, batches, hatIds);
+        HybridVotingProposals.createProposal(title, descriptionHash, minutesDuration, numOptions, batches, hatIds);
     }
 
     /* ─────── Voting ─────── */
