@@ -8,6 +8,11 @@ interface IEligibilityModule {
     function setEligibilityModuleAdminHat(uint256) external;
     function mintHatToAddress(uint256 hatId, address wearer) external;
     function transferSuperAdmin(address) external;
+    function getWearerStatus(address wearer, uint256 hatId) external view returns (bool eligible, bool standing);
+    function vouchFor(address wearer, uint256 hatId) external;
+    function revokeVouch(address wearer, uint256 hatId) external;
+    function currentVouchCount(uint256 hatId, address wearer) external view returns (uint32);
+    function claimVouchedHat(uint256 hatId) external;
 }
 
 interface IToggleModule {

@@ -13,41 +13,45 @@ import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {Executor, IExecutor} from "../src/Executor.sol";
 import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
 import {OrgRegistry} from "../src/OrgRegistry.sol";
+import {IEligibilityModule} from "../src/interfaces/IHatsModules.sol";
+import {ModuleTypes} from "../src/libs/ModuleTypes.sol";
 import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
 
 /**
- * @title RunOrgActions
- * @notice Comprehensive script demonstrating organization actions after deployment
- * @dev Showcases TaskManager, HybridVoting, and other module interactions
+ * @title RunOrgActionsAdvanced
+ * @notice Advanced demonstration showcasing vouching system and complete org lifecycle
+ * @dev Extends basic org actions with vouching demonstrations
  *
  * This script demonstrates:
  * 1. Organization deployment
  * 2. Member onboarding (QuickJoin + hat minting)
- * 3. Participation token management
- * 4. Task creation and lifecycle (TaskManager)
- * 5. Project creation and role permissions
- * 6. Proposal creation and voting (HybridVoting)
- * 7. Proposal execution through governance
+ * 3. **Vouching system (vouch for COORDINATOR hat)**
+ * 4. **Hat minting after vouching**
+ * 5. **Vouch revocation**
+ * 6. Participation token management
+ * 7. Task creation and lifecycle (TaskManager)
+ * 8. Proposal creation and voting (HybridVoting)
+ * 9. Proposal execution through governance
  *
  * Usage:
  *   # First deploy infrastructure (if not already deployed)
  *   forge script script/Deploy.s.sol:Deploy --rpc-url $RPC_URL --broadcast
  *
- *   # Then run this script to demonstrate org actions
- *   forge script script/RunOrgActions.s.sol:RunOrgActions \
+ *   # Then run this script to demonstrate advanced org actions
+ *   forge script script/RunOrgActionsAdvanced.s.sol:RunOrgActionsAdvanced \
  *     --rpc-url $RPC_URL \
  *     --broadcast \
  *     --slow
  *
  * Environment Variables Required:
  *   - DEPLOYER_PRIVATE_KEY: Private key for deployment and funding demo accounts
- *   - ORG_CONFIG_PATH: (Optional) Path to org config (default: script/org-config-governance-demo.json)
+ *   - ORG_CONFIG_PATH: (Optional) Path to org config (default: script/org-config-advanced-demo.json)
  *
  * Note: Script automatically generates ephemeral test accounts - no need for multiple private keys!
  *
  * Note: Run with --slow flag to give block time between actions
  */
-contract RunOrgActions is Script {
+contract RunOrgActionsAdvanced is Script {
     /*=========================== STRUCTS ===========================*/
 
     // JSON parsing structs - must match org config JSON structure
@@ -136,6 +140,7 @@ contract RunOrgActions is Script {
         address taskManager;
         address educationHub;
         address paymentManager;
+        address eligibilityModule;
         uint256 topHatId;
         uint256[] roleHatIds;
     }
@@ -166,7 +171,7 @@ contract RunOrgActions is Script {
 
     function run() public {
         console.log("\n========================================================");
-        console.log("   POA Organization Actions Demo                       ");
+        console.log("   POA Advanced Organization Actions Demo              ");
         console.log("========================================================\n");
 
         // Step 1: Deploy Organization
@@ -175,17 +180,20 @@ contract RunOrgActions is Script {
         // Step 2: Onboard Members
         _onboardMembers();
 
-        // Step 3: Distribute Participation Tokens
+        // Step 3: Demonstrate Vouching System
+        _demonstrateVouching();
+
+        // Step 4: Distribute Participation Tokens
         _distributeTokens();
 
-        // Step 4: Create Project and Tasks
+        // Step 5: Create Project and Tasks
         _demonstrateTaskManager();
 
-        // Step 5: Create and Execute Governance Proposal
+        // Step 6: Create and Execute Governance Proposal
         _demonstrateGovernance();
 
         console.log("\n========================================================");
-        console.log("   Demo Complete! All Actions Executed Successfully    ");
+        console.log("   Advanced Demo Complete! All Actions Executed Successfully");
         console.log("========================================================\n");
     }
 
@@ -208,7 +216,7 @@ contract RunOrgActions is Script {
         hats = IHats(hatsAddr);
 
         // Get org config path
-        string memory configPath = vm.envOr("ORG_CONFIG_PATH", string("script/org-config-governance-demo.json"));
+        string memory configPath = vm.envOr("ORG_CONFIG_PATH", string("script/org-config-advanced-demo.json"));
 
         // Load member addresses
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -252,8 +260,10 @@ contract RunOrgActions is Script {
         org.educationHub = result.educationHub;
         org.paymentManager = result.paymentManager;
 
-        // Get role hat IDs from OrgRegistry
+        // Get eligibility module and role hat IDs from OrgRegistry
         OrgRegistry orgRegistry = OrgRegistry(orgRegistryAddr);
+        org.eligibilityModule = orgRegistry.getOrgContract(orgId, ModuleTypes.ELIGIBILITY_MODULE_ID);
+
         org.roleHatIds = new uint256[](4); // 4 roles in config
         org.roleHatIds[0] = orgRegistry.getRoleHat(orgId, 0); // MEMBER
         org.roleHatIds[1] = orgRegistry.getRoleHat(orgId, 1); // COORDINATOR
@@ -302,33 +312,140 @@ contract RunOrgActions is Script {
 
         QuickJoin quickJoin = QuickJoin(org.quickJoin);
 
-        // Member 1 joins (will get MEMBER role - role index 0)
-        console.log("\n-> Member 1 joining...");
+        // Member 1 joins (registers username only, no hats - vouching required for MEMBER hat)
+        console.log("\n-> Member 1 joining (username only, no hats)...");
         vm.broadcast(memberKeys.member1);
         quickJoin.quickJoinNoUser("member1");
-        console.log("  [OK] Joined successfully");
+        console.log("  [OK] Registered username");
 
         // Member 2 joins
-        console.log("-> Member 2 joining...");
+        console.log("-> Member 2 joining (username only, no hats)...");
         vm.broadcast(memberKeys.member2);
         quickJoin.quickJoinNoUser("member2");
-        console.log("  [OK] Joined successfully");
+        console.log("  [OK] Registered username");
 
         // Coordinator joins
-        console.log("-> Coordinator joining...");
+        console.log("-> Coordinator joining (username only, no hats)...");
         vm.broadcast(memberKeys.coordinator);
         quickJoin.quickJoinNoUser("coordinator");
-        console.log("  [OK] Joined successfully");
+        console.log("  [OK] Registered username");
 
-        console.log("\n[OK] All Members Onboarded");
-        console.log("  (Note: All members have MEMBER role with full demo permissions)");
+        console.log("\n[OK] All Members Registered");
+        console.log("  (Note: No hats minted yet - vouching required for MEMBER and COORDINATOR hats)");
     }
 
-    /*=========================== STEP 3: TOKENS ===========================*/
+    /*=========================== STEP 3: VOUCHING ===========================*/
+
+    function _demonstrateVouching() internal {
+        console.log("\n=======================================================");
+        console.log("STEP 3: Demonstrating Two-Level Vouching System");
+        console.log("=======================================================\n");
+
+        uint256 memberHatId = org.roleHatIds[0]; // MEMBER role (index 0)
+        uint256 coordinatorHatId = org.roleHatIds[1]; // COORDINATOR role (index 1)
+        IEligibilityModule eligMod = IEligibilityModule(org.eligibilityModule);
+        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+
+        console.log("Member Hat ID:", memberHatId);
+        console.log("Coordinator Hat ID:", coordinatorHatId);
+        console.log("Eligibility Module:", org.eligibilityModule);
+        console.log("\nVouching Rules:");
+        console.log("  MEMBER hat: 1 vouch from ADMIN/COORDINATOR/MEMBER (hierarchy)");
+        console.log("  COORDINATOR hat: 1 vouch from ADMIN only");
+
+        /* ─────────── Part 1: Admin vouches for member1 to get MEMBER hat ─────────── */
+        console.log("\n[Part 1: Vouching for MEMBER hat]");
+
+        // Verify deployer has ADMIN hat
+        uint256 adminHatId = org.roleHatIds[3];
+        console.log("\n-> Verifying deployer has ADMIN hat...");
+        console.log("  Deployer address:", members.deployer);
+        console.log("  ADMIN hat ID:", adminHatId);
+        bool deployerHasAdminHat = hats.isWearerOfHat(members.deployer, adminHatId);
+        console.log("  Deployer has ADMIN hat:", deployerHasAdminHat);
+        require(deployerHasAdminHat, "Deployer does not have ADMIN hat - cannot vouch");
+
+        console.log("\n-> Checking member1 initial status...");
+        console.log("  Has MEMBER hat:", hats.isWearerOfHat(members.member1, memberHatId));
+        console.log("  Vouch count:", eligMod.currentVouchCount(memberHatId, members.member1));
+
+        console.log("\n-> Admin vouching for member1 to get MEMBER hat...");
+        vm.broadcast(deployerPrivateKey);
+        eligMod.vouchFor(members.member1, memberHatId);
+        console.log("  [OK] Admin vouched for member1");
+        console.log("  Vouch count:", eligMod.currentVouchCount(memberHatId, members.member1));
+
+        console.log("\n-> member1 claiming MEMBER hat after being vouched...");
+        vm.broadcast(memberKeys.member1);
+        eligMod.claimVouchedHat(memberHatId);
+        console.log("  [OK] member1 claimed MEMBER hat");
+        bool hasMemberHat = hats.isWearerOfHat(members.member1, memberHatId);
+        console.log("  member1 has MEMBER hat:", hasMemberHat);
+
+        /* ─────────── Part 2: Admin vouches for coordinator to get COORDINATOR hat ─────────── */
+        console.log("\n[Part 2: Vouching for COORDINATOR hat (separate coordinator account)]");
+
+        console.log("\n-> Checking coordinator initial status...");
+        console.log("  Has COORDINATOR hat:", hats.isWearerOfHat(members.coordinator, coordinatorHatId));
+        console.log("  Vouch count:", eligMod.currentVouchCount(coordinatorHatId, members.coordinator));
+
+        console.log("\n-> Admin vouching for coordinator to get COORDINATOR hat...");
+        vm.broadcast(deployerPrivateKey);
+        eligMod.vouchFor(members.coordinator, coordinatorHatId);
+        console.log("  [OK] Admin vouched for coordinator");
+        console.log("  Vouch count:", eligMod.currentVouchCount(coordinatorHatId, members.coordinator));
+
+        console.log("\n-> coordinator claiming COORDINATOR hat after being vouched...");
+        vm.broadcast(memberKeys.coordinator);
+        eligMod.claimVouchedHat(coordinatorHatId);
+        console.log("  [OK] coordinator claimed COORDINATOR hat");
+        bool hasCoordinatorHat = hats.isWearerOfHat(members.coordinator, coordinatorHatId);
+        console.log("  coordinator has COORDINATOR hat:", hasCoordinatorHat);
+
+        /* ─────────── Part 3: member1 (now MEMBER) vouches for member2 ─────────── */
+        console.log("\n[Part 3: Demonstrating MEMBER can vouch for new MEMBER]");
+
+        console.log("\n-> member1 (who has MEMBER hat) vouching for member2...");
+        vm.broadcast(memberKeys.member1);
+        eligMod.vouchFor(members.member2, memberHatId);
+        console.log("  [OK] member1 vouched for member2");
+        console.log("  Vouch count:", eligMod.currentVouchCount(memberHatId, members.member2));
+
+        console.log("\n-> member2 claiming MEMBER hat after being vouched...");
+        vm.broadcast(memberKeys.member2);
+        eligMod.claimVouchedHat(memberHatId);
+        console.log("  [OK] member2 claimed MEMBER hat");
+        bool member2HasMemberHat = hats.isWearerOfHat(members.member2, memberHatId);
+        console.log("  member2 has MEMBER hat:", member2HasMemberHat);
+
+        /* ─────────── Part 4: Demonstrate vouch revocation ─────────── */
+        console.log("\n[Part 4: Demonstrating vouch revocation]");
+
+        console.log("\n-> Admin revoking vouch for coordinator COORDINATOR hat...");
+        vm.broadcast(deployerPrivateKey);
+        eligMod.revokeVouch(members.coordinator, coordinatorHatId);
+        console.log("  [OK] Vouch revoked");
+        console.log("  Vouch count:", eligMod.currentVouchCount(coordinatorHatId, members.coordinator));
+
+        // Re-vouch to ensure coordinator can continue demo
+        console.log("\n-> Re-vouching coordinator for continued demo...");
+        vm.broadcast(deployerPrivateKey);
+        eligMod.vouchFor(members.coordinator, coordinatorHatId);
+        console.log("  [OK] coordinator re-vouched");
+
+        console.log("\n[OK] Two-Level Vouching System with Claim Pattern Demonstrated");
+        console.log("  member1: MEMBER (vouched by ADMIN, claimed)");
+        console.log("  member2: MEMBER (vouched by member1, claimed)");
+        console.log("  coordinator: COORDINATOR (vouched by ADMIN, claimed)");
+        console.log("  Hierarchy allows MEMBERs to vouch for new MEMBERs!");
+        console.log("  Users must explicitly claim hats after being vouched!");
+    }
+
+    /*=========================== STEP 4: TOKENS ===========================*/
 
     function _distributeTokens() internal {
         console.log("\n=======================================================");
-        console.log("STEP 3: Distributing Participation Tokens");
+        console.log("STEP 4: Distributing Participation Tokens");
         console.log("=======================================================\n");
 
         ParticipationToken token = ParticipationToken(org.participationToken);
@@ -361,11 +478,11 @@ contract RunOrgActions is Script {
         console.log("  (Note: Requests pending approval from token approver)");
     }
 
-    /*=========================== STEP 4: TASK MANAGER ===========================*/
+    /*=========================== STEP 5: TASK MANAGER ===========================*/
 
     function _demonstrateTaskManager() internal {
         console.log("\n=======================================================");
-        console.log("STEP 4: Demonstrating Task Manager");
+        console.log("STEP 5: Demonstrating Task Manager");
         console.log("=======================================================\n");
 
         TaskManager tm = TaskManager(org.taskManager);
@@ -471,11 +588,11 @@ contract RunOrgActions is Script {
         console.log("  Tasks Completed: 2");
     }
 
-    /*=========================== STEP 5: GOVERNANCE ===========================*/
+    /*=========================== STEP 6: GOVERNANCE ===========================*/
 
     function _demonstrateGovernance() internal {
         console.log("\n=======================================================");
-        console.log("STEP 5: Demonstrating Governance (HybridVoting)");
+        console.log("STEP 6: Demonstrating Governance (HybridVoting)");
         console.log("=======================================================\n");
 
         HybridVoting voting = HybridVoting(org.hybridVoting);
@@ -523,24 +640,24 @@ contract RunOrgActions is Script {
         // optionIndices: which options you're voting for (0=YES, 1=NO)
         // optionWeights: weight for each option (must sum to 100)
 
-        console.log("\n-> Member 1 voting YES (100%)...");
+        console.log("\n-> Coordinator voting YES (100%)...");
         uint8[] memory yesOption = new uint8[](1);
         yesOption[0] = 0; // Option 0 = YES
 
         uint8[] memory fullWeight = new uint8[](1);
         fullWeight[0] = 100; // 100% weight to YES
 
+        vm.broadcast(memberKeys.coordinator);
+        voting.vote(proposalId, yesOption, fullWeight);
+        console.log("  [OK] Vote Cast");
+
+        console.log("-> Member 1 voting YES (100%)...");
         vm.broadcast(memberKeys.member1);
         voting.vote(proposalId, yesOption, fullWeight);
         console.log("  [OK] Vote Cast");
 
         console.log("-> Member 2 voting YES (100%)...");
         vm.broadcast(memberKeys.member2);
-        voting.vote(proposalId, yesOption, fullWeight);
-        console.log("  [OK] Vote Cast");
-
-        console.log("-> Coordinator voting YES (100%)...");
-        vm.broadcast(memberKeys.coordinator);
         voting.vote(proposalId, yesOption, fullWeight);
         console.log("  [OK] Vote Cast");
 
