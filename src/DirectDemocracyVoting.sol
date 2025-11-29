@@ -108,7 +108,15 @@ contract DirectDemocracyVoting is Initializable {
     event HatSet(HatType hatType, uint256 hat, bool allowed);
     event CreatorHatSet(uint256 hat, bool allowed);
     event NewProposal(uint256 id, bytes title, bytes32 descriptionHash, uint8 numOptions, uint64 endTs, uint64 created);
-    event NewHatProposal(uint256 id, bytes title, bytes32 descriptionHash, uint8 numOptions, uint64 endTs, uint64 created, uint256[] hatIds);
+    event NewHatProposal(
+        uint256 id,
+        bytes title,
+        bytes32 descriptionHash,
+        uint8 numOptions,
+        uint64 endTs,
+        uint64 created,
+        uint256[] hatIds
+    );
     event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
     event ExecutorUpdated(address newExecutor);

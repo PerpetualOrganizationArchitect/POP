@@ -18,7 +18,15 @@ library HybridVotingProposals {
     uint32 public constant MIN_DURATION = 10;
 
     event NewProposal(uint256 id, bytes title, bytes32 descriptionHash, uint8 numOptions, uint64 endTs, uint64 created);
-    event NewHatProposal(uint256 id, bytes title, bytes32 descriptionHash, uint8 numOptions, uint64 endTs, uint64 created, uint256[] hatIds);
+    event NewHatProposal(
+        uint256 id,
+        bytes title,
+        bytes32 descriptionHash,
+        uint8 numOptions,
+        uint64 endTs,
+        uint64 created,
+        uint256[] hatIds
+    );
 
     function _layout() private pure returns (HybridVoting.Layout storage s) {
         assembly {

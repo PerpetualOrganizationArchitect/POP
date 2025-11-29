@@ -187,11 +187,11 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
     /// @param images Role images
     /// @param canVote Whether each role can vote
     /// @return Role configs with default settings (no vouching, all eligible, linear hierarchy)
-    function _buildSimpleRoleConfigs(
-        string[] memory names,
-        string[] memory images,
-        bool[] memory canVote
-    ) internal pure returns (RoleConfigStructs.RoleConfig[] memory) {
+    function _buildSimpleRoleConfigs(string[] memory names, string[] memory images, bool[] memory canVote)
+        internal
+        pure
+        returns (RoleConfigStructs.RoleConfig[] memory)
+    {
         RoleConfigStructs.RoleConfig[] memory roles = new RoleConfigStructs.RoleConfig[](names.length);
 
         for (uint256 i = 0; i < names.length; i++) {
@@ -203,15 +203,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 image: images[i],
                 canVote: canVote[i],
                 vouching: RoleConfigStructs.RoleVouchingConfig({
-                    enabled: false,
-                    quorum: 0,
-                    voucherRoleIndex: 0,
-                    combineWithHierarchy: false
+                    enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false
                 }),
-                defaults: RoleConfigStructs.RoleEligibilityDefaults({
-                    eligible: true,
-                    standing: true
-                }),
+                defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
                 hierarchy: RoleConfigStructs.RoleHierarchyConfig({
                     adminRoleIndex: isTopRole ? type(uint256).max : i + 1
                 }),
@@ -221,8 +215,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                     additionalWearers: new address[](0)
                 }),
                 hatConfig: RoleConfigStructs.HatConfig({
-                    maxSupply: type(uint32).max,  // Default: unlimited
-                    mutableHat: true               // Default: mutable
+                    maxSupply: type(uint32).max, // Default: unlimited
+                    mutableHat: true // Default: mutable
                 })
             });
         }
@@ -1671,9 +1665,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         _vouchFor(voter2, setup.eligibilityModule, candidate, setup.defaultRoleHat);
 
         // Verify eligible but not wearing hat yet
-        _assertEligibilityStatus(
-            setup.eligibilityModule, candidate, setup.defaultRoleHat, true, true, "After vouching"
-        );
+        _assertEligibilityStatus(setup.eligibilityModule, candidate, setup.defaultRoleHat, true, true, "After vouching");
         _assertWearingHat(candidate, setup.defaultRoleHat, false, "Before claiming");
 
         // Test HatClaimed event
@@ -1745,9 +1737,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}),
             distribution: RoleConfigStructs.RoleDistributionConfig({
-                mintToDeployer: false,
-                mintToExecutor: true,
-                additionalWearers: new address[](0)
+                mintToDeployer: false, mintToExecutor: true, additionalWearers: new address[](0)
             }),
             hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
         });
@@ -1756,17 +1746,12 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             image: "ipfs://admin",
             canVote: true,
             vouching: RoleConfigStructs.RoleVouchingConfig({
-                enabled: false,
-                quorum: 0,
-                voucherRoleIndex: 0,
-                combineWithHierarchy: false
+                enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false
             }),
             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}),
             distribution: RoleConfigStructs.RoleDistributionConfig({
-                mintToDeployer: true,
-                mintToExecutor: false,
-                additionalWearers: new address[](0)
+                mintToDeployer: true, mintToExecutor: false, additionalWearers: new address[](0)
             }),
             hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
         });
@@ -1790,9 +1775,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}),
             distribution: RoleConfigStructs.RoleDistributionConfig({
-                mintToDeployer: true,
-                mintToExecutor: false,
-                additionalWearers: new address[](0)
+                mintToDeployer: true, mintToExecutor: false, additionalWearers: new address[](0)
             }),
             hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
         });
@@ -1808,17 +1791,12 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             image: "ipfs://member",
             canVote: true,
             vouching: RoleConfigStructs.RoleVouchingConfig({
-                enabled: false,
-                quorum: 0,
-                voucherRoleIndex: 0,
-                combineWithHierarchy: false
+                enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false
             }),
             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: 0}), // Self-reference
             distribution: RoleConfigStructs.RoleDistributionConfig({
-                mintToDeployer: true,
-                mintToExecutor: false,
-                additionalWearers: new address[](0)
+                mintToDeployer: true, mintToExecutor: false, additionalWearers: new address[](0)
             }),
             hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
         });
@@ -1830,147 +1808,147 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.stopPrank();
     }
 
-//     function skip_testComplexHierarchy() public {
-//         vm.startPrank(orgOwner);
-// 
-//         // Test non-linear hierarchy: ELIGIBILITY_ADMIN -> ADMIN -> [MANAGER, COORDINATOR] -> MEMBER
-//         // This creates a tree structure rather than linear chain
-//         RoleConfigStructs.RoleConfig[] memory complexRoles = new RoleConfigStructs.RoleConfig[](4);
-// 
-//         // MEMBER (index 0) - child of MANAGER (index 1)
-//         complexRoles[0] = RoleConfigStructs.RoleConfig({
-//             name: "MEMBER",
-//             image: "ipfs://member",
-//             canVote: true,
-//             vouching: RoleConfigStructs.RoleVouchingConfig({enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false}),
-//             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
-//             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: 1}), // Parent is MANAGER
-//             distribution: RoleConfigStructs.RoleDistributionConfig({mintToDeployer: false, mintToExecutor: true, additionalWearers: new address[](0)})
-//         });
-// 
-//         // MANAGER (index 1) - child of ADMIN (index 3)
-//         complexRoles[1] = RoleConfigStructs.RoleConfig({
-//             name: "MANAGER",
-//             image: "ipfs://manager",
-//             canVote: true,
-//             vouching: RoleConfigStructs.RoleVouchingConfig({enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false}),
-//             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
-//             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: 3}), // Parent is ADMIN
-//             distribution: RoleConfigStructs.RoleDistributionConfig({mintToDeployer: false, mintToExecutor: true, additionalWearers: new address[](0)})
-//         });
-// 
-//         // COORDINATOR (index 2) - also child of ADMIN (index 3), sibling to MANAGER
-//         complexRoles[2] = RoleConfigStructs.RoleConfig({
-//             name: "COORDINATOR",
-//             image: "ipfs://coordinator",
-//             canVote: true,
-//             vouching: RoleConfigStructs.RoleVouchingConfig({enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false}),
-//             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
-//             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: 3}), // Parent is ADMIN
-//             distribution: RoleConfigStructs.RoleDistributionConfig({mintToDeployer: false, mintToExecutor: true, additionalWearers: new address[](0)})
-//         });
-// 
-//         // ADMIN (index 3) - top level
-//         complexRoles[3] = RoleConfigStructs.RoleConfig({
-//             name: "ADMIN",
-//             image: "ipfs://admin",
-//             canVote: true,
-//             vouching: RoleConfigStructs.RoleVouchingConfig({enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false}),
-//             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
-//             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}), // Top level
-//             distribution: RoleConfigStructs.RoleDistributionConfig({mintToDeployer: true, mintToExecutor: false, additionalWearers: new address[](0)})
-//         });
-// 
-//         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-//         address[] memory ddTargets = new address[](0);
-// 
-//         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
-//             orgId: ORG_ID,
-//             orgName: "Complex Hierarchy DAO",
-//             registryAddr: accountRegProxy,
-//             deployerAddress: orgOwner,
-//             deployerUsername: "",
-//             autoUpgrade: true,
-//             hybridQuorumPct: 50,
-//             ddQuorumPct: 50,
-//             hybridClasses: classes,
-//             ddInitialTargets: ddTargets,
-//             roles: complexRoles,
-//             roleAssignments: _buildDefaultRoleAssignments()
-//         });
-// 
-//         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
-// 
-//         // Verify all hats were created
-//         uint256[] memory roleHats = orgRegistry.getRoleHats(ORG_ID);
-//         assertEq(roleHats.length, 4, "Should have 4 role hats");
-// 
-//         // Verify hierarchy: check that MEMBER's admin is MANAGER, etc.
-//         uint256 memberHat = roleHats[0];
-//         uint256 managerHat = roleHats[1];
-//         uint256 coordinatorHat = roleHats[2];
-//         uint256 adminHat = roleHats[3];
-// 
-//         // Admin should be wearer of admin hat
-//         assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(orgOwner, adminHat), "Deployer should have ADMIN hat");
-// 
-//         vm.stopPrank();
-//     }
+    //     function skip_testComplexHierarchy() public {
+    //         vm.startPrank(orgOwner);
+    //
+    //         // Test non-linear hierarchy: ELIGIBILITY_ADMIN -> ADMIN -> [MANAGER, COORDINATOR] -> MEMBER
+    //         // This creates a tree structure rather than linear chain
+    //         RoleConfigStructs.RoleConfig[] memory complexRoles = new RoleConfigStructs.RoleConfig[](4);
+    //
+    //         // MEMBER (index 0) - child of MANAGER (index 1)
+    //         complexRoles[0] = RoleConfigStructs.RoleConfig({
+    //             name: "MEMBER",
+    //             image: "ipfs://member",
+    //             canVote: true,
+    //             vouching: RoleConfigStructs.RoleVouchingConfig({enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false}),
+    //             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
+    //             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: 1}), // Parent is MANAGER
+    //             distribution: RoleConfigStructs.RoleDistributionConfig({mintToDeployer: false, mintToExecutor: true, additionalWearers: new address[](0)})
+    //         });
+    //
+    //         // MANAGER (index 1) - child of ADMIN (index 3)
+    //         complexRoles[1] = RoleConfigStructs.RoleConfig({
+    //             name: "MANAGER",
+    //             image: "ipfs://manager",
+    //             canVote: true,
+    //             vouching: RoleConfigStructs.RoleVouchingConfig({enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false}),
+    //             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
+    //             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: 3}), // Parent is ADMIN
+    //             distribution: RoleConfigStructs.RoleDistributionConfig({mintToDeployer: false, mintToExecutor: true, additionalWearers: new address[](0)})
+    //         });
+    //
+    //         // COORDINATOR (index 2) - also child of ADMIN (index 3), sibling to MANAGER
+    //         complexRoles[2] = RoleConfigStructs.RoleConfig({
+    //             name: "COORDINATOR",
+    //             image: "ipfs://coordinator",
+    //             canVote: true,
+    //             vouching: RoleConfigStructs.RoleVouchingConfig({enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false}),
+    //             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
+    //             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: 3}), // Parent is ADMIN
+    //             distribution: RoleConfigStructs.RoleDistributionConfig({mintToDeployer: false, mintToExecutor: true, additionalWearers: new address[](0)})
+    //         });
+    //
+    //         // ADMIN (index 3) - top level
+    //         complexRoles[3] = RoleConfigStructs.RoleConfig({
+    //             name: "ADMIN",
+    //             image: "ipfs://admin",
+    //             canVote: true,
+    //             vouching: RoleConfigStructs.RoleVouchingConfig({enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false}),
+    //             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
+    //             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}), // Top level
+    //             distribution: RoleConfigStructs.RoleDistributionConfig({mintToDeployer: true, mintToExecutor: false, additionalWearers: new address[](0)})
+    //         });
+    //
+    //         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+    //         address[] memory ddTargets = new address[](0);
+    //
+    //         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+    //             orgId: ORG_ID,
+    //             orgName: "Complex Hierarchy DAO",
+    //             registryAddr: accountRegProxy,
+    //             deployerAddress: orgOwner,
+    //             deployerUsername: "",
+    //             autoUpgrade: true,
+    //             hybridQuorumPct: 50,
+    //             ddQuorumPct: 50,
+    //             hybridClasses: classes,
+    //             ddInitialTargets: ddTargets,
+    //             roles: complexRoles,
+    //             roleAssignments: _buildDefaultRoleAssignments()
+    //         });
+    //
+    //         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
+    //
+    //         // Verify all hats were created
+    //         uint256[] memory roleHats = orgRegistry.getRoleHats(ORG_ID);
+    //         assertEq(roleHats.length, 4, "Should have 4 role hats");
+    //
+    //         // Verify hierarchy: check that MEMBER's admin is MANAGER, etc.
+    //         uint256 memberHat = roleHats[0];
+    //         uint256 managerHat = roleHats[1];
+    //         uint256 coordinatorHat = roleHats[2];
+    //         uint256 adminHat = roleHats[3];
+    //
+    //         // Admin should be wearer of admin hat
+    //         assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(orgOwner, adminHat), "Deployer should have ADMIN hat");
+    //
+    //         vm.stopPrank();
+    //     }
 
-//     function skip_testMultipleInitialWearers() public {
-//         vm.startPrank(orgOwner);
-// 
-//         address founder1 = address(0x1111);
-//         address founder2 = address(0x2222);
-//         address[] memory additionalWearers = new address[](2);
-//         additionalWearers[0] = founder1;
-//         additionalWearers[1] = founder2;
-// 
-//         RoleConfigStructs.RoleConfig[] memory multiWearerRoles = new RoleConfigStructs.RoleConfig[](1);
-//         multiWearerRoles[0] = RoleConfigStructs.RoleConfig({
-//             name: "FOUNDER",
-//             image: "ipfs://founder",
-//             canVote: true,
-//             vouching: RoleConfigStructs.RoleVouchingConfig({enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false}),
-//             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
-//             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}),
-//             distribution: RoleConfigStructs.RoleDistributionConfig({
-//                 mintToDeployer: true,
-//                 mintToExecutor: false,
-//                 additionalWearers: additionalWearers
-//             })
-//         });
-// 
-//         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(100, 0, false, 0);
-//         address[] memory ddTargets = new address[](0);
-// 
-//         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
-//             orgId: ORG_ID,
-//             orgName: "Multi-Founder DAO",
-//             registryAddr: accountRegProxy,
-//             deployerAddress: orgOwner,
-//             deployerUsername: "",
-//             autoUpgrade: true,
-//             hybridQuorumPct: 50,
-//             ddQuorumPct: 50,
-//             hybridClasses: classes,
-//             ddInitialTargets: ddTargets,
-//             roles: multiWearerRoles,
-//             roleAssignments: _buildDefaultRoleAssignments()
-//         });
-// 
-//         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
-// 
-//         // Verify all three founders have the hat
-//         uint256[] memory roleHats = orgRegistry.getRoleHats(ORG_ID);
-//         uint256 founderHat = roleHats[0];
-// 
-//         assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(orgOwner, founderHat), "Deployer should have FOUNDER hat");
-//         assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(founder1, founderHat), "Founder1 should have FOUNDER hat");
-//         assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(founder2, founderHat), "Founder2 should have FOUNDER hat");
-// 
-//         vm.stopPrank();
-//     }
+    //     function skip_testMultipleInitialWearers() public {
+    //         vm.startPrank(orgOwner);
+    //
+    //         address founder1 = address(0x1111);
+    //         address founder2 = address(0x2222);
+    //         address[] memory additionalWearers = new address[](2);
+    //         additionalWearers[0] = founder1;
+    //         additionalWearers[1] = founder2;
+    //
+    //         RoleConfigStructs.RoleConfig[] memory multiWearerRoles = new RoleConfigStructs.RoleConfig[](1);
+    //         multiWearerRoles[0] = RoleConfigStructs.RoleConfig({
+    //             name: "FOUNDER",
+    //             image: "ipfs://founder",
+    //             canVote: true,
+    //             vouching: RoleConfigStructs.RoleVouchingConfig({enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false}),
+    //             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
+    //             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}),
+    //             distribution: RoleConfigStructs.RoleDistributionConfig({
+    //                 mintToDeployer: true,
+    //                 mintToExecutor: false,
+    //                 additionalWearers: additionalWearers
+    //             })
+    //         });
+    //
+    //         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(100, 0, false, 0);
+    //         address[] memory ddTargets = new address[](0);
+    //
+    //         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+    //             orgId: ORG_ID,
+    //             orgName: "Multi-Founder DAO",
+    //             registryAddr: accountRegProxy,
+    //             deployerAddress: orgOwner,
+    //             deployerUsername: "",
+    //             autoUpgrade: true,
+    //             hybridQuorumPct: 50,
+    //             ddQuorumPct: 50,
+    //             hybridClasses: classes,
+    //             ddInitialTargets: ddTargets,
+    //             roles: multiWearerRoles,
+    //             roleAssignments: _buildDefaultRoleAssignments()
+    //         });
+    //
+    //         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
+    //
+    //         // Verify all three founders have the hat
+    //         uint256[] memory roleHats = orgRegistry.getRoleHats(ORG_ID);
+    //         uint256 founderHat = roleHats[0];
+    //
+    //         assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(orgOwner, founderHat), "Deployer should have FOUNDER hat");
+    //         assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(founder1, founderHat), "Founder1 should have FOUNDER hat");
+    //         assertTrue(IHats(SEPOLIA_HATS).isWearerOfHat(founder2, founderHat), "Founder2 should have FOUNDER hat");
+    //
+    //         vm.stopPrank();
+    //     }
 
     function testVouchingDisabling() public {
         vm.startPrank(orgOwner);
@@ -2990,7 +2968,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Set users as eligible for their hats before minting
         vm.startPrank(setup.exec);
-        EligibilityModule(setup.eligibilityModule).setWearerEligibility(executiveUser, setup.executiveRoleHat, true, true);
+        EligibilityModule(setup.eligibilityModule)
+            .setWearerEligibility(executiveUser, setup.executiveRoleHat, true, true);
         EligibilityModule(setup.eligibilityModule).setWearerEligibility(defaultUser, setup.defaultRoleHat, true, true);
         vm.stopPrank();
 
