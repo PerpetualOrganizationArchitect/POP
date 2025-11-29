@@ -68,9 +68,8 @@ contract HatsTreeSetup {
         params.hats.mintHat(eligibilityAdminHatId, params.eligibilityModule);
         IEligibilityModule(params.eligibilityModule).setEligibilityModuleAdminHat(eligibilityAdminHatId);
         // Register hat creation for subgraph indexing
-        IEligibilityModule(params.eligibilityModule).registerHatCreation(
-            eligibilityAdminHatId, result.topHatId, true, true
-        );
+        IEligibilityModule(params.eligibilityModule)
+            .registerHatCreation(eligibilityAdminHatId, result.topHatId, true, true);
 
         // Create role hats
         uint256 len = params.roleNames.length;
