@@ -10,6 +10,7 @@ import {ModuleTypes} from "../libs/ModuleTypes.sol";
 import {RoleResolver} from "../libs/RoleResolver.sol";
 import {IPoaManager} from "../libs/ModuleDeploymentLib.sol";
 import {IEligibilityModule, IToggleModule} from "../interfaces/IHatsModules.sol";
+import {RoleConfigStructs} from "../libs/RoleConfigStructs.sol";
 
 /*──────────────────── HatsTreeSetup interface ────────────────────*/
 interface IHatsTreeSetup {
@@ -27,12 +28,12 @@ interface IHatsTreeSetup {
         address eligibilityModule;
         address toggleModule;
         address deployer;
-        address deployerAddress; // Address to receive ADMIN hat
+        address deployerAddress;
         address executor;
+        address accountRegistry;
         string orgName;
-        string[] roleNames;
-        string[] roleImages;
-        bool[] roleCanVote;
+        string deployerUsername;
+        RoleConfigStructs.RoleConfig[] roles;
     }
 
     function setupHatsTree(SetupParams memory params) external returns (SetupResult memory);
@@ -68,7 +69,9 @@ contract GovernanceFactory {
         address hatsTreeSetup;
         address deployer; // OrgDeployer address for registration callbacks
         address deployerAddress; // Address to receive ADMIN hat
+        address accountRegistry; // UniversalAccountRegistry for username registration
         address participationToken; // Token for HybridVoting
+        string deployerUsername; // Optional username for deployer (empty string = skip registration)
         bool autoUpgrade;
         uint8 hybridQuorumPct; // Quorum for HybridVoting
         uint8 ddQuorumPct; // Quorum for DirectDemocracyVoting
@@ -77,9 +80,7 @@ contract GovernanceFactory {
         uint256 ddVotingRolesBitmap; // Bit N set = Role N can vote in polls
         uint256 ddCreatorRolesBitmap; // Bit N set = Role N can create polls
         address[] ddInitialTargets; // Allowed execution targets for DirectDemocracyVoting
-        string[] roleNames;
-        string[] roleImages;
-        bool[] roleCanVote;
+        RoleConfigStructs.RoleConfig[] roles; // Complete role configuration
     }
 
     /*──────────────────── Governance Deployment Result ────────────────────*/
@@ -158,12 +159,12 @@ contract GovernanceFactory {
                 eligibilityModule: result.eligibilityModule,
                 toggleModule: result.toggleModule,
                 deployer: address(this),
-                deployerAddress: params.deployerAddress, // Address to receive ADMIN hat
+                deployerAddress: params.deployerAddress,
                 executor: result.executor,
+                accountRegistry: params.accountRegistry,
                 orgName: params.orgName,
-                roleNames: params.roleNames,
-                roleImages: params.roleImages,
-                roleCanVote: params.roleCanVote
+                deployerUsername: params.deployerUsername,
+                roles: params.roles
             });
 
             IHatsTreeSetup.SetupResult memory setupResult =

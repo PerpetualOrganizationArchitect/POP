@@ -150,7 +150,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     event VouchingRateLimitExceededEvent(address indexed user);
     event NewUserVouchingRestrictedEvent(address indexed user);
     event EligibilityModuleAdminHatSet(uint256 indexed hatId);
-    event HatAutoMinted(address indexed wearer, uint256 indexed hatId, uint32 vouchCount);
+    event HatClaimed(address indexed wearer, uint256 indexed hatId);
     event HatCreatedWithEligibility(
         address indexed creator,
         uint256 indexed parentHatId,
@@ -436,7 +436,16 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         Layout storage l = _layout();
         VouchConfig memory config = l.vouchConfigs[hatId];
         if (!_isVouchingEnabled(config.flags)) revert VouchingNotEnabled();
-        if (!l.hats.isWearerOfHat(msg.sender, config.membershipHatId)) revert NotAuthorizedToVouch();
+
+        // Check vouching authorization
+        bool isAuthorized = l.hats.isWearerOfHat(msg.sender, config.membershipHatId);
+
+        // If combineWithHierarchy is enabled, also check if voucher has admin privileges for this hat
+        if (!isAuthorized && _shouldCombineWithHierarchy(config.flags)) {
+            isAuthorized = l.hats.isAdminOfHat(msg.sender, hatId);
+        }
+
+        if (!isAuthorized) revert NotAuthorizedToVouch();
         if (l.vouchers[hatId][wearer][msg.sender]) revert AlreadyVouched();
 
         // SECURITY: Rate limiting checks
@@ -453,14 +462,6 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         l.dailyVouchCount[msg.sender][currentDay] = dailyCount;
 
         emit Vouched(msg.sender, wearer, hatId, newCount);
-
-        // Auto-mint hat if quorum is reached and wearer doesn't already have it
-        if (newCount >= config.quorum && !l.hats.isWearerOfHat(wearer, hatId)) {
-            bool success = l.hats.mintHat(hatId, wearer);
-            if (success) {
-                emit HatAutoMinted(wearer, hatId, newCount);
-            }
-        }
     }
 
     function _checkVouchingRateLimit(address user) internal view {
@@ -516,6 +517,30 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     function resetVouches(uint256 hatId) external onlySuperAdmin {
         delete _layout().vouchConfigs[hatId];
         emit VouchConfigSet(hatId, 0, 0, false, false);
+    }
+
+    /**
+     * @notice Allows a user to claim a hat they are eligible for after being vouched
+     * @dev User must have sufficient vouches to be eligible. This is the claim-based pattern
+     *      where users explicitly accept their role rather than having it auto-minted.
+     *      The EligibilityModule contract mints the hat using its ELIGIBILITY_ADMIN permissions.
+     * @param hatId The ID of the hat to claim
+     */
+    function claimVouchedHat(uint256 hatId) external whenNotPaused {
+        Layout storage l = _layout();
+
+        // Check if caller is eligible to claim this hat
+        (bool eligible, bool standing) = this.getWearerStatus(msg.sender, hatId);
+        require(eligible && standing, "Not eligible to claim hat");
+
+        // Check if already wearing the hat
+        require(!l.hats.isWearerOfHat(msg.sender, hatId), "Already wearing hat");
+
+        // Mint the hat to the caller using EligibilityModule's admin powers
+        bool success = l.hats.mintHat(hatId, msg.sender);
+        require(success, "Hat minting failed");
+
+        emit HatClaimed(msg.sender, hatId);
     }
 
     /*═══════════════════════════════════ ELIGIBILITY INTERFACE ═══════════════════════════════════════*/

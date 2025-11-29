@@ -12,6 +12,7 @@ library ValidationLib {
     error InvalidString();
     error InvalidPayout();
     error CapBelowCommitted();
+    error EmptyTitle();
 
     /* ─────────── Constants ─────────── */
     uint256 internal constant MAX_PAYOUT = 1e24; // 1 000 000 tokens (18 dec)
@@ -33,6 +34,15 @@ library ValidationLib {
      */
     function requireNonEmptyBytes(bytes calldata data) internal pure {
         if (data.length == 0) revert InvalidString();
+    }
+
+    /**
+     * @notice Validate that a title is not empty (at least one non-zero byte)
+     * @param title The title to validate (bytes96)
+     */
+    function requireValidTitle(bytes96 title) internal pure {
+        // Check if all bytes are zero (empty title)
+        if (title == bytes96(0)) revert EmptyTitle();
     }
 
     /**
@@ -95,26 +105,33 @@ library ValidationLib {
     /**
      * @notice Validate task creation parameters
      * @param payout The task payout
-     * @param metadata The task metadata
+     * @param title The task title (bytes96, emitted on-chain)
+     * @param description The task description (IPFS hash)
      * @param bountyToken The bounty token address
      * @param bountyPayout The bounty payout amount
      */
-    function requireValidTaskParams(uint256 payout, bytes calldata metadata, address bountyToken, uint256 bountyPayout)
-        internal
-        pure
-    {
+    function requireValidTaskParams(
+        uint256 payout,
+        bytes96 title,
+        bytes calldata description,
+        address bountyToken,
+        uint256 bountyPayout
+    ) internal pure {
         requireValidPayout96(payout);
-        requireNonEmptyBytes(metadata);
+        requireValidTitle(title);
+        requireNonEmptyBytes(description);
         requireValidBountyConfig(bountyToken, bountyPayout);
     }
 
     /**
      * @notice Validate project creation parameters
-     * @param metadata The project metadata
+     * @param title The project title (bytes96, emitted on-chain)
+     * @param description The project description (IPFS hash)
      * @param cap The project cap
      */
-    function requireValidProjectParams(bytes calldata metadata, uint256 cap) internal pure {
-        requireNonEmptyBytes(metadata);
+    function requireValidProjectParams(bytes96 title, bytes calldata description, uint256 cap) internal pure {
+        requireValidTitle(title);
+        requireNonEmptyBytes(description);
         requireValidCapAmount(cap);
     }
 

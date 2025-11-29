@@ -1,15 +1,15 @@
 {
-  "lib/openzeppelin-contracts": {
-    "tag": {
-      "name": "v5.4.0",
-      "rev": "c64a1edb67b6e3f4a15cca8909c9482ad33a02b0"
-    }
-  },
   "lib/forge-std": {
     "rev": "3b20d60d14b343ee4f908cb8079495c07f5e8981"
   },
   "lib/hats-protocol": {
     "rev": "cccb71a061cdb9095af7d11dfdb47026993d8c4e"
+  },
+  "lib/openzeppelin-contracts": {
+    "tag": {
+      "name": "v5.4.0",
+      "rev": "c64a1edb67b6e3f4a15cca8909c9482ad33a02b0"
+    }
   },
   "lib/openzeppelin-contracts-upgradeable": {
     "tag": {
