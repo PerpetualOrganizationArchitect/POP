@@ -67,6 +67,10 @@ contract HatsTreeSetup {
         IToggleModule(params.toggleModule).setHatStatus(eligibilityAdminHatId, true);
         params.hats.mintHat(eligibilityAdminHatId, params.eligibilityModule);
         IEligibilityModule(params.eligibilityModule).setEligibilityModuleAdminHat(eligibilityAdminHatId);
+        // Register hat creation for subgraph indexing
+        IEligibilityModule(params.eligibilityModule).registerHatCreation(
+            eligibilityAdminHatId, result.topHatId, true, true
+        );
 
         // Create role hats
         uint256 len = params.roleNames.length;
@@ -89,6 +93,9 @@ contract HatsTreeSetup {
                 );
             result.roleHatIds[idx] = newHatId;
 
+            // Register hat creation for subgraph indexing
+            IEligibilityModule(params.eligibilityModule).registerHatCreation(newHatId, adminHatId, true, true);
+
             // Set eligibility for both executor and deployer (ADMIN hat will be minted to deployer)
             IEligibilityModule(params.eligibilityModule).setWearerEligibility(params.executor, newHatId, true, true);
             IEligibilityModule(params.eligibilityModule)
@@ -110,11 +117,8 @@ contract HatsTreeSetup {
         // Transfer top hat to executor
         params.hats.transferHat(result.topHatId, address(this), params.executor);
 
-        // Set default eligibility
+        // Set default eligibility for top hat (role hats already handled by registerHatCreation)
         IEligibilityModule(params.eligibilityModule).setDefaultEligibility(result.topHatId, true, true);
-        for (uint256 i = 0; i < result.roleHatIds.length; i++) {
-            IEligibilityModule(params.eligibilityModule).setDefaultEligibility(result.roleHatIds[i], true, true);
-        }
 
         // Transfer module admin rights to executor
         IEligibilityModule(params.eligibilityModule).transferSuperAdmin(params.executor);

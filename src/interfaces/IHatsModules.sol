@@ -8,6 +8,8 @@ interface IEligibilityModule {
     function setEligibilityModuleAdminHat(uint256) external;
     function mintHatToAddress(uint256 hatId, address wearer) external;
     function transferSuperAdmin(address) external;
+    function registerHatCreation(uint256 hatId, uint256 parentHatId, bool defaultEligible, bool defaultStanding)
+        external;
 }
 
 interface IToggleModule {
