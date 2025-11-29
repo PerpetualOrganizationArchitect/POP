@@ -762,7 +762,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         vm.prank(voter1);
         uint256[] memory hatIds = new uint256[](0);
-        HybridVoting(hybridProxy).createProposal("ipfs://test", 60, optNumber, batches, hatIds);
+        HybridVoting(hybridProxy).createProposal(bytes("ipfs://test"), bytes32(0), 60, optNumber, batches, hatIds);
 
         /* vote YES */
         uint8[] memory idxList = new uint8[](1);

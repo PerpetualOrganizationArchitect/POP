@@ -244,7 +244,7 @@ contract OrgDeployer is Initializable {
 
         /* 3. Create Org in bootstrap mode */
         if (!_orgExists(params.orgId)) {
-            l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName));
+            l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName), bytes32(0));
         } else {
             revert OrgExistsMismatch();
         }

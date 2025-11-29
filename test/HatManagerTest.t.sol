@@ -137,7 +137,7 @@ contract HatManagerTest is Test {
         batches[0] = new IExecutor.Call[](0);
 
         vm.prank(creator);
-        dd.createProposal("test", 10, 1, batches, new uint256[](0));
+        dd.createProposal(bytes("test"), bytes32(0), 10, 1, batches, new uint256[](0));
         assertEq(dd.proposalsCount(), 1);
 
         // Voter should be able to vote
@@ -163,7 +163,7 @@ contract HatManagerTest is Test {
         batches[0] = new IExecutor.Call[](0);
 
         vm.prank(creator);
-        dd.createProposal("test", 10, 1, batches, new uint256[](0));
+        dd.createProposal(bytes("test"), bytes32(0), 10, 1, batches, new uint256[](0));
 
         // But voter should not be able to vote (no voting hat)
         uint8[] memory idx = new uint8[](1);
@@ -189,7 +189,7 @@ contract HatManagerTest is Test {
         IExecutor.Call[][] memory batches = new IExecutor.Call[][](1);
         batches[0] = new IExecutor.Call[](0);
         vm.prank(creator);
-        dd.createProposal("test", 10, 1, batches, new uint256[](0));
+        dd.createProposal(bytes("test"), bytes32(0), 10, 1, batches, new uint256[](0));
 
         uint8[] memory idx = new uint8[](1);
         idx[0] = 0;
