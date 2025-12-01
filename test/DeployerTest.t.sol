@@ -3207,20 +3207,20 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
         OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
         address[] memory ddTargets = new address[](0);
+        RoleConfigStructs.RoleConfig[] memory roles = _buildSimpleRoleConfigs(names, images, voting);
 
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: keccak256("EVENTS_TEST_ORG"),
             orgName: "Events Test DAO",
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
+            deployerUsername: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
-            roleNames: names,
-            roleImages: images,
-            roleCanVote: voting,
+            roles: roles,
             roleAssignments: roleAssignments
         });
 
