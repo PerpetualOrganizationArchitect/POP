@@ -59,18 +59,18 @@ contract HatsTreeSetup {
         IToggleModule(params.toggleModule).setHatStatus(result.topHatId, true);
 
         // Create eligibility admin hat - this hat can mint any role
-        uint256 eligibilityAdminHatId = params.hats.createHat(
-            result.topHatId,
-            "ELIGIBILITY_ADMIN",
-            1,
-            params.eligibilityModule,
-            params.toggleModule,
-            true,
-            "ELIGIBILITY_ADMIN"
-        );
-        IEligibilityModule(params.eligibilityModule).setWearerEligibility(
-            params.eligibilityModule, eligibilityAdminHatId, true, true
-        );
+        uint256 eligibilityAdminHatId = params.hats
+            .createHat(
+                result.topHatId,
+                "ELIGIBILITY_ADMIN",
+                1,
+                params.eligibilityModule,
+                params.toggleModule,
+                true,
+                "ELIGIBILITY_ADMIN"
+            );
+        IEligibilityModule(params.eligibilityModule)
+            .setWearerEligibility(params.eligibilityModule, eligibilityAdminHatId, true, true);
         IToggleModule(params.toggleModule).setHatStatus(eligibilityAdminHatId, true);
         params.hats.mintHat(eligibilityAdminHatId, params.eligibilityModule);
         IEligibilityModule(params.eligibilityModule).setEligibilityModuleAdminHat(eligibilityAdminHatId);
@@ -106,15 +106,16 @@ contract HatsTreeSetup {
                 if (canCreate) {
                     // Create hat with configuration
                     uint32 maxSupply = role.hatConfig.maxSupply == 0 ? type(uint32).max : role.hatConfig.maxSupply;
-                    uint256 newHatId = params.hats.createHat(
-                        adminHatId,
-                        role.name,
-                        maxSupply,
-                        params.eligibilityModule,
-                        params.toggleModule,
-                        role.hatConfig.mutableHat,
-                        role.image
-                    );
+                    uint256 newHatId = params.hats
+                        .createHat(
+                            adminHatId,
+                            role.name,
+                            maxSupply,
+                            params.eligibilityModule,
+                            params.toggleModule,
+                            role.hatConfig.mutableHat,
+                            role.image
+                        );
                     result.roleHatIds[i] = newHatId;
                     created[i] = true;
                     createdCount++;
@@ -134,19 +135,15 @@ contract HatsTreeSetup {
             RoleConfigStructs.RoleConfig memory role = params.roles[i];
 
             IEligibilityModule(params.eligibilityModule).setWearerEligibility(params.executor, hatId, true, true);
-            IEligibilityModule(params.eligibilityModule).setWearerEligibility(
-                params.deployerAddress, hatId, true, true
-            );
+            IEligibilityModule(params.eligibilityModule).setWearerEligibility(params.deployerAddress, hatId, true, true);
             IToggleModule(params.toggleModule).setHatStatus(hatId, true);
-            IEligibilityModule(params.eligibilityModule).setDefaultEligibility(
-                hatId, role.defaults.eligible, role.defaults.standing
-            );
+            IEligibilityModule(params.eligibilityModule)
+                .setDefaultEligibility(hatId, role.defaults.eligible, role.defaults.standing);
 
             // Set eligibility for additional wearers
             for (uint256 j = 0; j < role.distribution.additionalWearers.length; j++) {
-                IEligibilityModule(params.eligibilityModule).setWearerEligibility(
-                    role.distribution.additionalWearers[j], hatId, true, true
-                );
+                IEligibilityModule(params.eligibilityModule)
+                    .setWearerEligibility(role.distribution.additionalWearers[j], hatId, true, true);
             }
         }
 

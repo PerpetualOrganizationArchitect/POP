@@ -113,10 +113,10 @@ contract TaskManager is Initializable, ContextUpgradeable {
 
     /*──────── Events ───────*/
     event HatSet(HatType hatType, uint256 hat, bool allowed);
-    event ProjectCreated(bytes32 indexed id, bytes96 title, bytes description, uint256 cap);
+    event ProjectCreated(bytes32 indexed id, bytes title, bytes32 metadataHash, uint256 cap);
     event ProjectCapUpdated(bytes32 indexed id, uint256 oldCap, uint256 newCap);
     event ProjectManagerUpdated(bytes32 indexed id, address indexed manager, bool isManager);
-    event ProjectDeleted(bytes32 indexed id, bytes96 title, bytes description);
+    event ProjectDeleted(bytes32 indexed id);
     event ProjectRolePermSet(bytes32 indexed id, uint256 indexed hatId, uint8 mask);
     event BountyCapSet(bytes32 indexed projectId, address indexed token, uint256 oldCap, uint256 newCap);
 
@@ -127,11 +127,13 @@ contract TaskManager is Initializable, ContextUpgradeable {
         address bountyToken,
         uint256 bountyPayout,
         bool requiresApplication,
-        bytes96 title,
-        bytes description
+        bytes title,
+        bytes32 metadataHash
     );
-    event TaskUpdated(uint256 indexed id, uint256 payout, address bountyToken, uint256 bountyPayout, bytes96 title, bytes description);
-    event TaskSubmitted(uint256 indexed id, bytes description);
+    event TaskUpdated(
+        uint256 indexed id, uint256 payout, address bountyToken, uint256 bountyPayout, bytes title, bytes32 metadataHash
+    );
+    event TaskSubmitted(uint256 indexed id, bytes32 submissionHash);
     event TaskClaimed(uint256 indexed id, address indexed claimer);
     event TaskAssigned(uint256 indexed id, address indexed assignee, address indexed assigner);
     event TaskCompleted(uint256 indexed id, address indexed completer);
@@ -199,6 +201,8 @@ contract TaskManager is Initializable, ContextUpgradeable {
 
     /*──────── Project Logic ─────*/
     /**
+     * @param title           Project title (required, raw UTF-8)
+     * @param metadataHash    IPFS CID sha256 digest (optional, bytes32(0) valid)
      * @param managers        initial manager addresses (auto-adds msg.sender)
      * @param createHats      hat IDs allowed to CREATE tasks in this project
      * @param claimHats       hat IDs allowed to CLAIM
@@ -206,8 +210,8 @@ contract TaskManager is Initializable, ContextUpgradeable {
      * @param assignHats      hat IDs allowed to ASSIGN tasks
      */
     function createProject(
-        bytes96 title,
-        bytes calldata description,
+        bytes calldata title,
+        bytes32 metadataHash,
         uint256 cap,
         address[] calldata managers,
         uint256[] calldata createHats,
@@ -216,7 +220,8 @@ contract TaskManager is Initializable, ContextUpgradeable {
         uint256[] calldata assignHats
     ) external returns (bytes32 projectId) {
         _requireCreator();
-        ValidationLib.requireValidProjectParams(title, description, cap);
+        ValidationLib.requireValidTitle(title);
+        ValidationLib.requireValidCapAmount(cap);
 
         Layout storage l = _layout();
         projectId = bytes32(uint256(l.nextProjectId++));
@@ -242,46 +247,46 @@ contract TaskManager is Initializable, ContextUpgradeable {
         _setBatchHatPerm(projectId, reviewHats, TaskPerm.REVIEW);
         _setBatchHatPerm(projectId, assignHats, TaskPerm.ASSIGN);
 
-        emit ProjectCreated(projectId, title, description, cap);
+        emit ProjectCreated(projectId, title, metadataHash, cap);
     }
 
-    function deleteProject(bytes32 pid, bytes96 title, bytes calldata description) external {
+    function deleteProject(bytes32 pid) external {
         _requireCreator();
-        ValidationLib.requireValidTitle(title);
-        description.requireNonEmptyBytes();
         Layout storage l = _layout();
         Project storage p = l._projects[pid];
         if (!p.exists) revert NotFound();
 
         delete l._projects[pid];
-        emit ProjectDeleted(pid, title, description);
+        emit ProjectDeleted(pid);
     }
 
     /*──────── Task Logic ───────*/
     function createTask(
         uint256 payout,
-        bytes96 title,
-        bytes calldata description,
+        bytes calldata title,
+        bytes32 metadataHash,
         bytes32 pid,
         address bountyToken,
         uint256 bountyPayout,
         bool requiresApplication
     ) external {
         _requireCanCreate(pid);
-        _createTask(payout, title, description, pid, requiresApplication, bountyToken, bountyPayout);
+        _createTask(payout, title, metadataHash, pid, requiresApplication, bountyToken, bountyPayout);
     }
 
     function _createTask(
         uint256 payout,
-        bytes96 title,
-        bytes calldata description,
+        bytes calldata title,
+        bytes32 metadataHash,
         bytes32 pid,
         bool requiresApplication,
         address bountyToken,
         uint256 bountyPayout
     ) internal {
         Layout storage l = _layout();
-        ValidationLib.requireValidTaskParams(payout, title, description, bountyToken, bountyPayout);
+        ValidationLib.requireValidTitle(title);
+        ValidationLib.requireValidPayout96(payout);
+        ValidationLib.requireValidBountyConfig(bountyToken, bountyPayout);
 
         Project storage p = l._projects[pid];
         if (!p.exists) revert NotFound();
@@ -301,20 +306,22 @@ contract TaskManager is Initializable, ContextUpgradeable {
         l._tasks[id] = Task(
             pid, uint96(payout), address(0), uint96(bountyPayout), requiresApplication, Status.UNCLAIMED, bountyToken
         );
-        emit TaskCreated(id, pid, payout, bountyToken, bountyPayout, requiresApplication, title, description);
+        emit TaskCreated(id, pid, payout, bountyToken, bountyPayout, requiresApplication, title, metadataHash);
     }
 
     function updateTask(
         uint256 id,
         uint256 newPayout,
-        bytes96 newTitle,
-        bytes calldata newDescription,
+        bytes calldata newTitle,
+        bytes32 newMetadataHash,
         address newBountyToken,
         uint256 newBountyPayout
     ) external {
         _requireCanCreate(_layout()._tasks[id].projectId);
         Layout storage l = _layout();
-        ValidationLib.requireValidTaskParams(newPayout, newTitle, newDescription, newBountyToken, newBountyPayout);
+        ValidationLib.requireValidTitle(newTitle);
+        ValidationLib.requireValidPayout96(newPayout);
+        ValidationLib.requireValidBountyConfig(newBountyToken, newBountyPayout);
 
         Task storage t = _task(l, id);
         if (t.status != Status.UNCLAIMED) revert BadStatus();
@@ -342,7 +349,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
         t.bountyToken = newBountyToken;
         t.bountyPayout = uint96(newBountyPayout);
 
-        emit TaskUpdated(id, newPayout, newBountyToken, newBountyPayout, newTitle, newDescription);
+        emit TaskUpdated(id, newPayout, newBountyToken, newBountyPayout, newTitle, newMetadataHash);
     }
 
     function claimTask(uint256 id) external {
@@ -370,15 +377,15 @@ contract TaskManager is Initializable, ContextUpgradeable {
         emit TaskAssigned(id, assignee, _msgSender());
     }
 
-    function submitTask(uint256 id, bytes calldata description) external {
+    function submitTask(uint256 id, bytes32 submissionHash) external {
         Layout storage l = _layout();
         Task storage t = _task(l, id);
         if (t.status != Status.CLAIMED) revert BadStatus();
         if (t.claimer != _msgSender()) revert NotClaimer();
-        description.requireNonEmptyBytes();
+        if (submissionHash == bytes32(0)) revert ValidationLib.InvalidString();
 
         t.status = Status.SUBMITTED;
-        emit TaskSubmitted(id, description);
+        emit TaskSubmitted(id, submissionHash);
     }
 
     function completeTask(uint256 id) external {
@@ -472,29 +479,31 @@ contract TaskManager is Initializable, ContextUpgradeable {
     /**
      * @dev Creates a task and immediately assigns it to the specified assignee in a single transaction.
      * @param payout The payout amount for the task
-     * @param title Task title (bytes96, emitted on-chain)
-     * @param description Task description (IPFS hash)
+     * @param title Task title (required, raw UTF-8)
+     * @param metadataHash IPFS CID sha256 digest (optional, bytes32(0) valid)
      * @param pid Project ID
      * @param assignee Address to assign the task to
      * @return taskId The ID of the created task
      */
     function createAndAssignTask(
         uint256 payout,
-        bytes96 title,
-        bytes calldata description,
+        bytes calldata title,
+        bytes32 metadataHash,
         bytes32 pid,
         address assignee,
         address bountyToken,
         uint256 bountyPayout,
         bool requiresApplication
     ) external returns (uint256 taskId) {
-        return _createAndAssignTask(payout, title, description, pid, assignee, requiresApplication, bountyToken, bountyPayout);
+        return _createAndAssignTask(
+            payout, title, metadataHash, pid, assignee, requiresApplication, bountyToken, bountyPayout
+        );
     }
 
     function _createAndAssignTask(
         uint256 payout,
-        bytes96 title,
-        bytes calldata description,
+        bytes calldata title,
+        bytes32 metadataHash,
         bytes32 pid,
         address assignee,
         bool requiresApplication,
@@ -514,7 +523,9 @@ contract TaskManager is Initializable, ContextUpgradeable {
         }
 
         // Validation
-        ValidationLib.requireValidTaskParams(payout, title, description, bountyToken, bountyPayout);
+        ValidationLib.requireValidTitle(title);
+        ValidationLib.requireValidPayout96(payout);
+        ValidationLib.requireValidBountyConfig(bountyToken, bountyPayout);
 
         Project storage p = l._projects[pid];
         if (!p.exists) revert NotFound();
@@ -535,7 +546,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
             Task(pid, uint96(payout), assignee, uint96(bountyPayout), requiresApplication, Status.CLAIMED, bountyToken);
 
         // Emit events
-        emit TaskCreated(taskId, pid, payout, bountyToken, bountyPayout, requiresApplication, title, description);
+        emit TaskCreated(taskId, pid, payout, bountyToken, bountyPayout, requiresApplication, title, metadataHash);
         emit TaskAssigned(taskId, assignee, sender);
     }
 

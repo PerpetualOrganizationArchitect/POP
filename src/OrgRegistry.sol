@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import {ValidationLib} from "./libs/ValidationLib.sol";
 
 /* ─────────── Custom errors ─────────── */
 error InvalidParam();
@@ -70,8 +71,8 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     }
 
     /* ───── Events ───── */
-    event OrgRegistered(bytes32 indexed orgId, address indexed executor, bytes metaData);
-    event MetaUpdated(bytes32 indexed orgId, bytes newMetaData);
+    event OrgRegistered(bytes32 indexed orgId, address indexed executor, bytes name, bytes32 metadataHash);
+    event MetaUpdated(bytes32 indexed orgId, bytes newName, bytes32 newMetadataHash);
     event ContractRegistered(
         bytes32 indexed contractId,
         bytes32 indexed orgId,
@@ -97,7 +98,11 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     }
 
     /* ═════════════════ ORG  LOGIC ═════════════════ */
-    function registerOrg(bytes32 orgId, address executorAddr, bytes calldata metaData) external onlyOwner {
+    function registerOrg(bytes32 orgId, address executorAddr, bytes calldata name, bytes32 metadataHash)
+        external
+        onlyOwner
+    {
+        ValidationLib.requireValidTitle(name);
         if (orgId == bytes32(0) || executorAddr == address(0)) revert InvalidParam();
 
         Layout storage l = _layout();
@@ -110,15 +115,17 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
             exists: true
         });
         l.orgIds.push(orgId);
-        emit OrgRegistered(orgId, executorAddr, metaData);
+        emit OrgRegistered(orgId, executorAddr, name, metadataHash);
     }
 
     /**
      * @dev Creates an org in bootstrap mode without an executor (for deployment scenarios)
      * @param orgId The org identifier
-     * @param metaData Metadata for the org
+     * @param name Name of the org (required, raw UTF-8)
+     * @param metadataHash IPFS CID sha256 digest (optional, bytes32(0) is valid)
      */
-    function createOrgBootstrap(bytes32 orgId, bytes calldata metaData) external onlyOwner {
+    function createOrgBootstrap(bytes32 orgId, bytes calldata name, bytes32 metadataHash) external onlyOwner {
+        ValidationLib.requireValidTitle(name);
         if (orgId == bytes32(0)) revert InvalidParam();
 
         Layout storage l = _layout();
@@ -131,7 +138,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
             exists: true
         });
         l.orgIds.push(orgId);
-        emit OrgRegistered(orgId, address(0), metaData);
+        emit OrgRegistered(orgId, address(0), name, metadataHash);
     }
 
     /**
@@ -148,16 +155,16 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         if (!o.bootstrap) revert OwnerOnlyDuringBootstrap();
 
         o.executor = executorAddr;
-        emit OrgRegistered(orgId, executorAddr, ""); // emit update event
     }
 
-    function updateOrgMeta(bytes32 orgId, bytes calldata newMetaData) external {
+    function updateOrgMeta(bytes32 orgId, bytes calldata newName, bytes32 newMetadataHash) external {
+        ValidationLib.requireValidTitle(newName);
         Layout storage l = _layout();
         OrgInfo storage o = l.orgOf[orgId];
         if (!o.exists) revert OrgUnknown();
         if (msg.sender != o.executor) revert NotOrgExecutor();
 
-        emit MetaUpdated(orgId, newMetaData);
+        emit MetaUpdated(orgId, newName, newMetadataHash);
     }
 
     /* ══════════ CONTRACT  REGISTRATION  ══════════ */

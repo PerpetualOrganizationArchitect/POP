@@ -9,6 +9,7 @@ import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {HatManager} from "./libs/HatManager.sol";
 import {VotingMath} from "./libs/VotingMath.sol";
 import {VotingErrors} from "./libs/VotingErrors.sol";
+import {ValidationLib} from "./libs/ValidationLib.sol";
 
 /* ──────────────────  Direct‑democracy governor  ─────────────────────── */
 contract DirectDemocracyVoting is Initializable {
@@ -106,8 +107,16 @@ contract DirectDemocracyVoting is Initializable {
     /* ─────────── Events ─────────── */
     event HatSet(HatType hatType, uint256 hat, bool allowed);
     event CreatorHatSet(uint256 hat, bool allowed);
-    event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created);
-    event NewHatProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created, uint256[] hatIds);
+    event NewProposal(uint256 id, bytes title, bytes32 descriptionHash, uint8 numOptions, uint64 endTs, uint64 created);
+    event NewHatProposal(
+        uint256 id,
+        bytes title,
+        bytes32 descriptionHash,
+        uint8 numOptions,
+        uint64 endTs,
+        uint64 created,
+        uint256[] hatIds
+    );
     event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
     event ExecutorUpdated(address newExecutor);
@@ -249,13 +258,14 @@ contract DirectDemocracyVoting is Initializable {
     }
 
     function _initProposal(
-        bytes calldata metadata,
+        bytes calldata title,
+        bytes32 descriptionHash,
         uint32 minutesDuration,
         uint8 numOptions,
         IExecutor.Call[][] calldata batches,
         uint256[] calldata hatIds
     ) internal returns (uint256) {
-        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
+        ValidationLib.requireValidTitle(title);
         if (numOptions == 0) revert VotingErrors.LengthMismatch();
         if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
         _validateDuration(minutesDuration);
@@ -322,20 +332,21 @@ contract DirectDemocracyVoting is Initializable {
 
     /* ────────── Proposal Creation ────────── */
     function createProposal(
-        bytes calldata metadata,
+        bytes calldata title,
+        bytes32 descriptionHash,
         uint32 minutesDuration,
         uint8 numOptions,
         IExecutor.Call[][] calldata batches,
         uint256[] calldata hatIds
     ) external onlyCreator whenNotPaused {
-        uint256 id = _initProposal(metadata, minutesDuration, numOptions, batches, hatIds);
+        uint256 id = _initProposal(title, descriptionHash, minutesDuration, numOptions, batches, hatIds);
 
         uint64 endTs = _layout()._proposals[id].endTimestamp;
 
         if (hatIds.length > 0) {
-            emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
+            emit NewHatProposal(id, title, descriptionHash, numOptions, endTs, uint64(block.timestamp), hatIds);
         } else {
-            emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
+            emit NewProposal(id, title, descriptionHash, numOptions, endTs, uint64(block.timestamp));
         }
     }
 
