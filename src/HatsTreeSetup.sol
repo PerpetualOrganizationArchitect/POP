@@ -146,9 +146,8 @@ contract HatsTreeSetup {
         }
 
         // Batch register all hat creations for subgraph indexing (replaces N individual calls)
-        IEligibilityModule(params.eligibilityModule).batchRegisterHatCreation(
-            regHatIds, regParentHatIds, regDefaultEligibles, regDefaultStandings
-        );
+        IEligibilityModule(params.eligibilityModule)
+            .batchRegisterHatCreation(regHatIds, regParentHatIds, regDefaultEligibles, regDefaultStandings);
 
         // Step 5: Collect all eligibility and toggle operations for batch execution
         // Count total eligibility entries needed: 2 per role (executor + deployer) + additional wearers
@@ -203,13 +202,11 @@ contract HatsTreeSetup {
         }
 
         // Execute batch operations (replaces N individual calls with 3 batch calls)
-        IEligibilityModule(params.eligibilityModule).batchSetWearerEligibilityMultiHat(
-            eligWearers, eligHatIds, true, true
-        );
+        IEligibilityModule(params.eligibilityModule)
+            .batchSetWearerEligibilityMultiHat(eligWearers, eligHatIds, true, true);
         IToggleModule(params.toggleModule).batchSetHatStatus(toggleHatIds, toggleActives);
-        IEligibilityModule(params.eligibilityModule).batchSetDefaultEligibility(
-            defaultHatIds, defaultEligibles, defaultStandings
-        );
+        IEligibilityModule(params.eligibilityModule)
+            .batchSetDefaultEligibility(defaultHatIds, defaultEligibles, defaultStandings);
 
         // Step 6: Collect all minting operations for batch execution
         uint256 mintCount = 0;

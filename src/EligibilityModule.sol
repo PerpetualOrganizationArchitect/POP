@@ -336,11 +336,11 @@ contract EligibilityModule is Initializable, IHatsEligibility {
      * @param eligibles Array of eligibility flags
      * @param standings Array of standing flags
      */
-    function batchSetDefaultEligibility(
-        uint256[] calldata hatIds,
-        bool[] calldata eligibles,
-        bool[] calldata standings
-    ) external onlySuperAdmin whenNotPaused {
+    function batchSetDefaultEligibility(uint256[] calldata hatIds, bool[] calldata eligibles, bool[] calldata standings)
+        external
+        onlySuperAdmin
+        whenNotPaused
+    {
         uint256 length = hatIds.length;
         if (length != eligibles.length || length != standings.length) {
             revert ArrayLengthMismatch();
@@ -363,10 +363,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
      * @param hatIds Array of hat IDs to mint
      * @param wearers Array of addresses to receive hats
      */
-    function batchMintHats(
-        uint256[] calldata hatIds,
-        address[] calldata wearers
-    ) external onlySuperAdmin {
+    function batchMintHats(uint256[] calldata hatIds, address[] calldata wearers) external onlySuperAdmin {
         uint256 length = hatIds.length;
         if (length != wearers.length) revert ArrayLengthMismatch();
 
@@ -575,7 +572,8 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         bool[] calldata combineWithHierarchyFlags
     ) external onlySuperAdmin {
         uint256 length = hatIds.length;
-        if (length != quorums.length || length != membershipHatIds.length || length != combineWithHierarchyFlags.length) {
+        if (length != quorums.length || length != membershipHatIds.length || length != combineWithHierarchyFlags.length)
+        {
             revert ArrayLengthMismatch();
         }
 

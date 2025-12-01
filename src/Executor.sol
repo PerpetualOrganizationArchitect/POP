@@ -192,7 +192,10 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
         (bool success,) = eligibilityModule.call(
             abi.encodeWithSignature(
                 "batchConfigureVouching(uint256[],uint32[],uint256[],bool[])",
-                hatIds, quorums, membershipHatIds, combineWithHierarchyFlags
+                hatIds,
+                quorums,
+                membershipHatIds,
+                combineWithHierarchyFlags
             )
         );
         require(success, "batchConfigureVouching failed");
