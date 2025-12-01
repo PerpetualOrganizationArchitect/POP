@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.30;
 
 /**
  * @title ValidationLib
@@ -13,10 +13,12 @@ library ValidationLib {
     error InvalidPayout();
     error CapBelowCommitted();
     error EmptyTitle();
+    error TitleTooLong();
 
     /* ─────────── Constants ─────────── */
     uint256 internal constant MAX_PAYOUT = 1e24; // 1 000 000 tokens (18 dec)
     uint96 internal constant MAX_PAYOUT_96 = 1e24; // same as above, but as uint96
+    uint256 internal constant MAX_TITLE_LENGTH = 256; // max title length in bytes
 
     /* ─────────── Core Functions ─────────── */
 
@@ -37,12 +39,12 @@ library ValidationLib {
     }
 
     /**
-     * @notice Validate that a title is not empty (at least one non-zero byte)
-     * @param title The title to validate (bytes96)
+     * @notice Validate that a title is not empty and within length limits
+     * @param title The title to validate (dynamic bytes)
      */
-    function requireValidTitle(bytes96 title) internal pure {
-        // Check if all bytes are zero (empty title)
-        if (title == bytes96(0)) revert EmptyTitle();
+    function requireValidTitle(bytes calldata title) internal pure {
+        if (title.length == 0) revert EmptyTitle();
+        if (title.length > MAX_TITLE_LENGTH) revert TitleTooLong();
     }
 
     /**
@@ -100,39 +102,6 @@ library ValidationLib {
      */
     function requireValidCapAmount(uint256 cap) internal pure {
         if (cap > MAX_PAYOUT) revert InvalidPayout();
-    }
-
-    /**
-     * @notice Validate task creation parameters
-     * @param payout The task payout
-     * @param title The task title (bytes96, emitted on-chain)
-     * @param description The task description (IPFS hash)
-     * @param bountyToken The bounty token address
-     * @param bountyPayout The bounty payout amount
-     */
-    function requireValidTaskParams(
-        uint256 payout,
-        bytes96 title,
-        bytes calldata description,
-        address bountyToken,
-        uint256 bountyPayout
-    ) internal pure {
-        requireValidPayout96(payout);
-        requireValidTitle(title);
-        requireNonEmptyBytes(description);
-        requireValidBountyConfig(bountyToken, bountyPayout);
-    }
-
-    /**
-     * @notice Validate project creation parameters
-     * @param title The project title (bytes96, emitted on-chain)
-     * @param description The project description (IPFS hash)
-     * @param cap The project cap
-     */
-    function requireValidProjectParams(bytes96 title, bytes calldata description, uint256 cap) internal pure {
-        requireValidTitle(title);
-        requireNonEmptyBytes(description);
-        requireValidCapAmount(cap);
     }
 
     /**

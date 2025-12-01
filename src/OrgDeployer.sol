@@ -64,6 +64,7 @@ contract OrgDeployer is Initializable {
         uint256 topHatId,
         uint256[] roleHatIds
     );
+
     /*───────────── ERC-7201 Storage ───────────*/
     /// @custom:storage-location erc7201:poa.orgdeployer.storage
     struct Layout {
@@ -244,7 +245,7 @@ contract OrgDeployer is Initializable {
 
         /* 3. Create Org in bootstrap mode */
         if (!_orgExists(params.orgId)) {
-            l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName));
+            l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName), bytes32(0));
         } else {
             revert OrgExistsMismatch();
         }
@@ -342,13 +343,14 @@ contract OrgDeployer is Initializable {
                     uint256 hatId = gov.roleHatIds[i];
                     uint256 voucherHatId = gov.roleHatIds[role.vouching.voucherRoleIndex];
 
-                    IExecutorAdmin(result.executor).configureVouching(
-                        gov.eligibilityModule,
-                        hatId,
-                        role.vouching.quorum,
-                        voucherHatId,
-                        role.vouching.combineWithHierarchy
-                    );
+                    IExecutorAdmin(result.executor)
+                        .configureVouching(
+                            gov.eligibilityModule,
+                            hatId,
+                            role.vouching.quorum,
+                            voucherHatId,
+                            role.vouching.combineWithHierarchy
+                        );
                 }
             }
         }
@@ -514,5 +516,4 @@ contract OrgDeployer is Initializable {
         // Forward batch registration to OrgRegistry (we are the owner)
         l.orgRegistry.batchRegisterOrgContracts(orgId, registrations, autoUpgrade, lastRegister);
     }
-
 }
