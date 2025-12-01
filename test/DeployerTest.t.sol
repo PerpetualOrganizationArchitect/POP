@@ -3039,4 +3039,244 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
     function _hashPair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
         return a < b ? keccak256(abi.encodePacked(a, b)) : keccak256(abi.encodePacked(b, a));
     }
+
+    /*═══════════════════════════════════ REGISTER HAT CREATION TESTS ═══════════════════════════════════════*/
+
+    // Test that registerHatCreation emits the correct HatCreatedWithEligibility event
+    function testRegisterHatCreationEvents() public {
+        TestOrgSetup memory setup = _createTestOrg("Register Hat Test DAO");
+        address executive = voter1;
+
+        // Get toggle module address from org registry (uses ORG_ID constant)
+        address toggleModule = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.TOGGLE_MODULE_ID);
+
+        // Mint executive hat to voter1
+        _mintAdminHat(setup.exec, setup.eligibilityModule, setup.executiveRoleHat, executive);
+
+        // Create a new hat using createHat directly (simulating external hat creation)
+        vm.prank(executive);
+        uint256 newHatId = IHats(SEPOLIA_HATS)
+            .createHat(
+                setup.defaultRoleHat, // parent
+                "Test Hat",
+                100, // maxSupply
+                setup.eligibilityModule,
+                toggleModule,
+                true, // mutable
+                "ipfs://test-hat"
+            );
+
+        // Now register this hat creation - should emit HatCreatedWithEligibility event
+        vm.expectEmit(true, true, true, true);
+        emit HatCreatedWithEligibility(
+            executive, // creator
+            setup.defaultRoleHat, // parentHatId
+            newHatId, // newHatId
+            true, // defaultEligible
+            true, // defaultStanding
+            0 // mintedCount (registerHatCreation doesn't mint)
+        );
+
+        vm.prank(executive);
+        EligibilityModule(setup.eligibilityModule).registerHatCreation(newHatId, setup.defaultRoleHat, true, true);
+    }
+
+    // Test that registerHatCreation emits DefaultEligibilityUpdated event
+    function testRegisterHatCreationEmitsDefaultEligibilityUpdated() public {
+        TestOrgSetup memory setup = _createTestOrg("Register Hat Eligibility Test DAO");
+        address executive = voter1;
+
+        address toggleModule = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.TOGGLE_MODULE_ID);
+
+        _mintAdminHat(setup.exec, setup.eligibilityModule, setup.executiveRoleHat, executive);
+
+        vm.prank(executive);
+        uint256 newHatId = IHats(SEPOLIA_HATS)
+            .createHat(
+                setup.defaultRoleHat,
+                "Test Hat 2",
+                100,
+                setup.eligibilityModule,
+                toggleModule,
+                true,
+                "ipfs://test-hat-2"
+            );
+
+        // Expect DefaultEligibilityUpdated event
+        vm.expectEmit(true, false, false, true);
+        emit DefaultEligibilityUpdated(newHatId, false, true, executive);
+
+        vm.prank(executive);
+        EligibilityModule(setup.eligibilityModule)
+            .registerHatCreation(
+                newHatId,
+                setup.defaultRoleHat,
+                false, // not eligible by default
+                true // good standing by default
+            );
+    }
+
+    // Test authorization - only superAdmin or hat admin can call registerHatCreation
+    function testRegisterHatCreationAuthorization() public {
+        TestOrgSetup memory setup = _createTestOrg("Auth Test DAO");
+        address executive = voter1;
+        address unauthorized = address(0x999);
+
+        address toggleModule = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.TOGGLE_MODULE_ID);
+
+        _mintAdminHat(setup.exec, setup.eligibilityModule, setup.executiveRoleHat, executive);
+
+        // Create a hat that we'll try to register
+        vm.prank(executive);
+        uint256 newHatId = IHats(SEPOLIA_HATS)
+            .createHat(
+                setup.defaultRoleHat,
+                "Auth Test Hat",
+                100,
+                setup.eligibilityModule,
+                toggleModule,
+                true,
+                "ipfs://auth-test"
+            );
+
+        // Unauthorized user should not be able to register
+        vm.prank(unauthorized);
+        vm.expectRevert(abi.encodeWithSelector(EligibilityModule.NotAuthorizedAdmin.selector));
+        EligibilityModule(setup.eligibilityModule).registerHatCreation(newHatId, setup.defaultRoleHat, true, true);
+
+        // Hat admin (executive) should be able to register
+        vm.prank(executive);
+        EligibilityModule(setup.eligibilityModule).registerHatCreation(newHatId, setup.defaultRoleHat, true, true);
+    }
+
+    // Test that registerHatCreation sets default eligibility correctly
+    function testRegisterHatCreationSetsDefaultEligibility() public {
+        TestOrgSetup memory setup = _createTestOrg("Default Eligibility Test DAO");
+        address executive = voter1;
+        address testWearer = address(0x888);
+
+        address toggleModule = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.TOGGLE_MODULE_ID);
+
+        _mintAdminHat(setup.exec, setup.eligibilityModule, setup.executiveRoleHat, executive);
+
+        vm.prank(executive);
+        uint256 newHatId = IHats(SEPOLIA_HATS)
+            .createHat(
+                setup.defaultRoleHat,
+                "Eligibility Test Hat",
+                100,
+                setup.eligibilityModule,
+                toggleModule,
+                true,
+                "ipfs://eligibility-test"
+            );
+
+        // Register with specific eligibility settings (not eligible, good standing)
+        vm.prank(executive);
+        EligibilityModule(setup.eligibilityModule)
+            .registerHatCreation(
+                newHatId,
+                setup.defaultRoleHat,
+                false, // not eligible by default
+                true // good standing by default
+            );
+
+        // Check that the default eligibility was set correctly
+        (bool eligible, bool standing) =
+            EligibilityModule(setup.eligibilityModule).getWearerStatus(testWearer, newHatId);
+        assertFalse(eligible, "Wearer should not be eligible by default");
+        assertTrue(standing, "Wearer should have good standing by default");
+    }
+
+    // Test that HatsTreeSetup correctly emits events during org deployment
+    function testHatsTreeSetupEmitsRegisterHatCreationEvents() public {
+        // This test verifies that HatsTreeSetup calls registerHatCreation
+        // by checking that HatCreatedWithEligibility events are emitted during deployment
+
+        vm.startPrank(orgOwner);
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: keccak256("EVENTS_TEST_ORG"),
+            orgName: "Events Test DAO",
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roleNames: names,
+            roleImages: images,
+            roleCanVote: voting,
+            roleAssignments: roleAssignments
+        });
+
+        // Record logs to verify HatCreatedWithEligibility events were emitted
+        vm.recordLogs();
+
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        vm.stopPrank();
+
+        // Count HatCreatedWithEligibility events
+        // Event signature: HatCreatedWithEligibility(address,uint256,uint256,bool,bool,uint256)
+        bytes32 eventSig = keccak256("HatCreatedWithEligibility(address,uint256,uint256,bool,bool,uint256)");
+        uint256 hatCreatedEventCount = 0;
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                hatCreatedEventCount++;
+            }
+        }
+
+        // Should have at least 3 events: 1 for eligibility admin hat + 2 for role hats (DEFAULT, EXECUTIVE)
+        assertGe(hatCreatedEventCount, 3, "Should emit HatCreatedWithEligibility events for all created hats");
+    }
+
+    // Test that superAdmin can call registerHatCreation
+    function testRegisterHatCreationBySuperAdmin() public {
+        TestOrgSetup memory setup = _createTestOrg("SuperAdmin Test DAO");
+        address executive = voter1;
+
+        address toggleModule = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.TOGGLE_MODULE_ID);
+
+        _mintAdminHat(setup.exec, setup.eligibilityModule, setup.executiveRoleHat, executive);
+
+        // Create a hat
+        vm.prank(executive);
+        uint256 newHatId = IHats(SEPOLIA_HATS)
+            .createHat(
+                setup.defaultRoleHat,
+                "SuperAdmin Test Hat",
+                100,
+                setup.eligibilityModule,
+                toggleModule,
+                true,
+                "ipfs://superadmin-test"
+            );
+
+        // SuperAdmin (executor) should be able to register even without being hat admin
+        vm.prank(setup.exec);
+        EligibilityModule(setup.eligibilityModule).registerHatCreation(newHatId, setup.defaultRoleHat, true, true);
+
+        // Verify eligibility was set
+        (bool eligible, bool standing) =
+            EligibilityModule(setup.eligibilityModule).getWearerStatus(address(0x777), newHatId);
+        assertTrue(eligible, "Wearer should be eligible by default after registration");
+        assertTrue(standing, "Wearer should have good standing by default after registration");
+    }
 }
