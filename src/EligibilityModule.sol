@@ -340,6 +340,22 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         );
     }
 
+    /// @notice Register a hat that was created externally and emit the HatCreatedWithEligibility event
+    /// @dev Used by HatsTreeSetup to emit events for subgraph indexing without needing admin rights to create hats
+    /// @param hatId The ID of the hat that was created
+    /// @param parentHatId The ID of the parent hat
+    /// @param defaultEligible Whether wearers are eligible by default
+    /// @param defaultStanding Whether wearers have good standing by default
+    function registerHatCreation(uint256 hatId, uint256 parentHatId, bool defaultEligible, bool defaultStanding)
+        external
+        onlyHatAdmin(parentHatId)
+    {
+        Layout storage l = _layout();
+        l.defaultRules[hatId] = WearerRules(_packWearerFlags(defaultEligible, defaultStanding));
+        emit DefaultEligibilityUpdated(hatId, defaultEligible, defaultStanding, msg.sender);
+        emit HatCreatedWithEligibility(msg.sender, parentHatId, hatId, defaultEligible, defaultStanding, 0);
+    }
+
     /// @dev Internal function to handle initial minting logic
     function _handleInitialMinting(
         uint256 hatId,
