@@ -1,0 +1,150 @@
+{
+  "orgId": "advanced-demo-cooperative-with-vouching",
+  "orgName": "Advanced Demo Cooperative",
+  "autoUpgrade": true,
+  "quorum": {
+    "hybrid": 50,
+    "directDemocracy": 60
+  },
+  "roles": [
+    {
+      "name": "MEMBER",
+      "image": "ipfs://QmMemberRole",
+      "canVote": true,
+      "vouching": {
+        "enabled": true,
+        "quorum": 1,
+        "voucherRoleIndex": 0,
+        "combineWithHierarchy": true
+      },
+      "defaults": {
+        "eligible": false,
+        "standing": true
+      },
+      "hierarchy": {
+        "adminRoleIndex": 3
+      },
+      "distribution": {
+        "mintToDeployer": false,
+        "mintToExecutor": false,
+        "additionalWearers": []
+      },
+      "hatConfig": {
+        "maxSupply": 0,
+        "mutableHat": true
+      }
+    },
+    {
+      "name": "COORDINATOR",
+      "image": "ipfs://QmCoordinatorRole",
+      "canVote": true,
+      "vouching": {
+        "enabled": true,
+        "quorum": 1,
+        "voucherRoleIndex": 3,
+        "combineWithHierarchy": false
+      },
+      "defaults": {
+        "eligible": false,
+        "standing": true
+      },
+      "hierarchy": {
+        "adminRoleIndex": 3
+      },
+      "distribution": {
+        "mintToDeployer": false,
+        "mintToExecutor": false,
+        "additionalWearers": []
+      },
+      "hatConfig": {
+        "maxSupply": 10,
+        "mutableHat": true
+      }
+    },
+    {
+      "name": "CONTRIBUTOR",
+      "image": "ipfs://QmContributorRole",
+      "canVote": false,
+      "vouching": {
+        "enabled": false,
+        "quorum": 0,
+        "voucherRoleIndex": 0,
+        "combineWithHierarchy": false
+      },
+      "defaults": {
+        "eligible": true,
+        "standing": true
+      },
+      "hierarchy": {
+        "adminRoleIndex": 3
+      },
+      "distribution": {
+        "mintToDeployer": false,
+        "mintToExecutor": false,
+        "additionalWearers": []
+      },
+      "hatConfig": {
+        "maxSupply": 0,
+        "mutableHat": true
+      }
+    },
+    {
+      "name": "ADMIN",
+      "image": "ipfs://QmAdminRole",
+      "canVote": true,
+      "vouching": {
+        "enabled": false,
+        "quorum": 0,
+        "voucherRoleIndex": 0,
+        "combineWithHierarchy": false
+      },
+      "defaults": {
+        "eligible": true,
+        "standing": true
+      },
+      "hierarchy": {
+        "adminRoleIndex": 115792089237316195423570985008687907853269984665640564039457584007913129639935
+      },
+      "distribution": {
+        "mintToDeployer": true,
+        "mintToExecutor": false,
+        "additionalWearers": []
+      },
+      "hatConfig": {
+        "maxSupply": 5,
+        "mutableHat": false
+      }
+    }
+  ],
+  "votingClasses": [
+    {
+      "strategy": "DIRECT",
+      "slicePct": 60,
+      "quadratic": false,
+      "minBalance": 0,
+      "asset": "0x0000000000000000000000000000000000000000",
+      "hatIds": []
+    },
+    {
+      "strategy": "ERC20_BAL",
+      "slicePct": 40,
+      "quadratic": true,
+      "minBalance": "1000000000000000000",
+      "asset": "0x0000000000000000000000000000000000000000",
+      "hatIds": []
+    }
+  ],
+  "roleAssignments": {
+    "quickJoinRoles": [],
+    "tokenMemberRoles": [0, 1, 3],
+    "tokenApproverRoles": [3],
+    "taskCreatorRoles": [0, 1, 3],
+    "educationCreatorRoles": [0, 1, 3],
+    "educationMemberRoles": [0, 1, 2, 3],
+    "hybridProposalCreatorRoles": [0, 1, 3],
+    "ddVotingRoles": [0, 1, 3],
+    "ddCreatorRoles": [0, 1, 3]
+  },
+  "ddInitialTargets": [],
+  "withPaymaster": false
+}

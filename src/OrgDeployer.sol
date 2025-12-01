@@ -8,9 +8,10 @@ import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import "./OrgRegistry.sol";
 import {IHybridVotingInit} from "./libs/ModuleDeploymentLib.sol";
 import {RoleResolver} from "./libs/RoleResolver.sol";
-import {GovernanceFactory} from "./factories/GovernanceFactory.sol";
+import {GovernanceFactory, IHatsTreeSetup} from "./factories/GovernanceFactory.sol";
 import {AccessFactory} from "./factories/AccessFactory.sol";
 import {ModulesFactory} from "./factories/ModulesFactory.sol";
+import {RoleConfigStructs} from "./libs/RoleConfigStructs.sol";
 
 /*────────────────────── Module‑specific hooks ──────────────────────────*/
 interface IParticipationToken {
@@ -28,6 +29,13 @@ interface IExecutorAdmin {
         uint256 membershipHatId,
         bool combineWithHierarchy
     ) external;
+    function batchConfigureVouching(
+        address eligibilityModule,
+        uint256[] calldata hatIds,
+        uint32[] calldata quorums,
+        uint256[] calldata membershipHatIds,
+        bool[] calldata combineWithHierarchyFlags
+    ) external;
     function setDefaultEligibility(address eligibilityModule, uint256 hatId, bool eligible, bool standing) external;
 }
 
@@ -35,30 +43,35 @@ interface IPaymasterHub {
     function registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId) external;
 }
 
-/*────────────────────────────  Errors  ───────────────────────────────*/
-error InvalidAddress();
-error OrgExistsMismatch();
-error Reentrant();
-
-/*────────────────────────────  Events  ───────────────────────────────*/
-event OrgDeployed(
-    bytes32 indexed orgId,
-    address indexed executor,
-    address hybridVoting,
-    address directDemocracyVoting,
-    address quickJoin,
-    address participationToken,
-    address taskManager,
-    address educationHub,
-    address paymentManager
-);
-
 /**
  * @title OrgDeployer
  * @notice Thin orchestrator for deploying complete organizations using factory pattern
  * @dev Coordinates GovernanceFactory, AccessFactory, and ModulesFactory
  */
 contract OrgDeployer is Initializable {
+    /*────────────────────────────  Errors  ───────────────────────────────*/
+    error InvalidAddress();
+    error OrgExistsMismatch();
+    error Reentrant();
+    error InvalidRoleConfiguration();
+
+    /*────────────────────────────  Events  ───────────────────────────────*/
+    event OrgDeployed(
+        bytes32 indexed orgId,
+        address indexed executor,
+        address hybridVoting,
+        address directDemocracyVoting,
+        address quickJoin,
+        address participationToken,
+        address taskManager,
+        address educationHub,
+        address paymentManager,
+        address eligibilityModule,
+        address toggleModule,
+        uint256 topHatId,
+        uint256[] roleHatIds
+    );
+
     /*───────────── ERC-7201 Storage ───────────*/
     /// @custom:storage-location erc7201:poa.orgdeployer.storage
     struct Layout {
@@ -146,15 +159,63 @@ contract OrgDeployer is Initializable {
         string orgName;
         address registryAddr;
         address deployerAddress; // Address to receive ADMIN hat
+        string deployerUsername; // Optional username for deployer (empty string = skip registration)
         bool autoUpgrade;
         uint8 hybridQuorumPct;
         uint8 ddQuorumPct;
         IHybridVotingInit.ClassConfig[] hybridClasses;
         address[] ddInitialTargets;
-        string[] roleNames;
-        string[] roleImages;
-        bool[] roleCanVote;
+        RoleConfigStructs.RoleConfig[] roles; // Complete role configuration (replaces roleNames, roleImages, roleCanVote)
         RoleAssignments roleAssignments;
+    }
+
+    /*════════════════  VALIDATION  ════════════════*/
+
+    /// @notice Validates role configurations for correctness
+    /// @dev Checks indices, prevents cycles, validates vouching configs
+    /// @param roles Array of role configurations to validate
+    function _validateRoleConfigs(RoleConfigStructs.RoleConfig[] calldata roles) internal pure {
+        uint256 len = roles.length;
+
+        // Must have at least one role
+        if (len == 0) revert InvalidRoleConfiguration();
+
+        // Practical limit to prevent gas issues
+        if (len > 32) revert InvalidRoleConfiguration();
+
+        for (uint256 i = 0; i < len; i++) {
+            RoleConfigStructs.RoleConfig calldata role = roles[i];
+
+            // Validate vouching configuration
+            if (role.vouching.enabled) {
+                // Quorum must be positive
+                if (role.vouching.quorum == 0) revert InvalidRoleConfiguration();
+
+                // Voucher role index must be valid
+                if (role.vouching.voucherRoleIndex >= len) {
+                    revert InvalidRoleConfiguration();
+                }
+            }
+
+            // Validate hierarchy configuration
+            if (role.hierarchy.adminRoleIndex != type(uint256).max) {
+                // Admin role index must be valid
+                if (role.hierarchy.adminRoleIndex >= len) {
+                    revert InvalidRoleConfiguration();
+                }
+
+                // Prevent simple self-referential cycles
+                if (role.hierarchy.adminRoleIndex == i) {
+                    revert InvalidRoleConfiguration();
+                }
+            }
+
+            // Validate name is not empty
+            if (bytes(role.name).length == 0) revert InvalidRoleConfiguration();
+        }
+
+        // Note: Full cycle detection would require graph traversal
+        // The Hats contract itself will revert if actual cycles exist during tree creation
     }
 
     /*════════════════  MAIN DEPLOYMENT FUNCTION  ════════════════*/
@@ -181,14 +242,17 @@ contract OrgDeployer is Initializable {
     {
         Layout storage l = _layout();
 
-        /* 1. Validate deployer address */
+        /* 1. Validate role configurations */
+        _validateRoleConfigs(params.roles);
+
+        /* 2. Validate deployer address */
         if (params.deployerAddress == address(0)) {
             revert InvalidAddress();
         }
 
-        /* 2. Create Org in bootstrap mode */
+        /* 3. Create Org in bootstrap mode */
         if (!_orgExists(params.orgId)) {
-            l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName));
+            l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName), bytes32(0));
         } else {
             revert OrgExistsMismatch();
         }
@@ -277,32 +341,34 @@ contract OrgDeployer is Initializable {
         /* 10. Link executor to governor */
         IExecutorAdmin(result.executor).setCaller(result.hybridVoting);
 
-        /* 10.5. Configure vouching system before renouncing ownership */
+        /* 10.5. Configure vouching system from role configurations (batch optimized) */
         {
-            // Only configure vouching for orgs with 4+ roles (MEMBER, COORDINATOR, CONTRIBUTOR, ADMIN)
-            // This avoids breaking simple 2-role test orgs (DEFAULT, EXECUTIVE)
-            if (gov.roleHatIds.length >= 4) {
-                uint256 coordinatorHatId = gov.roleHatIds[1]; // COORDINATOR
-                uint256 memberHatId = gov.roleHatIds[0]; // MEMBER
+            // Count roles with vouching enabled
+            uint256 vouchCount = 0;
+            for (uint256 i = 0; i < params.roles.length; i++) {
+                if (params.roles[i].vouching.enabled) vouchCount++;
+            }
 
-                // Configure vouching: quorum=1, membershipHat=MEMBER, combineWithHierarchy=false
-                IExecutorAdmin(result.executor)
-                    .configureVouching(
-                        gov.eligibilityModule,
-                        coordinatorHatId,
-                        1, // quorum: only 1 vouch needed
-                        memberHatId, // MEMBER hat wearers can vouch
-                        false // don't combine with hierarchy
-                    );
+            if (vouchCount > 0) {
+                uint256[] memory hatIds = new uint256[](vouchCount);
+                uint32[] memory quorums = new uint32[](vouchCount);
+                uint256[] memory membershipHatIds = new uint256[](vouchCount);
+                bool[] memory combineFlags = new bool[](vouchCount);
+                uint256 vouchIndex = 0;
 
-                // Set COORDINATOR default eligibility to false (forces vouching)
+                for (uint256 i = 0; i < params.roles.length; i++) {
+                    RoleConfigStructs.RoleConfig calldata role = params.roles[i];
+                    if (role.vouching.enabled) {
+                        hatIds[vouchIndex] = gov.roleHatIds[i];
+                        quorums[vouchIndex] = role.vouching.quorum;
+                        membershipHatIds[vouchIndex] = gov.roleHatIds[role.vouching.voucherRoleIndex];
+                        combineFlags[vouchIndex] = role.vouching.combineWithHierarchy;
+                        vouchIndex++;
+                    }
+                }
+
                 IExecutorAdmin(result.executor)
-                    .setDefaultEligibility(
-                        gov.eligibilityModule,
-                        coordinatorHatId,
-                        false, // not eligible by default
-                        true // good standing by default
-                    );
+                    .batchConfigureVouching(gov.eligibilityModule, hatIds, quorums, membershipHatIds, combineFlags);
             }
         }
 
@@ -319,7 +385,11 @@ contract OrgDeployer is Initializable {
             result.participationToken,
             result.taskManager,
             result.educationHub,
-            result.paymentManager
+            result.paymentManager,
+            gov.eligibilityModule,
+            gov.toggleModule,
+            gov.topHatId,
+            gov.roleHatIds
         );
 
         return result;
@@ -351,7 +421,9 @@ contract OrgDeployer is Initializable {
         govParams.hatsTreeSetup = l.hatsTreeSetup;
         govParams.deployer = address(this);
         govParams.deployerAddress = params.deployerAddress; // Pass deployer address for ADMIN hat
+        govParams.accountRegistry = params.registryAddr; // UniversalAccountRegistry for username registration
         govParams.participationToken = address(0);
+        govParams.deployerUsername = params.deployerUsername; // Optional username (empty = skip)
         govParams.autoUpgrade = params.autoUpgrade;
         govParams.hybridQuorumPct = params.hybridQuorumPct;
         govParams.ddQuorumPct = params.ddQuorumPct;
@@ -360,9 +432,7 @@ contract OrgDeployer is Initializable {
         govParams.ddVotingRolesBitmap = params.roleAssignments.ddVotingRolesBitmap;
         govParams.ddCreatorRolesBitmap = params.roleAssignments.ddCreatorRolesBitmap;
         govParams.ddInitialTargets = params.ddInitialTargets;
-        govParams.roleNames = params.roleNames;
-        govParams.roleImages = params.roleImages;
-        govParams.roleCanVote = params.roleCanVote;
+        govParams.roles = params.roles;
 
         return l.governanceFactory.deployInfrastructure(govParams);
     }
@@ -397,9 +467,7 @@ contract OrgDeployer is Initializable {
         votingParams.ddVotingRolesBitmap = params.roleAssignments.ddVotingRolesBitmap;
         votingParams.ddCreatorRolesBitmap = params.roleAssignments.ddCreatorRolesBitmap;
         votingParams.ddInitialTargets = params.ddInitialTargets;
-        votingParams.roleNames = params.roleNames;
-        votingParams.roleImages = params.roleImages;
-        votingParams.roleCanVote = params.roleCanVote;
+        votingParams.roles = params.roles;
 
         return l.governanceFactory.deployVoting(votingParams, executor, roleHatIds);
     }

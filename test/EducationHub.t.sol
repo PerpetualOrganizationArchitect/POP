@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 
 import {EducationHub, IParticipationToken} from "../src/EducationHub.sol";
+import {ValidationLib} from "../src/libs/ValidationLib.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {MockHats} from "./mocks/MockHats.sol";
 
@@ -133,7 +134,7 @@ contract MockPT is Test, IParticipationToken {
 
             // New creator should be able to create modules
             vm.prank(newCreator);
-            hub.createModule(bytes("test"), 5, 1);
+            hub.createModule(bytes("test"), bytes32(0), 5, 1);
 
             // Remove the hat
             vm.prank(executor);
@@ -146,7 +147,7 @@ contract MockPT is Test, IParticipationToken {
             // New creator should no longer be able to create modules
             vm.prank(newCreator);
             vm.expectRevert(EducationHub.NotCreator.selector);
-            hub.createModule(bytes("test2"), 5, 1);
+            hub.createModule(bytes("test2"), bytes32(0), 5, 1);
         }
 
         function testSetMemberHatAllowed() public {
@@ -174,7 +175,7 @@ contract MockPT is Test, IParticipationToken {
 
             // First create a module for testing
             vm.prank(creator);
-            hub.createModule(bytes("data"), 5, 2);
+            hub.createModule(bytes("data"), bytes32(0), 5, 2);
 
             // New member should be able to complete modules
             vm.prank(newMember);
@@ -197,31 +198,31 @@ contract MockPT is Test, IParticipationToken {
         ////////////////////////////////////////////////////////////*/
         function testCreateModuleAndGet() public {
             vm.prank(creator);
-            hub.createModule(bytes("ipfs://m"), 10, 1);
+            hub.createModule(bytes("ipfs://m"), bytes32(0), 10, 1);
             (uint256 payout, bool exists) = hub.getModule(0);
             assertEq(payout, 10);
             assertTrue(exists);
             assertEq(hub.nextModuleId(), 1);
         }
 
-        function testCreateModuleInvalidBytesReverts() public {
+        function testCreateModuleEmptyTitleReverts() public {
             vm.prank(creator);
-            vm.expectRevert(EducationHub.InvalidBytes.selector);
-            hub.createModule("", 1, 1);
+            vm.expectRevert(ValidationLib.EmptyTitle.selector);
+            hub.createModule(bytes(""), bytes32(0), 1, 1);
         }
 
         function testUpdateModule() public {
             vm.prank(creator);
-            hub.createModule(bytes("data"), 5, 1);
+            hub.createModule(bytes("data"), bytes32(0), 5, 1);
             vm.prank(creator);
-            hub.updateModule(0, bytes("new"), 8);
+            hub.updateModule(0, bytes("new"), bytes32(0), 8);
             (uint256 payout,) = hub.getModule(0);
             assertEq(payout, 8);
         }
 
         function testRemoveModule() public {
             vm.prank(creator);
-            hub.createModule(bytes("data"), 5, 1);
+            hub.createModule(bytes("data"), bytes32(0), 5, 1);
             vm.prank(creator);
             hub.removeModule(0);
             vm.expectRevert(EducationHub.ModuleUnknown.selector);
@@ -233,7 +234,7 @@ contract MockPT is Test, IParticipationToken {
         ////////////////////////////////////////////////////////////*/
         function testCompleteModuleMintsAndMarks() public {
             vm.prank(creator);
-            hub.createModule(bytes("data"), 5, 2);
+            hub.createModule(bytes("data"), bytes32(0), 5, 2);
             vm.prank(learner);
             hub.completeModule(0, 2);
             assertEq(token.balanceOf(learner), 5);
@@ -242,7 +243,7 @@ contract MockPT is Test, IParticipationToken {
 
         function testCompleteModuleWrongAnswerReverts() public {
             vm.prank(creator);
-            hub.createModule(bytes("data"), 5, 2);
+            hub.createModule(bytes("data"), bytes32(0), 5, 2);
             vm.prank(learner);
             vm.expectRevert(EducationHub.InvalidAnswer.selector);
             hub.completeModule(0, 1);
@@ -250,7 +251,7 @@ contract MockPT is Test, IParticipationToken {
 
         function testCompleteModuleAlreadyCompletedReverts() public {
             vm.prank(creator);
-            hub.createModule(bytes("data"), 5, 2);
+            hub.createModule(bytes("data"), bytes32(0), 5, 2);
             vm.prank(learner);
             hub.completeModule(0, 2);
             vm.prank(learner);
@@ -268,7 +269,7 @@ contract MockPT is Test, IParticipationToken {
 
             vm.prank(nonCreator);
             vm.expectRevert(EducationHub.NotCreator.selector);
-            hub.createModule(bytes("test"), 5, 1);
+            hub.createModule(bytes("test"), bytes32(0), 5, 1);
         }
 
         function testNonMemberCannotCompleteModule() public {
@@ -277,7 +278,7 @@ contract MockPT is Test, IParticipationToken {
 
             // First create a module
             vm.prank(creator);
-            hub.createModule(bytes("data"), 5, 2);
+            hub.createModule(bytes("data"), bytes32(0), 5, 2);
 
             vm.prank(nonMember);
             vm.expectRevert(EducationHub.NotMember.selector);
@@ -287,7 +288,7 @@ contract MockPT is Test, IParticipationToken {
         function testExecutorBypassesHatChecks() public {
             // Executor should be able to create modules even without creator hat
             vm.prank(executor);
-            hub.createModule(bytes("executor module"), 10, 3);
+            hub.createModule(bytes("executor module"), bytes32(0), 10, 3);
 
             // Executor should be able to complete modules even without member hat
             vm.prank(executor);

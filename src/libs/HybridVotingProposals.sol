@@ -5,6 +5,7 @@ import "../HybridVoting.sol";
 import "./VotingErrors.sol";
 import "./VotingMath.sol";
 import "./HatManager.sol";
+import "./ValidationLib.sol";
 import {IExecutor} from "../Executor.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 
@@ -16,8 +17,16 @@ library HybridVotingProposals {
     uint32 public constant MAX_DURATION = 43_200;
     uint32 public constant MIN_DURATION = 10;
 
-    event NewProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created);
-    event NewHatProposal(uint256 id, bytes metadata, uint8 numOptions, uint64 endTs, uint64 created, uint256[] hatIds);
+    event NewProposal(uint256 id, bytes title, bytes32 descriptionHash, uint8 numOptions, uint64 endTs, uint64 created);
+    event NewHatProposal(
+        uint256 id,
+        bytes title,
+        bytes32 descriptionHash,
+        uint8 numOptions,
+        uint64 endTs,
+        uint64 created,
+        uint256[] hatIds
+    );
 
     function _layout() private pure returns (HybridVoting.Layout storage s) {
         assembly {
@@ -26,31 +35,33 @@ library HybridVotingProposals {
     }
 
     function createProposal(
-        bytes calldata metadata,
+        bytes calldata title,
+        bytes32 descriptionHash,
         uint32 minutesDuration,
         uint8 numOptions,
         IExecutor.Call[][] calldata batches,
         uint256[] calldata hatIds
     ) external {
-        uint256 id = _initProposal(metadata, minutesDuration, numOptions, batches, hatIds);
+        uint256 id = _initProposal(title, descriptionHash, minutesDuration, numOptions, batches, hatIds);
 
         uint64 endTs = _layout()._proposals[id].endTimestamp;
 
         if (hatIds.length > 0) {
-            emit NewHatProposal(id, metadata, numOptions, endTs, uint64(block.timestamp), hatIds);
+            emit NewHatProposal(id, title, descriptionHash, numOptions, endTs, uint64(block.timestamp), hatIds);
         } else {
-            emit NewProposal(id, metadata, numOptions, endTs, uint64(block.timestamp));
+            emit NewProposal(id, title, descriptionHash, numOptions, endTs, uint64(block.timestamp));
         }
     }
 
     function _initProposal(
-        bytes calldata metadata,
+        bytes calldata title,
+        bytes32 descriptionHash,
         uint32 minutesDuration,
         uint8 numOptions,
         IExecutor.Call[][] calldata batches,
         uint256[] calldata hatIds
     ) internal returns (uint256) {
-        if (metadata.length == 0) revert VotingErrors.InvalidMetadata();
+        ValidationLib.requireValidTitle(title);
         if (numOptions == 0) revert VotingErrors.LengthMismatch();
         if (numOptions > MAX_OPTIONS) revert VotingErrors.TooManyOptions();
         _validateDuration(minutesDuration);

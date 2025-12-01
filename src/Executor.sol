@@ -173,6 +173,35 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     }
 
     /**
+     * @notice Batch configure vouching for multiple hats during initial setup
+     * @dev Only callable by owner before renouncing ownership - gas optimized for org deployment
+     * @param eligibilityModule Address of the EligibilityModule
+     * @param hatIds Array of hat IDs to configure
+     * @param quorums Array of quorum values
+     * @param membershipHatIds Array of membership hat IDs
+     * @param combineWithHierarchyFlags Array of combine flags
+     */
+    function batchConfigureVouching(
+        address eligibilityModule,
+        uint256[] calldata hatIds,
+        uint32[] calldata quorums,
+        uint256[] calldata membershipHatIds,
+        bool[] calldata combineWithHierarchyFlags
+    ) external onlyOwner {
+        if (eligibilityModule == address(0)) revert ZeroAddress();
+        (bool success,) = eligibilityModule.call(
+            abi.encodeWithSignature(
+                "batchConfigureVouching(uint256[],uint32[],uint256[],bool[])",
+                hatIds,
+                quorums,
+                membershipHatIds,
+                combineWithHierarchyFlags
+            )
+        );
+        require(success, "batchConfigureVouching failed");
+    }
+
+    /**
      * @notice Set default eligibility for a hat during initial setup
      * @dev Only callable by owner before renouncing ownership
      * @param eligibilityModule Address of the EligibilityModule

@@ -17,7 +17,7 @@ contract OrgRegistryTest is Test {
     }
 
     function testRegisterOrgAndContract() public {
-        reg.registerOrg(ORG_ID, address(this), "meta");
+        reg.registerOrg(ORG_ID, address(this), bytes("Test Org"), bytes32(0));
         bytes32 typeId = keccak256("TYPE");
         reg.registerOrgContract(ORG_ID, typeId, address(0x1), address(0x2), true, address(this), true);
         (address executor,,,) = reg.orgOf(ORG_ID);

@@ -8,6 +8,7 @@ import "forge-std/Test.sol";
 import {HybridVoting} from "../src/HybridVoting.sol";
 import {VotingErrors} from "../src/libs/VotingErrors.sol";
 import {HybridVotingProposals} from "../src/libs/HybridVotingProposals.sol";
+import {ValidationLib} from "../src/libs/ValidationLib.sol";
 
 /* OpenZeppelin */
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -185,10 +186,10 @@ contract MockERC20 is IERC20 {
             batches[0][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
             batches[1][0] = IExecutor.Call({target: address(0xCA11), value: 0, data: ""});
 
-            // Convert string to bytes for metadata
-            bytes memory metadata = bytes("ipfs://test");
+            bytes memory title = bytes("Test Proposal");
+            bytes32 descriptionHash = bytes32(0);
             uint256[] memory hatIds = new uint256[](0);
-            hv.createProposal(metadata, 30, 2, batches, hatIds);
+            hv.createProposal(title, descriptionHash, 30, 2, batches, hatIds);
 
             vm.stopPrank();
 
@@ -203,10 +204,11 @@ contract MockERC20 is IERC20 {
             batches[0] = new IExecutor.Call[](0);
             batches[1] = new IExecutor.Call[](0);
 
-            bytes memory metadata = bytes("ipfs://test");
+            bytes memory title = bytes("Test Proposal");
+            bytes32 descriptionHash = bytes32(0);
             uint256[] memory hatIds = new uint256[](0);
             vm.expectRevert(VotingErrors.Unauthorized.selector);
-            hv.createProposal(metadata, 30, 2, batches, hatIds);
+            hv.createProposal(title, descriptionHash, 30, 2, batches, hatIds);
 
             vm.stopPrank();
         }
@@ -233,10 +235,10 @@ contract MockERC20 is IERC20 {
                 data: ""
             });
 
-            // Convert string to bytes for metadata
-            bytes memory metadata = bytes("ipfs://p");
+            bytes memory title = bytes("Test Proposal");
+            bytes32 descriptionHash = bytes32(0);
             uint256[] memory hatIds = new uint256[](0);
-            hv.createProposal(metadata, 15, 2, batches, hatIds);
+            hv.createProposal(title, descriptionHash, 15, 2, batches, hatIds);
             vm.stopPrank();
             return hv.proposalsCount() - 1;
         }
@@ -244,7 +246,7 @@ contract MockERC20 is IERC20 {
         function _createHatPoll(uint8 opts, uint256[] memory hatIds) internal returns (uint256) {
             vm.prank(alice);
             IExecutor.Call[][] memory batches = new IExecutor.Call[][](0);
-            hv.createProposal(bytes("ipfs://test"), 15, opts, batches, hatIds);
+            hv.createProposal(bytes("Test Hat Poll"), bytes32(0), 15, opts, batches, hatIds);
             return hv.proposalsCount() - 1;
         }
 
@@ -333,7 +335,7 @@ contract MockERC20 is IERC20 {
 
             uint256[] memory hatIds = new uint256[](0);
             vm.expectRevert(VotingErrors.Paused.selector);
-            hv.createProposal(bytes("ipfs://test"), 15, 2, batches, hatIds);
+            hv.createProposal(bytes("Test Proposal"), bytes32(0), 15, 2, batches, hatIds);
             vm.stopPrank();
 
             // Unpause and try again
@@ -420,7 +422,7 @@ contract MockERC20 is IERC20 {
 
             vm.prank(newCreator);
             uint256[] memory hatIds = new uint256[](0);
-            hv.createProposal(bytes("ipfs://test"), 15, 2, batches, hatIds);
+            hv.createProposal(bytes("Test Proposal"), bytes32(0), 15, 2, batches, hatIds);
             assertEq(hv.proposalsCount(), 1);
 
             // Disable new hat
@@ -430,7 +432,7 @@ contract MockERC20 is IERC20 {
             // Should now fail
             vm.prank(newCreator);
             vm.expectRevert(VotingErrors.Unauthorized.selector);
-            hv.createProposal(bytes("ipfs://test2"), 15, 2, batches, hatIds);
+            hv.createProposal(bytes("Test Proposal 2"), bytes32(0), 15, 2, batches, hatIds);
         }
 
         /* ───────────────────────── UNAUTHORIZED ACCESS TESTS ───────────────────────── */
@@ -573,7 +575,13 @@ contract MockERC20 is IERC20 {
             // Expect the NewHatProposal event to be emitted
             vm.expectEmit(true, true, true, true);
             emit HybridVotingProposals.NewHatProposal(
-                0, bytes("ipfs://test"), 2, uint64(block.timestamp + 15 minutes), uint64(block.timestamp), hatIds
+                0,
+                bytes("Test Hat Poll"),
+                bytes32(0),
+                2,
+                uint64(block.timestamp + 15 minutes),
+                uint64(block.timestamp),
+                hatIds
             );
 
             uint256 id = _createHatPoll(2, hatIds);

@@ -83,6 +83,26 @@ contract ToggleModule is Initializable {
     }
 
     /**
+     * @notice Batch set multiple hats' active status
+     * @dev Sets status for multiple hats in a single call - gas optimized for HatsTreeSetup
+     * @param hatIds Array of hat IDs to toggle
+     * @param actives Array of active statuses (must match hatIds length)
+     */
+    function batchSetHatStatus(uint256[] calldata hatIds, bool[] calldata actives) external onlyAdmin {
+        uint256 length = hatIds.length;
+        require(length == actives.length, "Array length mismatch");
+
+        Layout storage l = _layout();
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                l.hatActive[hatIds[i]] = actives[i];
+                emit HatToggled(hatIds[i], actives[i]);
+            }
+        }
+    }
+
+    /**
      * @notice The Hats Protocol calls this function to determine if `hatId` is active.
      * @param hatId The ID of the hat being checked
      * @return status 1 if active, 0 if inactive

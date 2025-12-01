@@ -6,6 +6,7 @@ import "forge-std/console.sol";
 
 import {OrgDeployer} from "../src/OrgDeployer.sol";
 import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
+import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
 
 /**
  * @title DeployOrg
@@ -44,10 +45,42 @@ contract DeployOrg is Script {
         uint8 directDemocracy;
     }
 
+    struct RoleVouchingConfigJson {
+        bool enabled;
+        uint32 quorum;
+        uint256 voucherRoleIndex;
+        bool combineWithHierarchy;
+    }
+
+    struct RoleEligibilityDefaultsJson {
+        bool eligible;
+        bool standing;
+    }
+
+    struct RoleHierarchyConfigJson {
+        uint256 adminRoleIndex;
+    }
+
+    struct RoleDistributionConfigJson {
+        bool mintToDeployer;
+        bool mintToExecutor;
+        address[] additionalWearers;
+    }
+
+    struct HatConfigJson {
+        uint32 maxSupply;
+        bool mutableHat;
+    }
+
     struct RoleConfig {
         string name;
         string image;
         bool canVote;
+        RoleVouchingConfigJson vouching;
+        RoleEligibilityDefaultsJson defaults;
+        RoleHierarchyConfigJson hierarchy;
+        RoleDistributionConfigJson distribution;
+        HatConfigJson hatConfig;
     }
 
     struct VotingClassConfig {
@@ -166,6 +199,63 @@ contract DeployOrg is Script {
             config.roles[i].name = vm.parseJsonString(configJson, string.concat(basePath, ".name"));
             config.roles[i].image = vm.parseJsonString(configJson, string.concat(basePath, ".image"));
             config.roles[i].canVote = vm.parseJsonBool(configJson, string.concat(basePath, ".canVote"));
+
+            // Parse nested vouching config (optional - use try/catch for backwards compat)
+            try vm.parseJsonBool(configJson, string.concat(basePath, ".vouching.enabled")) returns (bool enabled) {
+                config.roles[i].vouching.enabled = enabled;
+                config.roles[i].vouching.quorum =
+                    uint32(vm.parseJsonUint(configJson, string.concat(basePath, ".vouching.quorum")));
+                config.roles[i].vouching.voucherRoleIndex =
+                    vm.parseJsonUint(configJson, string.concat(basePath, ".vouching.voucherRoleIndex"));
+                config.roles[i].vouching.combineWithHierarchy =
+                    vm.parseJsonBool(configJson, string.concat(basePath, ".vouching.combineWithHierarchy"));
+            } catch {}
+
+            // Parse nested defaults config (optional)
+            try vm.parseJsonBool(configJson, string.concat(basePath, ".defaults.eligible")) returns (bool eligible) {
+                config.roles[i].defaults.eligible = eligible;
+                config.roles[i].defaults.standing =
+                    vm.parseJsonBool(configJson, string.concat(basePath, ".defaults.standing"));
+            } catch {
+                // Default to eligible=true, standing=true for backwards compat
+                config.roles[i].defaults.eligible = true;
+                config.roles[i].defaults.standing = true;
+            }
+
+            // Parse nested hierarchy config (optional)
+            try vm.parseJsonUint(configJson, string.concat(basePath, ".hierarchy.adminRoleIndex")) returns (
+                uint256 adminIdx
+            ) {
+                config.roles[i].hierarchy.adminRoleIndex = adminIdx;
+            } catch {
+                // Default to type(uint256).max for backwards compat
+                config.roles[i].hierarchy.adminRoleIndex = type(uint256).max;
+            }
+
+            // Parse nested distribution config (optional)
+            try vm.parseJsonBool(configJson, string.concat(basePath, ".distribution.mintToDeployer")) returns (
+                bool mintToDeployer
+            ) {
+                config.roles[i].distribution.mintToDeployer = mintToDeployer;
+                config.roles[i].distribution.mintToExecutor =
+                    vm.parseJsonBool(configJson, string.concat(basePath, ".distribution.mintToExecutor"));
+                bytes memory additionalWearersData =
+                    vm.parseJson(configJson, string.concat(basePath, ".distribution.additionalWearers"));
+                config.roles[i].distribution.additionalWearers = abi.decode(additionalWearersData, (address[]));
+            } catch {}
+
+            // Parse nested hatConfig (optional)
+            try vm.parseJsonUint(configJson, string.concat(basePath, ".hatConfig.maxSupply")) returns (
+                uint256 maxSupply
+            ) {
+                config.roles[i].hatConfig.maxSupply = uint32(maxSupply);
+                config.roles[i].hatConfig.mutableHat =
+                    vm.parseJsonBool(configJson, string.concat(basePath, ".hatConfig.mutableHat"));
+            } catch {
+                // Default to unlimited and mutable for backwards compat
+                config.roles[i].hatConfig.maxSupply = type(uint32).max;
+                config.roles[i].hatConfig.mutableHat = true;
+            }
         }
 
         // Parse voting classes array (reasonable max: 100)
@@ -246,7 +336,7 @@ contract DeployOrg is Script {
 
     function _buildDeploymentParams(OrgConfigJson memory config, address globalAccountRegistry, address deployerAddress)
         internal
-        pure
+        view
         returns (OrgDeployer.DeploymentParams memory params)
     {
         // Set basic params
@@ -254,20 +344,41 @@ contract DeployOrg is Script {
         params.orgName = config.orgName;
         params.registryAddr = globalAccountRegistry;
         params.deployerAddress = deployerAddress; // Address to receive ADMIN hat
+        params.deployerUsername = vm.envOr("DEPLOYER_USERNAME", string("")); // Optional username (empty = skip)
         params.autoUpgrade = config.autoUpgrade;
         params.hybridQuorumPct = config.quorum.hybrid;
         params.ddQuorumPct = config.quorum.directDemocracy;
         params.ddInitialTargets = config.ddInitialTargets;
 
-        // Build role arrays
-        params.roleNames = new string[](config.roles.length);
-        params.roleImages = new string[](config.roles.length);
-        params.roleCanVote = new bool[](config.roles.length);
+        // Build role configs
+        params.roles = new RoleConfigStructs.RoleConfig[](config.roles.length);
 
         for (uint256 i = 0; i < config.roles.length; i++) {
-            params.roleNames[i] = config.roles[i].name;
-            params.roleImages[i] = config.roles[i].image;
-            params.roleCanVote[i] = config.roles[i].canVote;
+            RoleConfig memory role = config.roles[i];
+
+            params.roles[i] = RoleConfigStructs.RoleConfig({
+                name: role.name,
+                image: role.image,
+                canVote: role.canVote,
+                vouching: RoleConfigStructs.RoleVouchingConfig({
+                    enabled: role.vouching.enabled,
+                    quorum: role.vouching.quorum,
+                    voucherRoleIndex: role.vouching.voucherRoleIndex,
+                    combineWithHierarchy: role.vouching.combineWithHierarchy
+                }),
+                defaults: RoleConfigStructs.RoleEligibilityDefaults({
+                    eligible: role.defaults.eligible, standing: role.defaults.standing
+                }),
+                hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: role.hierarchy.adminRoleIndex}),
+                distribution: RoleConfigStructs.RoleDistributionConfig({
+                    mintToDeployer: role.distribution.mintToDeployer,
+                    mintToExecutor: role.distribution.mintToExecutor,
+                    additionalWearers: role.distribution.additionalWearers
+                }),
+                hatConfig: RoleConfigStructs.HatConfig({
+                    maxSupply: role.hatConfig.maxSupply, mutableHat: role.hatConfig.mutableHat
+                })
+            });
         }
 
         // Build voting classes
