@@ -22,11 +22,8 @@ interface IEligibilityModule {
         bool eligible,
         bool standing
     ) external;
-    function batchSetDefaultEligibility(
-        uint256[] calldata hatIds,
-        bool[] calldata eligibles,
-        bool[] calldata standings
-    ) external;
+    function batchSetDefaultEligibility(uint256[] calldata hatIds, bool[] calldata eligibles, bool[] calldata standings)
+        external;
     function batchMintHats(uint256[] calldata hatIds, address[] calldata wearers) external;
     function batchRegisterHatCreation(
         uint256[] calldata hatIds,

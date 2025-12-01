@@ -367,9 +367,8 @@ contract OrgDeployer is Initializable {
                     }
                 }
 
-                IExecutorAdmin(result.executor).batchConfigureVouching(
-                    gov.eligibilityModule, hatIds, quorums, membershipHatIds, combineFlags
-                );
+                IExecutorAdmin(result.executor)
+                    .batchConfigureVouching(gov.eligibilityModule, hatIds, quorums, membershipHatIds, combineFlags);
             }
         }
 

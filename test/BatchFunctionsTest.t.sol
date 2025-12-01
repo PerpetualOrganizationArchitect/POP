@@ -64,10 +64,7 @@ contract BatchFunctionsTest is Test {
             address(hats),
             address(0) // toggleModule set later
         );
-        bytes memory toggleInit = abi.encodeWithSelector(
-            ToggleModule.initialize.selector,
-            superAdmin
-        );
+        bytes memory toggleInit = abi.encodeWithSelector(ToggleModule.initialize.selector, superAdmin);
 
         eligibility = EligibilityModule(address(new BeaconProxy(address(eligibilityBeacon), eligibilityInit)));
         toggle = ToggleModule(address(new BeaconProxy(address(toggleBeacon), toggleInit)));
