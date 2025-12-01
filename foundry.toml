@@ -8,7 +8,7 @@ via_ir = true
 bytecode_hash = "none"
 evm_version = "cancun"
 ignored_error_codes = ["unused-var"]
-fs_permissions = [{ access = "read-write", path = "./script/infrastructure.json" }, { access = "read-write", path = "./script/org-config-example.json" }, {access = "read-write", path = "./script/org-config-governance-demo.json"}]
+fs_permissions = [{ access = "read-write", path = "./script/infrastructure.json" }, { access = "read-write", path = "./script/org-config-example.json" }, {access = "read-write", path = "./script/org-config-governance-demo.json"}, {access = "read-write", path = "./script/org-config-advanced-demo.json"}]
 extra_output_files = ["abi"]
 
 # Production: optimizer enabled for 37% smaller contracts
@@ -16,7 +16,7 @@ extra_output_files = ["abi"]
 [profile.production]
 via_ir = true
 optimizer = true
-optimizer_runs = 10000
+optimizer_runs = 200
 bytecode_hash = "none"
 evm_version = "cancun"
 

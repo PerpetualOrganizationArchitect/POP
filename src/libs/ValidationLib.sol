@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.30;
 
 /**
  * @title ValidationLib
@@ -12,10 +12,13 @@ library ValidationLib {
     error InvalidString();
     error InvalidPayout();
     error CapBelowCommitted();
+    error EmptyTitle();
+    error TitleTooLong();
 
     /* ─────────── Constants ─────────── */
     uint256 internal constant MAX_PAYOUT = 1e24; // 1 000 000 tokens (18 dec)
     uint96 internal constant MAX_PAYOUT_96 = 1e24; // same as above, but as uint96
+    uint256 internal constant MAX_TITLE_LENGTH = 256; // max title length in bytes
 
     /* ─────────── Core Functions ─────────── */
 
@@ -33,6 +36,15 @@ library ValidationLib {
      */
     function requireNonEmptyBytes(bytes calldata data) internal pure {
         if (data.length == 0) revert InvalidString();
+    }
+
+    /**
+     * @notice Validate that a title is not empty and within length limits
+     * @param title The title to validate (dynamic bytes)
+     */
+    function requireValidTitle(bytes calldata title) internal pure {
+        if (title.length == 0) revert EmptyTitle();
+        if (title.length > MAX_TITLE_LENGTH) revert TitleTooLong();
     }
 
     /**
@@ -90,32 +102,6 @@ library ValidationLib {
      */
     function requireValidCapAmount(uint256 cap) internal pure {
         if (cap > MAX_PAYOUT) revert InvalidPayout();
-    }
-
-    /**
-     * @notice Validate task creation parameters
-     * @param payout The task payout
-     * @param metadata The task metadata
-     * @param bountyToken The bounty token address
-     * @param bountyPayout The bounty payout amount
-     */
-    function requireValidTaskParams(uint256 payout, bytes calldata metadata, address bountyToken, uint256 bountyPayout)
-        internal
-        pure
-    {
-        requireValidPayout96(payout);
-        requireNonEmptyBytes(metadata);
-        requireValidBountyConfig(bountyToken, bountyPayout);
-    }
-
-    /**
-     * @notice Validate project creation parameters
-     * @param metadata The project metadata
-     * @param cap The project cap
-     */
-    function requireValidProjectParams(bytes calldata metadata, uint256 cap) internal pure {
-        requireNonEmptyBytes(metadata);
-        requireValidCapAmount(cap);
     }
 
     /**

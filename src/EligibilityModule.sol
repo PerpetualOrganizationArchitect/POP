@@ -150,7 +150,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     event VouchingRateLimitExceededEvent(address indexed user);
     event NewUserVouchingRestrictedEvent(address indexed user);
     event EligibilityModuleAdminHatSet(uint256 indexed hatId);
-    event HatAutoMinted(address indexed wearer, uint256 indexed hatId, uint32 vouchCount);
+    event HatClaimed(address indexed wearer, uint256 indexed hatId);
     event HatCreatedWithEligibility(
         address indexed creator,
         uint256 indexed parentHatId,
@@ -294,6 +294,118 @@ contract EligibilityModule is Initializable, IHatsEligibility {
                 l.wearerRules[wearer][hatId] = WearerRules(_packWearerFlags(eligibleFlags[i], standingFlags[i]));
                 l.hasSpecificWearerRules[wearer][hatId] = true;
                 emit WearerEligibilityUpdated(wearer, hatId, eligibleFlags[i], standingFlags[i], msg.sender);
+            }
+        }
+    }
+
+    /**
+     * @notice Batch set wearer eligibility across multiple hats - optimized for HatsTreeSetup
+     * @dev Sets eligibility for multiple (wearer, hatId) pairs in a single call
+     * @param wearers Array of wearer addresses
+     * @param hatIds Array of hat IDs (must match wearers length)
+     * @param eligible Eligibility status to set for all pairs
+     * @param standing Standing status to set for all pairs
+     */
+    function batchSetWearerEligibilityMultiHat(
+        address[] calldata wearers,
+        uint256[] calldata hatIds,
+        bool eligible,
+        bool standing
+    ) external onlySuperAdmin whenNotPaused {
+        uint256 length = wearers.length;
+        if (length != hatIds.length) revert ArrayLengthMismatch();
+
+        Layout storage l = _layout();
+        uint8 packedFlags = _packWearerFlags(eligible, standing);
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                address wearer = wearers[i];
+                uint256 hatId = hatIds[i];
+                l.wearerRules[wearer][hatId] = WearerRules(packedFlags);
+                l.hasSpecificWearerRules[wearer][hatId] = true;
+                emit WearerEligibilityUpdated(wearer, hatId, eligible, standing, msg.sender);
+            }
+        }
+    }
+
+    /**
+     * @notice Batch set default eligibility for multiple hats
+     * @dev Sets default eligibility rules for multiple hats in a single call
+     * @param hatIds Array of hat IDs
+     * @param eligibles Array of eligibility flags
+     * @param standings Array of standing flags
+     */
+    function batchSetDefaultEligibility(uint256[] calldata hatIds, bool[] calldata eligibles, bool[] calldata standings)
+        external
+        onlySuperAdmin
+        whenNotPaused
+    {
+        uint256 length = hatIds.length;
+        if (length != eligibles.length || length != standings.length) {
+            revert ArrayLengthMismatch();
+        }
+
+        Layout storage l = _layout();
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                uint256 hatId = hatIds[i];
+                l.defaultRules[hatId] = WearerRules(_packWearerFlags(eligibles[i], standings[i]));
+                emit DefaultEligibilityUpdated(hatId, eligibles[i], standings[i], msg.sender);
+            }
+        }
+    }
+
+    /**
+     * @notice Batch mint hats to multiple wearers
+     * @dev Mints multiple hats in a single call - optimized for HatsTreeSetup
+     * @param hatIds Array of hat IDs to mint
+     * @param wearers Array of addresses to receive hats
+     */
+    function batchMintHats(uint256[] calldata hatIds, address[] calldata wearers) external onlySuperAdmin {
+        uint256 length = hatIds.length;
+        if (length != wearers.length) revert ArrayLengthMismatch();
+
+        Layout storage l = _layout();
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                bool success = l.hats.mintHat(hatIds[i], wearers[i]);
+                require(success, "Hat minting failed");
+            }
+        }
+    }
+
+    /**
+     * @notice Batch register hat creations for subgraph indexing
+     * @dev Registers multiple hats in a single call - optimized for HatsTreeSetup
+     * @param hatIds Array of hat IDs that were created
+     * @param parentHatIds Array of parent hat IDs
+     * @param defaultEligibles Array of default eligibility flags
+     * @param defaultStandings Array of default standing flags
+     */
+    function batchRegisterHatCreation(
+        uint256[] calldata hatIds,
+        uint256[] calldata parentHatIds,
+        bool[] calldata defaultEligibles,
+        bool[] calldata defaultStandings
+    ) external onlySuperAdmin {
+        uint256 length = hatIds.length;
+        if (length != parentHatIds.length || length != defaultEligibles.length || length != defaultStandings.length) {
+            revert ArrayLengthMismatch();
+        }
+
+        Layout storage l = _layout();
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                uint256 hatId = hatIds[i];
+                l.defaultRules[hatId] = WearerRules(_packWearerFlags(defaultEligibles[i], defaultStandings[i]));
+                emit DefaultEligibilityUpdated(hatId, defaultEligibles[i], defaultStandings[i], msg.sender);
+                emit HatCreatedWithEligibility(
+                    msg.sender, parentHatIds[i], hatId, defaultEligibles[i], defaultStandings[i], 0
+                );
             }
         }
     }
@@ -445,6 +557,43 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         emit VouchConfigSet(hatId, quorum, membershipHatId, enabled, combineWithHierarchy);
     }
 
+    /**
+     * @notice Batch configure vouching for multiple hats
+     * @dev Sets vouching configuration for multiple hats in a single call - gas optimized for org deployment
+     * @param hatIds Array of hat IDs to configure
+     * @param quorums Array of quorum values (number of vouches required)
+     * @param membershipHatIds Array of hat IDs whose wearers can vouch
+     * @param combineWithHierarchyFlags Array of flags for combining with hierarchy eligibility
+     */
+    function batchConfigureVouching(
+        uint256[] calldata hatIds,
+        uint32[] calldata quorums,
+        uint256[] calldata membershipHatIds,
+        bool[] calldata combineWithHierarchyFlags
+    ) external onlySuperAdmin {
+        uint256 length = hatIds.length;
+        if (length != quorums.length || length != membershipHatIds.length || length != combineWithHierarchyFlags.length)
+        {
+            revert ArrayLengthMismatch();
+        }
+
+        Layout storage l = _layout();
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                uint256 hatId = hatIds[i];
+                bool enabled = quorums[i] > 0;
+                l.vouchConfigs[hatId] = VouchConfig({
+                    quorum: quorums[i],
+                    membershipHatId: membershipHatIds[i],
+                    flags: _packVouchFlags(enabled, combineWithHierarchyFlags[i])
+                });
+
+                emit VouchConfigSet(hatId, quorums[i], membershipHatIds[i], enabled, combineWithHierarchyFlags[i]);
+            }
+        }
+    }
+
     function vouchFor(address wearer, uint256 hatId) external whenNotPaused {
         if (wearer == address(0)) revert ZeroAddress();
         if (wearer == msg.sender) revert CannotVouchForSelf();
@@ -452,7 +601,16 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         Layout storage l = _layout();
         VouchConfig memory config = l.vouchConfigs[hatId];
         if (!_isVouchingEnabled(config.flags)) revert VouchingNotEnabled();
-        if (!l.hats.isWearerOfHat(msg.sender, config.membershipHatId)) revert NotAuthorizedToVouch();
+
+        // Check vouching authorization
+        bool isAuthorized = l.hats.isWearerOfHat(msg.sender, config.membershipHatId);
+
+        // If combineWithHierarchy is enabled, also check if voucher has admin privileges for this hat
+        if (!isAuthorized && _shouldCombineWithHierarchy(config.flags)) {
+            isAuthorized = l.hats.isAdminOfHat(msg.sender, hatId);
+        }
+
+        if (!isAuthorized) revert NotAuthorizedToVouch();
         if (l.vouchers[hatId][wearer][msg.sender]) revert AlreadyVouched();
 
         // SECURITY: Rate limiting checks
@@ -469,14 +627,6 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         l.dailyVouchCount[msg.sender][currentDay] = dailyCount;
 
         emit Vouched(msg.sender, wearer, hatId, newCount);
-
-        // Auto-mint hat if quorum is reached and wearer doesn't already have it
-        if (newCount >= config.quorum && !l.hats.isWearerOfHat(wearer, hatId)) {
-            bool success = l.hats.mintHat(hatId, wearer);
-            if (success) {
-                emit HatAutoMinted(wearer, hatId, newCount);
-            }
-        }
     }
 
     function _checkVouchingRateLimit(address user) internal view {
@@ -532,6 +682,30 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     function resetVouches(uint256 hatId) external onlySuperAdmin {
         delete _layout().vouchConfigs[hatId];
         emit VouchConfigSet(hatId, 0, 0, false, false);
+    }
+
+    /**
+     * @notice Allows a user to claim a hat they are eligible for after being vouched
+     * @dev User must have sufficient vouches to be eligible. This is the claim-based pattern
+     *      where users explicitly accept their role rather than having it auto-minted.
+     *      The EligibilityModule contract mints the hat using its ELIGIBILITY_ADMIN permissions.
+     * @param hatId The ID of the hat to claim
+     */
+    function claimVouchedHat(uint256 hatId) external whenNotPaused {
+        Layout storage l = _layout();
+
+        // Check if caller is eligible to claim this hat
+        (bool eligible, bool standing) = this.getWearerStatus(msg.sender, hatId);
+        require(eligible && standing, "Not eligible to claim hat");
+
+        // Check if already wearing the hat
+        require(!l.hats.isWearerOfHat(msg.sender, hatId), "Already wearing hat");
+
+        // Mint the hat to the caller using EligibilityModule's admin powers
+        bool success = l.hats.mintHat(hatId, msg.sender);
+        require(success, "Hat minting failed");
+
+        emit HatClaimed(msg.sender, hatId);
     }
 
     /*═══════════════════════════════════ ELIGIBILITY INTERFACE ═══════════════════════════════════════*/

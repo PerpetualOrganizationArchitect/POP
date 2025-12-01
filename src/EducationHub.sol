@@ -11,6 +11,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /*──────── External interfaces ────────*/
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {HatManager} from "./libs/HatManager.sol";
+import {ValidationLib} from "./libs/ValidationLib.sol";
 
 interface IParticipationToken is IERC20 {
     function mint(address to, uint256 amount) external;
@@ -26,7 +27,6 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
 
     /*────────── Errors ─────────*/
     error ZeroAddress();
-    error InvalidBytes();
     error InvalidPayout();
     error InvalidAnswer();
     error NotMember();
@@ -66,8 +66,8 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     }
 
     /*────────── Events ─────────*/
-    event ModuleCreated(uint256 indexed id, uint256 payout, bytes metadata);
-    event ModuleUpdated(uint256 indexed id, uint256 payout, bytes metadata);
+    event ModuleCreated(uint256 indexed id, bytes title, bytes32 contentHash, uint256 payout);
+    event ModuleUpdated(uint256 indexed id, bytes title, bytes32 contentHash, uint256 payout);
     event ModuleRemoved(uint256 indexed id);
     event ModuleCompleted(uint256 indexed id, address indexed learner);
     event CreatorHatSet(uint256 indexed hatId, bool enabled);
@@ -183,12 +183,12 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     }
 
     /*────────── Module CRUD ────────*/
-    function createModule(bytes calldata metadata, uint256 payout, uint8 correctAnswer)
+    function createModule(bytes calldata title, bytes32 contentHash, uint256 payout, uint8 correctAnswer)
         external
         onlyCreator
         whenNotPaused
     {
-        if (metadata.length == 0) revert InvalidBytes();
+        ValidationLib.requireValidTitle(title);
         if (payout == 0 || payout > type(uint128).max) revert InvalidPayout();
 
         Layout storage l = _layout();
@@ -200,21 +200,21 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         l._modules[id] =
             Module({answerHash: keccak256(abi.encodePacked(correctAnswer)), payout: uint128(payout), exists: true});
 
-        emit ModuleCreated(id, payout, metadata);
+        emit ModuleCreated(id, title, contentHash, payout);
     }
 
-    function updateModule(uint256 id, bytes calldata newMetadata, uint256 newPayout)
+    function updateModule(uint256 id, bytes calldata newTitle, bytes32 newContentHash, uint256 newPayout)
         external
         onlyCreator
         whenNotPaused
     {
         Layout storage l = _layout();
         Module storage m = _module(l, id);
-        if (newMetadata.length == 0) revert InvalidBytes();
+        ValidationLib.requireValidTitle(newTitle);
         if (newPayout == 0 || newPayout > type(uint128).max) revert InvalidPayout();
 
         m.payout = uint128(newPayout);
-        emit ModuleUpdated(id, newPayout, newMetadata);
+        emit ModuleUpdated(id, newTitle, newContentHash, newPayout);
     }
 
     function removeModule(uint256 id) external onlyCreator whenNotPaused {
