@@ -82,6 +82,12 @@ contract HatsTreeSetup {
         uint256 len = params.roles.length;
         result.roleHatIds = new uint256[](len);
 
+        // Arrays for batch registration (collected during hat creation)
+        uint256[] memory regHatIds = new uint256[](len);
+        uint256[] memory regParentHatIds = new uint256[](len);
+        bool[] memory regDefaultEligibles = new bool[](len);
+        bool[] memory regDefaultStandings = new bool[](len);
+
         // Multi-pass: resolve dependencies and create hats in correct order
         bool[] memory created = new bool[](len);
         uint256 createdCount = 0;
@@ -121,9 +127,11 @@ contract HatsTreeSetup {
                         );
                     result.roleHatIds[i] = newHatId;
 
-                    // Register hat creation for subgraph indexing
-                    IEligibilityModule(params.eligibilityModule)
-                        .registerHatCreation(newHatId, adminHatId, role.defaults.eligible, role.defaults.standing);
+                    // Collect registration data for batch call later
+                    regHatIds[i] = newHatId;
+                    regParentHatIds[i] = adminHatId;
+                    regDefaultEligibles[i] = role.defaults.eligible;
+                    regDefaultStandings[i] = role.defaults.standing;
 
                     created[i] = true;
                     createdCount++;
@@ -137,23 +145,71 @@ contract HatsTreeSetup {
             }
         }
 
-        // Step 5: Set eligibility and toggle status for all hats
+        // Batch register all hat creations for subgraph indexing (replaces N individual calls)
+        IEligibilityModule(params.eligibilityModule).batchRegisterHatCreation(
+            regHatIds, regParentHatIds, regDefaultEligibles, regDefaultStandings
+        );
+
+        // Step 5: Collect all eligibility and toggle operations for batch execution
+        // Count total eligibility entries needed: 2 per role (executor + deployer) + additional wearers
+        uint256 eligibilityCount = 0;
+        for (uint256 i = 0; i < len; i++) {
+            eligibilityCount += 2; // executor + deployer
+            eligibilityCount += params.roles[i].distribution.additionalWearers.length;
+        }
+
+        // Build arrays for batch eligibility call
+        address[] memory eligWearers = new address[](eligibilityCount);
+        uint256[] memory eligHatIds = new uint256[](eligibilityCount);
+        uint256 eligIndex = 0;
+
+        // Build arrays for batch toggle call
+        uint256[] memory toggleHatIds = new uint256[](len);
+        bool[] memory toggleActives = new bool[](len);
+
+        // Build arrays for batch default eligibility call
+        uint256[] memory defaultHatIds = new uint256[](len);
+        bool[] memory defaultEligibles = new bool[](len);
+        bool[] memory defaultStandings = new bool[](len);
+
         for (uint256 i = 0; i < len; i++) {
             uint256 hatId = result.roleHatIds[i];
             RoleConfigStructs.RoleConfig memory role = params.roles[i];
 
-            IEligibilityModule(params.eligibilityModule).setWearerEligibility(params.executor, hatId, true, true);
-            IEligibilityModule(params.eligibilityModule).setWearerEligibility(params.deployerAddress, hatId, true, true);
-            IToggleModule(params.toggleModule).setHatStatus(hatId, true);
-            IEligibilityModule(params.eligibilityModule)
-                .setDefaultEligibility(hatId, role.defaults.eligible, role.defaults.standing);
+            // Collect eligibility entries
+            eligWearers[eligIndex] = params.executor;
+            eligHatIds[eligIndex] = hatId;
+            eligIndex++;
 
-            // Set eligibility for additional wearers
+            eligWearers[eligIndex] = params.deployerAddress;
+            eligHatIds[eligIndex] = hatId;
+            eligIndex++;
+
+            // Collect additional wearers
             for (uint256 j = 0; j < role.distribution.additionalWearers.length; j++) {
-                IEligibilityModule(params.eligibilityModule)
-                    .setWearerEligibility(role.distribution.additionalWearers[j], hatId, true, true);
+                eligWearers[eligIndex] = role.distribution.additionalWearers[j];
+                eligHatIds[eligIndex] = hatId;
+                eligIndex++;
             }
+
+            // Collect toggle status
+            toggleHatIds[i] = hatId;
+            toggleActives[i] = true;
+
+            // Collect default eligibility
+            defaultHatIds[i] = hatId;
+            defaultEligibles[i] = role.defaults.eligible;
+            defaultStandings[i] = role.defaults.standing;
         }
+
+        // Execute batch operations (replaces N individual calls with 3 batch calls)
+        IEligibilityModule(params.eligibilityModule).batchSetWearerEligibilityMultiHat(
+            eligWearers, eligHatIds, true, true
+        );
+        IToggleModule(params.toggleModule).batchSetHatStatus(toggleHatIds, toggleActives);
+        IEligibilityModule(params.eligibilityModule).batchSetDefaultEligibility(
+            defaultHatIds, defaultEligibles, defaultStandings
+        );
 
         // Step 6: Collect all minting operations for batch execution
         uint256 mintCount = 0;
@@ -204,10 +260,8 @@ contract HatsTreeSetup {
                 }
             }
 
-            // Step 7: Batch mint all hats via EligibilityModule
-            for (uint256 i = 0; i < mintCount; i++) {
-                IEligibilityModule(params.eligibilityModule).mintHatToAddress(hatIdsToMint[i], wearersToMint[i]);
-            }
+            // Step 7: Batch mint all hats via single call (replaces N mintHatToAddress calls)
+            IEligibilityModule(params.eligibilityModule).batchMintHats(hatIdsToMint, wearersToMint);
         }
 
         // Transfer top hat to executor

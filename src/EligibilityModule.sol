@@ -298,6 +298,121 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         }
     }
 
+    /**
+     * @notice Batch set wearer eligibility across multiple hats - optimized for HatsTreeSetup
+     * @dev Sets eligibility for multiple (wearer, hatId) pairs in a single call
+     * @param wearers Array of wearer addresses
+     * @param hatIds Array of hat IDs (must match wearers length)
+     * @param eligible Eligibility status to set for all pairs
+     * @param standing Standing status to set for all pairs
+     */
+    function batchSetWearerEligibilityMultiHat(
+        address[] calldata wearers,
+        uint256[] calldata hatIds,
+        bool eligible,
+        bool standing
+    ) external onlySuperAdmin whenNotPaused {
+        uint256 length = wearers.length;
+        if (length != hatIds.length) revert ArrayLengthMismatch();
+
+        Layout storage l = _layout();
+        uint8 packedFlags = _packWearerFlags(eligible, standing);
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                address wearer = wearers[i];
+                uint256 hatId = hatIds[i];
+                l.wearerRules[wearer][hatId] = WearerRules(packedFlags);
+                l.hasSpecificWearerRules[wearer][hatId] = true;
+                emit WearerEligibilityUpdated(wearer, hatId, eligible, standing, msg.sender);
+            }
+        }
+    }
+
+    /**
+     * @notice Batch set default eligibility for multiple hats
+     * @dev Sets default eligibility rules for multiple hats in a single call
+     * @param hatIds Array of hat IDs
+     * @param eligibles Array of eligibility flags
+     * @param standings Array of standing flags
+     */
+    function batchSetDefaultEligibility(
+        uint256[] calldata hatIds,
+        bool[] calldata eligibles,
+        bool[] calldata standings
+    ) external onlySuperAdmin whenNotPaused {
+        uint256 length = hatIds.length;
+        if (length != eligibles.length || length != standings.length) {
+            revert ArrayLengthMismatch();
+        }
+
+        Layout storage l = _layout();
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                uint256 hatId = hatIds[i];
+                l.defaultRules[hatId] = WearerRules(_packWearerFlags(eligibles[i], standings[i]));
+                emit DefaultEligibilityUpdated(hatId, eligibles[i], standings[i], msg.sender);
+            }
+        }
+    }
+
+    /**
+     * @notice Batch mint hats to multiple wearers
+     * @dev Mints multiple hats in a single call - optimized for HatsTreeSetup
+     * @param hatIds Array of hat IDs to mint
+     * @param wearers Array of addresses to receive hats
+     */
+    function batchMintHats(
+        uint256[] calldata hatIds,
+        address[] calldata wearers
+    ) external onlySuperAdmin {
+        uint256 length = hatIds.length;
+        if (length != wearers.length) revert ArrayLengthMismatch();
+
+        Layout storage l = _layout();
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                bool success = l.hats.mintHat(hatIds[i], wearers[i]);
+                require(success, "Hat minting failed");
+            }
+        }
+    }
+
+    /**
+     * @notice Batch register hat creations for subgraph indexing
+     * @dev Registers multiple hats in a single call - optimized for HatsTreeSetup
+     * @param hatIds Array of hat IDs that were created
+     * @param parentHatIds Array of parent hat IDs
+     * @param defaultEligibles Array of default eligibility flags
+     * @param defaultStandings Array of default standing flags
+     */
+    function batchRegisterHatCreation(
+        uint256[] calldata hatIds,
+        uint256[] calldata parentHatIds,
+        bool[] calldata defaultEligibles,
+        bool[] calldata defaultStandings
+    ) external onlySuperAdmin {
+        uint256 length = hatIds.length;
+        if (length != parentHatIds.length || length != defaultEligibles.length || length != defaultStandings.length) {
+            revert ArrayLengthMismatch();
+        }
+
+        Layout storage l = _layout();
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                uint256 hatId = hatIds[i];
+                l.defaultRules[hatId] = WearerRules(_packWearerFlags(defaultEligibles[i], defaultStandings[i]));
+                emit DefaultEligibilityUpdated(hatId, defaultEligibles[i], defaultStandings[i], msg.sender);
+                emit HatCreatedWithEligibility(
+                    msg.sender, parentHatIds[i], hatId, defaultEligibles[i], defaultStandings[i], 0
+                );
+            }
+        }
+    }
+
     /*═══════════════════════════════════ HAT CREATION ═══════════════════════════════════════*/
 
     function createHatWithEligibility(CreateHatParams calldata params)
@@ -443,6 +558,42 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         });
 
         emit VouchConfigSet(hatId, quorum, membershipHatId, enabled, combineWithHierarchy);
+    }
+
+    /**
+     * @notice Batch configure vouching for multiple hats
+     * @dev Sets vouching configuration for multiple hats in a single call - gas optimized for org deployment
+     * @param hatIds Array of hat IDs to configure
+     * @param quorums Array of quorum values (number of vouches required)
+     * @param membershipHatIds Array of hat IDs whose wearers can vouch
+     * @param combineWithHierarchyFlags Array of flags for combining with hierarchy eligibility
+     */
+    function batchConfigureVouching(
+        uint256[] calldata hatIds,
+        uint32[] calldata quorums,
+        uint256[] calldata membershipHatIds,
+        bool[] calldata combineWithHierarchyFlags
+    ) external onlySuperAdmin {
+        uint256 length = hatIds.length;
+        if (length != quorums.length || length != membershipHatIds.length || length != combineWithHierarchyFlags.length) {
+            revert ArrayLengthMismatch();
+        }
+
+        Layout storage l = _layout();
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                uint256 hatId = hatIds[i];
+                bool enabled = quorums[i] > 0;
+                l.vouchConfigs[hatId] = VouchConfig({
+                    quorum: quorums[i],
+                    membershipHatId: membershipHatIds[i],
+                    flags: _packVouchFlags(enabled, combineWithHierarchyFlags[i])
+                });
+
+                emit VouchConfigSet(hatId, quorums[i], membershipHatIds[i], enabled, combineWithHierarchyFlags[i]);
+            }
+        }
     }
 
     function vouchFor(address wearer, uint256 hatId) external whenNotPaused {
