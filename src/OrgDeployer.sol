@@ -29,6 +29,13 @@ interface IExecutorAdmin {
         uint256 membershipHatId,
         bool combineWithHierarchy
     ) external;
+    function batchConfigureVouching(
+        address eligibilityModule,
+        uint256[] calldata hatIds,
+        uint32[] calldata quorums,
+        uint256[] calldata membershipHatIds,
+        bool[] calldata combineWithHierarchyFlags
+    ) external;
     function setDefaultEligibility(address eligibilityModule, uint256 hatId, bool eligible, bool standing) external;
 }
 
@@ -334,24 +341,35 @@ contract OrgDeployer is Initializable {
         /* 10. Link executor to governor */
         IExecutorAdmin(result.executor).setCaller(result.hybridVoting);
 
-        /* 10.5. Configure vouching system from role configurations */
+        /* 10.5. Configure vouching system from role configurations (batch optimized) */
         {
+            // Count roles with vouching enabled
+            uint256 vouchCount = 0;
             for (uint256 i = 0; i < params.roles.length; i++) {
-                RoleConfigStructs.RoleConfig calldata role = params.roles[i];
+                if (params.roles[i].vouching.enabled) vouchCount++;
+            }
 
-                if (role.vouching.enabled) {
-                    uint256 hatId = gov.roleHatIds[i];
-                    uint256 voucherHatId = gov.roleHatIds[role.vouching.voucherRoleIndex];
+            if (vouchCount > 0) {
+                uint256[] memory hatIds = new uint256[](vouchCount);
+                uint32[] memory quorums = new uint32[](vouchCount);
+                uint256[] memory membershipHatIds = new uint256[](vouchCount);
+                bool[] memory combineFlags = new bool[](vouchCount);
+                uint256 vouchIndex = 0;
 
-                    IExecutorAdmin(result.executor)
-                        .configureVouching(
-                            gov.eligibilityModule,
-                            hatId,
-                            role.vouching.quorum,
-                            voucherHatId,
-                            role.vouching.combineWithHierarchy
-                        );
+                for (uint256 i = 0; i < params.roles.length; i++) {
+                    RoleConfigStructs.RoleConfig calldata role = params.roles[i];
+                    if (role.vouching.enabled) {
+                        hatIds[vouchIndex] = gov.roleHatIds[i];
+                        quorums[vouchIndex] = role.vouching.quorum;
+                        membershipHatIds[vouchIndex] = gov.roleHatIds[role.vouching.voucherRoleIndex];
+                        combineFlags[vouchIndex] = role.vouching.combineWithHierarchy;
+                        vouchIndex++;
+                    }
                 }
+
+                IExecutorAdmin(result.executor).batchConfigureVouching(
+                    gov.eligibilityModule, hatIds, quorums, membershipHatIds, combineFlags
+                );
             }
         }
 
