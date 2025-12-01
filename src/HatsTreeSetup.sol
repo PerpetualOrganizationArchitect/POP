@@ -120,6 +120,11 @@ contract HatsTreeSetup {
                             role.image
                         );
                     result.roleHatIds[i] = newHatId;
+
+                    // Register hat creation for subgraph indexing
+                    IEligibilityModule(params.eligibilityModule)
+                        .registerHatCreation(newHatId, adminHatId, role.defaults.eligible, role.defaults.standing);
+
                     created[i] = true;
                     createdCount++;
                     passCreatedCount++;
