@@ -13,6 +13,8 @@ interface IEligibilityModule {
     function revokeVouch(address wearer, uint256 hatId) external;
     function currentVouchCount(uint256 hatId, address wearer) external view returns (uint32);
     function claimVouchedHat(uint256 hatId) external;
+    function registerHatCreation(uint256 hatId, uint256 parentHatId, bool defaultEligible, bool defaultStanding)
+        external;
 }
 
 interface IToggleModule {
