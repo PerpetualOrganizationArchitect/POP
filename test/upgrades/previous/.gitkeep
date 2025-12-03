@@ -1,0 +1,2 @@
+# This directory stores previous baseline snapshots for fallback comparison.
+# Etherform uses a 3-tier rotation: current -> baseline -> previous
