@@ -28,7 +28,7 @@ jobs:
       flatten-contracts: true
       upgrades-path: 'test/upgrades'
     secrets:
-      PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
       RPC_URL: ${{ secrets.HOODI_RPC_URL }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
