@@ -43,7 +43,7 @@ import {HatsTreeSetup} from "../src/HatsTreeSetup.sol";
  *     --verify
  *
  * Environment Variables Required:
- *   - PRIVATE_KEY or DEPLOYER_PRIVATE_KEY: Private key for deployment
+ *   - PRIVATE_KEY: Private key for deployment
  */
 contract DeployInfrastructure is Script {
     /*═══════════════════════════ CONSTANTS ═══════════════════════════*/
@@ -67,11 +67,7 @@ contract DeployInfrastructure is Script {
     /*═══════════════════════════ MAIN DEPLOYMENT ═══════════════════════════*/
 
     function run() public {
-        // Support both PRIVATE_KEY (Etherform CI/CD) and DEPLOYER_PRIVATE_KEY (local dev)
-        uint256 deployerPrivateKey = vm.envOr("PRIVATE_KEY", uint256(0));
-        if (deployerPrivateKey == 0) {
-            deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        }
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
         console.log("\n=== Starting POA Infrastructure Deployment ===");
         console.log("Deployer:", vm.addr(deployerPrivateKey));
