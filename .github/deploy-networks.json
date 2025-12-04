@@ -3,7 +3,7 @@
     {
       "name": "hoodi",
       "chain_id": 560048,
-      "blockscout_url": "https://hoodi.blockscout.com",
+      "blockscout_url": "https://eth-hoodi.blockscout.com",
       "environment": "testnet"
     }
   ],
@@ -11,7 +11,7 @@
     {
       "name": "hoodi",
       "chain_id": 560048,
-      "blockscout_url": "https://hoodi.blockscout.com",
+      "blockscout_url": "https://eth-hoodi.blockscout.com",
       "environment": "production"
     }
   ]
