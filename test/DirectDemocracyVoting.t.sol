@@ -250,7 +250,7 @@ contract DDVotingTest is Test {
         b[0] = new IExecutor.Call[](0);
         vm.prank(creator);
         vm.expectRevert(VotingErrors.DurationOutOfRange.selector);
-        dd.createProposal(bytes("Test"), bytes32(0), 5, 1, b, new uint256[](0));
+        dd.createProposal(bytes("Test"), bytes32(0), 0, 1, b, new uint256[](0)); // 0 < MIN_DURATION_MIN (1)
     }
 
     function testCreateProposalTooManyOptions() public {
