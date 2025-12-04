@@ -8,7 +8,7 @@ on:
 
 jobs:
   foundry-cicd:
-    uses: BreadchainCoop/etherform/.github/workflows/_foundry-cicd.yml@main
+    uses: BreadchainCoop/etherform/.github/workflows/_foundry-cicd.yml@foundry-profile-input
     with:
       # CI Options
       check-formatting: true
@@ -27,6 +27,7 @@ jobs:
       indexing-wait: 90
       flatten-contracts: true
       upgrades-path: 'test/upgrades'
+      foundry-profile: 'production'
     secrets:
       PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
       RPC_URL: ${{ secrets.HOODI_RPC_URL }}
