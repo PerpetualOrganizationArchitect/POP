@@ -27,7 +27,7 @@ jobs:
       indexing-wait: 90
       flatten-contracts: true
       upgrades-path: 'test/upgrades'
-      foundry-profile: 'production'
+      deployment-foundry-profile: 'production'
     secrets:
       PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
       RPC_URL: ${{ secrets.HOODI_RPC_URL }}
