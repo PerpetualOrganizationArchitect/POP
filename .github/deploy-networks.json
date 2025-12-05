@@ -1,0 +1,18 @@
+{
+  "testnets": [
+    {
+      "name": "hoodi",
+      "chain_id": 560048,
+      "blockscout_url": "https://eth-hoodi.blockscout.com",
+      "environment": "testnet"
+    }
+  ],
+  "mainnets": [
+    {
+      "name": "hoodi",
+      "chain_id": 560048,
+      "blockscout_url": "https://eth-hoodi.blockscout.com",
+      "environment": "production"
+    }
+  ]
+}
