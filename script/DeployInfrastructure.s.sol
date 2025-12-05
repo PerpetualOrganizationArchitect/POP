@@ -43,7 +43,7 @@ import {HatsTreeSetup} from "../src/HatsTreeSetup.sol";
  *     --verify
  *
  * Environment Variables Required:
- *   - DEPLOYER_PRIVATE_KEY: Private key for deployment
+ *   - PRIVATE_KEY: Private key for deployment
  */
 contract DeployInfrastructure is Script {
     /*═══════════════════════════ CONSTANTS ═══════════════════════════*/
@@ -67,7 +67,7 @@ contract DeployInfrastructure is Script {
     /*═══════════════════════════ MAIN DEPLOYMENT ═══════════════════════════*/
 
     function run() public {
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
         console.log("\n=== Starting POA Infrastructure Deployment ===");
         console.log("Deployer:", vm.addr(deployerPrivateKey));
