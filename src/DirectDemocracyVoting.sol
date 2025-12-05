@@ -18,7 +18,7 @@ contract DirectDemocracyVoting is Initializable {
     uint8 public constant MAX_OPTIONS = 50;
     uint8 public constant MAX_CALLS = 20;
     uint32 public constant MAX_DURATION_MIN = 43_200; /* 30 days */
-    uint32 public constant MIN_DURATION_MIN = 10; /* spam guard */
+    uint32 public constant MIN_DURATION_MIN = 1; /* 1 min for testing */
 
     enum HatType {
         VOTING,

@@ -20,7 +20,7 @@ contract HybridVoting is Initializable {
     uint8 public constant MAX_CALLS = 20;
     uint8 public constant MAX_CLASSES = 8;
     uint32 public constant MAX_DURATION = 43_200; /* 30 days */
-    uint32 public constant MIN_DURATION = 10; /* 10 min   */
+    uint32 public constant MIN_DURATION = 1; /* 1 min for testing */
 
     /* ─────── Data Structures ─────── */
 
