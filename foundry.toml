@@ -6,7 +6,8 @@ via_ir = true
 # Optimizer OFF: Solidity IR bug with vm.roll() in tests (issues #4934, #1373, #8102)
 # For production: FOUNDRY_PROFILE=production to enable optimizer (37% smaller contracts)
 bytecode_hash = "none"
-evm_version = "cancun"
+# osaka EVM enables P256 precompile at 0x100 for testing passkey signatures
+evm_version = "osaka"
 ignored_error_codes = ["unused-var"]
 fs_permissions = [{ access = "read-write", path = "./script/infrastructure.json" }, { access = "read-write", path = "./script/org-config-example.json" }, {access = "read-write", path = "./script/org-config-governance-demo.json"}, {access = "read-write", path = "./script/org-config-advanced-demo.json"}]
 extra_output_files = ["abi"]

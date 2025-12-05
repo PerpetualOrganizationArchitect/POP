@@ -54,4 +54,10 @@ library ModuleTypes {
 
     /// @dev keccak256("DirectDemocracyVoting")
     bytes32 constant DIRECT_DEMOCRACY_VOTING_ID = 0xf7339bb8aed66291ac713d0a14749e830b09b2288976ec5d45de7e64df0f2aeb;
+
+    /// @dev keccak256("PasskeyAccount")
+    bytes32 constant PASSKEY_ACCOUNT_ID = 0xda41a9794e00ddb18f1b3c615f12a80255bfb0a79706263eee63314d8f817c10;
+
+    /// @dev keccak256("PasskeyAccountFactory")
+    bytes32 constant PASSKEY_ACCOUNT_FACTORY_ID = 0x82da23c7ff6e2ce257dee836273bf72af382187589631ce71ae1388c80777930;
 }
