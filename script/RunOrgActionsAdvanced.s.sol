@@ -626,7 +626,7 @@ contract RunOrgActionsAdvanced is Script {
         voting.createProposal(
             abi.encode("ipfs://proposal-update-task-timeout"),
             bytes32(0), // descriptionHash
-            4320, // 3 days in minutes
+            1, // 1 minute for quick testing
             2, // 2 options (YES/NO)
             batches,
             emptyHatIds // No hat restrictions
@@ -637,7 +637,7 @@ contract RunOrgActionsAdvanced is Script {
         console.log("  [OK] Proposal Created (ID:", proposalId, ")");
         console.log("  Description: Signaling Vote - Should we update task timeout?");
         console.log("  Type: Non-executable (signaling poll)");
-        console.log("  Duration: 3 days");
+        console.log("  Duration: 1 minute");
 
         // Members vote on the proposal
         // Vote format: vote(proposalId, optionIndices[], optionWeights[])
@@ -665,16 +665,33 @@ contract RunOrgActionsAdvanced is Script {
         voting.vote(proposalId, yesOption, fullWeight);
         console.log("  [OK] Vote Cast");
 
-        // In production, we would need to:
-        // 1. Wait for voting deadline to pass
-        // 2. Call voting.announce(proposalId) to finalize voting
-        // 3. Call executor.execute(...) to execute the proposal
-        // For this demo, we're showing the voting flow
+        // Wait for voting period to end
+        console.log("\n-> Waiting for voting period to end...");
+        if (_isLocalAnvil()) {
+            vm.warp(block.timestamp + 2 minutes);
+            console.log("  [Anvil] Time warped forward");
+        } else {
+            console.log("  [Testnet] Waiting 70 seconds...");
+            vm.sleep(70000); // 70 seconds in milliseconds
+        }
 
-        console.log("\n[OK] Governance Demonstration Complete");
+        // Announce winner
+        console.log("-> Announcing winner...");
+        vm.broadcast(memberKeys.coordinator);
+        (uint256 winningOption, bool isValid) = voting.announceWinner(proposalId);
+
+        console.log("  [OK] Winner Announced");
+        console.log("  Winning Option:", winningOption);
+        console.log("  Is Valid (quorum met):", isValid);
+
+        console.log("\n[OK] Governance Demonstration Complete - Full Cycle!");
         console.log("  Proposal Created: 1");
         console.log("  Votes Cast: 3");
-        console.log("  (Note: Execution requires waiting for deadline + announce + execute)");
+        console.log("  Winner Announced: Option", winningOption);
+    }
+
+    function _isLocalAnvil() internal view returns (bool) {
+        return block.chainid == 31337;
     }
 
     /*=========================== CONFIG PARSING ===========================*/
