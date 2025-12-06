@@ -157,6 +157,7 @@ contract OrgDeployer is Initializable {
     struct DeploymentParams {
         bytes32 orgId;
         string orgName;
+        bytes32 metadataHash; // IPFS CID sha256 digest (optional, bytes32(0) is valid)
         address registryAddr;
         address deployerAddress; // Address to receive ADMIN hat
         string deployerUsername; // Optional username for deployer (empty string = skip registration)
@@ -252,7 +253,7 @@ contract OrgDeployer is Initializable {
 
         /* 3. Create Org in bootstrap mode */
         if (!_orgExists(params.orgId)) {
-            l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName), bytes32(0));
+            l.orgRegistry.createOrgBootstrap(params.orgId, bytes(params.orgName), params.metadataHash);
         } else {
             revert OrgExistsMismatch();
         }
