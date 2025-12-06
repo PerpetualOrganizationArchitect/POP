@@ -103,13 +103,7 @@ contract P256ForkTest is Test {
 
         console.log("Testing with NIST P-256 test vector...");
 
-        bool valid = P256Verifier.verify(
-            NIST_MESSAGE_HASH,
-            NIST_R,
-            NIST_S,
-            NIST_PUB_X,
-            NIST_PUB_Y
-        );
+        bool valid = P256Verifier.verify(NIST_MESSAGE_HASH, NIST_R, NIST_S, NIST_PUB_X, NIST_PUB_Y);
 
         console.log("Verification result:", valid);
         assertTrue(valid, "NIST test vector should verify successfully");
@@ -127,13 +121,7 @@ contract P256ForkTest is Test {
         // Modify the signature to make it invalid
         bytes32 modifiedR = bytes32(uint256(NIST_R) + 1);
 
-        bool valid = P256Verifier.verify(
-            NIST_MESSAGE_HASH,
-            modifiedR,
-            NIST_S,
-            NIST_PUB_X,
-            NIST_PUB_Y
-        );
+        bool valid = P256Verifier.verify(NIST_MESSAGE_HASH, modifiedR, NIST_S, NIST_PUB_X, NIST_PUB_Y);
 
         console.log("Verification result (should be false):", valid);
         assertFalse(valid, "Modified signature should fail verification");
@@ -174,13 +162,7 @@ contract P256ForkTest is Test {
         // Measure verification gas
         uint256 gasStart = gasleft();
 
-        bool valid = P256Verifier.verify(
-            NIST_MESSAGE_HASH,
-            NIST_R,
-            NIST_S,
-            NIST_PUB_X,
-            NIST_PUB_Y
-        );
+        bool valid = P256Verifier.verify(NIST_MESSAGE_HASH, NIST_R, NIST_S, NIST_PUB_X, NIST_PUB_Y);
 
         uint256 gasUsed = gasStart - gasleft();
 
@@ -218,13 +200,7 @@ contract P256ForkTest is Test {
 
         // First: Direct call to fallback verifier
         if (hasFallback) {
-            bytes memory input = abi.encodePacked(
-                NIST_MESSAGE_HASH,
-                NIST_R,
-                NIST_S,
-                NIST_PUB_X,
-                NIST_PUB_Y
-            );
+            bytes memory input = abi.encodePacked(NIST_MESSAGE_HASH, NIST_R, NIST_S, NIST_PUB_X, NIST_PUB_Y);
 
             uint256 gasStart = gasleft();
             (bool success, bytes memory result) = DAIMO_VERIFIER.staticcall(input);
@@ -240,13 +216,7 @@ contract P256ForkTest is Test {
 
         // Second: Direct call to precompile
         if (hasPrecompile) {
-            bytes memory input = abi.encodePacked(
-                NIST_MESSAGE_HASH,
-                NIST_R,
-                NIST_S,
-                NIST_PUB_X,
-                NIST_PUB_Y
-            );
+            bytes memory input = abi.encodePacked(NIST_MESSAGE_HASH, NIST_R, NIST_S, NIST_PUB_X, NIST_PUB_Y);
 
             uint256 gasStart = gasleft();
             (bool success, bytes memory result) = RIP7212_PRECOMPILE.staticcall(input);
@@ -262,13 +232,7 @@ contract P256ForkTest is Test {
 
         // Third: Through P256Verifier library (tests fallback logic)
         uint256 gasStart = gasleft();
-        bool valid = P256Verifier.verify(
-            NIST_MESSAGE_HASH,
-            NIST_R,
-            NIST_S,
-            NIST_PUB_X,
-            NIST_PUB_Y
-        );
+        bool valid = P256Verifier.verify(NIST_MESSAGE_HASH, NIST_R, NIST_S, NIST_PUB_X, NIST_PUB_Y);
         uint256 libraryGas = gasStart - gasleft();
 
         console.log("P256Verifier library (auto-detect):");

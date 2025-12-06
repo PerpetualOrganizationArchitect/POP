@@ -107,13 +107,11 @@ library WebAuthnLib {
      * @param requireUserVerification If true, require UV flag to be set
      * @return valid True if the signature is valid
      */
-    function verify(
-        WebAuthnAuth memory auth,
-        bytes32 challenge,
-        bytes32 x,
-        bytes32 y,
-        bool requireUserVerification
-    ) internal view returns (bool valid) {
+    function verify(WebAuthnAuth memory auth, bytes32 challenge, bytes32 x, bytes32 y, bool requireUserVerification)
+        internal
+        view
+        returns (bool valid)
+    {
         // 1. Validate authenticator data length
         if (auth.authenticatorData.length < MIN_AUTH_DATA_LENGTH) {
             return false;
@@ -195,14 +193,16 @@ library WebAuthnLib {
             return (false, 0);
         }
 
-        newSignCount = uint32(bytes4(
-            abi.encodePacked(
-                auth.authenticatorData[33],
-                auth.authenticatorData[34],
-                auth.authenticatorData[35],
-                auth.authenticatorData[36]
+        newSignCount = uint32(
+            bytes4(
+                abi.encodePacked(
+                    auth.authenticatorData[33],
+                    auth.authenticatorData[34],
+                    auth.authenticatorData[35],
+                    auth.authenticatorData[36]
+                )
             )
-        ));
+        );
 
         // SignCount must be greater than last known value (if non-zero)
         // Note: signCount of 0 means the authenticator doesn't support counters
@@ -221,11 +221,7 @@ library WebAuthnLib {
      * @param authData Raw authenticator data bytes
      * @return parsed Parsed authenticator data struct
      */
-    function parseAuthenticatorData(bytes calldata authData)
-        internal
-        pure
-        returns (AuthenticatorData memory parsed)
-    {
+    function parseAuthenticatorData(bytes calldata authData) internal pure returns (AuthenticatorData memory parsed) {
         if (authData.length < MIN_AUTH_DATA_LENGTH) {
             revert AuthDataTooShort();
         }
@@ -278,11 +274,11 @@ library WebAuthnLib {
      * @param expectedChallenge The expected challenge value
      * @return valid True if challenge matches
      */
-    function _verifyChallenge(
-        bytes memory clientDataJSON,
-        uint256 challengeIndex,
-        bytes32 expectedChallenge
-    ) private pure returns (bool valid) {
+    function _verifyChallenge(bytes memory clientDataJSON, uint256 challengeIndex, bytes32 expectedChallenge)
+        private
+        pure
+        returns (bool valid)
+    {
         // The challenge in clientDataJSON is base64url-encoded
         // We need to decode it and compare with expected
 

@@ -118,7 +118,9 @@ contract PasskeyTest is Test {
     event CredentialRemoved(bytes32 indexed credentialId);
     event CredentialStatusChanged(bytes32 indexed credentialId, bool active);
     event GuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
-    event RecoveryInitiated(bytes32 indexed recoveryId, bytes32 credentialId, address indexed initiator, uint48 executeAfter);
+    event RecoveryInitiated(
+        bytes32 indexed recoveryId, bytes32 credentialId, address indexed initiator, uint48 executeAfter
+    );
     event RecoveryCompleted(bytes32 indexed recoveryId, bytes32 indexed credentialId);
     event RecoveryCancelled(bytes32 indexed recoveryId);
     event AccountCreated(address indexed account, bytes32 indexed orgId, bytes32 credentialId, address indexed owner);
@@ -202,10 +204,7 @@ contract PasskeyTest is Test {
 
         vm.expectEmit(true, true, false, true);
         emit AccountCreated(
-            factory.getAddress(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0),
-            ORG_ID,
-            CREDENTIAL_ID,
-            user
+            factory.getAddress(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0), ORG_ID, CREDENTIAL_ID, user
         );
 
         address account = factory.createAccount(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
@@ -712,10 +711,7 @@ contract PasskeyTest is Test {
         vm.prank(user);
 
         QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID,
-            publicKeyX: PUB_KEY_X,
-            publicKeyY: PUB_KEY_Y,
-            salt: 0
+            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
         });
 
         address account = qj.quickJoinWithPasskey("testuser", enrollment);
@@ -734,10 +730,7 @@ contract PasskeyTest is Test {
         vm.prank(user);
 
         QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID,
-            publicKeyX: PUB_KEY_X,
-            publicKeyY: PUB_KEY_Y,
-            salt: 0
+            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
         });
 
         vm.expectRevert(QuickJoin.NoUsername.selector);
@@ -769,10 +762,7 @@ contract PasskeyTest is Test {
         vm.prank(user);
 
         QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID,
-            publicKeyX: PUB_KEY_X,
-            publicKeyY: PUB_KEY_Y,
-            salt: 0
+            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
         });
 
         vm.expectRevert(QuickJoin.PasskeyFactoryNotSet.selector);
@@ -785,10 +775,7 @@ contract PasskeyTest is Test {
         vm.prank(owner); // Master deploy address
 
         QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID,
-            publicKeyX: PUB_KEY_X,
-            publicKeyY: PUB_KEY_Y,
-            salt: 0
+            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
         });
 
         address account = qj.quickJoinWithPasskeyMasterDeploy("masteruser", enrollment);
@@ -803,10 +790,7 @@ contract PasskeyTest is Test {
         vm.prank(attacker);
 
         QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID,
-            publicKeyX: PUB_KEY_X,
-            publicKeyY: PUB_KEY_Y,
-            salt: 0
+            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
         });
 
         vm.expectRevert(QuickJoin.OnlyMasterDeploy.selector);
@@ -827,13 +811,7 @@ contract PasskeyTest is Test {
             s: bytes32(0)
         });
 
-        bool valid = WebAuthnLib.verify(
-            auth,
-            bytes32(0),
-            PUB_KEY_X,
-            PUB_KEY_Y,
-            false
-        );
+        bool valid = WebAuthnLib.verify(auth, bytes32(0), PUB_KEY_X, PUB_KEY_Y, false);
 
         assertFalse(valid);
     }
@@ -853,13 +831,7 @@ contract PasskeyTest is Test {
             s: bytes32(0)
         });
 
-        bool valid = WebAuthnLib.verify(
-            auth,
-            bytes32(0),
-            PUB_KEY_X,
-            PUB_KEY_Y,
-            false
-        );
+        bool valid = WebAuthnLib.verify(auth, bytes32(0), PUB_KEY_X, PUB_KEY_Y, false);
 
         assertFalse(valid);
     }

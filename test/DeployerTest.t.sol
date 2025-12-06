@@ -166,7 +166,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -344,7 +346,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -398,7 +402,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -723,7 +729,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -851,7 +859,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         deployer.deployFullOrg(params);
@@ -888,7 +898,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -968,7 +980,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1235,7 +1249,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1446,7 +1462,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1605,7 +1623,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1738,7 +1758,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: new address[](0),
             roles: emptyRoles,
             roleAssignments: _buildDefaultRoleAssignments(),
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         vm.expectRevert(OrgDeployer.InvalidRoleConfiguration.selector);
@@ -2006,7 +2028,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2108,7 +2132,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2271,7 +2297,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -3251,7 +3279,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: roles,
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0})
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         // Record logs to verify HatCreatedWithEligibility events were emitted

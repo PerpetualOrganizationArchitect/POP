@@ -31,11 +31,9 @@ interface IAccount {
      *      if it has sufficient balance. This payment happens before execution.
      *      The account may receive partial or full refund after execution via postOp.
      */
-    function validateUserOp(
-        PackedUserOperation calldata userOp,
-        bytes32 userOpHash,
-        uint256 missingAccountFunds
-    ) external returns (uint256 validationData);
+    function validateUserOp(PackedUserOperation calldata userOp, bytes32 userOpHash, uint256 missingAccountFunds)
+        external
+        returns (uint256 validationData);
 }
 
 /**

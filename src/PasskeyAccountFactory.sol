@@ -78,20 +78,10 @@ contract PasskeyAccountFactory is Initializable {
     /*──────────────────────────── Events ───────────────────────────────*/
 
     /// @notice Emitted when a new account is created
-    event AccountCreated(
-        address indexed account,
-        bytes32 indexed orgId,
-        bytes32 credentialId,
-        address indexed owner
-    );
+    event AccountCreated(address indexed account, bytes32 indexed orgId, bytes32 credentialId, address indexed owner);
 
     /// @notice Emitted when an org is registered
-    event OrgRegistered(
-        bytes32 indexed orgId,
-        uint8 maxCredentials,
-        address guardian,
-        uint48 recoveryDelay
-    );
+    event OrgRegistered(bytes32 indexed orgId, uint8 maxCredentials, address guardian, uint48 recoveryDelay);
 
     /// @notice Emitted when org config is updated
     event OrgConfigUpdated(bytes32 indexed orgId);
@@ -158,12 +148,10 @@ contract PasskeyAccountFactory is Initializable {
      * @param guardian Default recovery guardian
      * @param recoveryDelay Recovery delay in seconds
      */
-    function registerOrg(
-        bytes32 orgId,
-        uint8 maxCredentials,
-        address guardian,
-        uint48 recoveryDelay
-    ) external onlyExecutor {
+    function registerOrg(bytes32 orgId, uint8 maxCredentials, address guardian, uint48 recoveryDelay)
+        external
+        onlyExecutor
+    {
         Layout storage l = _layout();
 
         l.orgConfigs[orgId] = OrgConfig({
@@ -183,12 +171,10 @@ contract PasskeyAccountFactory is Initializable {
      * @param guardian New guardian (address(0) to keep existing)
      * @param recoveryDelay New recovery delay (0 to keep existing)
      */
-    function updateOrgConfig(
-        bytes32 orgId,
-        uint8 maxCredentials,
-        address guardian,
-        uint48 recoveryDelay
-    ) external onlyExecutor {
+    function updateOrgConfig(bytes32 orgId, uint8 maxCredentials, address guardian, uint48 recoveryDelay)
+        external
+        onlyExecutor
+    {
         Layout storage l = _layout();
         OrgConfig storage config = l.orgConfigs[orgId];
 
@@ -240,13 +226,10 @@ contract PasskeyAccountFactory is Initializable {
      * @param salt Additional salt for CREATE2
      * @return account The deployed account address
      */
-    function createAccount(
-        bytes32 orgId,
-        bytes32 credentialId,
-        bytes32 pubKeyX,
-        bytes32 pubKeyY,
-        uint256 salt
-    ) external returns (address account) {
+    function createAccount(bytes32 orgId, bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
+        external
+        returns (address account)
+    {
         Layout storage l = _layout();
 
         // Verify org is enabled
@@ -296,13 +279,11 @@ contract PasskeyAccountFactory is Initializable {
      * @param salt Additional salt for CREATE2
      * @return account The predicted account address
      */
-    function getAddress(
-        bytes32 orgId,
-        bytes32 credentialId,
-        bytes32 pubKeyX,
-        bytes32 pubKeyY,
-        uint256 salt
-    ) public view returns (address account) {
+    function getAddress(bytes32 orgId, bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
+        public
+        view
+        returns (address account)
+    {
         Layout storage l = _layout();
 
         // Get org config for initialization params
@@ -321,10 +302,8 @@ contract PasskeyAccountFactory is Initializable {
         );
 
         // Compute bytecode hash
-        bytes memory proxyBytecode = abi.encodePacked(
-            type(BeaconProxy).creationCode,
-            abi.encode(l.accountBeacon, initData)
-        );
+        bytes memory proxyBytecode =
+            abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(l.accountBeacon, initData));
 
         bytes32 create2Salt = _computeSalt(orgId, credentialId, pubKeyX, pubKeyY, salt);
 
@@ -388,13 +367,11 @@ contract PasskeyAccountFactory is Initializable {
      * @param salt Additional salt
      * @return The computed salt
      */
-    function _computeSalt(
-        bytes32 orgId,
-        bytes32 credentialId,
-        bytes32 pubKeyX,
-        bytes32 pubKeyY,
-        uint256 salt
-    ) internal pure returns (bytes32) {
+    function _computeSalt(bytes32 orgId, bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
+        internal
+        pure
+        returns (bytes32)
+    {
         return keccak256(abi.encodePacked(orgId, credentialId, pubKeyX, pubKeyY, salt));
     }
 }

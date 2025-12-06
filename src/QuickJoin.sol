@@ -22,13 +22,9 @@ interface IExecutorHatMinter {
 }
 
 interface IPasskeyAccountFactory {
-    function createAccount(
-        bytes32 orgId,
-        bytes32 credentialId,
-        bytes32 pubKeyX,
-        bytes32 pubKeyY,
-        uint256 salt
-    ) external returns (address account);
+    function createAccount(bytes32 orgId, bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
+        external
+        returns (address account);
 }
 
 /*──────────────────────────────  Contract  ───────────────────────────────*/
@@ -83,8 +79,12 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     event QuickJoinedByMaster(address indexed master, address indexed user, bool usernameCreated, uint256[] hatIds);
     event PasskeyFactoryUpdated(address indexed passkeyFactory);
     event OrgIdUpdated(bytes32 indexed orgId);
-    event QuickJoinedWithPasskey(address indexed account, string username, bytes32 indexed credentialId, uint256[] hatIds);
-    event QuickJoinedWithPasskeyByMaster(address indexed master, address indexed account, string username, bytes32 indexed credentialId, uint256[] hatIds);
+    event QuickJoinedWithPasskey(
+        address indexed account, string username, bytes32 indexed credentialId, uint256[] hatIds
+    );
+    event QuickJoinedWithPasskeyByMaster(
+        address indexed master, address indexed account, string username, bytes32 indexed credentialId, uint256[] hatIds
+    );
 
     /* ───────── Initialiser ───── */
     function initialize(
@@ -234,13 +234,8 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
         // 1. Create PasskeyAccount via factory
-        account = l.passkeyFactory.createAccount(
-            l.orgId,
-            passkey.credentialId,
-            passkey.publicKeyX,
-            passkey.publicKeyY,
-            passkey.salt
-        );
+        account = l.passkeyFactory
+            .createAccount(l.orgId, passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
 
         // 2. Register username to the new account address
         if (bytes(l.accountRegistry.getUsername(account)).length == 0) {
@@ -271,13 +266,8 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
         // 1. Create PasskeyAccount via factory
-        account = l.passkeyFactory.createAccount(
-            l.orgId,
-            passkey.credentialId,
-            passkey.publicKeyX,
-            passkey.publicKeyY,
-            passkey.salt
-        );
+        account = l.passkeyFactory
+            .createAccount(l.orgId, passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
 
         // 2. Register username to the new account address
         if (bytes(l.accountRegistry.getUsername(account)).length == 0) {

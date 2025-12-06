@@ -288,9 +288,7 @@ library ModuleDeploymentLib {
         address factoryBeacon
     ) internal returns (address factoryProxy) {
         bytes memory init = abi.encodeWithSelector(
-            IPasskeyAccountFactoryInit.initialize.selector,
-            executorAddr,
-            accountBeacon
+            IPasskeyAccountFactoryInit.initialize.selector, executorAddr, accountBeacon
         );
         factoryProxy = deployCore(config, ModuleTypes.PASSKEY_ACCOUNT_FACTORY_ID, init, factoryBeacon);
     }

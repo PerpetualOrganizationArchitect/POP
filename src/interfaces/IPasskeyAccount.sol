@@ -62,10 +62,7 @@ interface IPasskeyAccount {
 
     /// @notice Emitted when recovery is initiated
     event RecoveryInitiated(
-        bytes32 indexed recoveryId,
-        bytes32 credentialId,
-        address indexed initiator,
-        uint48 executeAfter
+        bytes32 indexed recoveryId, bytes32 credentialId, address indexed initiator, uint48 executeAfter
     );
 
     /// @notice Emitted when recovery is completed
