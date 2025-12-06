@@ -164,7 +164,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -340,7 +343,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -392,7 +398,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -715,7 +724,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -841,7 +853,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         deployer.deployFullOrg(params);
@@ -876,7 +891,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -954,7 +972,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1219,7 +1240,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1428,7 +1452,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1585,7 +1612,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1716,7 +1746,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: new IHybridVotingInit.ClassConfig[](0),
             ddInitialTargets: new address[](0),
             roles: emptyRoles,
-            roleAssignments: _buildDefaultRoleAssignments()
+            roleAssignments: _buildDefaultRoleAssignments(),
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         vm.expectRevert(OrgDeployer.InvalidRoleConfiguration.selector);
@@ -1982,7 +2015,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2082,7 +2118,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2243,7 +2282,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -3221,7 +3263,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             hybridClasses: classes,
             ddInitialTargets: ddTargets,
             roles: roles,
-            roleAssignments: roleAssignments
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            })
         });
 
         // Record logs to verify HatCreatedWithEligibility events were emitted

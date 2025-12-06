@@ -88,6 +88,10 @@ interface IPaymentManagerInit {
     function initialize(address _owner, address _revenueShareToken) external;
 }
 
+interface IPasskeyAccountFactoryInit {
+    function initialize(address executor, address accountBeacon) external;
+}
+
 library ModuleDeploymentLib {
     error InvalidAddress();
     error EmptyInit();
@@ -275,5 +279,17 @@ library ModuleDeploymentLib {
             quorumPct
         );
         ddProxy = deployCore(config, ModuleTypes.DIRECT_DEMOCRACY_VOTING_ID, init, beacon);
+    }
+
+    function deployPasskeyAccountFactory(
+        DeployConfig memory config,
+        address executorAddr,
+        address accountBeacon,
+        address factoryBeacon
+    ) internal returns (address factoryProxy) {
+        bytes memory init = abi.encodeWithSelector(
+            IPasskeyAccountFactoryInit.initialize.selector, executorAddr, accountBeacon
+        );
+        factoryProxy = deployCore(config, ModuleTypes.PASSKEY_ACCOUNT_FACTORY_ID, init, factoryBeacon);
     }
 }
