@@ -864,6 +864,7 @@ contract RunOrgActionsAdvanced is Script {
         // Set basic params
         params.orgId = keccak256(bytes(config.orgId));
         params.orgName = config.orgName;
+        params.metadataHash = bytes32(0); // No metadata hash for demo
         params.registryAddr = globalAccountRegistry;
         params.deployerAddress = deployerAddress; // Address to receive ADMIN hat
         params.deployerUsername = "admin"; // Deployer gets "admin" username for demo
