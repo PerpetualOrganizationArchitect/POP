@@ -342,6 +342,7 @@ contract DeployOrg is Script {
         // Set basic params
         params.orgId = keccak256(bytes(config.orgId));
         params.orgName = config.orgName;
+        params.metadataHash = bytes32(0); // No metadata hash by default (can be set via env)
         params.registryAddr = globalAccountRegistry;
         params.deployerAddress = deployerAddress; // Address to receive ADMIN hat
         params.deployerUsername = vm.envOr("DEPLOYER_USERNAME", string("")); // Optional username (empty = skip)
