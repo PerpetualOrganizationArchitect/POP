@@ -20,7 +20,7 @@ jobs:
       validation-script: 'script/upgrades/ValidateUpgrade.s.sol'
 
       # Automatic Deployments
-      deploy-on-pr: true
+      deploy-on-pr: false
       deploy-on-main: true
       deploy-script: 'script/DeployInfrastructure.s.sol:DeployInfrastructure'
       network-config-path: '.github/deploy-networks.json'

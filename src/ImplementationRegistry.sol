@@ -130,7 +130,7 @@ contract ImplementationRegistry is Initializable, OwnableUpgradeable {
         return _layout().typeIds.length;
     }
 
-    // Public getter for typeIds
+    /// @notice Public getter for typeIds
     function typeIds(uint256 index) external view returns (bytes32) {
         return _layout().typeIds[index];
     }
