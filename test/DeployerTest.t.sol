@@ -155,6 +155,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "Hybrid DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -331,6 +332,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: orgName,
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -383,6 +385,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: orgName,
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -706,6 +709,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "Hybrid DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -832,6 +836,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "Hybrid DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -867,6 +872,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "Hybrid DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -945,6 +951,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "Hybrid DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -1210,6 +1217,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "Events Test DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -1419,6 +1427,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "Vouch Error Test DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -1576,6 +1585,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "Vouch Events Test DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -1707,6 +1717,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "Invalid Org",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -1973,6 +1984,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "Vouch Disable Test DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -2073,6 +2085,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "SuperAdmin Test DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -2234,6 +2247,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: ORG_ID,
             orgName: "Unrestricted Hat Test DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
@@ -3212,6 +3226,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: keccak256("EVENTS_TEST_ORG"),
             orgName: "Events Test DAO",
+            metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
