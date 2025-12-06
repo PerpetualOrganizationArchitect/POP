@@ -76,13 +76,7 @@ contract P256SignatureTest is Test {
 
     function testVerifyValidSignature() public view {
         // Register our test vectors in the mock
-        bool valid = P256Verifier.verify(
-            TEST1_MESSAGE_HASH,
-            TEST1_R,
-            TEST1_S,
-            TEST1_PUB_X,
-            TEST1_PUB_Y
-        );
+        bool valid = P256Verifier.verify(TEST1_MESSAGE_HASH, TEST1_R, TEST1_S, TEST1_PUB_X, TEST1_PUB_Y);
 
         // Note: This will only pass if the mock verifier recognizes these test vectors
         // In this test environment, we're testing the flow works correctly
@@ -93,7 +87,7 @@ contract P256SignatureTest is Test {
         // Use invalid signature components
         bool valid = P256Verifier.verify(
             TEST1_MESSAGE_HASH,
-            INVALID_R,  // Invalid r value
+            INVALID_R, // Invalid r value
             TEST1_S,
             TEST1_PUB_X,
             TEST1_PUB_Y
@@ -108,8 +102,8 @@ contract P256SignatureTest is Test {
             TEST1_MESSAGE_HASH,
             TEST1_R,
             TEST1_S,
-            bytes32(0),  // Zero x
-            bytes32(0)   // Zero y
+            bytes32(0), // Zero x
+            bytes32(0) // Zero y
         );
 
         assertFalse(valid, "Zero public key should fail verification");
@@ -118,8 +112,8 @@ contract P256SignatureTest is Test {
     function testVerifyZeroSignature() public view {
         bool valid = P256Verifier.verify(
             TEST1_MESSAGE_HASH,
-            bytes32(0),  // Zero r
-            bytes32(0),  // Zero s
+            bytes32(0), // Zero r
+            bytes32(0), // Zero s
             TEST1_PUB_X,
             TEST1_PUB_Y
         );
@@ -129,48 +123,27 @@ contract P256SignatureTest is Test {
 
     function testIsValidPublicKey() public pure {
         // Valid public key
-        assertTrue(
-            P256Verifier.isValidPublicKey(TEST1_PUB_X, TEST1_PUB_Y),
-            "Valid public key should pass"
-        );
+        assertTrue(P256Verifier.isValidPublicKey(TEST1_PUB_X, TEST1_PUB_Y), "Valid public key should pass");
 
         // Zero x
-        assertFalse(
-            P256Verifier.isValidPublicKey(bytes32(0), TEST1_PUB_Y),
-            "Zero x should fail"
-        );
+        assertFalse(P256Verifier.isValidPublicKey(bytes32(0), TEST1_PUB_Y), "Zero x should fail");
 
         // Zero y
-        assertFalse(
-            P256Verifier.isValidPublicKey(TEST1_PUB_X, bytes32(0)),
-            "Zero y should fail"
-        );
+        assertFalse(P256Verifier.isValidPublicKey(TEST1_PUB_X, bytes32(0)), "Zero y should fail");
 
         // Both zero
-        assertFalse(
-            P256Verifier.isValidPublicKey(bytes32(0), bytes32(0)),
-            "Both zero should fail"
-        );
+        assertFalse(P256Verifier.isValidPublicKey(bytes32(0), bytes32(0)), "Both zero should fail");
     }
 
     function testIsValidSignature() public pure {
         // Valid signature
-        assertTrue(
-            P256Verifier.isValidSignature(TEST1_R, TEST1_S),
-            "Valid signature should pass"
-        );
+        assertTrue(P256Verifier.isValidSignature(TEST1_R, TEST1_S), "Valid signature should pass");
 
         // Zero r
-        assertFalse(
-            P256Verifier.isValidSignature(bytes32(0), TEST1_S),
-            "Zero r should fail"
-        );
+        assertFalse(P256Verifier.isValidSignature(bytes32(0), TEST1_S), "Zero r should fail");
 
         // Zero s
-        assertFalse(
-            P256Verifier.isValidSignature(TEST1_R, bytes32(0)),
-            "Zero s should fail"
-        );
+        assertFalse(P256Verifier.isValidSignature(TEST1_R, bytes32(0)), "Zero s should fail");
     }
 
     function testIsPrecompileAvailable() public view {
@@ -194,13 +167,7 @@ contract P256SignatureTest is Test {
         // Measure gas with fallback verifier (our mock)
         uint256 gasStart = gasleft();
 
-        P256Verifier.verify(
-            TEST1_MESSAGE_HASH,
-            TEST1_R,
-            TEST1_S,
-            TEST1_PUB_X,
-            TEST1_PUB_Y
-        );
+        P256Verifier.verify(TEST1_MESSAGE_HASH, TEST1_R, TEST1_S, TEST1_PUB_X, TEST1_PUB_Y);
 
         uint256 gasUsed = gasStart - gasleft();
 
@@ -226,13 +193,7 @@ contract P256SignatureTest is Test {
 
         // Measure gas with the real precompile
         uint256 gasStart = gasleft();
-        bool result = P256Verifier.verify(
-            TEST1_MESSAGE_HASH,
-            TEST1_R,
-            TEST1_S,
-            TEST1_PUB_X,
-            TEST1_PUB_Y
-        );
+        bool result = P256Verifier.verify(TEST1_MESSAGE_HASH, TEST1_R, TEST1_S, TEST1_PUB_X, TEST1_PUB_Y);
         uint256 gasUsed = gasStart - gasleft();
 
         console.log("Verification result:", result);
@@ -274,11 +235,12 @@ contract P256SignatureTest is Test {
 
         // Create clientDataJSON with challenge
         // The challenge is base64url-encoded in the real flow
-        bytes memory clientDataJSON = bytes('{"type":"webauthn.get","challenge":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}');
+        bytes memory clientDataJSON =
+            bytes('{"type":"webauthn.get","challenge":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}');
 
         // Find where challenge value starts (after "challenge":")
         uint256 challengeIndex = 36; // Position of first 'A' in the base64 challenge
-        uint256 typeIndex = 9;  // Position of 'w' in "webauthn.get"
+        uint256 typeIndex = 9; // Position of 'w' in "webauthn.get"
 
         WebAuthnLib.WebAuthnAuth memory auth = WebAuthnLib.WebAuthnAuth({
             authenticatorData: authenticatorData,
@@ -299,7 +261,7 @@ contract P256SignatureTest is Test {
             expectedChallenge,
             TEST1_PUB_X,
             TEST1_PUB_Y,
-            false  // Don't require user verification
+            false // Don't require user verification
         );
 
         console.log("WebAuthn verification result:", valid);
@@ -333,9 +295,8 @@ contract P256SignatureTest is Test {
             parsedRpIdHash := mload(add(authData, 32))
         }
         uint8 parsedFlags = uint8(authData[32]);
-        uint32 parsedSignCount = uint32(bytes4(
-            abi.encodePacked(authData[33], authData[34], authData[35], authData[36])
-        ));
+        uint32 parsedSignCount =
+            uint32(bytes4(abi.encodePacked(authData[33], authData[34], authData[35], authData[36])));
 
         assertEq(parsedRpIdHash, expectedRpIdHash, "rpIdHash mismatch");
         assertEq(parsedFlags, 0x05, "flags mismatch");
@@ -358,13 +319,7 @@ contract P256SignatureTest is Test {
             s: TEST1_S
         });
 
-        bool valid = WebAuthnLib.verify(
-            auth,
-            bytes32(0),
-            TEST1_PUB_X,
-            TEST1_PUB_Y,
-            false
-        );
+        bool valid = WebAuthnLib.verify(auth, bytes32(0), TEST1_PUB_X, TEST1_PUB_Y, false);
 
         assertFalse(valid, "Should fail without UP flag");
 
@@ -379,7 +334,7 @@ contract P256SignatureTest is Test {
             bytes32(0),
             TEST1_PUB_X,
             TEST1_PUB_Y,
-            true  // Require UV
+            true // Require UV
         );
 
         assertFalse(valid, "Should fail without UV flag when required");

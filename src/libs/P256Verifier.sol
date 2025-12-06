@@ -68,13 +68,11 @@ library P256Verifier {
      * @return valid True if the signature is valid, false otherwise
      * @dev Attempts precompile first, falls back to contract verifier
      */
-    function verify(
-        bytes32 messageHash,
-        bytes32 r,
-        bytes32 s,
-        bytes32 x,
-        bytes32 y
-    ) internal view returns (bool valid) {
+    function verify(bytes32 messageHash, bytes32 r, bytes32 s, bytes32 x, bytes32 y)
+        internal
+        view
+        returns (bool valid)
+    {
         // Pack input for precompile (160 bytes total)
         // Format: messageHash(32) || r(32) || s(32) || x(32) || y(32)
         bytes memory input = abi.encodePacked(messageHash, r, s, x, y);
@@ -110,13 +108,7 @@ library P256Verifier {
      * @param y The y coordinate of the public key
      * @dev Reverts with InvalidSignature if verification fails
      */
-    function verifyOrRevert(
-        bytes32 messageHash,
-        bytes32 r,
-        bytes32 s,
-        bytes32 x,
-        bytes32 y
-    ) internal view {
+    function verifyOrRevert(bytes32 messageHash, bytes32 r, bytes32 s, bytes32 x, bytes32 y) internal view {
         if (!verify(messageHash, r, s, x, y)) {
             revert InvalidSignature();
         }

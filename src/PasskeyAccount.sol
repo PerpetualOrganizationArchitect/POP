@@ -165,11 +165,12 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
      * @param missingAccountFunds Amount to pay to EntryPoint
      * @return validationData 0 for success, 1 for failure
      */
-    function validateUserOp(
-        PackedUserOperation calldata userOp,
-        bytes32 userOpHash,
-        uint256 missingAccountFunds
-    ) external override onlyEntryPoint returns (uint256 validationData) {
+    function validateUserOp(PackedUserOperation calldata userOp, bytes32 userOpHash, uint256 missingAccountFunds)
+        external
+        override
+        onlyEntryPoint
+        returns (uint256 validationData)
+    {
         // Verify the WebAuthn signature
         validationData = _validateSignature(userOp.signature, userOpHash);
 
@@ -333,11 +334,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
     /*──────────────────────────── Recovery Functions ──────────────────*/
 
     /// @inheritdoc IPasskeyAccount
-    function initiateRecovery(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY)
-        external
-        override
-        onlyGuardian
-    {
+    function initiateRecovery(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY) external override onlyGuardian {
         Layout storage l = _layout();
 
         // Generate recovery ID
@@ -356,11 +353,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         uint48 executeAfter = uint48(block.timestamp) + l.recoveryDelay;
 
         l.recoveryRequests[recoveryId] = RecoveryRequest({
-            credentialId: credentialId,
-            pubKeyX: pubKeyX,
-            pubKeyY: pubKeyY,
-            executeAfter: executeAfter,
-            cancelled: false
+            credentialId: credentialId, pubKeyX: pubKeyX, pubKeyY: pubKeyY, executeAfter: executeAfter, cancelled: false
         });
         l.pendingRecoveryIds.push(recoveryId);
 
@@ -473,12 +466,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
     /*──────────────────────────── View Functions ──────────────────────*/
 
     /// @inheritdoc IPasskeyAccount
-    function getCredential(bytes32 credentialId)
-        external
-        view
-        override
-        returns (PasskeyCredential memory credential)
-    {
+    function getCredential(bytes32 credentialId) external view override returns (PasskeyCredential memory credential) {
         return _layout().credentials[credentialId];
     }
 
@@ -503,12 +491,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
     }
 
     /// @inheritdoc IPasskeyAccount
-    function getRecoveryRequest(bytes32 recoveryId)
-        external
-        view
-        override
-        returns (RecoveryRequest memory)
-    {
+    function getRecoveryRequest(bytes32 recoveryId) external view override returns (RecoveryRequest memory) {
         return _layout().recoveryRequests[recoveryId];
     }
 

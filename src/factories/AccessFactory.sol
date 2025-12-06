@@ -166,7 +166,11 @@ contract AccessFactory {
 
             // Create beacon for PasskeyAccountFactory
             passkeyFactoryBeacon = _createBeacon(
-                ModuleTypes.PASSKEY_ACCOUNT_FACTORY_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
+                ModuleTypes.PASSKEY_ACCOUNT_FACTORY_ID,
+                params.poaManager,
+                params.executor,
+                params.autoUpgrade,
+                address(0)
             );
 
             ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
@@ -184,12 +188,13 @@ contract AccessFactory {
             );
 
             // Register org in the factory
-            IPasskeyAccountFactoryOrg(result.passkeyAccountFactory).registerOrg(
-                params.orgId,
-                params.passkeyConfig.maxCredentialsPerAccount,
-                params.passkeyConfig.defaultGuardian,
-                params.passkeyConfig.recoveryDelay
-            );
+            IPasskeyAccountFactoryOrg(result.passkeyAccountFactory)
+                .registerOrg(
+                    params.orgId,
+                    params.passkeyConfig.maxCredentialsPerAccount,
+                    params.passkeyConfig.defaultGuardian,
+                    params.passkeyConfig.recoveryDelay
+                );
 
             // Configure QuickJoin with the factory
             IQuickJoinPasskeyConfig(result.quickJoin).setPasskeyFactory(result.passkeyAccountFactory);
@@ -199,7 +204,8 @@ contract AccessFactory {
         /* 4. Batch register all contracts */
         {
             uint256 registrationCount = params.passkeyConfig.enabled ? 3 : 2;
-            OrgRegistry.ContractRegistration[] memory registrations = new OrgRegistry.ContractRegistration[](registrationCount);
+            OrgRegistry.ContractRegistration[] memory registrations =
+                new OrgRegistry.ContractRegistration[](registrationCount);
 
             registrations[0] = OrgRegistry.ContractRegistration({
                 typeId: ModuleTypes.QUICK_JOIN_ID,
