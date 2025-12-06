@@ -5,32 +5,91 @@
 
 ---
 
-## The Vision: Organizations That Belong to Those Who Build Them
+## The Stakes: Why This Matters
 
-The Perpetual Organization Protocol (POP) is a comprehensive smart contract system that enables the creation of **worker-owned and community-governed organizations on-chain**. It represents a fundamental reimagining of how organizations can operate—shifting power from capital to labor, from shareholders to stakeholders, and from centralized control to collective governance.
+In the current economy, workers create value that flows upward. Platform companies capture billions while drivers and delivery workers scrape by. Tech giants extract data from communities and return nothing. Cooperative movements have fought this for over a century, but they've been limited by the same problems: How do you coordinate ownership across thousands of people? How do you make collective decisions without intermediaries who accumulate power? How do you ensure that democratic governance actually happens, transparently and verifiably?
 
-### The Problem with Traditional Organizations
+**Blockchain changes what's possible.**
 
-Traditional corporate structures concentrate power and wealth in the hands of shareholders and executives. Workers—the people who actually create value—receive wages while ownership accumulates elsewhere. This creates organizations where:
-
-- **Power follows capital:** More money means more control
-- **Workers are expendable:** Labor is a cost to minimize, not value to nurture
-- **Communities are extracted from:** Organizations optimize for shareholder returns, not stakeholder wellbeing
-- **Decisions happen behind closed doors:** Governance is opaque and inaccessible
-
-### The POP Alternative
-
-POP inverts this model entirely. Every organization deployed through POP operates on fundamentally different principles:
+The Perpetual Organization Protocol (POP) is infrastructure for a different kind of organization—one where work creates ownership, where governance is transparent and cryptographically guaranteed, and where power cannot be quietly accumulated by insiders. It's not a marginal improvement to existing structures. It's a complete alternative.
 
 ```
 Traditional Model:
-  Worker → Labor → Company → Profits → Shareholders
+  Worker → Labor → Company → Profits → Shareholders → Worker gets wages
 
 POP Model:
-  Worker → Labor → Participation Tokens → Ownership + Governance → Worker
+  Worker → Labor → Participation Tokens → Ownership + Governance → Worker owns the organization
 ```
 
-**When you contribute to a POP organization, you earn ownership.** Your participation tokens represent real stake in the organization—voting power in governance, share of revenue distributions, and voice in the organization's direction.
+Every task completed in a POP organization mints ownership stake to the person who did the work. Every decision happens on-chain, visible to all members. No backroom deals. No invisible hierarchies. No extraction.
+
+---
+
+## Who Is POP For?
+
+### Direct Democracy Groups
+
+If you believe that every member's voice should count equally—not weighted by wealth, not diluted by delegation—POP provides the infrastructure:
+
+- **Neighborhood Associations:** Collective decisions about shared resources, transparent budgets, equal votes
+- **Tenant Unions:** Coordinating collective action with cryptographic accountability
+- **Clubs and Societies:** From book clubs with treasuries to hobby groups making equipment purchases
+- **Community Land Trusts:** Democratic stewardship of shared property
+- **Parent-Teacher Organizations:** Equal voice regardless of who has time for meetings
+- **Mutual Aid Networks:** Pooling resources, making collective decisions about distribution
+
+POP's `DirectDemocracyVoting` contract enforces pure equality: every eligible member gets exactly 100 voting points. Period. You cannot buy more. You cannot inherit more. Your voice is equal to everyone else's.
+
+```solidity
+// DirectDemocracyVoting: Pure equality enforced in code
+function _calculateVotes(address voter) internal pure returns (uint256) {
+    return 100; // Every voter. No exceptions. No weights.
+}
+```
+
+### Worker Cooperatives
+
+The classic use case: organizations owned by the people who do the work.
+
+Traditional cooperatives struggle with:
+- Governance that scales beyond physical meetings
+- Transparent, auditable decision-making
+- Compensating contributors fairly across time zones
+- Onboarding members without bureaucratic friction
+
+POP solves these by making ownership programmable:
+- Complete tasks → receive participation tokens → own more of the organization
+- Vote on proposals → decisions execute automatically on-chain
+- Revenue arrives → distribution happens proportionally to ownership
+
+### DAOs Seeking Democratic Foundations
+
+Most DAOs default to plutocracy: more tokens = more votes. This is just shareholder capitalism with extra steps.
+
+POP offers alternatives:
+- **DirectDemocracyVoting:** One person, one vote—pure equality
+- **HybridVoting:** Balance multiple constituencies (e.g., 60% weight to member-vote, 40% to token-weighted)
+- **Quadratic voting:** Limit whale influence in hybrid systems
+
+If you want your DAO to be actually democratic, POP provides the contracts.
+
+### Open Source Projects
+
+Contributors to open source create enormous value but traditionally own nothing. POP enables:
+
+- Issue completion → participation tokens minted to contributor
+- Token holders govern project direction
+- If the project generates revenue (sponsorships, grants, commercial licensing), it flows to contributors proportionally
+
+The maintainer who's been contributing for years has more stake than someone who just arrived—but that stake was earned through contribution, not purchased.
+
+### Artist and Creator Collectives
+
+Musicians, writers, visual artists, and other creators can:
+- Pool resources and infrastructure
+- Make collective decisions about shared direction
+- Distribute revenue fairly when work sells
+- Build organizations that persist beyond any individual
 
 ---
 
@@ -38,86 +97,122 @@ POP Model:
 
 ### 1. Work Creates Ownership
 
-In POP organizations, **contribution is the path to ownership**. Complete a task, earn tokens. Finish a learning module, earn tokens. These aren't rewards—they're equity. Your labor builds your stake in the organization.
+This is the foundation. In POP organizations, **contribution is the path to ownership**. Not investment. Not connections. Not inheritance. Work.
 
 ```solidity
-// When a task is completed:
-participationToken.mint(worker, tokenAmount);
-// Worker now owns more of the organization
+// ParticipationToken: The ownership primitive
+// When work is approved:
+function mint(address to, uint256 amount) external onlyTaskOrEdu {
+    _mint(to, amount);
+    // `to` now owns more of the organization
+}
+
+// You cannot buy your way in:
+function transfer(address, uint256) public pure override returns (bool) {
+    revert TransfersDisabled();
+}
+
+function transferFrom(address, address, uint256) public pure override returns (bool) {
+    revert TransfersDisabled();
+}
 ```
 
-### 2. One Member, One Voice (Where It Matters)
+Participation tokens are non-transferable. You earn them. You keep them. They represent your accumulated contribution to the organization.
 
-POP offers governance models that ensure human participation—not capital—anchors the organization. Direct democracy voting gives every member equal say on fundamental decisions. No whales. No plutocracy. No buying influence.
+### 2. One Member, One Voice (When It Matters)
+
+POP's DirectDemocracyVoting ensures that wealth cannot distort governance. Every member who meets the eligibility requirements (wearing the appropriate Hats) gets equal voting power.
+
+This matters because:
+- Plutocratic voting replicates the problems of capitalism
+- Token-weighted governance allows coordination attacks by wealthy actors
+- Democratic legitimacy requires equal standing
 
 ### 3. Multiple Stakeholders, Proportional Voice
 
-Not all decisions are the same. POP's hybrid voting system allows organizations to balance different constituencies—workers, token holders, users, community supporters—each with their configured share of governance power. A single proposal might allocate 50% weight to worker-members (one person, one vote) and 50% to labor contributors (weighted by earned tokens).
+Not every decision should be pure direct democracy. Sometimes you want to balance:
+- Workers (equal voice)
+- Long-term contributors (token-weighted)
+- Community members (different eligibility criteria)
+
+HybridVoting lets organizations configure multiple "classes" of voters with different weights. A single proposal might give:
+- 50% weight to worker-members (one person, one vote)
+- 30% weight to token holders (contribution-weighted)
+- 20% weight to community advisors
 
 ### 4. Collective Infrastructure, Individual Autonomy
 
-Organizations share infrastructure—gas sponsorship, account abstraction, upgrade mechanisms—while maintaining full autonomy over their own governance and operations. The shared infrastructure creates solidarity between organizations; the autonomy preserves self-determination.
+Organizations share infrastructure—gasless transactions, identity systems, upgrade mechanisms—while maintaining complete autonomy over their own governance.
 
-### 5. Transparency by Design
+The PaymasterHub exemplifies this: smaller organizations get subsidized by the solidarity fund (fed by larger organizations). This isn't charity—it's mutual aid encoded in smart contracts.
 
-Every proposal, every vote, every task, every payment is recorded on-chain. There are no backroom deals, no hidden decisions, no revisionist history. Governance happens in public, creating permanent records of collective decision-making.
+### 5. Transparency by Default
+
+Every proposal, every vote, every task, every payment happens on-chain. There's no hidden ledger. No decisions made in private channels that members can't see.
+
+This creates:
+- Accountability that doesn't depend on trust
+- Historical records that can't be revised
+- Governance that's auditable by anyone
 
 ---
 
 ## System Architecture
 
-POP is a modular system where each component serves a specific purpose in the worker-ownership ecosystem:
-
 ```
-                    ┌─────────────────────────────────────────┐
-                    │           Protocol Layer                 │
-                    │  PoaManager · ImplementationRegistry    │
-                    │  PaymasterHub · UniversalAccountRegistry │
-                    └────────────────────┬────────────────────┘
-                                         │
-                    ┌────────────────────┴────────────────────┐
-                    │           Deployment Layer               │
-                    │        OrgDeployer · OrgRegistry         │
-                    │          Factory Contracts               │
-                    └────────────────────┬────────────────────┘
-                                         │
-         ┌───────────────────────────────┼───────────────────────────────┐
-         │                               │                               │
-         ▼                               ▼                               ▼
-┌─────────────────┐            ┌─────────────────┐            ┌─────────────────┐
-│   Governance    │            │     Access      │            │    Operations   │
-│                 │            │                 │            │                 │
-│ • HybridVoting  │            │ • QuickJoin     │            │ • TaskManager   │
-│ • DirectDemo    │            │ • Participation │            │ • EducationHub  │
-│ • Executor      │            │   Token         │            │ • PaymentManager│
-│ • Hats Protocol │            │                 │            │                 │
-└─────────────────┘            └─────────────────┘            └─────────────────┘
+                    ┌─────────────────────────────────────────────┐
+                    │              Protocol Layer                  │
+                    │   PoaManager · ImplementationRegistry        │
+                    │   PaymasterHub · UniversalAccountRegistry    │
+                    └──────────────────────┬──────────────────────┘
+                                           │
+                    ┌──────────────────────┴──────────────────────┐
+                    │             Deployment Layer                 │
+                    │          OrgDeployer · OrgRegistry           │
+                    │           Factory Contracts                  │
+                    └──────────────────────┬──────────────────────┘
+                                           │
+         ┌─────────────────────────────────┼─────────────────────────────────┐
+         │                                 │                                 │
+         ▼                                 ▼                                 ▼
+┌───────────────────┐            ┌───────────────────┐            ┌───────────────────┐
+│    Governance     │            │      Access       │            │    Operations     │
+│                   │            │                   │            │                   │
+│ • DirectDemocracy │            │ • QuickJoin       │            │ • TaskManager     │
+│ • HybridVoting    │            │ • Participation   │            │ • EducationHub    │
+│ • Executor        │            │   Token           │            │ • PaymentManager  │
+│ • Hats Protocol   │            │                   │            │                   │
+└───────────────────┘            └───────────────────┘            └───────────────────┘
 ```
 
 ### Protocol Layer
 
-**Shared infrastructure that benefits all organizations:**
+Shared infrastructure for all POP organizations:
 
-- **PaymasterHub:** Gasless transactions with solidarity-based mutual aid
-- **UniversalAccountRegistry:** Shared identity layer for all participants
-- **ImplementationRegistry:** Manages contract implementations and upgrades
-- **PoaManager:** Protocol-level governance and configuration
+| Contract | Purpose |
+|----------|---------|
+| **PaymasterHub** | Gasless transactions with solidarity-based mutual aid |
+| **UniversalAccountRegistry** | Shared identity—usernames work across all POP orgs |
+| **ImplementationRegistry** | Version management for upgradeable contracts |
+| **PoaManager** | Protocol-level configuration |
 
 ### Deployment Layer
 
-**How organizations come into existence:**
+How organizations come into existence:
 
-- **OrgDeployer:** Atomic deployment of complete organizations
-- **OrgRegistry:** Central registry of all organizations and their contracts
-- **Factory Contracts:** Create governance, access, and operational modules
+| Contract | Purpose |
+|----------|---------|
+| **OrgDeployer** | Single-transaction atomic deployment of complete organizations |
+| **OrgRegistry** | Central registry of all organizations and their contracts |
+| **Factory Contracts** | Create governance, access, and operational modules |
 
 ### Organization Layer
 
-Each organization consists of interconnected modules:
+Each organization is a set of interconnected modules:
 
-- **Governance:** How decisions are made
-- **Access:** Who can participate and how
-- **Operations:** How work gets coordinated and compensated
+- **Governance:** How decisions are made (voting, execution)
+- **Access:** Who can participate (roles, membership, onboarding)
+- **Operations:** How work is coordinated and compensated
 
 ---
 
@@ -125,122 +220,244 @@ Each organization consists of interconnected modules:
 
 ### ParticipationToken
 
-The **ParticipationToken** is the foundation of worker ownership. Unlike traditional tokens, participation tokens are:
+The ownership primitive. Every POP organization has one.
 
-- **Non-transferable:** You can't buy influence—you earn it
-- **Minted through contribution:** Tasks and education modules mint tokens
-- **Self-delegating:** Votes automatically count for the holder
-- **Voting-enabled:** Built-in vote tracking for governance
+**Key Properties:**
+- **Non-transferable:** Cannot be bought, sold, or delegated
+- **Minted through contribution:** TaskManager and EducationHub mint tokens
+- **Voting-enabled:** Built on ERC20Votes for governance integration
+- **Auto-delegating:** Votes automatically count for the holder
 
+```solidity
+// Key functions
+function mint(address to, uint256 amount) external onlyTaskOrEdu;
+function requestTokens(uint96 amount, string calldata ipfsHash) external isMember;
+function approveRequest(uint256 id) external onlyApprover;
+
+// Transfer functions revert—no market for ownership
+function transfer(address, uint256) public pure override returns (bool) {
+    revert TransfersDisabled();
+}
 ```
-Total Supply: 10,000 tokens
-Worker completes task → Mint 100 tokens
-New Supply: 10,100 tokens
 
-Worker now owns 100/10,100 ≈ 0.99% of the organization
+**Ownership Calculation:**
 ```
+Your ownership = Your tokens / Total supply
 
-Each token represents genuine ownership stake—a share of governance power and (if configured) revenue distributions.
+Example:
+- Total supply: 10,000 tokens
+- You complete task worth 100 tokens
+- New supply: 10,100 tokens
+- Your ownership: 100/10,100 ≈ 0.99%
+```
 
 ### TaskManager
 
-**TaskManager is how worker-owned organizations coordinate labor.** It transforms work from a wage relationship into an ownership relationship:
+Work coordination that creates ownership.
 
-- **Projects** organize tasks with budgets and dedicated managers
-- **Tasks** define work with token payouts and optional bounties
-- **Applications** enable competitive selection for complex work
-- **Completion** triggers automatic token minting and payment
+**Hierarchy:**
+```
+Organization
+└── Projects (budgets, managers)
+    └── Tasks (work units, payouts)
+        └── Applications (for complex work)
+```
 
 **The Ownership Cycle:**
-1. Organization creates task with token reward
-2. Worker claims or applies for task
-3. Worker completes and submits work
-4. Reviewer approves completion
-5. Worker receives ownership stake (participation tokens) + optional bounty
+```
+1. Organization creates task with payout:
+   createTask(projectId, payout, bounty, ...)
 
-### EducationHub
+2. Worker claims or applies:
+   claimTask(taskId) / applyForTask(taskId, ...)
 
-**Learning as a path to ownership.** EducationHub creates on-chain educational modules that reward participation tokens:
+3. Worker completes and submits:
+   submitTask(taskId, submissionHash)
 
-- Organizations can create learning paths for onboarding
-- Completing modules demonstrates competence and earns ownership
-- Knowledge sharing becomes a form of contribution
+4. Reviewer approves:
+   approveTask(taskId)
+   → Participation tokens minted to worker
+   → Bounty transferred (if applicable)
+   → Worker now owns more of the organization
+```
 
-### Governance: Voting Systems
+### DirectDemocracyVoting
 
-POP offers two governance models:
+Pure one-person-one-vote governance.
 
-**DirectDemocracyVoting:** Pure one-person-one-vote democracy
-- Every eligible member gets exactly equal voting power
-- Prevents plutocratic capture
-- Ideal for high-trust, smaller organizations
+```solidity
+// Every eligible voter gets exactly 100 points
+// No more. No less. No exceptions.
+uint256 constant VOTE_POINTS = 100;
 
-**HybridVoting:** Multi-constituency governance
-- Multiple stakeholder classes with configurable weights
-- Balances different perspectives (workers, token holders, users)
-- Supports quadratic voting to limit whale influence
+// Create proposals with multiple options
+function createProposal(
+    string calldata title,
+    bytes32 descriptionHash,
+    uint256 duration,
+    bytes[] calldata options,   // Not just yes/no
+    IExecutor.Call[][] calldata calls
+) external returns (uint256 proposalId);
 
-Both systems feature:
+// Vote by distributing your 100 points across options
+function vote(
+    uint256 proposalId,
+    uint256[] calldata optionIndices,
+    uint256[] calldata weights  // Must sum to 100
+) external;
+
+// After voting ends, execute winning option
+function executeProposal(uint256 proposalId) external;
+```
+
+**Key Features:**
 - Multi-option proposals (not just yes/no)
-- Weighted vote distribution across options
-- Quorum requirements and strict majority
+- Distribute voting power across options
+- Quorum requirements (minimum participation)
+- Strict majority required (>50% of participating votes)
 - On-chain execution of winning proposals
+
+### HybridVoting
+
+Multi-constituency governance for complex organizations.
+
+```solidity
+struct VotingClass {
+    uint16 weight;           // Percentage of total voting power
+    bool isDirectDemocracy;  // true = equal votes, false = token-weighted
+    bool useQuadratic;       // Apply sqrt() to token-weighted votes
+    uint256[] eligibleHatIds;// Which hats can vote in this class
+}
+```
+
+**Example Configuration:**
+```
+Class 0: Workers
+  - Weight: 50%
+  - DirectDemocracy: true (equal votes)
+  - Hats: [workerHatId]
+
+Class 1: Token Holders
+  - Weight: 50%
+  - DirectDemocracy: false (token-weighted)
+  - UseQuadratic: true (limit whale influence)
+  - Hats: [memberHatId]
+```
 
 ### Executor
 
-The **Executor** is the "hands" of the organization. It can only act when instructed by approved governance:
+The "hands" of the organization. Can only act when instructed by governance.
 
-- Executes batch transactions from approved proposals
-- Controls module configuration
-- Manages role assignments through Hats Protocol
-- Cannot be controlled by any individual—only collective decisions
+```solidity
+struct Call {
+    address target;
+    uint256 value;
+    bytes data;
+}
 
-After deployment, the deployer **immediately renounces ownership**. The Executor becomes fully autonomous, controllable only through governance.
+// Only the authorized voting contract can trigger execution
+function execute(uint256 proposalId, Call[] calldata batch) external;
+```
+
+After deployment, the Executor's ownership is **immediately renounced**. No individual can control it. Only collective decisions through governance.
 
 ### QuickJoin
 
-**Frictionless onboarding** for new members:
+Frictionless onboarding.
 
-- Create username in shared account registry
-- Automatically receive initial roles (Hats)
-- Immediately ready to participate
+```solidity
+// New user with username
+function quickJoinNoUser(string calldata username) external;
 
-QuickJoin removes barriers to participation while maintaining organizational integrity through role-based access control.
+// User already has username from another POP org
+function quickJoinWithUser() external;
+```
+
+1. User calls QuickJoin
+2. Username registered (if needed) in UniversalAccountRegistry
+3. Member hats minted to user
+4. User is immediately ready to participate
+
+### EducationHub
+
+Learning as a path to ownership.
+
+```solidity
+// Creator creates educational module
+function createModule(
+    bytes calldata title,
+    bytes32 contentHash,  // IPFS hash of learning content
+    uint256 payout,       // Tokens earned on completion
+    uint8 correctAnswer   // Answer hash stored privately
+) external;
+
+// Member completes module
+function completeModule(uint256 id, uint8 answer) external;
+// If correct: participation tokens minted to learner
+```
+
+Organizations can create onboarding paths, skill assessments, or knowledge-sharing incentives.
 
 ### PaymentManager
 
-**Revenue distribution for worker-owners:**
+Revenue distribution for worker-owners.
 
-- Accepts payments in ETH or any ERC-20 token
-- Creates merkle-based distributions
-- Members claim their share based on participation token holdings
-- Supports opt-out for those who prefer alternative arrangements
+```solidity
+// Accept payments
+receive() external payable;
+function payERC20(address token, uint256 amount) external;
+
+// Create distribution (off-chain merkle tree calculation)
+function createDistribution(
+    address payoutToken,
+    uint256 amount,
+    bytes32 merkleRoot,
+    uint256 checkpointBlock
+) external returns (uint256 distributionId);
+
+// Members claim their share
+function claimDistribution(
+    uint256 distributionId,
+    uint256 claimAmount,
+    bytes32[] calldata merkleProof
+) external;
+```
+
+Revenue → Merkle distribution → Members claim proportionally to ownership.
 
 ### PaymasterHub
 
-**Shared gas sponsorship with built-in solidarity:**
+Shared gas sponsorship with built-in solidarity.
 
-Traditional ERC-4337 paymasters cost ~$500 per organization to deploy. PaymasterHub is multi-tenant—unlimited organizations share one contract.
+Traditional ERC-4337 paymasters cost ~$500 each. PaymasterHub is multi-tenant—one contract serves all POP organizations.
 
 **The Solidarity System:**
-- **Grace Period:** New organizations get 0.01 ETH (~3000 transactions) free for 90 days
-- **Progressive Tiers:** Smaller organizations get better matching from the solidarity fund
-- **Automatic Contribution:** 1% of all gas spending feeds the solidarity pool
-- **50/50 Split:** Transactions split costs between organization deposits and solidarity
-
 ```
-Tier 1 (Small Co-ops):  0.003 ETH deposit → 0.006 ETH match (2x)
-Tier 2 (Growing Co-ops): 0.006 ETH deposit → 0.009 ETH match (1.5x)
-Tier 3 (Established):   0.017+ ETH deposit → Self-sufficient (no match)
+┌─────────────────────────────────────────────────────┐
+│                   PaymasterHub                       │
+│                                                      │
+│  Grace Period (90 days):                            │
+│  └── New orgs get 0.01 ETH (~3000 txns) free       │
+│                                                      │
+│  Progressive Tiers:                                  │
+│  ├── Tier 1: 0.003 ETH → 0.006 ETH match (2x)      │
+│  ├── Tier 2: 0.006 ETH → 0.009 ETH match (1.5x)    │
+│  └── Tier 3: 0.017 ETH+ → Self-sufficient          │
+│                                                      │
+│  Every Transaction:                                  │
+│  └── 1% → Solidarity Fund                           │
+│                                                      │
+│  Result: Established orgs subsidize emerging ones   │
+└─────────────────────────────────────────────────────┘
 ```
 
-Successful organizations subsidize emerging ones—mutual aid at the protocol level.
+Mutual aid, encoded in smart contracts.
 
 ---
 
-## Role-Based Access Control with Hats Protocol
+## Role-Based Access with Hats Protocol
 
-POP uses **Hats Protocol** for flexible, decentralized role management. "Hats" represent responsibilities and permissions:
+POP uses Hats Protocol for flexible, decentralized role management.
 
 ```
               ┌──────────────┐
@@ -254,155 +471,243 @@ POP uses **Hats Protocol** for flexible, decentralized role management. "Hats" r
    ┌─────────┐  ┌─────────┐  ┌─────────┐
    │ Member  │  │ Worker  │  │Reviewer │
    │   Hat   │  │   Hat   │  │   Hat   │
-   └────┬────┘  └────┬────┘  └────┬────┘
+   └─────────┘  └─────────┘  └─────────┘
         │            │            │
         ▼            ▼            ▼
      Can vote     Can claim    Can approve
    in proposals    tasks        work
 ```
 
-**Hats enable:**
-- Role-based voting restrictions
-- Granular permission management
+**Key Features:**
+- Role-based voting eligibility
+- Permission management without centralized admin
 - Vouching systems for role progression
-- Dynamic role assignment through governance
+- Dynamic assignment through governance
 
 ---
 
-## Upgrade Architecture
+## See It In Action
 
-Organizations can evolve through the **SwitchableBeacon** system:
+### Example 1: Neighborhood Book Club
 
-**Mirror Mode:** Automatically follow protocol upgrades
-- Zero administrative overhead
-- Immediate access to improvements
-- Trust the protocol team
-
-**Static Mode:** Pin to a specific version
-- Complete upgrade autonomy
-- Requires governance vote to change
-- Full organizational control
-
-Organizations can switch modes through governance, balancing innovation with stability.
-
----
-
-## Creating an Organization
-
-When `OrgDeployer.deployFullOrg()` is called, an entire organization is created in a single atomic transaction:
+**Setup:** 12 members, shared treasury for book purchases, equal voice.
 
 ```
-1. Validate role configurations
-2. Create org in bootstrap mode
-3. Deploy governance infrastructure (Executor, Voting, Hats)
-4. Set executor and register hats tree
-5. Register with PaymasterHub (shared gas sponsorship)
-6. Deploy access infrastructure (QuickJoin, ParticipationToken)
-7. Deploy operational modules (TaskManager, EducationHub, PaymentManager)
-8. Wire cross-module connections
-9. Configure role permissions and vouching
-10. Renounce ownership
+Deployment:
+├── DirectDemocracyVoting (every member gets 100 points)
+├── ParticipationToken (tracks membership)
+├── Executor (holds treasury, executes decisions)
+└── QuickJoin (easy onboarding)
+
+Flow:
+1. Member proposes: "Buy 'Parable of the Sower' for $15"
+2. Other members vote (100 points each, majority wins)
+3. Proposal passes → Executor sends $15 to bookseller
+4. Book arrives, everyone reads, democracy happened
 ```
 
-**The Final Step Matters:** When deployment completes, the deployer renounces all special privileges. From that moment, the organization belongs to its members and can only be controlled through collective governance.
+No bank account. No treasurer who could abscond. No disputes about who decided what.
+
+### Example 2: Worker Cooperative
+
+**Setup:** Design agency with 8 worker-owners, hybrid governance.
+
+```
+Deployment:
+├── HybridVoting (50% equal vote + 50% contribution-weighted)
+├── ParticipationToken (ownership stake)
+├── TaskManager (project/task coordination)
+├── PaymentManager (revenue distribution)
+├── Executor
+└── QuickJoin
+
+Work Cycle:
+1. Client pays 10 ETH for project
+2. Project created in TaskManager with tasks
+3. Designers claim tasks, complete work
+4. Reviewers approve → tokens minted to workers
+5. Quarter ends → PaymentManager distributes revenue
+   └── Each worker receives proportional to their tokens
+
+Governance:
+1. Major decision: "Should we take on crypto clients?"
+2. HybridVoting proposal created
+3. Everyone votes:
+   ├── Class 0 (DirectDemocracy): Alice, Bob, Carol... each 100 points
+   └── Class 1 (Token-weighted): Weighted by accumulated contribution
+4. Results combined per class weights
+5. Decision executes on-chain
+```
+
+### Example 3: Open Source Project
+
+**Setup:** JavaScript library with global contributors.
+
+```
+Deployment:
+├── DirectDemocracyVoting (contributors govern direction)
+├── ParticipationToken (contribution = ownership)
+├── TaskManager (issues = tasks with payouts)
+├── EducationHub (onboarding modules)
+├── PaymentManager (sponsor/grant distribution)
+└── QuickJoin
+
+Contribution Flow:
+1. Issue labeled with token payout (e.g., "fix bug = 50 tokens")
+2. Contributor claims task, submits PR
+3. Maintainer approves → tokens minted
+4. Contributor now has governance stake
+
+Revenue:
+1. Corporate sponsor sends 5 ETH
+2. PaymentManager receives funds
+3. Distribution created based on token holdings
+4. Every contributor claims their share
+
+Governance:
+1. Proposal: "Adopt TypeScript for v2"
+2. All token holders vote (equal voice)
+3. Majority decides
+4. Direction set democratically
+```
 
 ---
 
-## Real-World Applications
+## For Developers
 
-### Worker Cooperatives
+### Quick Start
 
-Traditional cooperatives struggle with governance at scale and distributed decision-making. POP provides:
+**Key Contracts:**
+| Contract | Purpose | Key Entry Points |
+|----------|---------|------------------|
+| `OrgDeployer` | Deploy complete organization | `deployFullOrg()` |
+| `ParticipationToken` | Ownership tokens | `mint()`, `balanceOf()` |
+| `TaskManager` | Work coordination | `createTask()`, `completeTask()` |
+| `DirectDemocracyVoting` | Equal-voice governance | `createProposal()`, `vote()` |
+| `HybridVoting` | Multi-class governance | `createProposal()`, `vote()` |
+| `Executor` | Execute governance decisions | `execute()` |
 
-- Transparent, auditable voting
-- Automatic compensation for completed work
-- Democratic governance with cryptographic guarantees
-- No need for trusted intermediaries
+### Key Events for Indexing
 
-### Community Organizations
+```solidity
+// TaskManager
+event TaskCompleted(uint256 indexed taskId, address indexed worker);
+event TaskCreated(uint256 indexed projectId, uint256 indexed taskId, ...);
 
-Neighborhood associations, mutual aid networks, and community groups can:
+// ParticipationToken
+event Transfer(address indexed from, address indexed to, uint256 value);
+// (from = address(0) indicates mint)
 
-- Coordinate collective work and compensate contributors
-- Make binding decisions through transparent voting
-- Build shared ownership among participants
-- Accept and distribute community funds fairly
+// Voting
+event ProposalCreated(uint256 indexed proposalId, address indexed creator, ...);
+event Voted(uint256 indexed proposalId, address indexed voter, ...);
+event ProposalExecuted(uint256 indexed proposalId);
 
-### DAOs and Collectives
+// QuickJoin
+event QuickJoined(address indexed user, bool usernameCreated, uint256[] hatIds);
+```
 
-Decentralized autonomous organizations gain:
+### Integration Patterns
 
-- Robust multi-stakeholder governance
-- Clear role hierarchies with Hats Protocol
-- Gas-efficient infrastructure through shared resources
-- Upgrade paths that respect organizational autonomy
+**Check Membership:**
+```solidity
+IParticipationToken token = IParticipationToken(tokenAddress);
+uint256 balance = token.balanceOf(user);
+bool isMember = balance > 0;
+```
 
-### Creator Collectives
+**Check Voting Power:**
+```solidity
+// For DirectDemocracy: every member has 100 points
+// For Hybrid: varies by class
 
-Artists, writers, musicians, and other creators can:
+IDirectDemocracyVoting voting = IDirectDemocracyVoting(votingAddress);
+// Check if user can vote (wears eligible hat)
+```
 
-- Pool resources and share infrastructure
-- Make collective decisions about direction
-- Compensate contributors fairly based on participation
-- Build lasting organizations that outlive any individual
+**Create Proposal Programmatically:**
+```solidity
+IExecutor.Call[] memory calls = new IExecutor.Call[](1);
+calls[0] = IExecutor.Call({
+    target: treasuryAddress,
+    value: 0.1 ether,
+    data: "" // ETH transfer
+});
 
----
+bytes[] memory options = new bytes[](2);
+options[0] = "Approve payment";
+options[1] = "Reject";
 
-## The Bigger Picture
+IExecutor.Call[][] memory callsPerOption = new IExecutor.Call[][](2);
+callsPerOption[0] = calls;  // Execute on "Approve"
+callsPerOption[1] = new IExecutor.Call[](0);  // No-op on "Reject"
 
-POP isn't just a set of smart contracts—it's infrastructure for a different kind of economy. One where:
-
-- **Work creates ownership,** not just wages
-- **Governance is democratic,** not plutocratic
-- **Organizations serve their members,** not external shareholders
-- **Collective decisions are transparent,** not hidden
-- **Infrastructure creates solidarity,** not silos
-
-Every organization deployed through POP adds another node to a network of worker-owned, democratically-governed entities. Every task completed transfers ownership to those who do the work. Every vote cast demonstrates that transparent, accountable governance is not just possible—it's practical.
+voting.createProposal(
+    "Pay contractor",
+    descriptionHash,
+    7 days,
+    options,
+    callsPerOption
+);
+```
 
 ---
 
 ## Technical Foundation
 
-### Upgradeable Contracts
+### Upgradeable Architecture
 
-All POP contracts use the UUPS proxy pattern with ERC-7201 namespaced storage, enabling:
+All POP contracts use UUPS proxies with ERC-7201 namespaced storage:
 
-- Safe upgrades without storage collisions
-- Organization-specific upgrade preferences
-- Protocol-wide improvements when organizations opt in
+```solidity
+// Storage slot calculated from namespace
+bytes32 private constant _STORAGE_SLOT =
+    keccak256("poa.participationtoken.storage");
+
+function _layout() private pure returns (Layout storage s) {
+    assembly { s.slot := _STORAGE_SLOT }
+}
+```
+
+**SwitchableBeacon** lets organizations choose:
+- **Mirror Mode:** Auto-follow protocol upgrades
+- **Static Mode:** Pin to specific version (governance-controlled)
 
 ### Security
 
-POP implements multiple security layers:
-
-- Reentrancy guards on all state-changing functions
-- Role-based access control through Hats Protocol
-- Comprehensive input validation
-- Emergency pause capabilities
-- Atomic deployment with no intermediate states
+- **Reentrancy guards** on all state-changing functions
+- **Role-based access** through Hats Protocol
+- **Input validation** via ValidationLib
+- **Emergency pause** capabilities
+- **Atomic deployment** (no intermediate vulnerable states)
+- **Ownership renounced** immediately after deployment
 
 ### Gas Optimization
 
-POP is built for practical use:
-
 - Bitmap-based permission management
-- Packed storage layouts
+- Packed storage layouts (ERC-7201)
 - Batch operations for common patterns
-- Shared infrastructure to reduce per-organization costs
+- Shared PaymasterHub reduces per-org costs
 
 ---
 
-## Getting Started
+## The Bigger Picture
 
-For organizations ready to embrace worker ownership:
+POP isn't just smart contracts. It's infrastructure for economic democracy.
 
-1. **Define your structure:** What roles exist? How should governance work?
-2. **Configure voting:** Direct democracy, hybrid, or custom?
-3. **Set up work coordination:** What tasks will earn ownership?
-4. **Deploy:** One transaction creates your complete organization
-5. **Onboard members:** QuickJoin makes participation easy
-6. **Build together:** Every contribution grows collective ownership
+Every organization deployed adds another node to a network of worker-owned, democratically-governed entities. The PaymasterHub's solidarity fund means that success compounds—established organizations subsidize emerging ones.
+
+Every task completed transfers ownership to the person who did the work. Not to shareholders. Not to executives. To workers.
+
+Every vote cast on-chain creates an auditable record of collective decision-making. No backroom deals. No revised minutes. No "that's not what we agreed."
+
+This is what becomes possible when you rebuild organizations on cryptographic foundations:
+- **Ownership that cannot be extracted**
+- **Governance that cannot be captured**
+- **Transparency that cannot be redacted**
+- **Solidarity that is programmatic**
+
+The cooperative movement has been building toward this for 200 years. Now we have the tools.
 
 ---
 
@@ -419,14 +724,14 @@ Detailed documentation for each component:
 
 ---
 
-## The Promise
+## Build With Us
 
-POP exists because we believe organizations can—and should—belong to the people who build them. Not to investors who extract value, not to executives who hoard power, but to workers and communities who create value together.
+POP is open source under the MIT license.
 
-Every line of code in POP serves this vision: **organizations that are owned by those who participate in them, governed by collective decision-making, and designed to persist beyond any individual founder.**
+If you believe that organizations should belong to the people who build them—not to investors who extract value—this is your infrastructure.
 
-Build together. Own together. Govern together.
+**Build together. Own together. Govern together.**
 
 ---
 
-*The Perpetual Organization Protocol is open source software under the MIT license.*
+*The Perpetual Organization Protocol*
