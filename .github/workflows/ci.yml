@@ -16,7 +16,7 @@ jobs:
 
       # Upgrade Safety
       run-upgrade-safety: true
-      baseline-path: 'test/upgrades/baseline'
+      baseline-path: 'upgrades/baseline'
       validation-script: 'script/upgrades/ValidateUpgrade.s.sol'
 
       # Automatic Deployments
@@ -26,7 +26,7 @@ jobs:
       network-config-path: '.github/deploy-networks.json'
       indexing-wait: 90
       flatten-contracts: true
-      upgrades-path: 'test/upgrades'
+      upgrades-path: 'upgrades'
       deployment-foundry-profile: 'production'
     secrets:
       PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
