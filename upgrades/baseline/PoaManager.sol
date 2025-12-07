@@ -735,7 +735,7 @@ contract UpgradeableBeacon is IBeacon, Ownable {
 // src/PoaManager.sol
 // SPDX‑License‑Identifier: MIT
 
-/*───────────────────────  PoaManager  ─────────────────────────*/
+/*───────────────────────  PoaManager v1.0.1  ─────────────────────────*/
 
 contract PoaManager is Ownable(msg.sender) {
     /*──────────── Errors ───────────*/
