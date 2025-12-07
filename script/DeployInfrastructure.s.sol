@@ -196,6 +196,10 @@ contract DeployInfrastructure is Script {
         bytes memory accRegInit = abi.encodeWithSignature("initialize(address)", msg.sender);
         globalAccountRegistry = address(new BeaconProxy(accRegBeacon, accRegInit));
         console.log("GlobalAccountRegistry:", globalAccountRegistry);
+
+        // Emit InfrastructureDeployed event for subgraph dynamic discovery
+        pm.registerInfrastructure(orgDeployer, orgRegistry, implRegistry, paymasterHub, globalAccountRegistry);
+        console.log("\n--- Infrastructure Registered (for subgraph indexing) ---");
     }
 
     function _outputAddresses() internal {
