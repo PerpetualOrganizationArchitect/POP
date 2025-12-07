@@ -3524,6 +3524,9 @@ interface IPaymasterHub {
  * @dev Coordinates GovernanceFactory, AccessFactory, and ModulesFactory
  */
 contract OrgDeployer is Initializable {
+    /// @notice Contract version for tracking deployments
+    string public constant VERSION = "1.0.1";
+
     /*────────────────────────────  Errors  ───────────────────────────────*/
     error InvalidAddress();
     error OrgExistsMismatch();
