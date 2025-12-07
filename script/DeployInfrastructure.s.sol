@@ -200,6 +200,9 @@ contract DeployInfrastructure is Script {
 
     function _outputAddresses() internal {
         console.log("\n=== DEPLOYMENT COMPLETE ===");
+        console.log("\n--- Start Block (for subgraph indexing) ---");
+        console.log("START_BLOCK:", block.number);
+
         console.log("\n--- Key Addresses for Org Deployment ---");
         console.log("OrgDeployer:", orgDeployer);
         console.log("GlobalAccountRegistry:", globalAccountRegistry);
@@ -209,6 +212,25 @@ contract DeployInfrastructure is Script {
         console.log("OrgRegistry:", orgRegistry);
         console.log("ImplementationRegistry:", implRegistry);
         console.log("HatsProtocol:", HATS_PROTOCOL);
+
+        // Log all beacon addresses for subgraph indexing
+        console.log("\n--- Beacon Addresses (for subgraph indexing) ---");
+        PoaManager pm = PoaManager(poaManager);
+        console.log("BEACON_ImplementationRegistry:", pm.getBeaconById(keccak256("ImplementationRegistry")));
+        console.log("BEACON_OrgRegistry:", pm.getBeaconById(keccak256("OrgRegistry")));
+        console.log("BEACON_OrgDeployer:", pm.getBeaconById(keccak256("OrgDeployer")));
+        console.log("BEACON_PaymasterHub:", pm.getBeaconById(keccak256("PaymasterHub")));
+        console.log("BEACON_HybridVoting:", pm.getBeaconById(keccak256("HybridVoting")));
+        console.log("BEACON_DirectDemocracyVoting:", pm.getBeaconById(keccak256("DirectDemocracyVoting")));
+        console.log("BEACON_Executor:", pm.getBeaconById(keccak256("Executor")));
+        console.log("BEACON_QuickJoin:", pm.getBeaconById(keccak256("QuickJoin")));
+        console.log("BEACON_ParticipationToken:", pm.getBeaconById(keccak256("ParticipationToken")));
+        console.log("BEACON_TaskManager:", pm.getBeaconById(keccak256("TaskManager")));
+        console.log("BEACON_EducationHub:", pm.getBeaconById(keccak256("EducationHub")));
+        console.log("BEACON_PaymentManager:", pm.getBeaconById(keccak256("PaymentManager")));
+        console.log("BEACON_UniversalAccountRegistry:", pm.getBeaconById(keccak256("UniversalAccountRegistry")));
+        console.log("BEACON_EligibilityModule:", pm.getBeaconById(keccak256("EligibilityModule")));
+        console.log("BEACON_ToggleModule:", pm.getBeaconById(keccak256("ToggleModule")));
 
         // Write addresses to JSON file for easy org deployment
         string memory addressesJson = string.concat(

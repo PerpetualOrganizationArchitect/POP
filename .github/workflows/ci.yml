@@ -32,31 +32,3 @@ jobs:
       PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
       RPC_URL: ${{ secrets.HOODI_RPC_URL }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Auto-commit infrastructure.json after mainnet deployment
-  commit-infrastructure:
-    needs: foundry-cicd
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download deployment artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: deployment-artifacts
-          path: script/
-        continue-on-error: true
-
-      - name: Commit infrastructure.json if changed
-        run: |
-          if [ -f script/infrastructure.json ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add script/infrastructure.json
-            if ! git diff --staged --quiet; then
-              git commit -m "chore: update infrastructure.json [skip ci]"
-              git pull --rebase origin main
-              git push
-            fi
-          fi

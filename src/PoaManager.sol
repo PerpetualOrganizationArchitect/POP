@@ -1,7 +1,7 @@
 // SPDX‑License‑Identifier: MIT
 pragma solidity ^0.8.17;
 
-/*───────────────────────  PoaManager  ─────────────────────────*/
+/*───────────────────────  PoaManager v1.0.1  ─────────────────────────*/
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./ImplementationRegistry.sol";
