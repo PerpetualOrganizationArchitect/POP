@@ -16,7 +16,7 @@ jobs:
 
       # Upgrade Safety
       run-upgrade-safety: true
-      baseline-path: 'test/upgrades/baseline'
+      baseline-path: 'upgrades/baseline'
       validation-script: 'script/upgrades/ValidateUpgrade.s.sol'
 
       # Automatic Deployments
@@ -26,7 +26,7 @@ jobs:
       network-config-path: '.github/deploy-networks.json'
       indexing-wait: 90
       flatten-contracts: true
-      upgrades-path: 'test/upgrades'
+      upgrades-path: 'upgrades'
       deployment-foundry-profile: 'production'
     secrets:
       PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
@@ -54,6 +54,9 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add script/infrastructure.json
-            git diff --staged --quiet || git commit -m "chore: update infrastructure.json [skip ci]"
-            git push
+            if ! git diff --staged --quiet; then
+              git commit -m "chore: update infrastructure.json [skip ci]"
+              git pull --rebase origin main
+              git push
+            fi
           fi

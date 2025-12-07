@@ -41,3 +41,6 @@ polygon = "https://polygon.drpc.org"
 local = "http://localhost:8545"
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+
+[fmt]
+ignore = ["upgrades/**"]
