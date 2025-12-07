@@ -753,6 +753,13 @@ contract PoaManager is Ownable(msg.sender) {
     event BeaconCreated(bytes32 indexed typeId, string typeName, address beacon, address implementation);
     event BeaconUpgraded(bytes32 indexed typeId, address newImplementation, string version);
     event RegistryUpdated(address oldRegistry, address newRegistry);
+    event InfrastructureDeployed(
+        address orgDeployer,
+        address orgRegistry,
+        address implRegistry,
+        address paymasterHub,
+        address globalAccountRegistry
+    );
 
     constructor(address registryAddr) {
         // Allow a temporary zero address during initialization
@@ -766,6 +773,17 @@ contract PoaManager is Ownable(msg.sender) {
         address oldRegistry = address(registry);
         registry = ImplementationRegistry(registryAddr);
         emit RegistryUpdated(oldRegistry, registryAddr);
+    }
+
+    /*──────────── Admin: register infrastructure ───────────*/
+    function registerInfrastructure(
+        address _orgDeployer,
+        address _orgRegistry,
+        address _implRegistry,
+        address _paymasterHub,
+        address _globalAccountRegistry
+    ) external onlyOwner {
+        emit InfrastructureDeployed(_orgDeployer, _orgRegistry, _implRegistry, _paymasterHub, _globalAccountRegistry);
     }
 
     /*──────────── Internal utils ───────────*/
