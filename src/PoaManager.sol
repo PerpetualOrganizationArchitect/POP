@@ -52,13 +52,7 @@ contract PoaManager is Ownable(msg.sender) {
         address _paymasterHub,
         address _globalAccountRegistry
     ) external onlyOwner {
-        emit InfrastructureDeployed(
-            _orgDeployer,
-            _orgRegistry,
-            _implRegistry,
-            _paymasterHub,
-            _globalAccountRegistry
-        );
+        emit InfrastructureDeployed(_orgDeployer, _orgRegistry, _implRegistry, _paymasterHub, _globalAccountRegistry);
     }
 
     /*──────────── Internal utils ───────────*/

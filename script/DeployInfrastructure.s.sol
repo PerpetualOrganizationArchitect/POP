@@ -198,13 +198,7 @@ contract DeployInfrastructure is Script {
         console.log("GlobalAccountRegistry:", globalAccountRegistry);
 
         // Emit InfrastructureDeployed event for subgraph dynamic discovery
-        pm.registerInfrastructure(
-            orgDeployer,
-            orgRegistry,
-            implRegistry,
-            paymasterHub,
-            globalAccountRegistry
-        );
+        pm.registerInfrastructure(orgDeployer, orgRegistry, implRegistry, paymasterHub, globalAccountRegistry);
         console.log("\n--- Infrastructure Registered (for subgraph indexing) ---");
     }
 
