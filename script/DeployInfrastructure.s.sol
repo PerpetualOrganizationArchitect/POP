@@ -17,6 +17,8 @@ import {PaymentManager} from "../src/PaymentManager.sol";
 import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
 import {EligibilityModule} from "../src/EligibilityModule.sol";
 import {ToggleModule} from "../src/ToggleModule.sol";
+import {PasskeyAccount} from "../src/PasskeyAccount.sol";
+import {PasskeyAccountFactory} from "../src/PasskeyAccountFactory.sol";
 
 // Infrastructure
 import {ImplementationRegistry} from "../src/ImplementationRegistry.sol";
@@ -103,6 +105,8 @@ contract DeployInfrastructure is Script {
         address accountRegImpl = address(new UniversalAccountRegistry());
         address eligibilityImpl = address(new EligibilityModule());
         address toggleImpl = address(new ToggleModule());
+        address passkeyAccountImpl = address(new PasskeyAccount());
+        address passkeyAccountFactoryImpl = address(new PasskeyAccountFactory());
         address implRegImpl = address(new ImplementationRegistry());
         address orgRegImpl = address(new OrgRegistry());
         address deployerImpl = address(new OrgDeployer());
@@ -188,6 +192,8 @@ contract DeployInfrastructure is Script {
         pm.addContractType("UniversalAccountRegistry", accountRegImpl);
         pm.addContractType("EligibilityModule", eligibilityImpl);
         pm.addContractType("ToggleModule", toggleImpl);
+        pm.addContractType("PasskeyAccount", passkeyAccountImpl);
+        pm.addContractType("PasskeyAccountFactory", passkeyAccountFactoryImpl);
 
         console.log("\n--- Contract Types Registered ---");
 
@@ -235,9 +241,12 @@ contract DeployInfrastructure is Script {
         console.log("BEACON_UniversalAccountRegistry:", pm.getBeaconById(keccak256("UniversalAccountRegistry")));
         console.log("BEACON_EligibilityModule:", pm.getBeaconById(keccak256("EligibilityModule")));
         console.log("BEACON_ToggleModule:", pm.getBeaconById(keccak256("ToggleModule")));
+        console.log("BEACON_PasskeyAccount:", pm.getBeaconById(keccak256("PasskeyAccount")));
+        console.log("BEACON_PasskeyAccountFactory:", pm.getBeaconById(keccak256("PasskeyAccountFactory")));
 
         // Write addresses to JSON file for easy org deployment
-        string memory addressesJson = string.concat(
+        // Split into parts to avoid stack depth issues
+        string memory part1 = string.concat(
             "{\n",
             '  "orgDeployer": "',
             vm.toString(orgDeployer),
@@ -250,7 +259,10 @@ contract DeployInfrastructure is Script {
             '",\n',
             '  "poaManager": "',
             vm.toString(poaManager),
-            '",\n',
+            '",\n'
+        );
+
+        string memory part2 = string.concat(
             '  "orgRegistry": "',
             vm.toString(orgRegistry),
             '",\n',
@@ -262,7 +274,10 @@ contract DeployInfrastructure is Script {
             '",\n',
             '  "governanceFactory": "',
             vm.toString(governanceFactory),
-            '",\n',
+            '",\n'
+        );
+
+        string memory part3 = string.concat(
             '  "accessFactory": "',
             vm.toString(accessFactory),
             '",\n',
@@ -271,9 +286,17 @@ contract DeployInfrastructure is Script {
             '",\n',
             '  "hatsTreeSetup": "',
             vm.toString(hatsTreeSetup),
+            '",\n',
+            '  "passkeyAccountBeacon": "',
+            vm.toString(pm.getBeaconById(keccak256("PasskeyAccount"))),
+            '",\n',
+            '  "passkeyAccountFactoryBeacon": "',
+            vm.toString(pm.getBeaconById(keccak256("PasskeyAccountFactory"))),
             '"\n',
             "}\n"
         );
+
+        string memory addressesJson = string.concat(part1, part2, part3);
 
         vm.writeFile("script/infrastructure.json", addressesJson);
 
