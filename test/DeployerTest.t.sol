@@ -3413,8 +3413,11 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         assertTrue(result.quickJoin != address(0), "QuickJoin should be deployed");
 
         // Verify ParticipationToken.educationHub() returns address(0)
-        assertEq(ParticipationToken(result.participationToken).educationHub(), address(0),
-            "ParticipationToken.educationHub() should return address(0)");
+        assertEq(
+            ParticipationToken(result.participationToken).educationHub(),
+            address(0),
+            "ParticipationToken.educationHub() should return address(0)"
+        );
     }
 
     // Test: TaskManager can still mint tokens when EducationHub is disabled
@@ -3469,14 +3472,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         vm.prank(result.executor);
         bytes32 projectId = tm.createProject(
-            abi.encode("Test Project"),
-            bytes32(0),
-            1000 ether,
-            managers,
-            emptyHats,
-            emptyHats,
-            emptyHats,
-            emptyHats
+            abi.encode("Test Project"), bytes32(0), 1000 ether, managers, emptyHats, emptyHats, emptyHats, emptyHats
         );
 
         // Mint directly via executor (which is allowed)
