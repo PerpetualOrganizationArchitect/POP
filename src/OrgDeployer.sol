@@ -76,12 +76,7 @@ contract OrgDeployer is Initializable {
     );
 
     event RolesCreated(
-        bytes32 indexed orgId,
-        uint256[] hatIds,
-        string[] names,
-        string[] images,
-        bytes32[] metadataCIDs,
-        bool[] canVote
+        bytes32 indexed orgId, uint256[] hatIds, string[] names, string[] images, bytes32[] metadataCIDs, bool[] canVote
     );
 
     /*───────────── ERC-7201 Storage ───────────*/
@@ -428,14 +423,7 @@ contract OrgDeployer is Initializable {
                 canVoteFlags[i] = params.roles[i].canVote;
             }
 
-            emit RolesCreated(
-                params.orgId,
-                gov.roleHatIds,
-                names,
-                images,
-                metadataCIDs,
-                canVoteFlags
-            );
+            emit RolesCreated(params.orgId, gov.roleHatIds, names, images, metadataCIDs, canVoteFlags);
         }
 
         return result;
