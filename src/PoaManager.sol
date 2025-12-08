@@ -27,7 +27,8 @@ contract PoaManager is Ownable(msg.sender) {
         address orgRegistry,
         address implRegistry,
         address paymasterHub,
-        address globalAccountRegistry
+        address globalAccountRegistry,
+        address passkeyAccountFactoryBeacon
     );
 
     constructor(address registryAddr) {
@@ -50,9 +51,17 @@ contract PoaManager is Ownable(msg.sender) {
         address _orgRegistry,
         address _implRegistry,
         address _paymasterHub,
-        address _globalAccountRegistry
+        address _globalAccountRegistry,
+        address _passkeyAccountFactoryBeacon
     ) external onlyOwner {
-        emit InfrastructureDeployed(_orgDeployer, _orgRegistry, _implRegistry, _paymasterHub, _globalAccountRegistry);
+        emit InfrastructureDeployed(
+            _orgDeployer,
+            _orgRegistry,
+            _implRegistry,
+            _paymasterHub,
+            _globalAccountRegistry,
+            _passkeyAccountFactoryBeacon
+        );
     }
 
     /*──────────── Internal utils ───────────*/
