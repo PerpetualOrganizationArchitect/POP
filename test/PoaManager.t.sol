@@ -32,4 +32,38 @@ contract PoaManagerTest is Test {
         pm.upgradeBeacon("TypeA", address(impl2), "v2");
         assertEq(pm.getCurrentImplementationById(keccak256("TypeA")), address(impl2));
     }
+
+    function testRegisterInfrastructure() public {
+        address orgDeployer = makeAddr("orgDeployer");
+        address orgRegistry = makeAddr("orgRegistry");
+        address implRegistry = makeAddr("implRegistry");
+        address paymasterHub = makeAddr("paymasterHub");
+        address globalAccountRegistry = makeAddr("globalAccountRegistry");
+        address passkeyAccountFactoryBeacon = makeAddr("passkeyAccountFactoryBeacon");
+
+        vm.expectEmit(true, true, true, true);
+        emit PoaManager.InfrastructureDeployed(
+            orgDeployer, orgRegistry, implRegistry, paymasterHub, globalAccountRegistry, passkeyAccountFactoryBeacon
+        );
+
+        pm.registerInfrastructure(
+            orgDeployer, orgRegistry, implRegistry, paymasterHub, globalAccountRegistry, passkeyAccountFactoryBeacon
+        );
+    }
+
+    function testRegisterInfrastructureOnlyOwner() public {
+        address nonOwner = makeAddr("nonOwner");
+        address orgDeployer = makeAddr("orgDeployer");
+        address orgRegistry = makeAddr("orgRegistry");
+        address implRegistry = makeAddr("implRegistry");
+        address paymasterHub = makeAddr("paymasterHub");
+        address globalAccountRegistry = makeAddr("globalAccountRegistry");
+        address passkeyAccountFactoryBeacon = makeAddr("passkeyAccountFactoryBeacon");
+
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        pm.registerInfrastructure(
+            orgDeployer, orgRegistry, implRegistry, paymasterHub, globalAccountRegistry, passkeyAccountFactoryBeacon
+        );
+    }
 }
