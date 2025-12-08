@@ -753,6 +753,10 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     uint8 private constant ENABLED_FLAG = 0x01; // bit 0
     uint8 private constant COMBINE_HIERARCHY_FLAG = 0x02; // bit 1
 
+    /*═══════════════════════════════════ METADATA CONSTANTS ═══════════════════════════════════════*/
+
+    bytes16 private constant HEX_DIGITS = "0123456789abcdef";
+
     /*═══════════════════════════════════ RATE LIMITING CONSTANTS ═══════════════════════════════════*/
 
     uint32 private constant MAX_DAILY_VOUCHES = 3;
@@ -791,6 +795,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     );
     event Paused(address indexed account);
     event Unpaused(address indexed account);
+    event HatMetadataUpdated(uint256 indexed hatId, string name, bytes32 metadataCID);
 
     /*═════════════════════════════════════════ MODIFIERS ═════════════════════════════════════════*/
 
@@ -1170,6 +1175,55 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     function setUserJoinTimeNow(address user) external onlySuperAdmin {
         _layout().userJoinTime[user] = block.timestamp;
         emit UserJoinTimeSet(user, block.timestamp);
+    }
+
+    /*═══════════════════════════════════ METADATA MANAGEMENT ═══════════════════════════════════════*/
+
+    /**
+     * @notice Update hat metadata CID (uses native Hats Protocol changeHatDetails)
+     * @dev Emits HatDetailsChanged event from Hats Protocol (subgraph indexable)
+     * @param hatId The ID of the hat to update
+     * @param name The role name
+     * @param metadataCID The IPFS CID for extended metadata (bytes32(0) to clear)
+     */
+    function updateHatMetadata(uint256 hatId, string memory name, bytes32 metadataCID)
+        external
+        onlyHatAdmin(hatId)
+        whenNotPaused
+    {
+        string memory details = _formatHatDetails(name, metadataCID);
+        _layout().hats.changeHatDetails(hatId, details);
+        // Native HatDetailsChanged event is emitted by Hats Protocol
+        emit HatMetadataUpdated(hatId, name, metadataCID);
+    }
+
+    /**
+     * @notice Format hat details string - uses CID if provided, otherwise name
+     * @param name The role name (fallback if no CID)
+     * @param metadataCID The IPFS CID for extended metadata (bytes32(0) if none)
+     * @return The formatted details string
+     */
+    function _formatHatDetails(string memory name, bytes32 metadataCID) internal pure returns (string memory) {
+        if (metadataCID == bytes32(0)) {
+            return name;
+        }
+        return _bytes32ToHexString(metadataCID);
+    }
+
+    /**
+     * @notice Convert bytes32 to hex string with 0x prefix
+     * @param value The bytes32 value to convert
+     * @return The hex string representation
+     */
+    function _bytes32ToHexString(bytes32 value) internal pure returns (string memory) {
+        bytes memory buffer = new bytes(66); // 2 for "0x" + 64 for hex chars
+        buffer[0] = "0";
+        buffer[1] = "x";
+        for (uint256 i = 0; i < 32; i++) {
+            buffer[2 + i * 2] = HEX_DIGITS[uint8(value[i] >> 4)];
+            buffer[3 + i * 2] = HEX_DIGITS[uint8(value[i] & 0x0f)];
+        }
+        return string(buffer);
     }
 
     /*═══════════════════════════════════ VOUCHING SYSTEM ═══════════════════════════════════════*/

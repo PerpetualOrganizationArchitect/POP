@@ -223,7 +223,7 @@ interface IHatsIdUtilities {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol
 
-// OpenZeppelin Contracts (last updated v5.3.0) (proxy/utils/Initializable.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (proxy/utils/Initializable.sol)
 
 /**
  * @dev This is a base contract to aid in writing upgradeable contracts, or any kind of contract that will be deployed
@@ -334,7 +334,7 @@ abstract contract Initializable {
         // Allowed calls:
         // - initialSetup: the contract is not in the initializing state and no previous version was
         //                 initialized
-        // - construction: the contract is initialized at version 1 (no reinitialization) and the
+        // - construction: the contract is initialized at version 1 (no reininitialization) and the
         //                 current contract is just being deployed
         bool initialSetup = initialized == 0 && isTopLevelCall;
         bool construction = initialized == 1 && address(this).code.length == 0;
@@ -439,22 +439,12 @@ abstract contract Initializable {
     }
 
     /**
-     * @dev Pointer to storage slot. Allows integrators to override it with a custom storage location.
-     *
-     * NOTE: Consider following the ERC-7201 formula to derive storage locations.
-     */
-    function _initializableStorageSlot() internal pure virtual returns (bytes32) {
-        return INITIALIZABLE_STORAGE;
-    }
-
-    /**
      * @dev Returns a pointer to the storage namespace.
      */
     // solhint-disable-next-line var-name-mixedcase
     function _getInitializableStorage() private pure returns (InitializableStorage storage $) {
-        bytes32 slot = _initializableStorageSlot();
         assembly {
-            $.slot := slot
+            $.slot := INITIALIZABLE_STORAGE
         }
     }
 }
@@ -1111,7 +1101,7 @@ abstract contract ContextUpgradeable is Initializable {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol
 
-// OpenZeppelin Contracts (last updated v5.1.0) (utils/ReentrancyGuard.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (utils/ReentrancyGuard.sol)
 
 /**
  * @dev Contract module that helps prevent reentrant calls to a function.
@@ -1124,9 +1114,6 @@ abstract contract ContextUpgradeable is Initializable {
  * `nonReentrant` may not call one another. This can be worked around by making
  * those functions `private`, and then adding `external` `nonReentrant` entry
  * points to them.
- *
- * TIP: If EIP-1153 (transient storage) is available on the chain you're deploying at,
- * consider using {ReentrancyGuardTransient} instead.
  *
  * TIP: If you would like to learn more about reentrancy and alternative ways
  * to protect against it, check out our blog post
@@ -1334,7 +1321,7 @@ abstract contract OwnableUpgradeable is Initializable, ContextUpgradeable {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol
 
-// OpenZeppelin Contracts (last updated v5.3.0) (utils/Pausable.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (utils/Pausable.sol)
 
 /**
  * @dev Contract module which allows children to implement an emergency stop
@@ -1381,6 +1368,18 @@ abstract contract PausableUpgradeable is Initializable, ContextUpgradeable {
     error ExpectedPause();
 
     /**
+     * @dev Initializes the contract in unpaused state.
+     */
+    function __Pausable_init() internal onlyInitializing {
+        __Pausable_init_unchained();
+    }
+
+    function __Pausable_init_unchained() internal onlyInitializing {
+        PausableStorage storage $ = _getPausableStorage();
+        $._paused = false;
+    }
+
+    /**
      * @dev Modifier to make a function callable only when the contract is not paused.
      *
      * Requirements:
@@ -1404,11 +1403,6 @@ abstract contract PausableUpgradeable is Initializable, ContextUpgradeable {
         _;
     }
 
-    function __Pausable_init() internal onlyInitializing {
-    }
-
-    function __Pausable_init_unchained() internal onlyInitializing {
-    }
     /**
      * @dev Returns true if the contract is paused, and false otherwise.
      */

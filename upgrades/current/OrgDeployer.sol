@@ -346,7 +346,7 @@ interface IToggleModule {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol
 
-// OpenZeppelin Contracts (last updated v5.3.0) (proxy/utils/Initializable.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (proxy/utils/Initializable.sol)
 
 /**
  * @dev This is a base contract to aid in writing upgradeable contracts, or any kind of contract that will be deployed
@@ -457,7 +457,7 @@ abstract contract Initializable {
         // Allowed calls:
         // - initialSetup: the contract is not in the initializing state and no previous version was
         //                 initialized
-        // - construction: the contract is initialized at version 1 (no reinitialization) and the
+        // - construction: the contract is initialized at version 1 (no reininitialization) and the
         //                 current contract is just being deployed
         bool initialSetup = initialized == 0 && isTopLevelCall;
         bool construction = initialized == 1 && address(this).code.length == 0;
@@ -562,22 +562,12 @@ abstract contract Initializable {
     }
 
     /**
-     * @dev Pointer to storage slot. Allows integrators to override it with a custom storage location.
-     *
-     * NOTE: Consider following the ERC-7201 formula to derive storage locations.
-     */
-    function _initializableStorageSlot() internal pure virtual returns (bytes32) {
-        return INITIALIZABLE_STORAGE;
-    }
-
-    /**
      * @dev Returns a pointer to the storage namespace.
      */
     // solhint-disable-next-line var-name-mixedcase
     function _getInitializableStorage() private pure returns (InitializableStorage storage $) {
-        bytes32 slot = _initializableStorageSlot();
         assembly {
-            $.slot := slot
+            $.slot := INITIALIZABLE_STORAGE
         }
     }
 }
@@ -3047,6 +3037,11 @@ contract ModulesFactory {
         uint256 educationMemberRolesBitmap; // Bit N set = Role N can access education
     }
 
+    /*──────────────────── EducationHub Configuration ────────────────────*/
+    struct EducationHubConfig {
+        bool enabled; // Whether to deploy EducationHub
+    }
+
     /*──────────────────── Modules Deployment Params ────────────────────*/
     struct ModulesParams {
         bytes32 orgId;
@@ -3060,6 +3055,7 @@ contract ModulesFactory {
         uint256[] roleHatIds;
         bool autoUpgrade;
         RoleAssignments roleAssignments;
+        EducationHubConfig educationHubConfig; // EducationHub deployment configuration
     }
 
     /*──────────────────── Modules Deployment Result ────────────────────*/
@@ -3114,8 +3110,8 @@ contract ModulesFactory {
             );
         }
 
-        /* 2. Deploy EducationHub (without registration) */
-        {
+        /* 2. Deploy EducationHub if enabled (without registration) */
+        if (params.educationHubConfig.enabled) {
             // Get the role hat IDs for creator and member permissions
             uint256[] memory creatorHats = RoleResolver.resolveRoleBitmap(
                 OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.educationCreatorRolesBitmap
@@ -3165,9 +3161,11 @@ contract ModulesFactory {
             );
         }
 
-        /* 4. Batch register all 3 contracts */
+        /* 4. Batch register contracts (2 or 3 depending on EducationHub) */
         {
-            OrgRegistry.ContractRegistration[] memory registrations = new OrgRegistry.ContractRegistration[](3);
+            uint256 registrationCount = params.educationHubConfig.enabled ? 3 : 2;
+            OrgRegistry.ContractRegistration[] memory registrations =
+                new OrgRegistry.ContractRegistration[](registrationCount);
 
             registrations[0] = OrgRegistry.ContractRegistration({
                 typeId: ModuleTypes.TASK_MANAGER_ID,
@@ -3176,19 +3174,28 @@ contract ModulesFactory {
                 owner: params.executor
             });
 
-            registrations[1] = OrgRegistry.ContractRegistration({
-                typeId: ModuleTypes.EDUCATION_HUB_ID,
-                proxy: result.educationHub,
-                beacon: educationHubBeacon,
-                owner: params.executor
-            });
+            if (params.educationHubConfig.enabled) {
+                registrations[1] = OrgRegistry.ContractRegistration({
+                    typeId: ModuleTypes.EDUCATION_HUB_ID,
+                    proxy: result.educationHub,
+                    beacon: educationHubBeacon,
+                    owner: params.executor
+                });
 
-            registrations[2] = OrgRegistry.ContractRegistration({
-                typeId: ModuleTypes.PAYMENT_MANAGER_ID,
-                proxy: result.paymentManager,
-                beacon: paymentManagerBeacon,
-                owner: params.executor
-            });
+                registrations[2] = OrgRegistry.ContractRegistration({
+                    typeId: ModuleTypes.PAYMENT_MANAGER_ID,
+                    proxy: result.paymentManager,
+                    beacon: paymentManagerBeacon,
+                    owner: params.executor
+                });
+            } else {
+                registrations[1] = OrgRegistry.ContractRegistration({
+                    typeId: ModuleTypes.PAYMENT_MANAGER_ID,
+                    proxy: result.paymentManager,
+                    beacon: paymentManagerBeacon,
+                    owner: params.executor
+                });
+            }
 
             // Call OrgDeployer to batch register (not the last batch)
             IOrgDeployer_1(params.deployer).batchRegisterContracts(params.orgId, registrations, params.autoUpgrade, false);
@@ -3751,6 +3758,7 @@ contract OrgDeployer is Initializable {
         RoleConfigStructs.RoleConfig[] roles; // Complete role configuration (replaces roleNames, roleImages, roleCanVote)
         RoleAssignments roleAssignments;
         AccessFactory.PasskeyConfig passkeyConfig; // Passkey infrastructure configuration
+        ModulesFactory.EducationHubConfig educationHubConfig; // EducationHub deployment configuration
     }
 
     /*════════════════  VALIDATION  ════════════════*/
@@ -3904,7 +3912,8 @@ contract OrgDeployer is Initializable {
                 participationToken: result.participationToken,
                 roleHatIds: gov.roleHatIds,
                 autoUpgrade: params.autoUpgrade,
-                roleAssignments: moduleRoles
+                roleAssignments: moduleRoles,
+                educationHubConfig: params.educationHubConfig
             });
 
             modules = l.modulesFactory.deployModules(moduleParams);
@@ -3919,7 +3928,9 @@ contract OrgDeployer is Initializable {
 
         /* 8. Wire up cross-module connections */
         IParticipationToken_1(result.participationToken).setTaskManager(result.taskManager);
-        IParticipationToken_1(result.participationToken).setEducationHub(result.educationHub);
+        if (params.educationHubConfig.enabled) {
+            IParticipationToken_1(result.participationToken).setEducationHub(result.educationHub);
+        }
 
         /* 9. Authorize QuickJoin to mint hats */
         IExecutorAdmin(result.executor).setHatMinterAuthorization(result.quickJoin, true);

@@ -586,7 +586,7 @@ interface IVotes {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol
 
-// OpenZeppelin Contracts (last updated v5.3.0) (proxy/utils/Initializable.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (proxy/utils/Initializable.sol)
 
 /**
  * @dev This is a base contract to aid in writing upgradeable contracts, or any kind of contract that will be deployed
@@ -697,7 +697,7 @@ abstract contract Initializable {
         // Allowed calls:
         // - initialSetup: the contract is not in the initializing state and no previous version was
         //                 initialized
-        // - construction: the contract is initialized at version 1 (no reinitialization) and the
+        // - construction: the contract is initialized at version 1 (no reininitialization) and the
         //                 current contract is just being deployed
         bool initialSetup = initialized == 0 && isTopLevelCall;
         bool construction = initialized == 1 && address(this).code.length == 0;
@@ -802,22 +802,12 @@ abstract contract Initializable {
     }
 
     /**
-     * @dev Pointer to storage slot. Allows integrators to override it with a custom storage location.
-     *
-     * NOTE: Consider following the ERC-7201 formula to derive storage locations.
-     */
-    function _initializableStorageSlot() internal pure virtual returns (bytes32) {
-        return INITIALIZABLE_STORAGE;
-    }
-
-    /**
      * @dev Returns a pointer to the storage namespace.
      */
     // solhint-disable-next-line var-name-mixedcase
     function _getInitializableStorage() private pure returns (InitializableStorage storage $) {
-        bytes32 slot = _initializableStorageSlot();
         assembly {
-            $.slot := slot
+            $.slot := INITIALIZABLE_STORAGE
         }
     }
 }
@@ -2328,7 +2318,7 @@ abstract contract NoncesUpgradeable is Initializable {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol
 
-// OpenZeppelin Contracts (last updated v5.1.0) (utils/ReentrancyGuard.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (utils/ReentrancyGuard.sol)
 
 /**
  * @dev Contract module that helps prevent reentrant calls to a function.
@@ -2341,9 +2331,6 @@ abstract contract NoncesUpgradeable is Initializable {
  * `nonReentrant` may not call one another. This can be worked around by making
  * those functions `private`, and then adding `external` `nonReentrant` entry
  * points to them.
- *
- * TIP: If EIP-1153 (transient storage) is available on the chain you're deploying at,
- * consider using {ReentrancyGuardTransient} instead.
  *
  * TIP: If you would like to learn more about reentrancy and alternative ways
  * to protect against it, check out our blog post
@@ -4880,7 +4867,7 @@ library Strings {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/ERC20Upgradeable.sol
 
-// OpenZeppelin Contracts (last updated v5.4.0) (token/ERC20/ERC20.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (token/ERC20/ERC20.sol)
 
 /**
  * @dev Implementation of the {IERC20} interface.
@@ -4897,8 +4884,13 @@ library Strings {
  *
  * We have followed general OpenZeppelin Contracts guidelines: functions revert
  * instead returning `false` on failure. This behavior is nonetheless
- * conventional and does not conflict with the expectations of ERC-20
+ * conventional and does not conflict with the expectations of ERC20
  * applications.
+ *
+ * Additionally, an {Approval} event is emitted on calls to {transferFrom}.
+ * This allows applications to reconstruct the allowance for all accounts just
+ * by listening to said events. Other implementations of the EIP may not emit
+ * these events, as it isn't required by the specification.
  */
 abstract contract ERC20Upgradeable is Initializable, ContextUpgradeable, IERC20, IERC20Metadata, IERC20Errors {
     /// @custom:storage-location erc7201:openzeppelin.storage.ERC20
@@ -4925,7 +4917,8 @@ abstract contract ERC20Upgradeable is Initializable, ContextUpgradeable, IERC20,
     /**
      * @dev Sets the values for {name} and {symbol}.
      *
-     * Both values are immutable: they can only be set once during construction.
+     * All two of these values are immutable: they can only be set once during
+     * construction.
      */
     function __ERC20_init(string memory name_, string memory symbol_) internal onlyInitializing {
         __ERC20_init_unchained(name_, symbol_);
@@ -4971,13 +4964,17 @@ abstract contract ERC20Upgradeable is Initializable, ContextUpgradeable, IERC20,
         return 18;
     }
 
-    /// @inheritdoc IERC20
+    /**
+     * @dev See {IERC20-totalSupply}.
+     */
     function totalSupply() public view virtual returns (uint256) {
         ERC20Storage storage $ = _getERC20Storage();
         return $._totalSupply;
     }
 
-    /// @inheritdoc IERC20
+    /**
+     * @dev See {IERC20-balanceOf}.
+     */
     function balanceOf(address account) public view virtual returns (uint256) {
         ERC20Storage storage $ = _getERC20Storage();
         return $._balances[account];
@@ -4997,7 +4994,9 @@ abstract contract ERC20Upgradeable is Initializable, ContextUpgradeable, IERC20,
         return true;
     }
 
-    /// @inheritdoc IERC20
+    /**
+     * @dev See {IERC20-allowance}.
+     */
     function allowance(address owner, address spender) public view virtual returns (uint256) {
         ERC20Storage storage $ = _getERC20Storage();
         return $._allowances[owner][spender];
@@ -5022,8 +5021,8 @@ abstract contract ERC20Upgradeable is Initializable, ContextUpgradeable, IERC20,
     /**
      * @dev See {IERC20-transferFrom}.
      *
-     * Skips emitting an {Approval} event indicating an allowance update. This is not
-     * required by the ERC. See {xref-ERC20-_approve-address-address-uint256-bool-}[_approve].
+     * Emits an {Approval} event indicating the updated allowance. This is not
+     * required by the EIP. See the note at the beginning of {ERC20}.
      *
      * NOTE: Does not update the allowance if the current allowance
      * is the maximum `uint256`.
@@ -5131,7 +5130,7 @@ abstract contract ERC20Upgradeable is Initializable, ContextUpgradeable, IERC20,
     }
 
     /**
-     * @dev Sets `value` as the allowance of `spender` over the `owner`'s tokens.
+     * @dev Sets `value` as the allowance of `spender` over the `owner` s tokens.
      *
      * This internal function is equivalent to `approve`, and can be used to
      * e.g. set automatic allowances for certain subsystems, etc.
@@ -5158,8 +5157,7 @@ abstract contract ERC20Upgradeable is Initializable, ContextUpgradeable, IERC20,
      *
      * Anyone who wishes to continue emitting `Approval` events on the`transferFrom` operation can force the flag to
      * true using the following override:
-     *
-     * ```solidity
+     * ```
      * function _approve(address owner, address spender, uint256 value, bool) internal virtual override {
      *     super._approve(owner, spender, value, true);
      * }
@@ -5182,7 +5180,7 @@ abstract contract ERC20Upgradeable is Initializable, ContextUpgradeable, IERC20,
     }
 
     /**
-     * @dev Updates `owner`'s allowance for `spender` based on spent `value`.
+     * @dev Updates `owner` s allowance for `spender` based on spent `value`.
      *
      * Does not update the allowance value in case of infinite allowance.
      * Revert if not enough allowance is available.
@@ -5191,7 +5189,7 @@ abstract contract ERC20Upgradeable is Initializable, ContextUpgradeable, IERC20,
      */
     function _spendAllowance(address owner, address spender, uint256 value) internal virtual {
         uint256 currentAllowance = allowance(owner, spender);
-        if (currentAllowance < type(uint256).max) {
+        if (currentAllowance != type(uint256).max) {
             if (currentAllowance < value) {
                 revert ERC20InsufficientAllowance(spender, currentAllowance, value);
             }
@@ -5301,17 +5299,17 @@ library MessageHashUtils {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/utils/cryptography/EIP712Upgradeable.sol
 
-// OpenZeppelin Contracts (last updated v5.4.0) (utils/cryptography/EIP712.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (utils/cryptography/EIP712.sol)
 
 /**
- * @dev https://eips.ethereum.org/EIPS/eip-712[EIP-712] is a standard for hashing and signing of typed structured data.
+ * @dev https://eips.ethereum.org/EIPS/eip-712[EIP 712] is a standard for hashing and signing of typed structured data.
  *
  * The encoding scheme specified in the EIP requires a domain separator and a hash of the typed structured data, whose
  * encoding is very generic and therefore its implementation in Solidity is not feasible, thus this contract
  * does not implement the encoding itself. Protocols need to implement the type-specific encoding they need in order to
  * produce the hash of their typed data using a combination of `abi.encode` and `keccak256`.
  *
- * This contract implements the EIP-712 domain separator ({_domainSeparatorV4}) that is used as part of the encoding
+ * This contract implements the EIP 712 domain separator ({_domainSeparatorV4}) that is used as part of the encoding
  * scheme, and the final step of the encoding to obtain the message digest that is then signed via ECDSA
  * ({_hashTypedDataV4}).
  *
@@ -5321,8 +5319,9 @@ library MessageHashUtils {
  * NOTE: This contract implements the version of the encoding known as "v4", as implemented by the JSON RPC method
  * https://docs.metamask.io/guide/signing-data.html[`eth_signTypedDataV4` in MetaMask].
  *
- * NOTE: The upgradeable version of this contract does not use an immutable cache and recomputes the domain separator
- * each time {_domainSeparatorV4} is called. That is cheaper than accessing a cached version in cold storage.
+ * NOTE: In the upgradeable version of this contract, the cached values will correspond to the address, and the domain
+ * separator of the implementation contract. This will cause the {_domainSeparatorV4} function to always rebuild the
+ * separator from the immutable values, which is cheaper than accessing a cached version in cold storage.
  */
 abstract contract EIP712Upgradeable is Initializable, IERC5267 {
     bytes32 private constant TYPE_HASH =
@@ -5352,7 +5351,7 @@ abstract contract EIP712Upgradeable is Initializable, IERC5267 {
      * @dev Initializes the domain separator and parameter caches.
      *
      * The meaning of `name` and `version` is specified in
-     * https://eips.ethereum.org/EIPS/eip-712#definition-of-domainseparator[EIP-712]:
+     * https://eips.ethereum.org/EIPS/eip-712#definition-of-domainseparator[EIP 712]:
      *
      * - `name`: the user readable name of the signing domain, i.e. the name of the DApp or the protocol.
      * - `version`: the current major version of the signing domain.
@@ -5404,7 +5403,9 @@ abstract contract EIP712Upgradeable is Initializable, IERC5267 {
         return MessageHashUtils.toTypedDataHash(_domainSeparatorV4(), structHash);
     }
 
-    /// @inheritdoc IERC5267
+    /**
+     * @dev See {IERC-5267}.
+     */
     function eip712Domain()
         public
         view
@@ -5504,7 +5505,7 @@ abstract contract EIP712Upgradeable is Initializable, IERC5267 {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/governance/utils/VotesUpgradeable.sol
 
-// OpenZeppelin Contracts (last updated v5.2.0) (governance/utils/Votes.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (governance/utils/Votes.sol)
 
 /**
  * @dev This is a base abstract contract that tracks voting units, which are a measure of voting power that can be
@@ -5572,7 +5573,7 @@ abstract contract VotesUpgradeable is Initializable, ContextUpgradeable, EIP712U
     }
 
     /**
-     * @dev Machine-readable description of the clock as specified in ERC-6372.
+     * @dev Machine-readable description of the clock as specified in EIP-6372.
      */
     // solhint-disable-next-line func-name-mixedcase
     function CLOCK_MODE() public view virtual returns (string memory) {
@@ -5581,15 +5582,6 @@ abstract contract VotesUpgradeable is Initializable, ContextUpgradeable, EIP712U
             revert ERC6372InconsistentClock();
         }
         return "mode=blocknumber&from=default";
-    }
-
-    /**
-     * @dev Validate that a timepoint is in the past, and return it as a uint48.
-     */
-    function _validateTimepoint(uint256 timepoint) internal view returns (uint48) {
-        uint48 currentTimepoint = clock();
-        if (timepoint >= currentTimepoint) revert ERC5805FutureLookup(timepoint, currentTimepoint);
-        return SafeCast.toUint48(timepoint);
     }
 
     /**
@@ -5610,7 +5602,11 @@ abstract contract VotesUpgradeable is Initializable, ContextUpgradeable, EIP712U
      */
     function getPastVotes(address account, uint256 timepoint) public view virtual returns (uint256) {
         VotesStorage storage $ = _getVotesStorage();
-        return $._delegateCheckpoints[account].upperLookupRecent(_validateTimepoint(timepoint));
+        uint48 currentTimepoint = clock();
+        if (timepoint >= currentTimepoint) {
+            revert ERC5805FutureLookup(timepoint, currentTimepoint);
+        }
+        return $._delegateCheckpoints[account].upperLookupRecent(SafeCast.toUint48(timepoint));
     }
 
     /**
@@ -5627,7 +5623,11 @@ abstract contract VotesUpgradeable is Initializable, ContextUpgradeable, EIP712U
      */
     function getPastTotalSupply(uint256 timepoint) public view virtual returns (uint256) {
         VotesStorage storage $ = _getVotesStorage();
-        return $._totalCheckpoints.upperLookupRecent(_validateTimepoint(timepoint));
+        uint48 currentTimepoint = clock();
+        if (timepoint >= currentTimepoint) {
+            revert ERC5805FutureLookup(timepoint, currentTimepoint);
+        }
+        return $._totalCheckpoints.upperLookupRecent(SafeCast.toUint48(timepoint));
     }
 
     /**
@@ -5710,7 +5710,7 @@ abstract contract VotesUpgradeable is Initializable, ContextUpgradeable, EIP712U
     /**
      * @dev Moves delegated votes from one delegate to another.
      */
-    function _moveDelegateVotes(address from, address to, uint256 amount) internal virtual {
+    function _moveDelegateVotes(address from, address to, uint256 amount) private {
         VotesStorage storage $ = _getVotesStorage();
         if (from != to && amount > 0) {
             if (from != address(0)) {
@@ -5755,7 +5755,7 @@ abstract contract VotesUpgradeable is Initializable, ContextUpgradeable, EIP712U
         Checkpoints.Trace208 storage store,
         function(uint208, uint208) view returns (uint208) op,
         uint208 delta
-    ) private returns (uint208 oldValue, uint208 newValue) {
+    ) private returns (uint208, uint208) {
         return store.push(clock(), op(store.latest(), delta));
     }
 
@@ -5775,17 +5775,17 @@ abstract contract VotesUpgradeable is Initializable, ContextUpgradeable, EIP712U
 
 // lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20VotesUpgradeable.sol
 
-// OpenZeppelin Contracts (last updated v5.1.0) (token/ERC20/extensions/ERC20Votes.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (token/ERC20/extensions/ERC20Votes.sol)
 
 /**
- * @dev Extension of ERC-20 to support Compound-like voting and delegation. This version is more generic than Compound's,
+ * @dev Extension of ERC20 to support Compound-like voting and delegation. This version is more generic than Compound's,
  * and supports token supply up to 2^208^ - 1, while COMP is limited to 2^96^ - 1.
  *
  * NOTE: This contract does not provide interface compatibility with Compound's COMP token.
  *
  * This extension keeps a history (checkpoints) of each account's vote power. Vote power can be delegated either
- * by calling the {Votes-delegate} function directly, or by providing a signature to be used with {Votes-delegateBySig}. Voting
- * power can be queried through the public accessors {Votes-getVotes} and {Votes-getPastVotes}.
+ * by calling the {delegate} function directly, or by providing a signature to be used with {delegateBySig}. Voting
+ * power can be queried through the public accessors {getVotes} and {getPastVotes}.
  *
  * By default, token balance does not account for voting power. This makes transfers cheaper. The downside is that it
  * requires users to delegate to themselves in order to activate checkpoints and have their voting power tracked.
@@ -5805,9 +5805,9 @@ abstract contract ERC20VotesUpgradeable is Initializable, ERC20Upgradeable, Vote
      * @dev Maximum token supply. Defaults to `type(uint208).max` (2^208^ - 1).
      *
      * This maximum is enforced in {_update}. It limits the total supply of the token, which is otherwise a uint256,
-     * so that checkpoints can be stored in the Trace208 structure used by {Votes}. Increasing this value will not
+     * so that checkpoints can be stored in the Trace208 structure used by {{Votes}}. Increasing this value will not
      * remove the underlying limitation, and will cause {_update} to fail because of a math overflow in
-     * {Votes-_transferVotingUnits}. An override could be used to further restrict the total supply (to a lower value) if
+     * {_transferVotingUnits}. An override could be used to further restrict the total supply (to a lower value) if
      * additional logic requires it. When resolving override conflicts on this function, the minimum should be
      * returned.
      */
@@ -6027,7 +6027,8 @@ contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyG
     }
 
     function setEducationHub(address eh) external {
-        if (eh == address(0)) revert InvalidAddress();
+        // Allow address(0) to support optional EducationHub deployment
+        // and allow executor to clear it later
         Layout storage l = _layout();
         if (l.educationHub == address(0)) {
             l.educationHub = eh;

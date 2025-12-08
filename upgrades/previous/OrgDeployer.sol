@@ -333,6 +333,8 @@ interface IEligibilityModule {
         uint256[] calldata membershipHatIds,
         bool[] calldata combineWithHierarchyFlags
     ) external;
+    // Metadata management
+    function updateHatMetadata(uint256 hatId, string memory name, bytes32 metadataCID) external;
 }
 
 interface IToggleModule {
@@ -763,6 +765,7 @@ library RoleConfigStructs {
     struct RoleConfig {
         string name; // Role name (e.g., "MEMBER", "ADMIN")
         string image; // IPFS hash or URI for role image
+        bytes32 metadataCID; // IPFS CID for extended role metadata JSON
         bool canVote; // Whether this role can participate in voting
         RoleVouchingConfig vouching; // Vouching configuration
         RoleEligibilityDefaults defaults; // Default eligibility settings
