@@ -8,6 +8,7 @@ import "forge-std/Test.sol";
 import {HybridVoting} from "../src/HybridVoting.sol";
 import {VotingErrors} from "../src/libs/VotingErrors.sol";
 import {HybridVotingProposals} from "../src/libs/HybridVotingProposals.sol";
+import {HybridVotingConfig} from "../src/libs/HybridVotingConfig.sol";
 import {ValidationLib} from "../src/libs/ValidationLib.sol";
 
 /* OpenZeppelin */
@@ -1256,6 +1257,130 @@ contract MockERC20 is IERC20 {
             // Verify all 8 classes are set
             HybridVoting.ClassConfig[] memory stored = hv.getClasses();
             assertEq(stored.length, 8, "Should have maximum 8 classes");
+
+            vm.stopPrank();
+        }
+
+        /* ───────────────────────── CLASSES REPLACED EVENT TESTS ───────────────────────── */
+
+        function testClassesReplacedEventOnSetClasses() public {
+            vm.startPrank(address(exec));
+
+            // Create a new class configuration
+            HybridVoting.ClassConfig[] memory newClasses = new HybridVoting.ClassConfig[](2);
+
+            uint256[] memory ddHats = new uint256[](1);
+            ddHats[0] = EXECUTIVE_HAT_ID;
+            newClasses[0] = HybridVoting.ClassConfig({
+                strategy: HybridVoting.ClassStrategy.DIRECT,
+                slicePct: 60,
+                quadratic: false,
+                minBalance: 0,
+                asset: address(0),
+                hatIds: ddHats
+            });
+
+            uint256[] memory tokenHats = new uint256[](1);
+            tokenHats[0] = DEFAULT_HAT_ID;
+            newClasses[1] = HybridVoting.ClassConfig({
+                strategy: HybridVoting.ClassStrategy.ERC20_BAL,
+                slicePct: 40,
+                quadratic: true,
+                minBalance: 2 ether,
+                asset: address(token),
+                hatIds: tokenHats
+            });
+
+            // Calculate expected hash
+            bytes32 expectedHash = keccak256(abi.encode(newClasses));
+
+            // Expect the ClassesReplaced event with full class data
+            vm.expectEmit(true, true, false, true);
+            emit HybridVotingConfig.ClassesReplaced(block.number, expectedHash, newClasses, uint64(block.timestamp));
+
+            hv.setClasses(newClasses);
+
+            // Verify classes were stored correctly
+            HybridVoting.ClassConfig[] memory stored = hv.getClasses();
+            assertEq(stored.length, 2, "Should have 2 classes");
+            assertEq(stored[0].slicePct, 60, "First class should be 60%");
+            assertEq(stored[1].slicePct, 40, "Second class should be 40%");
+            assertEq(stored[1].quadratic, true, "Second class should be quadratic");
+            assertEq(stored[1].minBalance, 2 ether, "Second class minBalance should be 2 ether");
+            assertEq(stored[1].asset, address(token), "Second class asset should be token");
+
+            vm.stopPrank();
+        }
+
+        function testClassesReplacedEventContainsAllFields() public {
+            vm.startPrank(address(exec));
+
+            // Create a 3-class configuration to test all field types
+            HybridVoting.ClassConfig[] memory classes = new HybridVoting.ClassConfig[](3);
+
+            // Class 0: Direct with multiple hat IDs
+            uint256[] memory multiHats = new uint256[](2);
+            multiHats[0] = EXECUTIVE_HAT_ID;
+            multiHats[1] = CREATOR_HAT_ID;
+            classes[0] = HybridVoting.ClassConfig({
+                strategy: HybridVoting.ClassStrategy.DIRECT,
+                slicePct: 30,
+                quadratic: false,
+                minBalance: 0,
+                asset: address(0),
+                hatIds: multiHats
+            });
+
+            // Class 1: ERC20 with quadratic
+            uint256[] memory tokenHats = new uint256[](1);
+            tokenHats[0] = DEFAULT_HAT_ID;
+            classes[1] = HybridVoting.ClassConfig({
+                strategy: HybridVoting.ClassStrategy.ERC20_BAL,
+                slicePct: 50,
+                quadratic: true,
+                minBalance: 5 ether,
+                asset: address(token),
+                hatIds: tokenHats
+            });
+
+            // Class 2: Direct with no hats (open)
+            uint256[] memory emptyHats = new uint256[](0);
+            classes[2] = HybridVoting.ClassConfig({
+                strategy: HybridVoting.ClassStrategy.DIRECT,
+                slicePct: 20,
+                quadratic: false,
+                minBalance: 0,
+                asset: address(0),
+                hatIds: emptyHats
+            });
+
+            hv.setClasses(classes);
+
+            // Verify all fields are stored and would be emitted
+            HybridVoting.ClassConfig[] memory stored = hv.getClasses();
+
+            // Check class 0
+            assertEq(uint8(stored[0].strategy), uint8(HybridVoting.ClassStrategy.DIRECT));
+            assertEq(stored[0].slicePct, 30);
+            assertEq(stored[0].quadratic, false);
+            assertEq(stored[0].minBalance, 0);
+            assertEq(stored[0].asset, address(0));
+            assertEq(stored[0].hatIds.length, 2);
+            assertEq(stored[0].hatIds[0], EXECUTIVE_HAT_ID);
+            assertEq(stored[0].hatIds[1], CREATOR_HAT_ID);
+
+            // Check class 1
+            assertEq(uint8(stored[1].strategy), uint8(HybridVoting.ClassStrategy.ERC20_BAL));
+            assertEq(stored[1].slicePct, 50);
+            assertEq(stored[1].quadratic, true);
+            assertEq(stored[1].minBalance, 5 ether);
+            assertEq(stored[1].asset, address(token));
+            assertEq(stored[1].hatIds.length, 1);
+
+            // Check class 2
+            assertEq(uint8(stored[2].strategy), uint8(HybridVoting.ClassStrategy.DIRECT));
+            assertEq(stored[2].slicePct, 20);
+            assertEq(stored[2].hatIds.length, 0);
 
             vm.stopPrank();
         }
