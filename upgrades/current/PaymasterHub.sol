@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >=0.4.11 >=0.4.16 >=0.8.13 ^0.8.20 ^0.8.21 ^0.8.22 ^0.8.24;
+pragma solidity >=0.4.11 >=0.4.16 >=0.8.13 ^0.8.20 ^0.8.21 ^0.8.24;
 
 // lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol
 
@@ -510,7 +510,7 @@ interface IHatsIdUtilities {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol
 
-// OpenZeppelin Contracts (last updated v5.3.0) (proxy/utils/Initializable.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (proxy/utils/Initializable.sol)
 
 /**
  * @dev This is a base contract to aid in writing upgradeable contracts, or any kind of contract that will be deployed
@@ -621,7 +621,7 @@ abstract contract Initializable {
         // Allowed calls:
         // - initialSetup: the contract is not in the initializing state and no previous version was
         //                 initialized
-        // - construction: the contract is initialized at version 1 (no reinitialization) and the
+        // - construction: the contract is initialized at version 1 (no reininitialization) and the
         //                 current contract is just being deployed
         bool initialSetup = initialized == 0 && isTopLevelCall;
         bool construction = initialized == 1 && address(this).code.length == 0;
@@ -726,22 +726,12 @@ abstract contract Initializable {
     }
 
     /**
-     * @dev Pointer to storage slot. Allows integrators to override it with a custom storage location.
-     *
-     * NOTE: Consider following the ERC-7201 formula to derive storage locations.
-     */
-    function _initializableStorageSlot() internal pure virtual returns (bytes32) {
-        return INITIALIZABLE_STORAGE;
-    }
-
-    /**
      * @dev Returns a pointer to the storage namespace.
      */
     // solhint-disable-next-line var-name-mixedcase
     function _getInitializableStorage() private pure returns (InitializableStorage storage $) {
-        bytes32 slot = _initializableStorageSlot();
         assembly {
-            $.slot := slot
+            $.slot := INITIALIZABLE_STORAGE
         }
     }
 }
@@ -2323,7 +2313,7 @@ interface IPaymaster {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol
 
-// OpenZeppelin Contracts (last updated v5.1.0) (utils/ReentrancyGuard.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (utils/ReentrancyGuard.sol)
 
 /**
  * @dev Contract module that helps prevent reentrant calls to a function.
@@ -2336,9 +2326,6 @@ interface IPaymaster {
  * `nonReentrant` may not call one another. This can be worked around by making
  * those functions `private`, and then adding `external` `nonReentrant` entry
  * points to them.
- *
- * TIP: If EIP-1153 (transient storage) is available on the chain you're deploying at,
- * consider using {ReentrancyGuardTransient} instead.
  *
  * TIP: If you would like to learn more about reentrancy and alternative ways
  * to protect against it, check out our blog post
@@ -4144,7 +4131,7 @@ library MessageHashUtils {
 
 // lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol
 
-// OpenZeppelin Contracts (last updated v5.3.0) (proxy/utils/UUPSUpgradeable.sol)
+// OpenZeppelin Contracts (last updated v5.0.0) (proxy/utils/UUPSUpgradeable.sol)
 
 /**
  * @dev An upgradeability mechanism designed for UUPS proxies. The functions included here can perform an upgrade of an
@@ -4182,9 +4169,9 @@ abstract contract UUPSUpgradeable is Initializable, IERC1822Proxiable {
 
     /**
      * @dev Check that the execution is being performed through a delegatecall call and that the execution context is
-     * a proxy contract with an implementation (as defined in ERC-1967) pointing to self. This should only be the case
+     * a proxy contract with an implementation (as defined in ERC1967) pointing to self. This should only be the case
      * for UUPS and transparent proxies that are using the current contract as their implementation. Execution of a
-     * function through ERC-1167 minimal proxies (clones) would not normally pass this test, but is not guaranteed to
+     * function through ERC1167 minimal proxies (clones) would not normally pass this test, but is not guaranteed to
      * fail.
      */
     modifier onlyProxy() {
@@ -4207,7 +4194,7 @@ abstract contract UUPSUpgradeable is Initializable, IERC1822Proxiable {
     function __UUPSUpgradeable_init_unchained() internal onlyInitializing {
     }
     /**
-     * @dev Implementation of the ERC-1822 {proxiableUUID} function. This returns the storage slot used by the
+     * @dev Implementation of the ERC1822 {proxiableUUID} function. This returns the storage slot used by the
      * implementation. It is used to validate the implementation's compatibility when performing an upgrade.
      *
      * IMPORTANT: A proxy pointing at a proxiable contract should not be considered proxiable itself, because this risks
@@ -4235,7 +4222,8 @@ abstract contract UUPSUpgradeable is Initializable, IERC1822Proxiable {
 
     /**
      * @dev Reverts if the execution is not performed via delegatecall or the execution
-     * context is not of a proxy with an ERC-1967 compliant implementation pointing to self.
+     * context is not of a proxy with an ERC1967-compliant implementation pointing to self.
+     * See {_onlyProxy}.
      */
     function _checkProxy() internal view virtual {
         if (
@@ -4273,7 +4261,7 @@ abstract contract UUPSUpgradeable is Initializable, IERC1822Proxiable {
      * @dev Performs an implementation upgrade with a security check for UUPS proxies, and additional setup call.
      *
      * As a security check, {proxiableUUID} is invoked in the new implementation, and the return value
-     * is expected to be the implementation slot in ERC-1967.
+     * is expected to be the implementation slot in ERC1967.
      *
      * Emits an {IERC1967-Upgraded} event.
      */
