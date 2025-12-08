@@ -143,6 +143,7 @@ contract OrgDeployer is Initializable {
         address taskManager;
         address educationHub;
         address paymentManager;
+        address passkeyAccountFactory; // Optional: only set if passkey enabled
     }
 
     struct RoleAssignments {
@@ -171,6 +172,7 @@ contract OrgDeployer is Initializable {
         address[] ddInitialTargets;
         RoleConfigStructs.RoleConfig[] roles; // Complete role configuration (replaces roleNames, roleImages, roleCanVote)
         RoleAssignments roleAssignments;
+        AccessFactory.PasskeyConfig passkeyConfig; // Passkey infrastructure configuration
     }
 
     /*════════════════  VALIDATION  ════════════════*/
@@ -294,12 +296,14 @@ contract OrgDeployer is Initializable {
                 registryAddr: params.registryAddr,
                 roleHatIds: gov.roleHatIds,
                 autoUpgrade: params.autoUpgrade,
-                roleAssignments: accessRoles
+                roleAssignments: accessRoles,
+                passkeyConfig: params.passkeyConfig
             });
 
             access = l.accessFactory.deployAccess(accessParams);
             result.quickJoin = access.quickJoin;
             result.participationToken = access.participationToken;
+            result.passkeyAccountFactory = access.passkeyAccountFactory;
         }
 
         /* 6. Deploy Functional Modules (TaskManager, Education, Payment) */
