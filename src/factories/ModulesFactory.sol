@@ -36,6 +36,11 @@ contract ModulesFactory {
         uint256 educationMemberRolesBitmap; // Bit N set = Role N can access education
     }
 
+    /*──────────────────── EducationHub Configuration ────────────────────*/
+    struct EducationHubConfig {
+        bool enabled; // Whether to deploy EducationHub
+    }
+
     /*──────────────────── Modules Deployment Params ────────────────────*/
     struct ModulesParams {
         bytes32 orgId;
@@ -49,6 +54,7 @@ contract ModulesFactory {
         uint256[] roleHatIds;
         bool autoUpgrade;
         RoleAssignments roleAssignments;
+        EducationHubConfig educationHubConfig; // EducationHub deployment configuration
     }
 
     /*──────────────────── Modules Deployment Result ────────────────────*/
@@ -103,8 +109,8 @@ contract ModulesFactory {
             );
         }
 
-        /* 2. Deploy EducationHub (without registration) */
-        {
+        /* 2. Deploy EducationHub if enabled (without registration) */
+        if (params.educationHubConfig.enabled) {
             // Get the role hat IDs for creator and member permissions
             uint256[] memory creatorHats = RoleResolver.resolveRoleBitmap(
                 OrgRegistry(params.orgRegistry), params.orgId, params.roleAssignments.educationCreatorRolesBitmap
@@ -154,9 +160,11 @@ contract ModulesFactory {
             );
         }
 
-        /* 4. Batch register all 3 contracts */
+        /* 4. Batch register contracts (2 or 3 depending on EducationHub) */
         {
-            OrgRegistry.ContractRegistration[] memory registrations = new OrgRegistry.ContractRegistration[](3);
+            uint256 registrationCount = params.educationHubConfig.enabled ? 3 : 2;
+            OrgRegistry.ContractRegistration[] memory registrations =
+                new OrgRegistry.ContractRegistration[](registrationCount);
 
             registrations[0] = OrgRegistry.ContractRegistration({
                 typeId: ModuleTypes.TASK_MANAGER_ID,
@@ -165,19 +173,28 @@ contract ModulesFactory {
                 owner: params.executor
             });
 
-            registrations[1] = OrgRegistry.ContractRegistration({
-                typeId: ModuleTypes.EDUCATION_HUB_ID,
-                proxy: result.educationHub,
-                beacon: educationHubBeacon,
-                owner: params.executor
-            });
+            if (params.educationHubConfig.enabled) {
+                registrations[1] = OrgRegistry.ContractRegistration({
+                    typeId: ModuleTypes.EDUCATION_HUB_ID,
+                    proxy: result.educationHub,
+                    beacon: educationHubBeacon,
+                    owner: params.executor
+                });
 
-            registrations[2] = OrgRegistry.ContractRegistration({
-                typeId: ModuleTypes.PAYMENT_MANAGER_ID,
-                proxy: result.paymentManager,
-                beacon: paymentManagerBeacon,
-                owner: params.executor
-            });
+                registrations[2] = OrgRegistry.ContractRegistration({
+                    typeId: ModuleTypes.PAYMENT_MANAGER_ID,
+                    proxy: result.paymentManager,
+                    beacon: paymentManagerBeacon,
+                    owner: params.executor
+                });
+            } else {
+                registrations[1] = OrgRegistry.ContractRegistration({
+                    typeId: ModuleTypes.PAYMENT_MANAGER_ID,
+                    proxy: result.paymentManager,
+                    beacon: paymentManagerBeacon,
+                    owner: params.executor
+                });
+            }
 
             // Call OrgDeployer to batch register (not the last batch)
             IOrgDeployer(params.deployer).batchRegisterContracts(params.orgId, registrations, params.autoUpgrade, false);

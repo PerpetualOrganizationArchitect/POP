@@ -173,7 +173,8 @@ contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyG
     }
 
     function setEducationHub(address eh) external {
-        if (eh == address(0)) revert InvalidAddress();
+        // Allow address(0) to support optional EducationHub deployment
+        // and allow executor to clear it later
         Layout storage l = _layout();
         if (l.educationHub == address(0)) {
             l.educationHub = eh;

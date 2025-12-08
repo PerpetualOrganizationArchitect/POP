@@ -35,5 +35,6 @@
     "ddCreatorRoles": [0]
   },
   "ddInitialTargets": [],
-  "withPaymaster": false
+  "withPaymaster": false,
+  "withEducationHub": true
 }
