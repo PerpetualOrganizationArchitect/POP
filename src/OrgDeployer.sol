@@ -173,6 +173,7 @@ contract OrgDeployer is Initializable {
         RoleConfigStructs.RoleConfig[] roles; // Complete role configuration (replaces roleNames, roleImages, roleCanVote)
         RoleAssignments roleAssignments;
         AccessFactory.PasskeyConfig passkeyConfig; // Passkey infrastructure configuration
+        ModulesFactory.EducationHubConfig educationHubConfig; // EducationHub deployment configuration
     }
 
     /*════════════════  VALIDATION  ════════════════*/
@@ -326,7 +327,8 @@ contract OrgDeployer is Initializable {
                 participationToken: result.participationToken,
                 roleHatIds: gov.roleHatIds,
                 autoUpgrade: params.autoUpgrade,
-                roleAssignments: moduleRoles
+                roleAssignments: moduleRoles,
+                educationHubConfig: params.educationHubConfig
             });
 
             modules = l.modulesFactory.deployModules(moduleParams);
@@ -341,7 +343,9 @@ contract OrgDeployer is Initializable {
 
         /* 8. Wire up cross-module connections */
         IParticipationToken(result.participationToken).setTaskManager(result.taskManager);
-        IParticipationToken(result.participationToken).setEducationHub(result.educationHub);
+        if (params.educationHubConfig.enabled) {
+            IParticipationToken(result.participationToken).setEducationHub(result.educationHub);
+        }
 
         /* 9. Authorize QuickJoin to mint hats */
         IExecutorAdmin(result.executor).setHatMinterAuthorization(result.quickJoin, true);
