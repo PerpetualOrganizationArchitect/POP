@@ -997,6 +997,12 @@ interface IExecutorHatMinter {
     function mintHatsForUser(address user, uint256[] calldata hatIds) external;
 }
 
+interface IPasskeyAccountFactory {
+    function createAccount(bytes32 orgId, bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
+        external
+        returns (address account);
+}
+
 /*──────────────────────────────  Contract  ───────────────────────────────*/
 contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradeable {
     /* ───────── Errors ───────── */
@@ -1006,6 +1012,8 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     error UsernameTooLong();
     error NoUsername();
     error Unauthorized();
+    error PasskeyFactoryNotSet();
+    error AccountAlreadyRegistered();
 
     /* ───────── Constants ────── */
     uint256 internal constant MAX_USERNAME_LEN = 64;
@@ -1019,6 +1027,16 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         address masterDeployAddress;
         address executor;
         uint256[] memberHatIds; // hat IDs to mint when users join
+        IPasskeyAccountFactory passkeyFactory; // Factory for passkey accounts
+        bytes32 orgId; // Organization ID for passkey account creation
+    }
+
+    /* ───────── Passkey Enrollment Struct ──────── */
+    struct PasskeyEnrollment {
+        bytes32 credentialId;
+        bytes32 publicKeyX;
+        bytes32 publicKeyY;
+        uint256 salt;
     }
 
     // keccak256("poa.quickjoin.storage")
@@ -1036,6 +1054,14 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     event MemberHatIdsUpdated(uint256[] hatIds);
     event QuickJoined(address indexed user, bool usernameCreated, uint256[] hatIds);
     event QuickJoinedByMaster(address indexed master, address indexed user, bool usernameCreated, uint256[] hatIds);
+    event PasskeyFactoryUpdated(address indexed passkeyFactory);
+    event OrgIdUpdated(bytes32 indexed orgId);
+    event QuickJoinedWithPasskey(
+        address indexed account, string username, bytes32 indexed credentialId, uint256[] hatIds
+    );
+    event QuickJoinedWithPasskeyByMaster(
+        address indexed master, address indexed account, string username, bytes32 indexed credentialId, uint256[] hatIds
+    );
 
     /* ───────── Initialiser ───── */
     function initialize(
@@ -1115,6 +1141,16 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         emit ExecutorUpdated(newExec);
     }
 
+    function setPasskeyFactory(address factory) external onlyExecutor {
+        _layout().passkeyFactory = IPasskeyAccountFactory(factory);
+        emit PasskeyFactoryUpdated(factory);
+    }
+
+    function setOrgId(bytes32 orgId_) external onlyExecutor {
+        _layout().orgId = orgId_;
+        emit OrgIdUpdated(orgId_);
+    }
+
     /* ───────── Internal helper ─────── */
     function _quickJoin(address user, string memory username) private nonReentrant {
         if (user == address(0)) revert ZeroUser();
@@ -1156,6 +1192,77 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         }
 
         emit QuickJoined(_msgSender(), false, l.memberHatIds);
+    }
+
+    /* ───────── Passkey join paths ─────── */
+
+    /// @notice Join org with a new passkey account
+    /// @param username Username to register
+    /// @param passkey Passkey enrollment data
+    /// @return account The created passkey account address
+    /// @dev Reverts if the passkey already has a registered account with a username
+    function quickJoinWithPasskey(string calldata username, PasskeyEnrollment calldata passkey)
+        external
+        nonReentrant
+        returns (address account)
+    {
+        Layout storage l = _layout();
+        if (address(l.passkeyFactory) == address(0)) revert PasskeyFactoryNotSet();
+        if (bytes(username).length == 0) revert NoUsername();
+        if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
+
+        // 1. Create PasskeyAccount via factory (returns existing if already deployed)
+        account = l.passkeyFactory
+            .createAccount(l.orgId, passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
+
+        // 2. Register username to the account
+        // Revert if account already has a username (prevents duplicate enrollment attempts)
+        if (bytes(l.accountRegistry.getUsername(account)).length != 0) {
+            revert AccountAlreadyRegistered();
+        }
+        l.accountRegistry.registerAccountQuickJoin(username, account);
+
+        // 3. Mint member hats to the account
+        if (l.memberHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(account, l.memberHatIds);
+        }
+
+        emit QuickJoinedWithPasskey(account, username, passkey.credentialId, l.memberHatIds);
+    }
+
+    /// @notice Master-deploy path for passkey onboarding
+    /// @param username Username to register
+    /// @param passkey Passkey enrollment data
+    /// @return account The created passkey account address
+    /// @dev Reverts if the passkey already has a registered account with a username
+    function quickJoinWithPasskeyMasterDeploy(string calldata username, PasskeyEnrollment calldata passkey)
+        external
+        onlyMasterDeploy
+        nonReentrant
+        returns (address account)
+    {
+        Layout storage l = _layout();
+        if (address(l.passkeyFactory) == address(0)) revert PasskeyFactoryNotSet();
+        if (bytes(username).length == 0) revert NoUsername();
+        if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
+
+        // 1. Create PasskeyAccount via factory (returns existing if already deployed)
+        account = l.passkeyFactory
+            .createAccount(l.orgId, passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
+
+        // 2. Register username to the account
+        // Revert if account already has a username (prevents duplicate enrollment attempts)
+        if (bytes(l.accountRegistry.getUsername(account)).length != 0) {
+            revert AccountAlreadyRegistered();
+        }
+        l.accountRegistry.registerAccountQuickJoin(username, account);
+
+        // 3. Mint member hats to the account
+        if (l.memberHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(account, l.memberHatIds);
+        }
+
+        emit QuickJoinedWithPasskeyByMaster(_msgSender(), account, username, passkey.credentialId, l.memberHatIds);
     }
 
     /* ───────── Master-deploy helper paths ─────── */
@@ -1207,6 +1314,14 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
 
     function isMemberHat(uint256 hatId) external view returns (bool) {
         return HatManager.isHatInArray(_layout().memberHatIds, hatId);
+    }
+
+    function passkeyFactory() external view returns (IPasskeyAccountFactory) {
+        return _layout().passkeyFactory;
+    }
+
+    function orgId() external view returns (bytes32) {
+        return _layout().orgId;
     }
 }
 
