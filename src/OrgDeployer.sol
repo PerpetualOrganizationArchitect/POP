@@ -75,6 +75,15 @@ contract OrgDeployer is Initializable {
         uint256[] roleHatIds
     );
 
+    event RolesCreated(
+        bytes32 indexed orgId,
+        uint256[] hatIds,
+        string[] names,
+        string[] images,
+        bytes32[] metadataCIDs,
+        bool[] canVote
+    );
+
     /*───────────── ERC-7201 Storage ───────────*/
     /// @custom:storage-location erc7201:poa.orgdeployer.storage
     struct Layout {
@@ -403,6 +412,31 @@ contract OrgDeployer is Initializable {
             gov.topHatId,
             gov.roleHatIds
         );
+
+        /* 13. Emit role metadata for subgraph indexing */
+        {
+            uint256 roleCount = params.roles.length;
+            string[] memory names = new string[](roleCount);
+            string[] memory images = new string[](roleCount);
+            bytes32[] memory metadataCIDs = new bytes32[](roleCount);
+            bool[] memory canVoteFlags = new bool[](roleCount);
+
+            for (uint256 i = 0; i < roleCount; i++) {
+                names[i] = params.roles[i].name;
+                images[i] = params.roles[i].image;
+                metadataCIDs[i] = params.roles[i].metadataCID;
+                canVoteFlags[i] = params.roles[i].canVote;
+            }
+
+            emit RolesCreated(
+                params.orgId,
+                gov.roleHatIds,
+                names,
+                images,
+                metadataCIDs,
+                canVoteFlags
+            );
+        }
 
         return result;
     }
