@@ -360,6 +360,7 @@ contract DeployOrg is Script {
             params.roles[i] = RoleConfigStructs.RoleConfig({
                 name: role.name,
                 image: role.image,
+                metadataCID: bytes32(0), // TODO: Add to JSON config when needed
                 canVote: role.canVote,
                 vouching: RoleConfigStructs.RoleVouchingConfig({
                     enabled: role.vouching.enabled,
