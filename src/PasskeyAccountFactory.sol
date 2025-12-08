@@ -67,7 +67,7 @@ contract PasskeyAccountFactory is Initializable {
     }
 
     // keccak256("poa.passkeyaccountfactory.storage")
-    bytes32 private constant _STORAGE_SLOT = 0x4b8e9b51d4e3c2f7a6c9d8e1b5f4a3c7d2e6b9a8f1c4d7e0a3b6c9d2e5f8a1b4;
+    bytes32 private constant _STORAGE_SLOT = 0x827e9908968f666e42b67f932c7b1de44a3c55e267a1f6ed05a8d68576716a25;
 
     function _layout() private pure returns (Layout storage s) {
         assembly {

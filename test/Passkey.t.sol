@@ -1014,4 +1014,134 @@ contract PasskeyTest is Test {
         // Total credentials
         assertEq(account.getCredentialIds().length, 3);
     }
+
+    /*════════════════════════════════════════════════════════════════════
+                    QUICKJOIN DUPLICATE ACCOUNT TESTS
+    ════════════════════════════════════════════════════════════════════*/
+
+    function testQuickJoinWithPasskeyDuplicateReverts() public {
+        QuickJoin qj = _setupQuickJoin();
+
+        // First user joins with passkey
+        vm.prank(user);
+        QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
+            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
+        });
+        qj.quickJoinWithPasskey("firstuser", enrollment);
+
+        // Second user tries to join with same passkey (should revert)
+        vm.prank(attacker);
+        vm.expectRevert(QuickJoin.AccountAlreadyRegistered.selector);
+        qj.quickJoinWithPasskey("seconduser", enrollment);
+    }
+
+    function testQuickJoinWithPasskeyMasterDeployDuplicateReverts() public {
+        QuickJoin qj = _setupQuickJoin();
+
+        // First enrollment
+        vm.prank(owner);
+        QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
+            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
+        });
+        qj.quickJoinWithPasskeyMasterDeploy("firstuser", enrollment);
+
+        // Second enrollment with same passkey (should revert)
+        vm.prank(owner);
+        vm.expectRevert(QuickJoin.AccountAlreadyRegistered.selector);
+        qj.quickJoinWithPasskeyMasterDeploy("seconduser", enrollment);
+    }
+
+    /*════════════════════════════════════════════════════════════════════
+                    RECOVERY CREDENTIAL ORG TRACKING TESTS
+    ════════════════════════════════════════════════════════════════════*/
+
+    function testRecoveryCredentialHasNoOrgBinding() public {
+        PasskeyAccount account = _createAccount();
+
+        bytes32 newCredId = keccak256("recovery_credential");
+        bytes32 newPubKeyX = keccak256("new_x");
+        bytes32 newPubKeyY = keccak256("new_y");
+
+        // Initiate recovery
+        vm.prank(guardian);
+        account.initiateRecovery(newCredId, newPubKeyX, newPubKeyY);
+
+        bytes32 recoveryId = keccak256(abi.encodePacked(newCredId, block.timestamp, guardian));
+
+        // Complete after delay
+        vm.warp(block.timestamp + 7 days + 1);
+        account.completeRecovery(recoveryId);
+
+        // Verify recovery credential has no org binding
+        IPasskeyAccount.PasskeyCredential memory cred = account.getCredential(newCredId);
+        assertEq(cred.orgId, bytes32(0));
+
+        // Verify it doesn't count toward org credential count
+        assertEq(account.getOrgCredentialCount(ORG_ID), 1); // Only original credential
+        assertEq(account.getOrgCredentialCount(bytes32(0)), 0); // Null org doesn't track
+    }
+
+    /*════════════════════════════════════════════════════════════════════
+                    STORAGE SLOT VERIFICATION TESTS
+    ════════════════════════════════════════════════════════════════════*/
+
+    function testStorageSlotCorrectness() public pure {
+        // Verify PasskeyAccountFactory storage slot matches keccak256("poa.passkeyaccountfactory.storage")
+        bytes32 expectedFactorySlot = keccak256("poa.passkeyaccountfactory.storage");
+        assertEq(expectedFactorySlot, 0x827e9908968f666e42b67f932c7b1de44a3c55e267a1f6ed05a8d68576716a25);
+
+        // Verify PasskeyAccount storage slot matches keccak256("poa.passkeyaccount.storage")
+        bytes32 expectedAccountSlot = keccak256("poa.passkeyaccount.storage");
+        assertEq(expectedAccountSlot, 0x7cfc8294c1be3fa32b08d50f0668cc2726e1306f195499e2d5283b8967b03fef);
+    }
+
+    /*════════════════════════════════════════════════════════════════════
+                    P256 VERIFIER OPTIMIZATION TESTS
+    ════════════════════════════════════════════════════════════════════*/
+
+    function testP256VerifierWithHint() public view {
+        // Test verifyWithHint function
+        bytes32 testHash = bytes32(uint256(1));
+        bytes32 r = bytes32(uint256(2));
+        bytes32 s = bytes32(uint256(3));
+
+        // With hasPrecompile = true, should use precompile path
+        bool result = P256Verifier.verifyWithHint(testHash, r, s, PUB_KEY_X, PUB_KEY_Y, true);
+        // Result depends on whether precompile exists and if signature is valid
+        console.log("verifyWithHint (precompile=true):", result);
+
+        // With hasPrecompile = false, should use fallback path
+        result = P256Verifier.verifyWithHint(testHash, r, s, PUB_KEY_X, PUB_KEY_Y, false);
+        console.log("verifyWithHint (precompile=false):", result);
+    }
+
+    function testP256VerifierPrecompileAvailable() public view {
+        bool available = P256Verifier.isPrecompileAvailable();
+        console.log("P256 precompile available:", available);
+
+        uint256 estimatedGas = P256Verifier.estimateVerificationGas();
+        console.log("Estimated verification gas:", estimatedGas);
+
+        if (available) {
+            // Should return precompile gas cost
+            assertTrue(estimatedGas == 6900 || estimatedGas == 3450);
+        } else {
+            // Should return fallback gas cost
+            assertEq(estimatedGas, 350000);
+        }
+    }
+
+    function testP256VerifierValidationHelpers() public pure {
+        // Test isValidPublicKey
+        assertTrue(P256Verifier.isValidPublicKey(PUB_KEY_X, PUB_KEY_Y));
+        assertFalse(P256Verifier.isValidPublicKey(bytes32(0), PUB_KEY_Y));
+        assertFalse(P256Verifier.isValidPublicKey(PUB_KEY_X, bytes32(0)));
+
+        // Test isValidSignature
+        bytes32 r = bytes32(uint256(1));
+        bytes32 s = bytes32(uint256(2));
+        assertTrue(P256Verifier.isValidSignature(r, s));
+        assertFalse(P256Verifier.isValidSignature(bytes32(0), s));
+        assertFalse(P256Verifier.isValidSignature(r, bytes32(0)));
+    }
 }

@@ -204,8 +204,14 @@ library WebAuthnLib {
             )
         );
 
-        // SignCount must be greater than last known value (if non-zero)
-        // Note: signCount of 0 means the authenticator doesn't support counters
+        // SignCount anti-replay check: new count must be greater than last known value
+        // Edge cases handled:
+        //   - lastSignCount=0, newSignCount=0: PASSES (authenticator doesn't support counters)
+        //   - lastSignCount=0, newSignCount>0: PASSES (first use after counter-enabled auth)
+        //   - lastSignCount>0, newSignCount=0: PASSES (new authenticator without counters)
+        //   - lastSignCount>0, newSignCount<=last: FAILS (replay attack or cloned key)
+        // NOTE: Authenticators that don't support counters (e.g., some security keys) always
+        // return 0. We intentionally allow this to maximize compatibility.
         if (lastSignCount > 0 && newSignCount > 0 && newSignCount <= lastSignCount) {
             return (false, newSignCount);
         }

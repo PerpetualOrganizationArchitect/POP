@@ -25,13 +25,33 @@ pragma solidity ^0.8.20;
  *      - RIP-7212 precompile (L2s): 3,450 gas
  *      - Fallback contract: ~330,000 gas
  *
- *      Supported chains with native precompile:
- *      - Ethereum L1 (post-Fusaka, Dec 2025)
- *      - Arbitrum One/Nova (RIP-7212)
- *      - Optimism (RIP-7212)
- *      - Base (RIP-7212)
- *      - zkSync Era (RIP-7212)
- *      - Polygon PoS (RIP-7212)
+ *      L2 Support (RIP-7212 - ALREADY LIVE):
+ *      These chains have native P256 precompile at 0x100 TODAY:
+ *      - Arbitrum One/Nova
+ *      - Optimism
+ *      - Base
+ *      - zkSync Era
+ *      - Polygon PoS
+ *      - Scroll
+ *      - Linea
+ *
+ *      L1 Support (EIP-7951 - Fusaka upgrade):
+ *      - Ethereum mainnet: December 3, 2025
+ *
+ *      Gas Optimization:
+ *      For optimal gas, cache `isPrecompileAvailable()` at deployment and use
+ *      `verifyWithHint()` with the cached value. This avoids:
+ *      - Failed precompile calls on chains without precompile
+ *      - Redundant fallback calls when precompile exists but signature is invalid
+ *
+ *      Example:
+ *      ```solidity
+ *      bool public immutable hasP256Precompile = P256Verifier.isPrecompileAvailable();
+ *
+ *      function validateSignature(...) internal view {
+ *          return P256Verifier.verifyWithHint(hash, r, s, x, y, hasP256Precompile);
+ *      }
+ *      ```
  */
 library P256Verifier {
     /*──────────────────────────── Constants ────────────────────────────*/
@@ -112,6 +132,80 @@ library P256Verifier {
         if (!verify(messageHash, r, s, x, y)) {
             revert InvalidSignature();
         }
+    }
+
+    /**
+     * @notice Verify using precompile only (no fallback)
+     * @param messageHash The 32-byte hash of the message that was signed
+     * @param r The r component of the signature (32 bytes)
+     * @param s The s component of the signature (32 bytes)
+     * @param x The x coordinate of the public key (32 bytes)
+     * @param y The y coordinate of the public key (32 bytes)
+     * @return valid True if the signature is valid, false otherwise
+     * @dev Use this when you know the precompile is available (e.g., cached at deployment).
+     *      Saves ~330k gas on invalid signatures by not trying fallback.
+     *      Returns false if precompile is unavailable OR signature is invalid.
+     */
+    function verifyWithPrecompile(bytes32 messageHash, bytes32 r, bytes32 s, bytes32 x, bytes32 y)
+        internal
+        view
+        returns (bool valid)
+    {
+        bytes memory input = abi.encodePacked(messageHash, r, s, x, y);
+        (bool success, bytes memory result) = PRECOMPILE.staticcall(input);
+
+        if (success && result.length == 32) {
+            return abi.decode(result, (uint256)) == 1;
+        }
+        return false;
+    }
+
+    /**
+     * @notice Verify using fallback verifier only (no precompile)
+     * @param messageHash The 32-byte hash of the message that was signed
+     * @param r The r component of the signature (32 bytes)
+     * @param s The s component of the signature (32 bytes)
+     * @param x The x coordinate of the public key (32 bytes)
+     * @param y The y coordinate of the public key (32 bytes)
+     * @return valid True if the signature is valid, false otherwise
+     * @dev Use this on chains without precompile to save the failed precompile call gas.
+     *      The daimo-eth verifier costs ~330k gas regardless of result.
+     */
+    function verifyWithFallback(bytes32 messageHash, bytes32 r, bytes32 s, bytes32 x, bytes32 y)
+        internal
+        view
+        returns (bool valid)
+    {
+        bytes memory input = abi.encodePacked(messageHash, r, s, x, y);
+        (bool success, bytes memory result) = FALLBACK_VERIFIER.staticcall(input);
+
+        if (success && result.length == 32) {
+            return abi.decode(result, (uint256)) == 1;
+        }
+        return false;
+    }
+
+    /**
+     * @notice Verify using cached precompile availability hint
+     * @param messageHash The 32-byte hash of the message that was signed
+     * @param r The r component of the signature (32 bytes)
+     * @param s The s component of the signature (32 bytes)
+     * @param x The x coordinate of the public key (32 bytes)
+     * @param y The y coordinate of the public key (32 bytes)
+     * @param hasPrecompile Whether the precompile is known to be available
+     * @return valid True if the signature is valid, false otherwise
+     * @dev Use this with a cached `isPrecompileAvailable()` result for optimal gas.
+     *      Example: cache the result in an immutable at deployment time.
+     */
+    function verifyWithHint(bytes32 messageHash, bytes32 r, bytes32 s, bytes32 x, bytes32 y, bool hasPrecompile)
+        internal
+        view
+        returns (bool valid)
+    {
+        if (hasPrecompile) {
+            return verifyWithPrecompile(messageHash, r, s, x, y);
+        }
+        return verifyWithFallback(messageHash, r, s, x, y);
     }
 
     /**

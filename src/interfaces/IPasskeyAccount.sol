@@ -230,7 +230,12 @@ interface IPasskeyAccount {
     /**
      * @notice Complete a pending recovery
      * @param recoveryId The recovery request ID to complete
-     * @dev Anyone can call after delay passes
+     * @dev Anyone can call after delay passes.
+     *
+     *      IMPORTANT: Recovery credentials are added with orgId = bytes32(0) and do NOT
+     *      count toward the per-org credential limit. This is intentional behavior to ensure
+     *      recovery always succeeds regardless of org credential limits. The credential can
+     *      later be associated with an org by the account owner if needed.
      */
     function completeRecovery(bytes32 recoveryId) external;
 

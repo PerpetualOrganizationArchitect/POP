@@ -37,6 +37,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     error NoUsername();
     error Unauthorized();
     error PasskeyFactoryNotSet();
+    error AccountAlreadyRegistered();
 
     /* ───────── Constants ────── */
     uint256 internal constant MAX_USERNAME_LEN = 64;
@@ -223,6 +224,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     /// @param username Username to register
     /// @param passkey Passkey enrollment data
     /// @return account The created passkey account address
+    /// @dev Reverts if the passkey already has a registered account with a username
     function quickJoinWithPasskey(string calldata username, PasskeyEnrollment calldata passkey)
         external
         nonReentrant
@@ -233,14 +235,16 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         if (bytes(username).length == 0) revert NoUsername();
         if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
-        // 1. Create PasskeyAccount via factory
+        // 1. Create PasskeyAccount via factory (returns existing if already deployed)
         account = l.passkeyFactory
             .createAccount(l.orgId, passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
 
-        // 2. Register username to the new account address
-        if (bytes(l.accountRegistry.getUsername(account)).length == 0) {
-            l.accountRegistry.registerAccountQuickJoin(username, account);
+        // 2. Register username to the account
+        // Revert if account already has a username (prevents duplicate enrollment attempts)
+        if (bytes(l.accountRegistry.getUsername(account)).length != 0) {
+            revert AccountAlreadyRegistered();
         }
+        l.accountRegistry.registerAccountQuickJoin(username, account);
 
         // 3. Mint member hats to the account
         if (l.memberHatIds.length > 0) {
@@ -254,6 +258,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     /// @param username Username to register
     /// @param passkey Passkey enrollment data
     /// @return account The created passkey account address
+    /// @dev Reverts if the passkey already has a registered account with a username
     function quickJoinWithPasskeyMasterDeploy(string calldata username, PasskeyEnrollment calldata passkey)
         external
         onlyMasterDeploy
@@ -265,14 +270,16 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         if (bytes(username).length == 0) revert NoUsername();
         if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
-        // 1. Create PasskeyAccount via factory
+        // 1. Create PasskeyAccount via factory (returns existing if already deployed)
         account = l.passkeyFactory
             .createAccount(l.orgId, passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
 
-        // 2. Register username to the new account address
-        if (bytes(l.accountRegistry.getUsername(account)).length == 0) {
-            l.accountRegistry.registerAccountQuickJoin(username, account);
+        // 2. Register username to the account
+        // Revert if account already has a username (prevents duplicate enrollment attempts)
+        if (bytes(l.accountRegistry.getUsername(account)).length != 0) {
+            revert AccountAlreadyRegistered();
         }
+        l.accountRegistry.registerAccountQuickJoin(username, account);
 
         // 3. Mint member hats to the account
         if (l.memberHatIds.length > 0) {

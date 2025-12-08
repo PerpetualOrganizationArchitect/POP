@@ -64,7 +64,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
     }
 
     // keccak256("poa.passkeyaccount.storage")
-    bytes32 private constant _STORAGE_SLOT = 0x8a35acfbc15ff81a39ae7d344fd709f28e8600b4aa8c65c6b64bfe7fe36bd1a0;
+    bytes32 private constant _STORAGE_SLOT = 0x7cfc8294c1be3fa32b08d50f0668cc2726e1306f195499e2d5283b8967b03fef;
 
     function _layout() private pure returns (Layout storage s) {
         assembly {
@@ -176,9 +176,9 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
 
         // Pay prefund to EntryPoint
         if (missingAccountFunds > 0) {
+            // solhint-disable-next-line no-unused-vars
             (bool success,) = payable(msg.sender).call{value: missingAccountFunds}("");
-            // Ignore return value - EntryPoint will verify the deposit
-            (success);
+            // Return value intentionally ignored - EntryPoint validates the deposit
         }
     }
 
