@@ -10,10 +10,7 @@ library HybridVotingConfig {
     uint8 public constant MAX_CLASSES = 8;
 
     event ClassesReplaced(
-        uint256 indexed version,
-        bytes32 indexed classesHash,
-        HybridVoting.ClassConfig[] classes,
-        uint64 timestamp
+        uint256 indexed version, bytes32 indexed classesHash, HybridVoting.ClassConfig[] classes, uint64 timestamp
     );
 
     function _layout() private pure returns (HybridVoting.Layout storage s) {

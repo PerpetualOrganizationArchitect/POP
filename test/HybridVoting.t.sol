@@ -1296,12 +1296,7 @@ contract MockERC20 is IERC20 {
 
             // Expect the ClassesReplaced event with full class data
             vm.expectEmit(true, true, false, true);
-            emit HybridVotingConfig.ClassesReplaced(
-                block.number,
-                expectedHash,
-                newClasses,
-                uint64(block.timestamp)
-            );
+            emit HybridVotingConfig.ClassesReplaced(block.number, expectedHash, newClasses, uint64(block.timestamp));
 
             hv.setClasses(newClasses);
 
