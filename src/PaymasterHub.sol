@@ -11,6 +11,8 @@ import {
     ReentrancyGuardUpgradeable
 } from "lib/openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC165} from "lib/openzeppelin-contracts/contracts/utils/introspection/IERC165.sol";
+import {ECDSA} from "lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
+import {MessageHashUtils} from "lib/openzeppelin-contracts/contracts/utils/cryptography/MessageHashUtils.sol";
 
 /**
  * @title PaymasterHub
@@ -52,11 +54,17 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     error InsufficientOrgBalance();
     error OrgIsBanned();
     error InsufficientFunds();
+    error VouchExpired();
+    error VouchAlreadyUsed();
+    error InvalidVouchSignature();
+    error VoucherNotAuthorized();
+    error VoucherHatNotSet();
 
     // ============ Constants ============
     uint8 private constant PAYMASTER_DATA_VERSION = 1;
     uint8 private constant SUBJECT_TYPE_ACCOUNT = 0x00;
     uint8 private constant SUBJECT_TYPE_HAT = 0x01;
+    uint8 private constant SUBJECT_TYPE_VOUCHED = 0x02;
 
     uint32 private constant RULE_ID_GENERIC = 0x00000000;
     uint32 private constant RULE_ID_EXECUTOR = 0x00000001;
@@ -65,6 +73,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     uint32 private constant MIN_EPOCH_LENGTH = 1 hours;
     uint32 private constant MAX_EPOCH_LENGTH = 365 days;
     uint256 private constant MAX_BOUNTY_PCT_BP = 10000; // 100%
+
+    /// @notice Minimum paymasterAndData length for vouched subject type
+    /// @dev Format: base(86) + expiry(6) + signature(65) = 157 bytes minimum
+    uint256 private constant VOUCH_DATA_MIN_LENGTH = 157;
 
     // ============ Events ============
     event PaymasterInitialized(address indexed entryPoint, address indexed hats, address indexed poaManager);
@@ -100,6 +112,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     event SolidarityDonationReceived(address indexed from, uint256 amount);
     event GracePeriodConfigUpdated(uint32 initialGraceDays, uint128 maxSpendDuringGrace, uint128 minDepositRequired);
     event OrgBannedFromSolidarity(bytes32 indexed orgId, bool banned);
+    event VoucherHatSet(bytes32 indexed orgId, uint256 voucherHatId);
+    event VouchUsed(bytes32 indexed orgId, address indexed account, address indexed voucher);
 
     // ============ Storage Variables ============
     /// @custom:storage-location erc7201:poa.paymasterhub.main
@@ -121,10 +135,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     struct OrgConfig {
         uint256 adminHatId; // Slot 0
         uint256 operatorHatId; // Slot 1: Optional role for budget/rule management
-        bool paused; // Slot 2 (1 byte)
-        uint40 registeredAt; // Slot 2 (5 bytes): UNIX timestamp, good until year 36812
-        bool bannedFromSolidarity; // Slot 2 (1 byte)
-        // 25 bytes remaining in slot 2 for future use
+        uint256 voucherHatId; // Slot 2: Hat ID for members who can vouch for new users
+        bool paused; // Slot 3 (1 byte)
+        uint40 registeredAt; // Slot 3 (5 bytes): UNIX timestamp, good until year 36812
+        bool bannedFromSolidarity; // Slot 3 (1 byte)
+        // 25 bytes remaining in slot 3 for future use
     }
 
     /**
@@ -217,6 +232,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     bytes32 private constant GRACEPERIOD_STORAGE_LOCATION =
         0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321;
 
+    // keccak256("poa.paymasterhub.usedvouches")
+    bytes32 private constant USEDVOUCHES_STORAGE_LOCATION =
+        0x86e9dc53a59330278f5c7228b9372eecbe7ed09b3412489de7fe1e046b46bbaa;
+
     // ============ Constructor ============
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -276,6 +295,20 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param operatorHatId Optional hat ID for operators (0 if none)
      */
     function registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId) external {
+        registerOrgWithVoucher(orgId, adminHatId, operatorHatId, 0);
+    }
+
+    /**
+     * @notice Register a new organization with voucher hat support
+     * @dev Called by OrgDeployer during org creation
+     * @param orgId Unique organization identifier
+     * @param adminHatId Hat ID for org admin (topHat)
+     * @param operatorHatId Optional hat ID for operators (0 if none)
+     * @param voucherHatId Hat ID for members who can vouch for new users (0 if disabled)
+     */
+    function registerOrgWithVoucher(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId, uint256 voucherHatId)
+        public
+    {
         if (adminHatId == 0) revert ZeroAddress();
 
         mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
@@ -284,12 +317,16 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         orgs[orgId] = OrgConfig({
             adminHatId: adminHatId,
             operatorHatId: operatorHatId,
+            voucherHatId: voucherHatId,
             paused: false,
             registeredAt: uint40(block.timestamp),
             bannedFromSolidarity: false
         });
 
         emit OrgRegistered(orgId, adminHatId, operatorHatId);
+        if (voucherHatId != 0) {
+            emit VoucherHatSet(orgId, voucherHatId);
+        }
     }
 
     // ============ Modifiers ============
@@ -496,7 +533,13 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         if (org.paused) revert Paused();
 
         // Validate subject eligibility
-        bytes32 subjectKey = _validateSubjectEligibility(userOp.sender, subjectType, subjectId);
+        bytes32 subjectKey;
+        if (subjectType == SUBJECT_TYPE_VOUCHED) {
+            // Vouched onboarding: validate vouch signature from hat wearer
+            subjectKey = _validateVouchedEligibility(userOp.sender, orgId, org, subjectId, userOp.paymasterAndData);
+        } else {
+            subjectKey = _validateSubjectEligibility(userOp.sender, subjectType, subjectId);
+        }
 
         // Validate target/selector rules
         _validateRules(userOp, ruleId, orgId);
@@ -848,6 +891,17 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     }
 
     /**
+     * @notice Set the voucher hat for an org
+     * @dev Voucher hat wearers can sign vouches for new users to onboard gaslessly
+     * @param orgId Organization identifier
+     * @param voucherHatId Hat ID for vouchers (0 to disable vouching)
+     */
+    function setVoucherHat(bytes32 orgId, uint256 voucherHatId) external onlyOrgAdmin(orgId) {
+        _getOrgsStorage()[orgId].voucherHatId = voucherHatId;
+        emit VoucherHatSet(orgId, voucherHatId);
+    }
+
+    /**
      * @notice Configure bounty parameters for an org
      */
     function setBounty(bytes32 orgId, bool enabled, uint96 maxBountyWeiPerOp, uint16 pctBpCap)
@@ -984,6 +1038,16 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      */
     function getOrgConfig(bytes32 orgId) external view returns (OrgConfig memory) {
         return _getOrgsStorage()[orgId];
+    }
+
+    /**
+     * @notice Check if a vouch has been used for an account
+     * @param orgId Organization identifier
+     * @param account The account address that was vouched for
+     * @return True if the vouch has been used
+     */
+    function isVouchUsed(bytes32 orgId, address account) external view returns (bool) {
+        return _getUsedVouchesStorage()[orgId][account];
     }
 
     /**
@@ -1147,6 +1211,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
     }
 
+    function _getUsedVouchesStorage() private pure returns (mapping(bytes32 => mapping(address => bool)) storage $) {
+        assembly {
+            $.slot := USEDVOUCHES_STORAGE_LOCATION
+        }
+    }
+
     // ============ Public Getters ============
 
     /**
@@ -1239,6 +1309,69 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
     }
 
+    /**
+     * @notice Validate vouched eligibility for gasless onboarding
+     * @dev Verifies a vouch signature from a voucher hat wearer
+     *
+     *      Vouch paymasterAndData format (157 bytes total):
+     *      [paymaster(20) | version(1) | orgId(32) | subjectType(1) | voucherAddr(20) | ruleId(4) | mailboxCommit(8) | expiry(6) | signature(65)]
+     *
+     *      The voucher signs: keccak256(abi.encodePacked(orgId, account, expiry, chainId))
+     *
+     * @param account The account being created (sender)
+     * @param orgId The organization identifier
+     * @param org The org config (for voucher hat)
+     * @param subjectId The voucher address (packed as bytes20)
+     * @param paymasterAndData Full paymaster data including vouch signature
+     * @return subjectKey The subject key for budget tracking
+     */
+    function _validateVouchedEligibility(
+        address account,
+        bytes32 orgId,
+        OrgConfig storage org,
+        bytes20 subjectId,
+        bytes calldata paymasterAndData
+    ) private returns (bytes32 subjectKey) {
+        // Check voucher hat is configured
+        if (org.voucherHatId == 0) revert VoucherHatNotSet();
+
+        // Extract voucher address from subjectId
+        address voucher = address(subjectId);
+
+        // Verify voucher wears the voucher hat
+        if (!IHats(_getMainStorage().hats).isWearerOfHat(voucher, org.voucherHatId)) {
+            revert VoucherNotAuthorized();
+        }
+
+        // Check vouch hasn't been used (account address is the natural nonce)
+        mapping(bytes32 => mapping(address => bool)) storage usedVouches = _getUsedVouchesStorage();
+        if (usedVouches[orgId][account]) revert VouchAlreadyUsed();
+
+        // Extract vouch data from paymasterAndData
+        if (paymasterAndData.length < VOUCH_DATA_MIN_LENGTH) revert InvalidPaymasterData();
+
+        uint48 expiry = uint48(bytes6(paymasterAndData[86:92]));
+        bytes memory signature = paymasterAndData[92:157];
+
+        // Check expiry
+        if (block.timestamp > expiry) revert VouchExpired();
+
+        // Verify signature
+        bytes32 vouchHash = keccak256(abi.encodePacked(orgId, account, expiry, block.chainid));
+        bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(vouchHash);
+
+        address recoveredSigner = ECDSA.recover(ethSignedHash, signature);
+        if (recoveredSigner != voucher) revert InvalidVouchSignature();
+
+        // Mark vouch as used
+        usedVouches[orgId][account] = true;
+
+        // Subject key based on voucher (for budget tracking against voucher's allowance)
+        subjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, subjectId));
+
+        emit VouchUsed(orgId, account, voucher);
+    }
+
     function _validateRules(PackedUserOperation calldata userOp, uint32 ruleId, bytes32 orgId) private view {
         (address target, bytes4 selector) = _extractTargetSelector(userOp, ruleId);
 
@@ -1264,22 +1397,37 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         if (callData.length < 4) revert InvalidPaymasterData();
 
         if (ruleId == RULE_ID_GENERIC) {
-            // SimpleAccount.execute pattern
+            // ERC-4337 account execute patterns (SimpleAccount, PasskeyAccount, etc.)
             selector = bytes4(callData[0:4]);
 
-            // Check for execute(address,uint256,bytes)
+            // Check for execute(address,uint256,bytes) - 0xb61d27f6
+            // Used by SimpleAccount, PasskeyAccount, and most ERC-4337 wallets
             if (selector == 0xb61d27f6 && callData.length >= 0x64) {
                 assembly {
+                    // Extract target address at offset 0x04
                     target := calldataload(add(callData.offset, 0x04))
+
+                    // Read the bytes data offset pointer at position 0x44
+                    // This offset is relative to the start of params (0x04)
                     let dataOffset := calldataload(add(callData.offset, 0x44))
-                    if lt(add(dataOffset, 0x64), callData.length) {
-                        selector := calldataload(add(add(callData.offset, 0x64), dataOffset))
+
+                    // Calculate where the actual bytes data starts:
+                    // 0x04 (params start) + dataOffset + 0x20 (skip length field)
+                    let dataStart := add(add(0x04, dataOffset), 0x20)
+
+                    // Only extract inner selector if data is within bounds
+                    if lt(dataStart, callData.length) {
+                        selector := calldataload(add(callData.offset, dataStart))
                     }
                 }
                 selector = bytes4(selector);
             }
-            // Check for executeBatch
+            // Check for executeBatch(address[],bytes[]) - 0x18dfb3c7 (SimpleAccount pattern)
             else if (selector == 0x18dfb3c7) {
+                target = userOp.sender;
+            }
+            // Check for executeBatch(address[],uint256[],bytes[]) - 0x47e1da2a (PasskeyAccount pattern)
+            else if (selector == 0x47e1da2a) {
                 target = userOp.sender;
             } else {
                 target = userOp.sender;

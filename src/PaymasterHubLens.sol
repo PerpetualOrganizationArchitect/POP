@@ -238,22 +238,37 @@ contract PaymasterHubLens {
         if (callData.length < 4) revert InvalidPaymasterData();
 
         if (ruleId == RULE_ID_GENERIC) {
-            // SimpleAccount.execute pattern
+            // ERC-4337 account execute patterns (SimpleAccount, PasskeyAccount, etc.)
             selector = bytes4(callData[0:4]);
 
-            // Check for execute(address,uint256,bytes)
+            // Check for execute(address,uint256,bytes) - 0xb61d27f6
+            // Used by SimpleAccount, PasskeyAccount, and most ERC-4337 wallets
             if (selector == 0xb61d27f6 && callData.length >= 0x64) {
                 assembly {
+                    // Extract target address at offset 0x04
                     target := calldataload(add(callData.offset, 0x04))
+
+                    // Read the bytes data offset pointer at position 0x44
+                    // This offset is relative to the start of params (0x04)
                     let dataOffset := calldataload(add(callData.offset, 0x44))
-                    if lt(add(dataOffset, 0x64), callData.length) {
-                        selector := calldataload(add(add(callData.offset, 0x64), dataOffset))
+
+                    // Calculate where the actual bytes data starts:
+                    // 0x04 (params start) + dataOffset + 0x20 (skip length field)
+                    let dataStart := add(add(0x04, dataOffset), 0x20)
+
+                    // Only extract inner selector if data is within bounds
+                    if lt(dataStart, callData.length) {
+                        selector := calldataload(add(callData.offset, dataStart))
                     }
                 }
                 selector = bytes4(selector);
             }
-            // Check for executeBatch
+            // Check for executeBatch(address[],bytes[]) - 0x18dfb3c7 (SimpleAccount pattern)
             else if (selector == 0x18dfb3c7) {
+                target = userOp.sender;
+            }
+            // Check for executeBatch(address[],uint256[],bytes[]) - 0x47e1da2a (PasskeyAccount pattern)
+            else if (selector == 0x47e1da2a) {
                 target = userOp.sender;
             } else {
                 target = userOp.sender;
