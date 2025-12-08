@@ -14,6 +14,7 @@ import {Executor, IExecutor} from "../src/Executor.sol";
 import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
 import {OrgRegistry} from "../src/OrgRegistry.sol";
 import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
+import {ModulesFactory} from "../src/factories/ModulesFactory.sol";
 
 /**
  * @title RunOrgActions
@@ -61,6 +62,7 @@ contract RunOrgActions is Script {
         RoleAssignmentsConfig roleAssignments;
         address[] ddInitialTargets;
         bool withPaymaster;
+        bool withEducationHub; // Whether to deploy EducationHub (default: true)
     }
 
     struct QuorumConfig {
@@ -586,6 +588,13 @@ contract RunOrgActions is Script {
         config.autoUpgrade = vm.parseJsonBool(configJson, ".autoUpgrade");
         config.withPaymaster = vm.parseJsonBool(configJson, ".withPaymaster");
 
+        // Parse withEducationHub (default to true for backward compatibility)
+        try vm.parseJsonBool(configJson, ".withEducationHub") returns (bool withEduHub) {
+            config.withEducationHub = withEduHub;
+        } catch {
+            config.withEducationHub = true; // Default to enabled for backward compatibility
+        }
+
         // Parse quorum
         config.quorum.hybrid = uint8(vm.parseJsonUint(configJson, ".quorum.hybrid"));
         config.quorum.directDemocracy = uint8(vm.parseJsonUint(configJson, ".quorum.directDemocracy"));
@@ -824,6 +833,9 @@ contract RunOrgActions is Script {
             ddVotingRolesBitmap: _roleArrayToBitmap(config.roleAssignments.ddVotingRoles),
             ddCreatorRolesBitmap: _roleArrayToBitmap(config.roleAssignments.ddCreatorRoles)
         });
+
+        // Build education hub config
+        params.educationHubConfig = ModulesFactory.EducationHubConfig({enabled: config.withEducationHub});
 
         return params;
     }

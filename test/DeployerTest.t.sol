@@ -168,7 +168,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -348,7 +349,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -404,7 +406,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -731,7 +734,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -861,7 +865,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         deployer.deployFullOrg(params);
@@ -900,7 +905,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -982,7 +988,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1251,7 +1258,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1464,7 +1472,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1625,7 +1634,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1760,7 +1770,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: _buildDefaultRoleAssignments(),
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         vm.expectRevert(OrgDeployer.InvalidRoleConfiguration.selector);
@@ -2030,7 +2041,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2134,7 +2146,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2299,7 +2312,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -3281,7 +3295,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roleAssignments: roleAssignments,
             passkeyConfig: AccessFactory.PasskeyConfig({
                 enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            })
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
         // Record logs to verify HatCreatedWithEligibility events were emitted
@@ -3338,5 +3353,206 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             EligibilityModule(setup.eligibilityModule).getWearerStatus(address(0x777), newHatId);
         assertTrue(eligible, "Wearer should be eligible by default after registration");
         assertTrue(standing, "Wearer should have good standing by default after registration");
+    }
+
+    /*══════════════════════════════════════════════════════════════════════════════
+                           OPTIONAL EDUCATIONHUB TESTS
+    ══════════════════════════════════════════════════════════════════════════════*/
+
+    // Test: Deploy org without EducationHub
+    function testDeployOrgWithoutEducationHub() public {
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "ADMIN";
+
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default";
+        images[1] = "ipfs://admin";
+
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 0);
+        address[] memory ddTargets = new address[](0);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+
+        bytes32 orgIdNoEdu = keccak256("no-education-hub-org");
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgIdNoEdu,
+            orgName: "No EducationHub Org",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: address(this),
+            deployerUsername: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false})
+        });
+
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
+
+        // Verify educationHub is address(0)
+        assertEq(result.educationHub, address(0), "EducationHub should be address(0) when disabled");
+
+        // Verify other contracts are still deployed
+        assertTrue(result.executor != address(0), "Executor should be deployed");
+        assertTrue(result.taskManager != address(0), "TaskManager should be deployed");
+        assertTrue(result.paymentManager != address(0), "PaymentManager should be deployed");
+        assertTrue(result.participationToken != address(0), "ParticipationToken should be deployed");
+        assertTrue(result.hybridVoting != address(0), "HybridVoting should be deployed");
+        assertTrue(result.quickJoin != address(0), "QuickJoin should be deployed");
+
+        // Verify ParticipationToken.educationHub() returns address(0)
+        assertEq(ParticipationToken(result.participationToken).educationHub(), address(0),
+            "ParticipationToken.educationHub() should return address(0)");
+    }
+
+    // Test: TaskManager can still mint tokens when EducationHub is disabled
+    function testMintingWorksWithoutEducationHub() public {
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "ADMIN";
+
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default";
+        images[1] = "ipfs://admin";
+
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 0);
+        address[] memory ddTargets = new address[](0);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+
+        bytes32 orgIdMint = keccak256("mint-without-edu-org");
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgIdMint,
+            orgName: "Mint Without Edu Org",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: address(this),
+            deployerUsername: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false})
+        });
+
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
+
+        // Verify TaskManager can still mint tokens
+        ParticipationToken token = ParticipationToken(result.participationToken);
+        TaskManager tm = TaskManager(result.taskManager);
+
+        // Create a project and task to test minting
+        address[] memory managers = new address[](0);
+        uint256[] memory emptyHats = new uint256[](0);
+
+        vm.prank(result.executor);
+        bytes32 projectId = tm.createProject(
+            abi.encode("Test Project"),
+            bytes32(0),
+            1000 ether,
+            managers,
+            emptyHats,
+            emptyHats,
+            emptyHats,
+            emptyHats
+        );
+
+        // Mint directly via executor (which is allowed)
+        address recipient = address(0x123);
+        vm.prank(result.executor);
+        token.mint(recipient, 100 ether);
+
+        assertEq(token.balanceOf(recipient), 100 ether, "Executor should be able to mint tokens");
+    }
+
+    // Test: EducationHub can be set later via governance
+    function testEducationHubCanBeSetLater() public {
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "ADMIN";
+
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default";
+        images[1] = "ipfs://admin";
+
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 0);
+        address[] memory ddTargets = new address[](0);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+
+        bytes32 orgIdSetLater = keccak256("set-edu-later-org");
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgIdSetLater,
+            orgName: "Set Edu Later Org",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: address(this),
+            deployerUsername: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            passkeyConfig: AccessFactory.PasskeyConfig({
+                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
+            }),
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false})
+        });
+
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
+
+        // Verify educationHub is initially address(0)
+        ParticipationToken token = ParticipationToken(result.participationToken);
+        assertEq(token.educationHub(), address(0), "EducationHub should initially be address(0)");
+
+        // Set EducationHub later (first setter can set it)
+        address newEducationHub = address(0x456);
+        token.setEducationHub(newEducationHub);
+
+        assertEq(token.educationHub(), newEducationHub, "EducationHub should be set to new address");
+    }
+
+    // Test: Executor can clear EducationHub by setting to address(0)
+    function testExecutorCanClearEducationHub() public {
+        TestOrgSetup memory setup = _createTestOrg("Clear EducationHub Test");
+
+        ParticipationToken token = ParticipationToken(setup.token);
+
+        // Verify educationHub is initially set
+        assertTrue(token.educationHub() != address(0), "EducationHub should initially be set");
+
+        // Executor clears the educationHub
+        vm.prank(setup.exec);
+        token.setEducationHub(address(0));
+
+        assertEq(token.educationHub(), address(0), "EducationHub should be cleared to address(0)");
     }
 }
