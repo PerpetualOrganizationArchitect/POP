@@ -37,6 +37,8 @@ interface IEligibilityModule {
         uint256[] calldata membershipHatIds,
         bool[] calldata combineWithHierarchyFlags
     ) external;
+    // Metadata management
+    function updateHatMetadata(uint256 hatId, string memory name, bytes32 metadataCID) external;
 }
 
 interface IToggleModule {
