@@ -494,7 +494,7 @@ event NewHatProposal(uint256 id, bytes title, bytes32 descriptionHash, uint8 num
 event VoteCast(uint256 indexed id, address indexed voter, uint8[] idxs, uint8[] weights, uint256[] classRawPowers, uint64 timestamp);
 event Winner(uint256 indexed id, uint256 indexed winningIdx, bool valid, bool executed, uint64 timestamp);
 event ProposalExecuted(uint256 indexed id, uint256 indexed winningIdx, uint256 numCalls);
-event ClassesReplaced(uint256 indexed version, bytes32 indexed classesHash, uint256 numClasses, uint64 timestamp);
+event ClassesReplaced(uint256 indexed version, bytes32 indexed classesHash, ClassConfig[] classes, uint64 timestamp);
 ```
 
 ---
