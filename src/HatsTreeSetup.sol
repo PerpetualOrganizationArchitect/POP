@@ -282,8 +282,8 @@ contract HatsTreeSetup {
     /*════════════════  INTERNAL HELPERS  ════════════════*/
 
     /**
-     * @notice Format hat details string with name and optional metadata CID
-     * @param name The role name
+     * @notice Format hat details string - uses CID if provided, otherwise name
+     * @param name The role name (fallback if no CID)
      * @param metadataCID The IPFS CID for extended metadata (bytes32(0) if none)
      * @return The formatted details string
      */
@@ -291,8 +291,7 @@ contract HatsTreeSetup {
         if (metadataCID == bytes32(0)) {
             return name;
         }
-        // Format: "name|0x{cid}" - simple parseable format
-        return string(abi.encodePacked(name, "|", _bytes32ToHexString(metadataCID)));
+        return _bytes32ToHexString(metadataCID);
     }
 
     /**
