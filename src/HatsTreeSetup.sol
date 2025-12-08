@@ -14,6 +14,10 @@ import {RoleConfigStructs} from "./libs/RoleConfigStructs.sol";
  * @dev This contract is deployed temporarily to handle all Hats operations and reduce Deployer size
  */
 contract HatsTreeSetup {
+    /*════════════════  CONSTANTS  ════════════════*/
+
+    bytes16 private constant HEX_DIGITS = "0123456789abcdef";
+
     /*════════════════  SETUP STRUCTS  ════════════════*/
 
     struct SetupResult {
@@ -115,10 +119,11 @@ contract HatsTreeSetup {
                 if (canCreate) {
                     // Create hat with configuration
                     uint32 maxSupply = role.hatConfig.maxSupply == 0 ? type(uint32).max : role.hatConfig.maxSupply;
+                    string memory details = _formatHatDetails(role.name, role.metadataCID);
                     uint256 newHatId = params.hats
                         .createHat(
                             adminHatId,
-                            role.name,
+                            details,
                             maxSupply,
                             params.eligibilityModule,
                             params.toggleModule,
@@ -272,5 +277,37 @@ contract HatsTreeSetup {
         IToggleModule(params.toggleModule).transferAdmin(params.executor);
 
         return result;
+    }
+
+    /*════════════════  INTERNAL HELPERS  ════════════════*/
+
+    /**
+     * @notice Format hat details string with name and optional metadata CID
+     * @param name The role name
+     * @param metadataCID The IPFS CID for extended metadata (bytes32(0) if none)
+     * @return The formatted details string
+     */
+    function _formatHatDetails(string memory name, bytes32 metadataCID) internal pure returns (string memory) {
+        if (metadataCID == bytes32(0)) {
+            return name;
+        }
+        // Format: "name|0x{cid}" - simple parseable format
+        return string(abi.encodePacked(name, "|", _bytes32ToHexString(metadataCID)));
+    }
+
+    /**
+     * @notice Convert bytes32 to hex string with 0x prefix
+     * @param value The bytes32 value to convert
+     * @return The hex string representation
+     */
+    function _bytes32ToHexString(bytes32 value) internal pure returns (string memory) {
+        bytes memory buffer = new bytes(66); // 2 for "0x" + 64 for hex chars
+        buffer[0] = "0";
+        buffer[1] = "x";
+        for (uint256 i = 0; i < 32; i++) {
+            buffer[2 + i * 2] = HEX_DIGITS[uint8(value[i] >> 4)];
+            buffer[3 + i * 2] = HEX_DIGITS[uint8(value[i] & 0x0f)];
+        }
+        return string(buffer);
     }
 }

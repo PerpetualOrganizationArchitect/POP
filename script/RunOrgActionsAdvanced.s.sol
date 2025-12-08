@@ -882,6 +882,7 @@ contract RunOrgActionsAdvanced is Script {
             params.roles[i] = RoleConfigStructs.RoleConfig({
                 name: role.name,
                 image: role.image,
+                metadataCID: bytes32(0),
                 canVote: role.canVote,
                 vouching: RoleConfigStructs.RoleVouchingConfig({
                     enabled: role.vouching.enabled,

@@ -202,6 +202,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles[i] = RoleConfigStructs.RoleConfig({
                 name: names[i],
                 image: images[i],
+                metadataCID: bytes32(0),
                 canVote: canVote[i],
                 vouching: RoleConfigStructs.RoleVouchingConfig({
                     enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false
@@ -1738,6 +1739,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         invalidVoucherRoles[0] = RoleConfigStructs.RoleConfig({
             name: "MEMBER",
             image: "ipfs://member",
+            metadataCID: bytes32(0),
             canVote: true,
             vouching: RoleConfigStructs.RoleVouchingConfig({
                 enabled: true,
@@ -1755,6 +1757,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         invalidVoucherRoles[1] = RoleConfigStructs.RoleConfig({
             name: "ADMIN",
             image: "ipfs://admin",
+            metadataCID: bytes32(0),
             canVote: true,
             vouching: RoleConfigStructs.RoleVouchingConfig({
                 enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false
@@ -1776,6 +1779,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         zeroQuorumRoles[0] = RoleConfigStructs.RoleConfig({
             name: "MEMBER",
             image: "ipfs://member",
+            metadataCID: bytes32(0),
             canVote: true,
             vouching: RoleConfigStructs.RoleVouchingConfig({
                 enabled: true,
@@ -1800,6 +1804,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         selfRefRoles[0] = RoleConfigStructs.RoleConfig({
             name: "MEMBER",
             image: "ipfs://member",
+            metadataCID: bytes32(0),
             canVote: true,
             vouching: RoleConfigStructs.RoleVouchingConfig({
                 enabled: false, quorum: 0, voucherRoleIndex: 0, combineWithHierarchy: false
