@@ -415,6 +415,48 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         }
     }
 
+    /**
+     * @dev Registers multiple hats with metadata in a single call - optimized for HatsTreeSetup
+     * @dev This version also emits HatMetadataUpdated events for subgraph indexing
+     * @param hatIds Array of hat IDs that were created
+     * @param parentHatIds Array of parent hat IDs
+     * @param defaultEligibles Array of default eligibility flags
+     * @param defaultStandings Array of default standing flags
+     * @param names Array of role names for metadata
+     * @param metadataCIDs Array of IPFS CIDs for extended metadata
+     */
+    function batchRegisterHatCreationWithMetadata(
+        uint256[] calldata hatIds,
+        uint256[] calldata parentHatIds,
+        bool[] calldata defaultEligibles,
+        bool[] calldata defaultStandings,
+        string[] calldata names,
+        bytes32[] calldata metadataCIDs
+    ) external onlySuperAdmin {
+        uint256 length = hatIds.length;
+        if (
+            length != parentHatIds.length || length != defaultEligibles.length || length != defaultStandings.length
+                || length != names.length || length != metadataCIDs.length
+        ) {
+            revert ArrayLengthMismatch();
+        }
+
+        Layout storage l = _layout();
+
+        unchecked {
+            for (uint256 i; i < length; ++i) {
+                uint256 hatId = hatIds[i];
+                l.defaultRules[hatId] = WearerRules(_packWearerFlags(defaultEligibles[i], defaultStandings[i]));
+                emit DefaultEligibilityUpdated(hatId, defaultEligibles[i], defaultStandings[i], msg.sender);
+                emit HatCreatedWithEligibility(
+                    msg.sender, parentHatIds[i], hatId, defaultEligibles[i], defaultStandings[i], 0
+                );
+                // Also emit metadata event for subgraph indexing
+                emit HatMetadataUpdated(hatId, names[i], metadataCIDs[i]);
+            }
+        }
+    }
+
     /*═══════════════════════════════════ HAT CREATION ═══════════════════════════════════════*/
 
     function createHatWithEligibility(CreateHatParams calldata params)
