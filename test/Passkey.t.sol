@@ -86,7 +86,6 @@ contract MockExecutor {
 
 contract PasskeyTest is Test {
     /*──────── Constants ────────*/
-    bytes32 constant ORG_ID = keccak256("TEST_ORG");
     bytes32 constant CREDENTIAL_ID = keccak256("test_credential_1");
     bytes32 constant CREDENTIAL_ID_2 = keccak256("test_credential_2");
 
@@ -114,7 +113,7 @@ contract PasskeyTest is Test {
     address attacker = address(0x4);
 
     /*──────── Events ────────*/
-    event CredentialAdded(bytes32 indexed credentialId, bytes32 orgId, uint64 createdAt);
+    event CredentialAdded(bytes32 indexed credentialId, uint64 createdAt);
     event CredentialRemoved(bytes32 indexed credentialId);
     event CredentialStatusChanged(bytes32 indexed credentialId, bool active);
     event GuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
@@ -123,8 +122,8 @@ contract PasskeyTest is Test {
     );
     event RecoveryCompleted(bytes32 indexed recoveryId, bytes32 indexed credentialId);
     event RecoveryCancelled(bytes32 indexed recoveryId);
-    event AccountCreated(address indexed account, bytes32 indexed orgId, bytes32 credentialId, address indexed owner);
-    event OrgRegistered(bytes32 indexed orgId, uint8 maxCredentials, address guardian, uint48 recoveryDelay);
+    event AccountCreated(address indexed account, bytes32 credentialId, address indexed owner);
+    event GlobalConfigUpdated(address indexed poaGuardian, uint48 recoveryDelay, uint8 maxCredentials);
 
     /*──────── Setup ────────*/
     function setUp() public {
@@ -141,11 +140,13 @@ contract PasskeyTest is Test {
         accountBeacon = new UpgradeableBeacon(address(accountImpl), owner);
         factoryBeacon = new UpgradeableBeacon(address(factoryImpl), owner);
 
-        // Deploy factory via beacon proxy
+        // Deploy factory via beacon proxy with universal config
         bytes memory factoryInitData = abi.encodeWithSelector(
             PasskeyAccountFactory.initialize.selector,
-            owner, // executor
-            address(accountBeacon) // account beacon
+            owner, // poaManager
+            address(accountBeacon), // account beacon
+            guardian, // poaGuardian
+            uint48(7 days) // recoveryDelay
         );
         factory = PasskeyAccountFactory(address(new BeaconProxy(address(factoryBeacon), factoryInitData)));
 
@@ -159,9 +160,6 @@ contract PasskeyTest is Test {
         accountRegistry = new UniversalAccountRegistry();
         accountRegistry.initialize(owner);
 
-        // Register the org in factory
-        factory.registerOrg(ORG_ID, 5, guardian, 7 days);
-
         vm.stopPrank();
     }
 
@@ -170,44 +168,66 @@ contract PasskeyTest is Test {
     ════════════════════════════════════════════════════════════════════*/
 
     function testFactoryInitialization() public view {
-        assertEq(factory.executor(), owner);
+        assertEq(factory.poaManager(), owner);
         assertEq(factory.accountBeacon(), address(accountBeacon));
+
+        PasskeyAccountFactory.GlobalConfig memory config = factory.getGlobalConfig();
+        assertEq(config.poaGuardian, guardian);
+        assertEq(config.recoveryDelay, 7 days);
+        assertEq(config.maxCredentialsPerAccount, 10); // Default
+        assertFalse(config.paused);
     }
 
-    function testFactoryRegisterOrg() public {
+    function testFactorySetPoaGuardian() public {
         vm.startPrank(owner);
 
-        bytes32 newOrgId = keccak256("NEW_ORG");
+        address newGuardian = address(0x999);
 
-        vm.expectEmit(true, false, false, true);
-        emit OrgRegistered(newOrgId, 10, guardian, 14 days);
+        factory.setPoaGuardian(newGuardian);
 
-        factory.registerOrg(newOrgId, 10, guardian, 14 days);
-
-        PasskeyAccountFactory.OrgConfig memory config = factory.getOrgConfig(newOrgId);
-        assertEq(config.maxCredentialsPerAccount, 10);
-        assertEq(config.defaultGuardian, guardian);
-        assertEq(config.recoveryDelay, 14 days);
-        assertTrue(config.enabled);
+        PasskeyAccountFactory.GlobalConfig memory config = factory.getGlobalConfig();
+        assertEq(config.poaGuardian, newGuardian);
 
         vm.stopPrank();
     }
 
-    function testFactoryRegisterOrgUnauthorized() public {
+    function testFactorySetRecoveryDelay() public {
+        vm.startPrank(owner);
+
+        factory.setRecoveryDelay(14 days);
+
+        PasskeyAccountFactory.GlobalConfig memory config = factory.getGlobalConfig();
+        assertEq(config.recoveryDelay, 14 days);
+
+        vm.stopPrank();
+    }
+
+    function testFactorySetMaxCredentials() public {
+        vm.startPrank(owner);
+
+        factory.setMaxCredentials(15);
+
+        PasskeyAccountFactory.GlobalConfig memory config = factory.getGlobalConfig();
+        assertEq(config.maxCredentialsPerAccount, 15);
+
+        vm.stopPrank();
+    }
+
+    function testFactorySetPoaGuardianUnauthorized() public {
         vm.prank(attacker);
         vm.expectRevert(PasskeyAccountFactory.Unauthorized.selector);
-        factory.registerOrg(keccak256("ATTACKER_ORG"), 5, guardian, 7 days);
+        factory.setPoaGuardian(guardian);
     }
 
     function testFactoryCreateAccount() public {
-        vm.prank(user);
+        // Compute expected address before the prank
+        address expectedAccount = factory.getAddress(CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
 
         vm.expectEmit(true, true, false, true);
-        emit AccountCreated(
-            factory.getAddress(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0), ORG_ID, CREDENTIAL_ID, user
-        );
+        emit AccountCreated(expectedAccount, CREDENTIAL_ID, user);
 
-        address account = factory.createAccount(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
+        vm.prank(user);
+        address account = factory.createAccount(CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
 
         assertTrue(account != address(0));
         assertTrue(factory.isDeployedAccount(account));
@@ -224,11 +244,11 @@ contract PasskeyTest is Test {
 
     function testFactoryCreateAccountDeterministic() public {
         // Get predicted address
-        address predicted = factory.getAddress(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
+        address predicted = factory.getAddress(CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
 
         // Create account
         vm.prank(user);
-        address actual = factory.createAccount(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
+        address actual = factory.createAccount(CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
 
         assertEq(actual, predicted);
     }
@@ -236,8 +256,8 @@ contract PasskeyTest is Test {
     function testFactoryCreateAccountSameTwice() public {
         vm.startPrank(user);
 
-        address first = factory.createAccount(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
-        address second = factory.createAccount(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
+        address first = factory.createAccount(CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
+        address second = factory.createAccount(CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
 
         // Should return same address (idempotent)
         assertEq(first, second);
@@ -245,49 +265,30 @@ contract PasskeyTest is Test {
         vm.stopPrank();
     }
 
-    function testFactoryCreateAccountDisabledOrg() public {
+    function testFactoryCreateAccountWhenPaused() public {
         vm.prank(owner);
-        factory.setOrgEnabled(ORG_ID, false);
+        factory.setPaused(true);
 
         vm.prank(user);
-        vm.expectRevert(PasskeyAccountFactory.OrgNotEnabled.selector);
-        factory.createAccount(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
+        vm.expectRevert(PasskeyAccountFactory.Paused.selector);
+        factory.createAccount(CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
     }
 
-    function testFactoryCreateAccountUnregisteredOrg() public {
-        vm.prank(user);
-        vm.expectRevert(PasskeyAccountFactory.OrgNotEnabled.selector);
-        factory.createAccount(keccak256("UNKNOWN_ORG"), CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
-    }
-
-    function testFactoryUpdateOrgConfig() public {
+    function testFactorySetPoaManager() public {
         vm.startPrank(owner);
 
-        factory.updateOrgConfig(ORG_ID, 8, address(0x999), 10 days);
+        address newManager = address(0x888);
+        factory.setPoaManager(newManager);
 
-        PasskeyAccountFactory.OrgConfig memory config = factory.getOrgConfig(ORG_ID);
-        assertEq(config.maxCredentialsPerAccount, 8);
-        assertEq(config.defaultGuardian, address(0x999));
-        assertEq(config.recoveryDelay, 10 days);
+        assertEq(factory.poaManager(), newManager);
 
         vm.stopPrank();
     }
 
-    function testFactorySetExecutor() public {
-        vm.startPrank(owner);
-
-        address newExecutor = address(0x888);
-        factory.setExecutor(newExecutor);
-
-        assertEq(factory.executor(), newExecutor);
-
-        vm.stopPrank();
-    }
-
-    function testFactorySetExecutorZeroAddress() public {
+    function testFactorySetPoaManagerZeroAddress() public {
         vm.prank(owner);
         vm.expectRevert(PasskeyAccountFactory.ZeroAddress.selector);
-        factory.setExecutor(address(0));
+        factory.setPoaManager(address(0));
     }
 
     /*════════════════════════════════════════════════════════════════════
@@ -296,7 +297,7 @@ contract PasskeyTest is Test {
 
     function _createAccount() internal returns (PasskeyAccount) {
         vm.prank(user);
-        address account = factory.createAccount(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
+        address account = factory.createAccount(CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
         return PasskeyAccount(payable(account));
     }
 
@@ -314,7 +315,6 @@ contract PasskeyTest is Test {
         IPasskeyAccount.PasskeyCredential memory cred = account.getCredential(CREDENTIAL_ID);
         assertEq(cred.publicKeyX, PUB_KEY_X);
         assertEq(cred.publicKeyY, PUB_KEY_Y);
-        assertEq(cred.orgId, ORG_ID);
         assertTrue(cred.active);
         assertEq(cred.signCount, 0);
     }
@@ -325,7 +325,7 @@ contract PasskeyTest is Test {
         // Try to add credential directly (should fail)
         vm.prank(user);
         vm.expectRevert(IPasskeyAccount.OnlySelf.selector);
-        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y, ORG_ID);
+        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y);
     }
 
     function testAccountAddCredentialViaSelf() public {
@@ -335,14 +335,12 @@ contract PasskeyTest is Test {
         vm.prank(address(account));
 
         vm.expectEmit(true, false, false, true);
-        emit CredentialAdded(CREDENTIAL_ID_2, ORG_ID, uint64(block.timestamp));
+        emit CredentialAdded(CREDENTIAL_ID_2, uint64(block.timestamp));
 
-        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y, ORG_ID);
+        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y);
 
         bytes32[] memory credIds = account.getCredentialIds();
         assertEq(credIds.length, 2);
-
-        assertEq(account.getOrgCredentialCount(ORG_ID), 2);
     }
 
     function testAccountAddCredentialDuplicate() public {
@@ -350,7 +348,7 @@ contract PasskeyTest is Test {
 
         vm.prank(address(account));
         vm.expectRevert(IPasskeyAccount.CredentialExists.selector);
-        account.addCredential(CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, ORG_ID);
+        account.addCredential(CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y);
     }
 
     function testAccountRemoveCredential() public {
@@ -358,7 +356,7 @@ contract PasskeyTest is Test {
 
         // Add a second credential first
         vm.prank(address(account));
-        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y, ORG_ID);
+        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y);
 
         // Now remove the first one
         vm.prank(address(account));
@@ -627,49 +625,24 @@ contract PasskeyTest is Test {
     }
 
     /*════════════════════════════════════════════════════════════════════
-                        PER-ORG CREDENTIAL LIMIT TESTS
+                        GLOBAL CREDENTIAL LIMIT TESTS
     ════════════════════════════════════════════════════════════════════*/
 
-    function testMaxCredentialsPerOrg() public {
-        // Update org config to have max 2 credentials
+    function testMaxCredentialsGlobal() public {
+        // Update global config to have max 2 credentials
         vm.prank(owner);
-        factory.updateOrgConfig(ORG_ID, 2, guardian, 7 days);
+        factory.setMaxCredentials(2);
 
         PasskeyAccount account = _createAccount();
 
         // Add second credential (should work)
         vm.prank(address(account));
-        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y, ORG_ID);
+        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y);
 
         // Try to add third credential (should fail)
         vm.prank(address(account));
         vm.expectRevert(IPasskeyAccount.MaxCredentialsReached.selector);
-        account.addCredential(keccak256("cred3"), PUB_KEY_X, PUB_KEY_Y, ORG_ID);
-    }
-
-    function testCredentialsFromDifferentOrgs() public {
-        // Register a second org
-        vm.prank(owner);
-        bytes32 org2 = keccak256("ORG_2");
-        factory.registerOrg(org2, 5, guardian, 7 days);
-
-        // Update first org to have max 1 credential
-        vm.prank(owner);
-        factory.updateOrgConfig(ORG_ID, 1, guardian, 7 days);
-
-        PasskeyAccount account = _createAccount();
-
-        // Can't add more to first org
-        vm.prank(address(account));
-        vm.expectRevert(IPasskeyAccount.MaxCredentialsReached.selector);
-        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y, ORG_ID);
-
-        // But CAN add to second org
-        vm.prank(address(account));
-        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y, org2);
-
-        assertEq(account.getOrgCredentialCount(ORG_ID), 1);
-        assertEq(account.getOrgCredentialCount(org2), 1);
+        account.addCredential(keccak256("cred3"), PUB_KEY_X, PUB_KEY_Y);
     }
 
     /*════════════════════════════════════════════════════════════════════
@@ -696,9 +669,8 @@ contract PasskeyTest is Test {
 
         quickJoin = QuickJoin(address(new BeaconProxy(address(quickJoinBeacon), qjInitData)));
 
-        // Configure passkey factory in QuickJoin (requires executor permissions)
-        quickJoin.setPasskeyFactory(address(factory));
-        quickJoin.setOrgId(ORG_ID);
+        // Configure universal passkey factory in QuickJoin
+        quickJoin.setUniversalFactory(address(factory));
 
         vm.stopPrank();
 
@@ -840,35 +812,31 @@ contract PasskeyTest is Test {
                         VIEW FUNCTION TESTS
     ════════════════════════════════════════════════════════════════════*/
 
-    function testGetMaxCredentialsPerOrg() public view {
-        uint8 max = factory.getMaxCredentialsPerOrg(ORG_ID);
-        assertEq(max, 5);
-    }
-
-    function testGetMaxCredentialsPerOrgUnregistered() public view {
-        uint8 max = factory.getMaxCredentialsPerOrg(keccak256("UNREGISTERED"));
-        assertEq(max, 5); // Default value
+    function testGetMaxCredentials() public view {
+        PasskeyAccountFactory.GlobalConfig memory config = factory.getGlobalConfig();
+        assertEq(config.maxCredentialsPerAccount, 10); // Default
     }
 
     function testQuickJoinViewFunctions() public {
         QuickJoin qj = _setupQuickJoin();
 
-        assertEq(address(qj.passkeyFactory()), address(factory));
-        assertEq(qj.orgId(), ORG_ID);
+        assertEq(address(qj.universalFactory()), address(factory));
     }
 
     /*════════════════════════════════════════════════════════════════════
                         EDGE CASES AND SECURITY TESTS
     ════════════════════════════════════════════════════════════════════*/
 
-    function testFactoryInitializeZeroExecutor() public {
+    function testFactoryInitializeZeroPoaManager() public {
         vm.expectRevert(PasskeyAccountFactory.ZeroAddress.selector);
         new BeaconProxy(
             address(factoryBeacon),
             abi.encodeWithSelector(
                 PasskeyAccountFactory.initialize.selector,
-                address(0), // Zero executor
-                address(accountBeacon)
+                address(0), // Zero poaManager
+                address(accountBeacon),
+                guardian,
+                uint48(7 days)
             )
         );
     }
@@ -880,7 +848,9 @@ contract PasskeyTest is Test {
             abi.encodeWithSelector(
                 PasskeyAccountFactory.initialize.selector,
                 owner,
-                address(0) // Zero beacon
+                address(0), // Zero beacon
+                guardian,
+                uint48(7 days)
             )
         );
     }
@@ -892,7 +862,6 @@ contract PasskeyTest is Test {
             CREDENTIAL_ID,
             PUB_KEY_X,
             PUB_KEY_Y,
-            ORG_ID,
             guardian,
             7 days
         );
@@ -908,7 +877,6 @@ contract PasskeyTest is Test {
             CREDENTIAL_ID,
             bytes32(0), // Zero public key X
             PUB_KEY_Y,
-            ORG_ID,
             guardian,
             7 days
         );
@@ -922,7 +890,7 @@ contract PasskeyTest is Test {
 
         // Add second credential so we can attempt removal
         vm.prank(address(account));
-        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y, ORG_ID);
+        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y);
 
         vm.prank(address(account));
         vm.expectRevert(IPasskeyAccount.CredentialNotFound.selector);
@@ -981,37 +949,16 @@ contract PasskeyTest is Test {
         account.cancelRecovery(keccak256("nonexistent_recovery"));
     }
 
-    function testMultipleOrgCredentialTracking() public {
-        // Register multiple orgs
-        vm.startPrank(owner);
-        bytes32 org1 = keccak256("ORG_1");
-        bytes32 org2 = keccak256("ORG_2");
-        bytes32 org3 = keccak256("ORG_3");
+    function testMultipleCredentials() public {
+        PasskeyAccount account = _createAccount();
 
-        factory.registerOrg(org1, 2, guardian, 7 days);
-        factory.registerOrg(org2, 2, guardian, 7 days);
-        factory.registerOrg(org3, 2, guardian, 7 days);
+        // Add more credentials
+        vm.startPrank(address(account));
+        account.addCredential(keccak256("cred2"), PUB_KEY_X, PUB_KEY_Y);
+        account.addCredential(keccak256("cred3"), PUB_KEY_X, PUB_KEY_Y);
         vm.stopPrank();
 
-        // Create account for org1
-        vm.prank(user);
-        address accountAddr = factory.createAccount(org1, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
-        PasskeyAccount account = PasskeyAccount(payable(accountAddr));
-
-        // Add credential for org2
-        vm.prank(address(account));
-        account.addCredential(keccak256("cred_org2_1"), PUB_KEY_X, PUB_KEY_Y, org2);
-
-        // Add credential for org3
-        vm.prank(address(account));
-        account.addCredential(keccak256("cred_org3_1"), PUB_KEY_X, PUB_KEY_Y, org3);
-
-        // Verify counts
-        assertEq(account.getOrgCredentialCount(org1), 1);
-        assertEq(account.getOrgCredentialCount(org2), 1);
-        assertEq(account.getOrgCredentialCount(org3), 1);
-
-        // Total credentials
+        // Verify total credentials
         assertEq(account.getCredentialIds().length, 3);
     }
 
@@ -1049,36 +996,6 @@ contract PasskeyTest is Test {
         vm.prank(owner);
         vm.expectRevert(QuickJoin.AccountAlreadyRegistered.selector);
         qj.quickJoinWithPasskeyMasterDeploy("seconduser", enrollment);
-    }
-
-    /*════════════════════════════════════════════════════════════════════
-                    RECOVERY CREDENTIAL ORG TRACKING TESTS
-    ════════════════════════════════════════════════════════════════════*/
-
-    function testRecoveryCredentialHasNoOrgBinding() public {
-        PasskeyAccount account = _createAccount();
-
-        bytes32 newCredId = keccak256("recovery_credential");
-        bytes32 newPubKeyX = keccak256("new_x");
-        bytes32 newPubKeyY = keccak256("new_y");
-
-        // Initiate recovery
-        vm.prank(guardian);
-        account.initiateRecovery(newCredId, newPubKeyX, newPubKeyY);
-
-        bytes32 recoveryId = keccak256(abi.encodePacked(newCredId, block.timestamp, guardian));
-
-        // Complete after delay
-        vm.warp(block.timestamp + 7 days + 1);
-        account.completeRecovery(recoveryId);
-
-        // Verify recovery credential has no org binding
-        IPasskeyAccount.PasskeyCredential memory cred = account.getCredential(newCredId);
-        assertEq(cred.orgId, bytes32(0));
-
-        // Verify it doesn't count toward org credential count
-        assertEq(account.getOrgCredentialCount(ORG_ID), 1); // Only original credential
-        assertEq(account.getOrgCredentialCount(bytes32(0)), 0); // Null org doesn't track
     }
 
     /*════════════════════════════════════════════════════════════════════

@@ -166,9 +166,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -348,9 +346,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -405,9 +401,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -733,9 +727,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -864,9 +856,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -904,9 +894,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -987,9 +975,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -1257,9 +1243,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -1471,9 +1455,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -1633,9 +1615,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -1769,9 +1749,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: new address[](0),
             roles: emptyRoles,
             roleAssignments: _buildDefaultRoleAssignments(),
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -2044,9 +2022,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -2149,9 +2125,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -2315,9 +2289,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -3298,9 +3270,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: roles,
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
         });
 
@@ -3398,9 +3368,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false})
         });
 
@@ -3459,9 +3427,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false})
         });
 
@@ -3522,9 +3488,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
-            passkeyConfig: AccessFactory.PasskeyConfig({
-                enabled: false, maxCredentialsPerAccount: 0, defaultGuardian: address(0), recoveryDelay: 0
-            }),
+            passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false})
         });
 

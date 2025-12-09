@@ -21,8 +21,8 @@ interface IExecutorHatMinter {
     function mintHatsForUser(address user, uint256[] calldata hatIds) external;
 }
 
-interface IPasskeyAccountFactory {
-    function createAccount(bytes32 orgId, bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
+interface IUniversalPasskeyAccountFactory {
+    function createAccount(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
         external
         returns (address account);
 }
@@ -51,8 +51,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         address masterDeployAddress;
         address executor;
         uint256[] memberHatIds; // hat IDs to mint when users join
-        IPasskeyAccountFactory passkeyFactory; // Factory for passkey accounts
-        bytes32 orgId; // Organization ID for passkey account creation
+        IUniversalPasskeyAccountFactory universalFactory; // Universal factory for passkey accounts
     }
 
     /* ───────── Passkey Enrollment Struct ──────── */
@@ -78,8 +77,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     event MemberHatIdsUpdated(uint256[] hatIds);
     event QuickJoined(address indexed user, bool usernameCreated, uint256[] hatIds);
     event QuickJoinedByMaster(address indexed master, address indexed user, bool usernameCreated, uint256[] hatIds);
-    event PasskeyFactoryUpdated(address indexed passkeyFactory);
-    event OrgIdUpdated(bytes32 indexed orgId);
+    event UniversalFactoryUpdated(address indexed universalFactory);
     event QuickJoinedWithPasskey(
         address indexed account, string username, bytes32 indexed credentialId, uint256[] hatIds
     );
@@ -165,14 +163,9 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         emit ExecutorUpdated(newExec);
     }
 
-    function setPasskeyFactory(address factory) external onlyExecutor {
-        _layout().passkeyFactory = IPasskeyAccountFactory(factory);
-        emit PasskeyFactoryUpdated(factory);
-    }
-
-    function setOrgId(bytes32 orgId_) external onlyExecutor {
-        _layout().orgId = orgId_;
-        emit OrgIdUpdated(orgId_);
+    function setUniversalFactory(address factory) external onlyExecutor {
+        _layout().universalFactory = IUniversalPasskeyAccountFactory(factory);
+        emit UniversalFactoryUpdated(factory);
     }
 
     /* ───────── Internal helper ─────── */
@@ -231,13 +224,13 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         returns (address account)
     {
         Layout storage l = _layout();
-        if (address(l.passkeyFactory) == address(0)) revert PasskeyFactoryNotSet();
+        if (address(l.universalFactory) == address(0)) revert PasskeyFactoryNotSet();
         if (bytes(username).length == 0) revert NoUsername();
         if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
-        // 1. Create PasskeyAccount via factory (returns existing if already deployed)
-        account = l.passkeyFactory
-            .createAccount(l.orgId, passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
+        // 1. Create PasskeyAccount via universal factory (returns existing if already deployed)
+        account = l.universalFactory
+            .createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
 
         // 2. Register username to the account
         // Revert if account already has a username (prevents duplicate enrollment attempts)
@@ -266,13 +259,13 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         returns (address account)
     {
         Layout storage l = _layout();
-        if (address(l.passkeyFactory) == address(0)) revert PasskeyFactoryNotSet();
+        if (address(l.universalFactory) == address(0)) revert PasskeyFactoryNotSet();
         if (bytes(username).length == 0) revert NoUsername();
         if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
-        // 1. Create PasskeyAccount via factory (returns existing if already deployed)
-        account = l.passkeyFactory
-            .createAccount(l.orgId, passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
+        // 1. Create PasskeyAccount via universal factory (returns existing if already deployed)
+        account = l.universalFactory
+            .createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
 
         // 2. Register username to the account
         // Revert if account already has a username (prevents duplicate enrollment attempts)
@@ -340,11 +333,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         return HatManager.isHatInArray(_layout().memberHatIds, hatId);
     }
 
-    function passkeyFactory() external view returns (IPasskeyAccountFactory) {
-        return _layout().passkeyFactory;
-    }
-
-    function orgId() external view returns (bytes32) {
-        return _layout().orgId;
+    function universalFactory() external view returns (IUniversalPasskeyAccountFactory) {
+        return _layout().universalFactory;
     }
 }
