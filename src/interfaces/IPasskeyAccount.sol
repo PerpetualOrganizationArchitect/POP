@@ -15,7 +15,6 @@ interface IPasskeyAccount {
      * @param publicKeyY P256 public key Y coordinate
      * @param createdAt Timestamp when credential was registered
      * @param signCount Last known signature count (anti-replay)
-     * @param orgId Organization ID this credential was created for
      * @param active Whether this credential is currently active
      */
     struct PasskeyCredential {
@@ -23,7 +22,6 @@ interface IPasskeyAccount {
         bytes32 publicKeyY;
         uint64 createdAt;
         uint32 signCount;
-        bytes32 orgId;
         bool active;
     }
 
@@ -46,7 +44,7 @@ interface IPasskeyAccount {
     /*──────────────────────────── Events ───────────────────────────────*/
 
     /// @notice Emitted when a new credential is added
-    event CredentialAdded(bytes32 indexed credentialId, bytes32 orgId, uint64 createdAt);
+    event CredentialAdded(bytes32 indexed credentialId, uint64 createdAt);
 
     /// @notice Emitted when a credential is removed
     event CredentialRemoved(bytes32 indexed credentialId);
@@ -100,7 +98,7 @@ interface IPasskeyAccount {
     /// @notice Thrown when credential is not active
     error CredentialNotActive();
 
-    /// @notice Thrown when max credentials per org is reached
+    /// @notice Thrown when max credentials is reached
     error MaxCredentialsReached();
 
     /// @notice Thrown when trying to remove the last credential
@@ -143,13 +141,6 @@ interface IPasskeyAccount {
     function getCredentialIds() external view returns (bytes32[] memory credentialIds);
 
     /**
-     * @notice Get the number of credentials for an org
-     * @param orgId The organization ID
-     * @return count Number of credentials for this org
-     */
-    function getOrgCredentialCount(bytes32 orgId) external view returns (uint8 count);
-
-    /**
      * @notice Get the guardian address
      * @return guardian The guardian address
      */
@@ -181,10 +172,9 @@ interface IPasskeyAccount {
      * @param credentialId Unique identifier for the credential (hash of WebAuthn credentialId)
      * @param pubKeyX P256 public key X coordinate
      * @param pubKeyY P256 public key Y coordinate
-     * @param orgId Organization this credential is for
      * @dev Only callable via UserOp (self-call through EntryPoint)
      */
-    function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, bytes32 orgId) external;
+    function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY) external;
 
     /**
      * @notice Remove a passkey credential
@@ -231,11 +221,6 @@ interface IPasskeyAccount {
      * @notice Complete a pending recovery
      * @param recoveryId The recovery request ID to complete
      * @dev Anyone can call after delay passes.
-     *
-     *      IMPORTANT: Recovery credentials are added with orgId = bytes32(0) and do NOT
-     *      count toward the per-org credential limit. This is intentional behavior to ensure
-     *      recovery always succeeds regardless of org credential limits. The credential can
-     *      later be associated with an org by the account owner if needed.
      */
     function completeRecovery(bytes32 recoveryId) external;
 

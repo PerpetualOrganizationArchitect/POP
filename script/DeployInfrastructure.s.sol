@@ -56,6 +56,9 @@ contract DeployInfrastructure is Script {
     // EntryPoint v0.7 (canonical address on all chains)
     address public constant ENTRY_POINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
 
+    // POA Guardian address (for universal passkey account recovery)
+    address public constant POA_GUARDIAN = address(0); // TODO: Set to actual POA guardian multisig
+
     /*═══════════════════════════ STORAGE ═══════════════════════════*/
 
     // Core infrastructure
@@ -65,6 +68,7 @@ contract DeployInfrastructure is Script {
     address public orgRegistry;
     address public implRegistry;
     address public paymasterHub;
+    address public universalPasskeyFactory;
 
     // Factories
     address public governanceFactory;
@@ -160,7 +164,7 @@ contract DeployInfrastructure is Script {
         paymasterHub = address(new BeaconProxy(paymasterHubBeacon, paymasterHubInit));
         console.log("PaymasterHub:", paymasterHub);
 
-        // Deploy OrgDeployer proxy
+        // Deploy OrgDeployer proxy (universalPasskeyFactory set later after deployment)
         address deployerBeacon = PoaManager(poaManager).getBeaconById(keccak256("OrgDeployer"));
         bytes memory deployerInit = abi.encodeWithSignature(
             "initialize(address,address,address,address,address,address,address,address)",
@@ -202,6 +206,19 @@ contract DeployInfrastructure is Script {
         bytes memory accRegInit = abi.encodeWithSignature("initialize(address)", msg.sender);
         globalAccountRegistry = address(new BeaconProxy(accRegBeacon, accRegInit));
         console.log("GlobalAccountRegistry:", globalAccountRegistry);
+
+        // Deploy universal PasskeyAccountFactory (infrastructure singleton)
+        address passkeyAccountBeacon = pm.getBeaconById(keccak256("PasskeyAccount"));
+        address passkeyFactoryBeaconAddr = pm.getBeaconById(keccak256("PasskeyAccountFactory"));
+        bytes memory passkeyFactoryInit = abi.encodeWithSignature(
+            "initialize(address,address,address,uint48)", poaManager, passkeyAccountBeacon, POA_GUARDIAN, uint48(7 days)
+        );
+        universalPasskeyFactory = address(new BeaconProxy(passkeyFactoryBeaconAddr, passkeyFactoryInit));
+        console.log("UniversalPasskeyFactory:", universalPasskeyFactory);
+
+        // Wire up universal factory to OrgDeployer
+        OrgDeployer(orgDeployer).setUniversalPasskeyFactory(universalPasskeyFactory);
+        console.log("UniversalPasskeyFactory set on OrgDeployer");
 
         // Emit InfrastructureDeployed event for subgraph dynamic discovery
         address passkeyFactoryBeacon = pm.getBeaconById(keccak256("PasskeyAccountFactory"));
@@ -289,6 +306,9 @@ contract DeployInfrastructure is Script {
             '",\n',
             '  "hatsTreeSetup": "',
             vm.toString(hatsTreeSetup),
+            '",\n',
+            '  "universalPasskeyFactory": "',
+            vm.toString(universalPasskeyFactory),
             '",\n',
             '  "passkeyAccountBeacon": "',
             vm.toString(pm.getBeaconById(keccak256("PasskeyAccount"))),
