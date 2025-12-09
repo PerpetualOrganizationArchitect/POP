@@ -43,6 +43,34 @@ interface IPaymasterHub {
     function registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId) external;
 }
 
+interface ITaskManagerBootstrap {
+    struct BootstrapProjectConfig {
+        bytes title;
+        bytes32 metadataHash;
+        uint256 cap;
+        address[] managers;
+        uint256[] createHats;
+        uint256[] claimHats;
+        uint256[] reviewHats;
+        uint256[] assignHats;
+    }
+
+    struct BootstrapTaskConfig {
+        uint8 projectIndex;
+        uint256 payout;
+        bytes title;
+        bytes32 metadataHash;
+        address bountyToken;
+        uint256 bountyPayout;
+        bool requiresApplication;
+    }
+
+    function bootstrapProjectsAndTasks(
+        BootstrapProjectConfig[] calldata projects,
+        BootstrapTaskConfig[] calldata tasks
+    ) external returns (bytes32[] memory projectIds);
+}
+
 /**
  * @title OrgDeployer
  * @notice Thin orchestrator for deploying complete organizations using factory pattern
@@ -175,6 +203,11 @@ contract OrgDeployer is Initializable {
         uint256 ddCreatorRolesBitmap; // Bit N set = Role N can create polls
     }
 
+    struct BootstrapConfig {
+        ITaskManagerBootstrap.BootstrapProjectConfig[] projects;
+        ITaskManagerBootstrap.BootstrapTaskConfig[] tasks;
+    }
+
     struct DeploymentParams {
         bytes32 orgId;
         string orgName;
@@ -191,6 +224,7 @@ contract OrgDeployer is Initializable {
         RoleAssignments roleAssignments;
         bool passkeyEnabled; // Whether passkey support is enabled (uses universal factory)
         ModulesFactory.EducationHubConfig educationHubConfig; // EducationHub deployment configuration
+        BootstrapConfig bootstrap; // Optional: initial projects and tasks to create
     }
 
     /*════════════════  VALIDATION  ════════════════*/
@@ -367,6 +401,16 @@ contract OrgDeployer is Initializable {
         IParticipationToken(result.participationToken).setTaskManager(result.taskManager);
         if (params.educationHubConfig.enabled) {
             IParticipationToken(result.participationToken).setEducationHub(result.educationHub);
+        }
+
+        /* 8.5. Bootstrap initial projects and tasks if configured */
+        if (params.bootstrap.projects.length > 0) {
+            // Resolve role indices to hat IDs in bootstrap config
+            ITaskManagerBootstrap.BootstrapProjectConfig[] memory resolvedProjects =
+                _resolveBootstrapRoles(params.bootstrap.projects, gov.roleHatIds);
+            ITaskManagerBootstrap(result.taskManager).bootstrapProjectsAndTasks(
+                resolvedProjects, params.bootstrap.tasks
+            );
         }
 
         /* 9. Authorize QuickJoin to mint hats */
@@ -584,5 +628,47 @@ contract OrgDeployer is Initializable {
 
         // Forward batch registration to OrgRegistry (we are the owner)
         l.orgRegistry.batchRegisterOrgContracts(orgId, registrations, autoUpgrade, lastRegister);
+    }
+
+    /**
+     * @notice Resolve role indices to hat IDs in bootstrap project configs
+     * @dev Role indices in config are converted to actual hat IDs using roleHatIds array
+     */
+    function _resolveBootstrapRoles(
+        ITaskManagerBootstrap.BootstrapProjectConfig[] calldata projects,
+        uint256[] memory roleHatIds
+    ) internal pure returns (ITaskManagerBootstrap.BootstrapProjectConfig[] memory resolved) {
+        resolved = new ITaskManagerBootstrap.BootstrapProjectConfig[](projects.length);
+
+        for (uint256 i = 0; i < projects.length; i++) {
+            resolved[i] = ITaskManagerBootstrap.BootstrapProjectConfig({
+                title: projects[i].title,
+                metadataHash: projects[i].metadataHash,
+                cap: projects[i].cap,
+                managers: projects[i].managers,
+                createHats: _resolveRoleIndicesToHatIds(projects[i].createHats, roleHatIds),
+                claimHats: _resolveRoleIndicesToHatIds(projects[i].claimHats, roleHatIds),
+                reviewHats: _resolveRoleIndicesToHatIds(projects[i].reviewHats, roleHatIds),
+                assignHats: _resolveRoleIndicesToHatIds(projects[i].assignHats, roleHatIds)
+            });
+        }
+
+        return resolved;
+    }
+
+    /**
+     * @notice Convert array of role indices to array of hat IDs
+     */
+    function _resolveRoleIndicesToHatIds(uint256[] calldata roleIndices, uint256[] memory roleHatIds)
+        internal
+        pure
+        returns (uint256[] memory hatIds)
+    {
+        hatIds = new uint256[](roleIndices.length);
+        for (uint256 i = 0; i < roleIndices.length; i++) {
+            require(roleIndices[i] < roleHatIds.length, "Invalid role index in bootstrap config");
+            hatIds[i] = roleHatIds[roleIndices[i]];
+        }
+        return hatIds;
     }
 }
