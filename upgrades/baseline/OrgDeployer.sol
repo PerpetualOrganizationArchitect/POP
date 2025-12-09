@@ -2759,13 +2759,7 @@ interface IOrgDeployer_0 {
 
 /*──────────────────── QuickJoin passkey configuration ────────────────────*/
 interface IQuickJoinPasskeyConfig {
-    function setPasskeyFactory(address factory) external;
-    function setOrgId(bytes32 orgId) external;
-}
-
-/*──────────────────── PasskeyAccountFactory registration ────────────────────*/
-interface IPasskeyAccountFactoryOrg {
-    function registerOrg(bytes32 orgId, uint8 maxCredentials, address guardian, uint48 recoveryDelay) external;
+    function setUniversalFactory(address factory) external;
 }
 
 /*────────────────────────────  Errors  ───────────────────────────────*/
@@ -2788,10 +2782,8 @@ contract AccessFactory {
 
     /*──────────────────── Passkey Configuration ────────────────────*/
     struct PasskeyConfig {
-        bool enabled; // Whether to deploy passkey infrastructure
-        uint8 maxCredentialsPerAccount; // Max passkeys per account (0 = default 5)
-        address defaultGuardian; // Default recovery guardian
-        uint48 recoveryDelay; // Recovery delay in seconds (0 = default 7 days)
+        bool enabled; // Whether passkey support is enabled for this org
+        address universalFactory; // Reference to universal PasskeyAccountFactory
     }
 
     /*──────────────────── Access Deployment Params ────────────────────*/
@@ -2814,7 +2806,6 @@ contract AccessFactory {
     struct AccessResult {
         address quickJoin;
         address participationToken;
-        address passkeyAccountFactory; // Optional: only set if passkey enabled
     }
 
     /*══════════════  MAIN DEPLOYMENT FUNCTION  ═════════════=*/
@@ -2894,57 +2885,15 @@ contract AccessFactory {
             );
         }
 
-        address passkeyFactoryBeacon;
-
-        /* 3. Deploy PasskeyAccountFactory if enabled */
+        /* 3. Configure QuickJoin with universal passkey factory if enabled */
         if (params.passkeyConfig.enabled) {
-            // Create beacon for PasskeyAccount (the wallet implementation)
-            address accountBeacon = _createBeacon(
-                ModuleTypes.PASSKEY_ACCOUNT_ID, params.poaManager, params.executor, params.autoUpgrade, address(0)
-            );
-
-            // Create beacon for PasskeyAccountFactory
-            passkeyFactoryBeacon = _createBeacon(
-                ModuleTypes.PASSKEY_ACCOUNT_FACTORY_ID,
-                params.poaManager,
-                params.executor,
-                params.autoUpgrade,
-                address(0)
-            );
-
-            ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
-                poaManager: IPoaManager(params.poaManager),
-                orgRegistry: OrgRegistry(params.orgRegistry),
-                hats: params.hats,
-                orgId: params.orgId,
-                moduleOwner: params.executor,
-                autoUpgrade: params.autoUpgrade,
-                customImpl: address(0)
-            });
-
-            result.passkeyAccountFactory = ModuleDeploymentLib.deployPasskeyAccountFactory(
-                config, params.executor, accountBeacon, passkeyFactoryBeacon
-            );
-
-            // Register org in the factory
-            IPasskeyAccountFactoryOrg(result.passkeyAccountFactory)
-                .registerOrg(
-                    params.orgId,
-                    params.passkeyConfig.maxCredentialsPerAccount,
-                    params.passkeyConfig.defaultGuardian,
-                    params.passkeyConfig.recoveryDelay
-                );
-
-            // Configure QuickJoin with the factory
-            IQuickJoinPasskeyConfig(result.quickJoin).setPasskeyFactory(result.passkeyAccountFactory);
-            IQuickJoinPasskeyConfig(result.quickJoin).setOrgId(params.orgId);
+            if (params.passkeyConfig.universalFactory == address(0)) revert InvalidAddress();
+            IQuickJoinPasskeyConfig(result.quickJoin).setUniversalFactory(params.passkeyConfig.universalFactory);
         }
 
         /* 4. Batch register all contracts */
         {
-            uint256 registrationCount = params.passkeyConfig.enabled ? 3 : 2;
-            OrgRegistry.ContractRegistration[] memory registrations =
-                new OrgRegistry.ContractRegistration[](registrationCount);
+            OrgRegistry.ContractRegistration[] memory registrations = new OrgRegistry.ContractRegistration[](2);
 
             registrations[0] = OrgRegistry.ContractRegistration({
                 typeId: ModuleTypes.QUICK_JOIN_ID,
@@ -2959,15 +2908,6 @@ contract AccessFactory {
                 beacon: participationTokenBeacon,
                 owner: params.executor
             });
-
-            if (params.passkeyConfig.enabled) {
-                registrations[2] = OrgRegistry.ContractRegistration({
-                    typeId: ModuleTypes.PASSKEY_ACCOUNT_FACTORY_ID,
-                    proxy: result.passkeyAccountFactory,
-                    beacon: passkeyFactoryBeacon,
-                    owner: params.executor
-                });
-            }
 
             // Call OrgDeployer to batch register (not the last batch)
             IOrgDeployer_0(params.deployer).batchRegisterContracts(params.orgId, registrations, params.autoUpgrade, false);
@@ -3675,6 +3615,7 @@ contract OrgDeployer is Initializable {
         address poaManager;
         address hatsTreeSetup;
         address paymasterHub; // Shared PaymasterHub for all orgs
+        address universalPasskeyFactory; // Universal PasskeyAccountFactory for all orgs
         uint256 _status; // manual reentrancy guard
     }
 
@@ -3722,6 +3663,19 @@ contract OrgDeployer is Initializable {
         hats = IHats(_hats);
     }
 
+    /**
+     * @notice Set the universal passkey factory address
+     * @dev Callable by PoaManager, or anyone for one-time initial setup (when factory is not yet set)
+     */
+    function setUniversalPasskeyFactory(address _universalFactory) external {
+        Layout storage l = _layout();
+        // Allow one-time setup by anyone (when factory is not yet set), or require PoaManager for updates
+        if (l.universalPasskeyFactory != address(0) && msg.sender != l.poaManager) {
+            revert InvalidAddress();
+        }
+        l.universalPasskeyFactory = _universalFactory;
+    }
+
     /*════════════════  DEPLOYMENT STRUCTS  ════════════════*/
 
     struct DeploymentResult {
@@ -3733,7 +3687,6 @@ contract OrgDeployer is Initializable {
         address taskManager;
         address educationHub;
         address paymentManager;
-        address passkeyAccountFactory; // Optional: only set if passkey enabled
     }
 
     struct RoleAssignments {
@@ -3762,7 +3715,7 @@ contract OrgDeployer is Initializable {
         address[] ddInitialTargets;
         RoleConfigStructs.RoleConfig[] roles; // Complete role configuration (replaces roleNames, roleImages, roleCanVote)
         RoleAssignments roleAssignments;
-        AccessFactory.PasskeyConfig passkeyConfig; // Passkey infrastructure configuration
+        bool passkeyEnabled; // Whether passkey support is enabled (uses universal factory)
         ModulesFactory.EducationHubConfig educationHubConfig; // EducationHub deployment configuration
     }
 
@@ -3876,6 +3829,12 @@ contract OrgDeployer is Initializable {
                 tokenApproverRolesBitmap: params.roleAssignments.tokenApproverRolesBitmap
             });
 
+            // Use universal factory if passkey is enabled
+            AccessFactory.PasskeyConfig memory passkeyConfig = AccessFactory.PasskeyConfig({
+                enabled: params.passkeyEnabled,
+                universalFactory: params.passkeyEnabled ? l.universalPasskeyFactory : address(0)
+            });
+
             AccessFactory.AccessParams memory accessParams = AccessFactory.AccessParams({
                 orgId: params.orgId,
                 orgName: params.orgName,
@@ -3888,13 +3847,12 @@ contract OrgDeployer is Initializable {
                 roleHatIds: gov.roleHatIds,
                 autoUpgrade: params.autoUpgrade,
                 roleAssignments: accessRoles,
-                passkeyConfig: params.passkeyConfig
+                passkeyConfig: passkeyConfig
             });
 
             access = l.accessFactory.deployAccess(accessParams);
             result.quickJoin = access.quickJoin;
             result.participationToken = access.participationToken;
-            result.passkeyAccountFactory = access.passkeyAccountFactory;
         }
 
         /* 6. Deploy Functional Modules (TaskManager, Education, Payment) */

@@ -91,7 +91,6 @@ interface IPasskeyAccount {
      * @param publicKeyY P256 public key Y coordinate
      * @param createdAt Timestamp when credential was registered
      * @param signCount Last known signature count (anti-replay)
-     * @param orgId Organization ID this credential was created for
      * @param active Whether this credential is currently active
      */
     struct PasskeyCredential {
@@ -99,7 +98,6 @@ interface IPasskeyAccount {
         bytes32 publicKeyY;
         uint64 createdAt;
         uint32 signCount;
-        bytes32 orgId;
         bool active;
     }
 
@@ -122,7 +120,7 @@ interface IPasskeyAccount {
     /*──────────────────────────── Events ───────────────────────────────*/
 
     /// @notice Emitted when a new credential is added
-    event CredentialAdded(bytes32 indexed credentialId, bytes32 orgId, uint64 createdAt);
+    event CredentialAdded(bytes32 indexed credentialId, uint64 createdAt);
 
     /// @notice Emitted when a credential is removed
     event CredentialRemoved(bytes32 indexed credentialId);
@@ -176,7 +174,7 @@ interface IPasskeyAccount {
     /// @notice Thrown when credential is not active
     error CredentialNotActive();
 
-    /// @notice Thrown when max credentials per org is reached
+    /// @notice Thrown when max credentials is reached
     error MaxCredentialsReached();
 
     /// @notice Thrown when trying to remove the last credential
@@ -219,13 +217,6 @@ interface IPasskeyAccount {
     function getCredentialIds() external view returns (bytes32[] memory credentialIds);
 
     /**
-     * @notice Get the number of credentials for an org
-     * @param orgId The organization ID
-     * @return count Number of credentials for this org
-     */
-    function getOrgCredentialCount(bytes32 orgId) external view returns (uint8 count);
-
-    /**
      * @notice Get the guardian address
      * @return guardian The guardian address
      */
@@ -257,10 +248,9 @@ interface IPasskeyAccount {
      * @param credentialId Unique identifier for the credential (hash of WebAuthn credentialId)
      * @param pubKeyX P256 public key X coordinate
      * @param pubKeyY P256 public key Y coordinate
-     * @param orgId Organization this credential is for
      * @dev Only callable via UserOp (self-call through EntryPoint)
      */
-    function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, bytes32 orgId) external;
+    function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY) external;
 
     /**
      * @notice Remove a passkey credential
@@ -307,11 +297,6 @@ interface IPasskeyAccount {
      * @notice Complete a pending recovery
      * @param recoveryId The recovery request ID to complete
      * @dev Anyone can call after delay passes.
-     *
-     *      IMPORTANT: Recovery credentials are added with orgId = bytes32(0) and do NOT
-     *      count toward the per-org credential limit. This is intentional behavior to ensure
-     *      recovery always succeeds regardless of org credential limits. The credential can
-     *      later be associated with an org by the account owner if needed.
      */
     function completeRecovery(bytes32 recoveryId) external;
 
@@ -1976,6 +1961,18 @@ library ERC1967Utils {
 
 /*──────────────────── Interfaces ────────────────────────────────────*/
 
+/// @notice Interface for reading factory config
+interface IPasskeyAccountFactoryConfig {
+    struct GlobalConfig {
+        address poaGuardian;
+        uint48 recoveryDelay;
+        uint8 maxCredentialsPerAccount;
+        bool paused;
+    }
+
+    function getGlobalConfig() external view returns (GlobalConfig memory);
+}
+
 /*──────────────────── Libraries ────────────────────────────────────*/
 
 /**
@@ -2020,8 +2017,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         // Passkey credentials
         mapping(bytes32 => PasskeyCredential) credentials;
         bytes32[] credentialIds;
-        // Per-org credential counts
-        mapping(bytes32 => uint8) orgCredentialCount;
         // Guardian recovery
         address guardian;
         uint48 recoveryDelay;
@@ -2082,7 +2077,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
      * @param credentialId Initial credential ID
      * @param pubKeyX Initial credential public key X
      * @param pubKeyY Initial credential public key Y
-     * @param orgId Organization this account is for
      * @param guardian_ Recovery guardian address
      * @param recoveryDelay_ Recovery delay in seconds
      */
@@ -2091,7 +2085,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         bytes32 credentialId,
         bytes32 pubKeyX,
         bytes32 pubKeyY,
-        bytes32 orgId,
         address guardian_,
         uint48 recoveryDelay_
     ) external initializer {
@@ -2106,17 +2099,11 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
 
         // Register initial credential
         l.credentials[credentialId] = PasskeyCredential({
-            publicKeyX: pubKeyX,
-            publicKeyY: pubKeyY,
-            createdAt: uint64(block.timestamp),
-            signCount: 0,
-            orgId: orgId,
-            active: true
+            publicKeyX: pubKeyX, publicKeyY: pubKeyY, createdAt: uint64(block.timestamp), signCount: 0, active: true
         });
         l.credentialIds.push(credentialId);
-        l.orgCredentialCount[orgId] = 1;
 
-        emit CredentialAdded(credentialId, orgId, uint64(block.timestamp));
+        emit CredentialAdded(credentialId, uint64(block.timestamp));
         if (guardian_ != address(0)) {
             emit GuardianUpdated(address(0), guardian_);
         }
@@ -2199,11 +2186,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
     /*──────────────────────────── Credential Management ───────────────*/
 
     /// @inheritdoc IPasskeyAccount
-    function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, bytes32 orgId)
-        external
-        override
-        onlySelf
-    {
+    function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY) external override onlySelf {
         Layout storage l = _layout();
 
         // Check if credential already exists
@@ -2211,30 +2194,19 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
             revert CredentialExists();
         }
 
-        // Check global limit
-        if (l.credentialIds.length >= MAX_CREDENTIALS) {
-            revert MaxCredentialsReached();
-        }
-
-        // Check per-org limit from factory
-        uint8 maxPerOrg = _getMaxCredentialsPerOrg(orgId);
-        if (l.orgCredentialCount[orgId] >= maxPerOrg) {
+        // Check global limit from factory config
+        uint8 maxCreds = _getMaxCredentials();
+        if (l.credentialIds.length >= maxCreds) {
             revert MaxCredentialsReached();
         }
 
         // Add credential
         l.credentials[credentialId] = PasskeyCredential({
-            publicKeyX: pubKeyX,
-            publicKeyY: pubKeyY,
-            createdAt: uint64(block.timestamp),
-            signCount: 0,
-            orgId: orgId,
-            active: true
+            publicKeyX: pubKeyX, publicKeyY: pubKeyY, createdAt: uint64(block.timestamp), signCount: 0, active: true
         });
         l.credentialIds.push(credentialId);
-        l.orgCredentialCount[orgId]++;
 
-        emit CredentialAdded(credentialId, orgId, uint64(block.timestamp));
+        emit CredentialAdded(credentialId, uint64(block.timestamp));
     }
 
     /// @inheritdoc IPasskeyAccount
@@ -2250,9 +2222,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         if (cred.createdAt == 0) {
             revert CredentialNotFound();
         }
-
-        // Decrement org count
-        l.orgCredentialCount[cred.orgId]--;
 
         // Remove from array
         _removeCredentialFromArray(credentialId);
@@ -2343,7 +2312,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
             revert RecoveryDelayNotPassed();
         }
 
-        // Add the new credential (use default org - can be updated later)
+        // Add the new credential
         bytes32 credentialId = request.credentialId;
 
         l.credentials[credentialId] = PasskeyCredential({
@@ -2351,7 +2320,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
             publicKeyY: request.pubKeyY,
             createdAt: uint64(block.timestamp),
             signCount: 0,
-            orgId: bytes32(0), // Recovery credentials have no org binding
             active: true
         });
         l.credentialIds.push(credentialId);
@@ -2360,7 +2328,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         request.executeAfter = 0;
 
         emit RecoveryCompleted(recoveryId, credentialId);
-        emit CredentialAdded(credentialId, bytes32(0), uint64(block.timestamp));
+        emit CredentialAdded(credentialId, uint64(block.timestamp));
     }
 
     /// @inheritdoc IPasskeyAccount
@@ -2442,11 +2410,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
     }
 
     /// @inheritdoc IPasskeyAccount
-    function getOrgCredentialCount(bytes32 orgId) external view override returns (uint8) {
-        return _layout().orgCredentialCount[orgId];
-    }
-
-    /// @inheritdoc IPasskeyAccount
     function guardian() external view override returns (address) {
         return _layout().guardian;
     }
@@ -2469,26 +2432,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
     /*──────────────────────────── Internal Helpers ────────────────────*/
 
     /**
-     * @notice Get max credentials per org from factory
-     * @param orgId The organization ID
-     * @return maxCredentials Maximum credentials allowed for this org
-     */
-    function _getMaxCredentialsPerOrg(bytes32 orgId) internal view returns (uint8) {
-        // Try to get from factory, default to 5 if not set
-        address factoryAddr = _layout().factory;
-        if (factoryAddr == address(0)) {
-            return 5;
-        }
-
-        // Call factory to get org config
-        try IPasskeyAccountFactory(factoryAddr).getMaxCredentialsPerOrg(orgId) returns (uint8 max) {
-            return max > 0 ? max : 5;
-        } catch {
-            return 5;
-        }
-    }
-
-    /**
      * @notice Remove a credential ID from the array
      * @param credentialId The credential ID to remove
      */
@@ -2506,16 +2449,26 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         }
     }
 
+    /// @notice Get max credentials from factory's global config
+    /// @dev Falls back to hardcoded MAX_CREDENTIALS if factory call fails
+    function _getMaxCredentials() internal view returns (uint8) {
+        Layout storage l = _layout();
+        if (l.factory == address(0)) {
+            return MAX_CREDENTIALS;
+        }
+
+        try IPasskeyAccountFactoryConfig(l.factory).getGlobalConfig() returns (
+            IPasskeyAccountFactoryConfig.GlobalConfig memory config
+        ) {
+            return config.maxCredentialsPerAccount > 0 ? config.maxCredentialsPerAccount : MAX_CREDENTIALS;
+        } catch {
+            return MAX_CREDENTIALS;
+        }
+    }
+
     /*──────────────────────────── Receive ETH ─────────────────────────*/
 
     receive() external payable {}
-}
-
-/**
- * @notice Interface for PasskeyAccountFactory (used internally)
- */
-interface IPasskeyAccountFactory {
-    function getMaxCredentialsPerOrg(bytes32 orgId) external view returns (uint8);
 }
 
 // lib/openzeppelin-contracts/contracts/proxy/beacon/BeaconProxy.sol
@@ -2580,39 +2533,40 @@ contract BeaconProxy is Proxy {
 /**
  * @title PasskeyAccountFactory
  * @author POA Team
- * @notice Factory for deploying PasskeyAccount smart wallets
+ * @notice Universal factory for deploying PasskeyAccount smart wallets
  * @dev Features:
  *      - CREATE2 deterministic deployment
- *      - Per-org configuration (max credentials, guardian, recovery delay)
+ *      - Global POA-level configuration (guardian, recovery delay)
  *      - Counterfactual address computation
  *      - Integration with ERC-4337 EntryPoint
  *
  *      Architecture:
  *      - Uses ERC-7201 namespaced storage for upgrade safety
- *      - Deployed via BeaconProxy for upgradeability
+ *      - Deployed as infrastructure singleton (not per-org)
  *      - Creates PasskeyAccount instances as BeaconProxy
+ *      - Governed by PoaManager
  */
 contract PasskeyAccountFactory is Initializable {
     /*──────────────────────────── Structs ──────────────────────────────*/
 
     /**
-     * @notice Per-organization configuration
-     * @param maxCredentialsPerAccount Maximum passkeys per account for this org
-     * @param defaultGuardian Default recovery guardian for accounts
+     * @notice Global POA configuration
+     * @param poaGuardian POA recovery guardian address
      * @param recoveryDelay Recovery delay in seconds
-     * @param enabled Whether this org can create accounts
+     * @param maxCredentialsPerAccount Maximum passkeys per account
+     * @param paused Whether account creation is paused
      */
-    struct OrgConfig {
-        uint8 maxCredentialsPerAccount;
-        address defaultGuardian;
+    struct GlobalConfig {
+        address poaGuardian;
         uint48 recoveryDelay;
-        bool enabled;
+        uint8 maxCredentialsPerAccount;
+        bool paused;
     }
 
     /*──────────────────────────── Constants ────────────────────────────*/
 
     /// @notice Default max credentials per account
-    uint8 public constant DEFAULT_MAX_CREDENTIALS = 5;
+    uint8 public constant DEFAULT_MAX_CREDENTIALS = 10;
 
     /// @notice Default recovery delay (7 days)
     uint48 public constant DEFAULT_RECOVERY_DELAY = 7 days;
@@ -2626,10 +2580,10 @@ contract PasskeyAccountFactory is Initializable {
     struct Layout {
         // The beacon for PasskeyAccount proxies
         address accountBeacon;
-        // The executor/owner that can register orgs
-        address executor;
-        // Per-org configurations
-        mapping(bytes32 => OrgConfig) orgConfigs;
+        // The PoaManager that governs this factory
+        address poaManager;
+        // Global configuration
+        GlobalConfig globalConfig;
         // Track deployed accounts
         mapping(address => bool) deployedAccounts;
     }
@@ -2646,24 +2600,24 @@ contract PasskeyAccountFactory is Initializable {
     /*──────────────────────────── Events ───────────────────────────────*/
 
     /// @notice Emitted when a new account is created
-    event AccountCreated(address indexed account, bytes32 indexed orgId, bytes32 credentialId, address indexed owner);
+    event AccountCreated(address indexed account, bytes32 credentialId, address indexed owner);
 
-    /// @notice Emitted when an org is registered
-    event OrgRegistered(bytes32 indexed orgId, uint8 maxCredentials, address guardian, uint48 recoveryDelay);
+    /// @notice Emitted when global config is updated
+    event GlobalConfigUpdated(address guardian, uint48 recoveryDelay, uint8 maxCredentials);
 
-    /// @notice Emitted when org config is updated
-    event OrgConfigUpdated(bytes32 indexed orgId);
+    /// @notice Emitted when PoaManager is updated
+    event PoaManagerUpdated(address indexed oldPoaManager, address indexed newPoaManager);
 
-    /// @notice Emitted when executor is updated
-    event ExecutorUpdated(address indexed oldExecutor, address indexed newExecutor);
+    /// @notice Emitted when factory is paused/unpaused
+    event PausedStateChanged(bool paused);
 
     /*──────────────────────────── Errors ───────────────────────────────*/
 
     /// @notice Thrown when caller is not authorized
     error Unauthorized();
 
-    /// @notice Thrown when org is not registered or disabled
-    error OrgNotEnabled();
+    /// @notice Thrown when factory is paused
+    error Paused();
 
     /// @notice Thrown when account already exists
     error AccountExists();
@@ -2676,9 +2630,15 @@ contract PasskeyAccountFactory is Initializable {
 
     /*──────────────────────────── Modifiers ────────────────────────────*/
 
-    /// @notice Restrict to executor only
-    modifier onlyExecutor() {
-        if (msg.sender != _layout().executor) revert Unauthorized();
+    /// @notice Restrict to PoaManager only
+    modifier onlyPoaManager() {
+        if (msg.sender != _layout().poaManager) revert Unauthorized();
+        _;
+    }
+
+    /// @notice Ensure factory is not paused
+    modifier whenNotPaused() {
+        if (_layout().globalConfig.paused) revert Paused();
         _;
     }
 
@@ -2692,129 +2652,118 @@ contract PasskeyAccountFactory is Initializable {
     /*──────────────────────────── Initializer ──────────────────────────*/
 
     /**
-     * @notice Initialize the factory
-     * @param executor_ The executor/owner address
+     * @notice Initialize the universal factory
+     * @param poaManager_ The PoaManager that governs this factory
      * @param accountBeacon_ The beacon for PasskeyAccount proxies
+     * @param poaGuardian_ The POA recovery guardian
+     * @param recoveryDelay_ The recovery delay in seconds
      */
-    function initialize(address executor_, address accountBeacon_) external initializer {
-        if (executor_ == address(0)) revert ZeroAddress();
+    function initialize(address poaManager_, address accountBeacon_, address poaGuardian_, uint48 recoveryDelay_)
+        external
+        initializer
+    {
+        if (poaManager_ == address(0)) revert ZeroAddress();
         if (accountBeacon_ == address(0)) revert ZeroAddress();
 
         Layout storage l = _layout();
-        l.executor = executor_;
+        l.poaManager = poaManager_;
         l.accountBeacon = accountBeacon_;
-
-        emit ExecutorUpdated(address(0), executor_);
-    }
-
-    /*──────────────────────────── Org Management ──────────────────────*/
-
-    /**
-     * @notice Register a new organization
-     * @param orgId Organization identifier
-     * @param maxCredentials Maximum credentials per account
-     * @param guardian Default recovery guardian
-     * @param recoveryDelay Recovery delay in seconds
-     */
-    function registerOrg(bytes32 orgId, uint8 maxCredentials, address guardian, uint48 recoveryDelay)
-        external
-        onlyExecutor
-    {
-        Layout storage l = _layout();
-
-        l.orgConfigs[orgId] = OrgConfig({
-            maxCredentialsPerAccount: maxCredentials > 0 ? maxCredentials : DEFAULT_MAX_CREDENTIALS,
-            defaultGuardian: guardian,
-            recoveryDelay: recoveryDelay > 0 ? recoveryDelay : DEFAULT_RECOVERY_DELAY,
-            enabled: true
+        l.globalConfig = GlobalConfig({
+            poaGuardian: poaGuardian_,
+            recoveryDelay: recoveryDelay_ > 0 ? recoveryDelay_ : DEFAULT_RECOVERY_DELAY,
+            maxCredentialsPerAccount: DEFAULT_MAX_CREDENTIALS,
+            paused: false
         });
 
-        emit OrgRegistered(orgId, maxCredentials, guardian, recoveryDelay);
+        emit PoaManagerUpdated(address(0), poaManager_);
+        emit GlobalConfigUpdated(poaGuardian_, l.globalConfig.recoveryDelay, DEFAULT_MAX_CREDENTIALS);
     }
 
+    /*──────────────────────────── Governance ──────────────────────────*/
+
     /**
-     * @notice Update org configuration
-     * @param orgId Organization identifier
-     * @param maxCredentials New max credentials (0 to keep existing)
-     * @param guardian New guardian (address(0) to keep existing)
-     * @param recoveryDelay New recovery delay (0 to keep existing)
+     * @notice Update the POA guardian
+     * @param newGuardian New guardian address
      */
-    function updateOrgConfig(bytes32 orgId, uint8 maxCredentials, address guardian, uint48 recoveryDelay)
-        external
-        onlyExecutor
-    {
+    function setPoaGuardian(address newGuardian) external onlyPoaManager {
         Layout storage l = _layout();
-        OrgConfig storage config = l.orgConfigs[orgId];
-
-        if (maxCredentials > 0) {
-            config.maxCredentialsPerAccount = maxCredentials;
-        }
-        if (guardian != address(0)) {
-            config.defaultGuardian = guardian;
-        }
-        if (recoveryDelay > 0) {
-            config.recoveryDelay = recoveryDelay;
-        }
-
-        emit OrgConfigUpdated(orgId);
+        l.globalConfig.poaGuardian = newGuardian;
+        emit GlobalConfigUpdated(newGuardian, l.globalConfig.recoveryDelay, l.globalConfig.maxCredentialsPerAccount);
     }
 
     /**
-     * @notice Enable or disable an org
-     * @param orgId Organization identifier
-     * @param enabled Whether the org is enabled
+     * @notice Update the recovery delay
+     * @param newDelay New recovery delay in seconds
      */
-    function setOrgEnabled(bytes32 orgId, bool enabled) external onlyExecutor {
-        _layout().orgConfigs[orgId].enabled = enabled;
-        emit OrgConfigUpdated(orgId);
+    function setRecoveryDelay(uint48 newDelay) external onlyPoaManager {
+        Layout storage l = _layout();
+        l.globalConfig.recoveryDelay = newDelay;
+        emit GlobalConfigUpdated(l.globalConfig.poaGuardian, newDelay, l.globalConfig.maxCredentialsPerAccount);
     }
 
     /**
-     * @notice Update the executor
-     * @param newExecutor New executor address
+     * @notice Update the max credentials per account
+     * @param maxCredentials New max credentials
      */
-    function setExecutor(address newExecutor) external onlyExecutor {
-        if (newExecutor == address(0)) revert ZeroAddress();
+    function setMaxCredentials(uint8 maxCredentials) external onlyPoaManager {
+        Layout storage l = _layout();
+        l.globalConfig.maxCredentialsPerAccount = maxCredentials;
+        emit GlobalConfigUpdated(l.globalConfig.poaGuardian, l.globalConfig.recoveryDelay, maxCredentials);
+    }
+
+    /**
+     * @notice Pause or unpause account creation
+     * @param paused Whether to pause
+     */
+    function setPaused(bool paused) external onlyPoaManager {
+        _layout().globalConfig.paused = paused;
+        emit PausedStateChanged(paused);
+    }
+
+    /**
+     * @notice Update the PoaManager
+     * @param newPoaManager New PoaManager address
+     */
+    function setPoaManager(address newPoaManager) external onlyPoaManager {
+        if (newPoaManager == address(0)) revert ZeroAddress();
 
         Layout storage l = _layout();
-        address oldExecutor = l.executor;
-        l.executor = newExecutor;
+        address oldPoaManager = l.poaManager;
+        l.poaManager = newPoaManager;
 
-        emit ExecutorUpdated(oldExecutor, newExecutor);
+        emit PoaManagerUpdated(oldPoaManager, newPoaManager);
     }
 
     /*──────────────────────────── Account Creation ────────────────────*/
 
     /**
      * @notice Create a new PasskeyAccount
-     * @param orgId Organization this account belongs to
      * @param credentialId Initial credential ID
      * @param pubKeyX Credential public key X coordinate
      * @param pubKeyY Credential public key Y coordinate
      * @param salt Additional salt for CREATE2
      * @return account The deployed account address
      */
-    function createAccount(bytes32 orgId, bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
+    function createAccount(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
         external
+        whenNotPaused
         returns (address account)
     {
         Layout storage l = _layout();
-
-        // Verify org is enabled
-        OrgConfig storage config = l.orgConfigs[orgId];
-        if (!config.enabled) revert OrgNotEnabled();
 
         // Verify beacon is set
         if (l.accountBeacon == address(0)) revert BeaconNotSet();
 
         // Compute deterministic address
-        account = getAddress(orgId, credentialId, pubKeyX, pubKeyY, salt);
+        account = getAddress(credentialId, pubKeyX, pubKeyY, salt);
 
         // Return existing if already deployed
         if (account.code.length > 0) {
             return account;
         }
 
+        GlobalConfig storage config = l.globalConfig;
+
         // Build initialization data
         bytes memory initData = abi.encodeWithSelector(
             PasskeyAccount.initialize.selector,
@@ -2822,40 +2771,36 @@ contract PasskeyAccountFactory is Initializable {
             credentialId,
             pubKeyX,
             pubKeyY,
-            orgId,
-            config.defaultGuardian,
+            config.poaGuardian,
             config.recoveryDelay
         );
 
         // Deploy via CREATE2
-        bytes32 create2Salt = _computeSalt(orgId, credentialId, pubKeyX, pubKeyY, salt);
+        bytes32 create2Salt = _computeSalt(credentialId, pubKeyX, pubKeyY, salt);
 
         account = address(new BeaconProxy{salt: create2Salt}(l.accountBeacon, initData));
 
         // Track deployment
         l.deployedAccounts[account] = true;
 
-        emit AccountCreated(account, orgId, credentialId, msg.sender);
+        emit AccountCreated(account, credentialId, msg.sender);
     }
 
     /**
      * @notice Compute the counterfactual address for an account
-     * @param orgId Organization this account belongs to
      * @param credentialId Initial credential ID
      * @param pubKeyX Credential public key X coordinate
      * @param pubKeyY Credential public key Y coordinate
      * @param salt Additional salt for CREATE2
      * @return account The predicted account address
      */
-    function getAddress(bytes32 orgId, bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
+    function getAddress(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
         public
         view
         returns (address account)
     {
         Layout storage l = _layout();
-
-        // Get org config for initialization params
-        OrgConfig storage config = l.orgConfigs[orgId];
+        GlobalConfig storage config = l.globalConfig;
 
         // Build initialization data
         bytes memory initData = abi.encodeWithSelector(
@@ -2864,8 +2809,7 @@ contract PasskeyAccountFactory is Initializable {
             credentialId,
             pubKeyX,
             pubKeyY,
-            orgId,
-            config.defaultGuardian,
+            config.poaGuardian,
             config.recoveryDelay
         );
 
@@ -2873,7 +2817,7 @@ contract PasskeyAccountFactory is Initializable {
         bytes memory proxyBytecode =
             abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(l.accountBeacon, initData));
 
-        bytes32 create2Salt = _computeSalt(orgId, credentialId, pubKeyX, pubKeyY, salt);
+        bytes32 create2Salt = _computeSalt(credentialId, pubKeyX, pubKeyY, salt);
 
         return Create2.computeAddress(create2Salt, keccak256(proxyBytecode));
     }
@@ -2881,22 +2825,11 @@ contract PasskeyAccountFactory is Initializable {
     /*──────────────────────────── View Functions ──────────────────────*/
 
     /**
-     * @notice Get org configuration
-     * @param orgId Organization identifier
-     * @return config The org configuration
+     * @notice Get global configuration
+     * @return config The global configuration
      */
-    function getOrgConfig(bytes32 orgId) external view returns (OrgConfig memory config) {
-        return _layout().orgConfigs[orgId];
-    }
-
-    /**
-     * @notice Get max credentials per org for an account
-     * @param orgId Organization identifier
-     * @return maxCredentials Maximum credentials allowed
-     */
-    function getMaxCredentialsPerOrg(bytes32 orgId) external view returns (uint8 maxCredentials) {
-        OrgConfig storage config = _layout().orgConfigs[orgId];
-        return config.maxCredentialsPerAccount > 0 ? config.maxCredentialsPerAccount : DEFAULT_MAX_CREDENTIALS;
+    function getGlobalConfig() external view returns (GlobalConfig memory config) {
+        return _layout().globalConfig;
     }
 
     /**
@@ -2917,30 +2850,45 @@ contract PasskeyAccountFactory is Initializable {
     }
 
     /**
-     * @notice Get the executor address
-     * @return executor The executor address
+     * @notice Get the PoaManager address
+     * @return The PoaManager address
      */
-    function executor() external view returns (address) {
-        return _layout().executor;
+    function poaManager() external view returns (address) {
+        return _layout().poaManager;
+    }
+
+    /**
+     * @notice Get the POA guardian address
+     * @return guardian The guardian address
+     */
+    function poaGuardian() external view returns (address guardian) {
+        return _layout().globalConfig.poaGuardian;
+    }
+
+    /**
+     * @notice Check if factory is paused
+     * @return paused Whether factory is paused
+     */
+    function isPaused() external view returns (bool paused) {
+        return _layout().globalConfig.paused;
     }
 
     /*──────────────────────────── Internal Helpers ────────────────────*/
 
     /**
      * @notice Compute CREATE2 salt
-     * @param orgId Organization identifier
      * @param credentialId Credential identifier
      * @param pubKeyX Public key X coordinate
      * @param pubKeyY Public key Y coordinate
      * @param salt Additional salt
      * @return The computed salt
      */
-    function _computeSalt(bytes32 orgId, bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
+    function _computeSalt(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encodePacked(orgId, credentialId, pubKeyX, pubKeyY, salt));
+        return keccak256(abi.encodePacked(credentialId, pubKeyX, pubKeyY, salt));
     }
 }
 
