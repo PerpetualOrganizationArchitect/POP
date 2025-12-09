@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Script.sol";
 import "forge-std/console.sol";
 
-import {OrgDeployer} from "../src/OrgDeployer.sol";
+import {OrgDeployer, ITaskManagerBootstrap} from "../src/OrgDeployer.sol";
 import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
 import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
 import {ModulesFactory} from "../src/factories/ModulesFactory.sol";
@@ -570,9 +570,9 @@ contract DeployOrg is Script {
 
         // Build project configs
         // Note: Role indices will be converted to hat IDs by OrgDeployer at deployment time
-        bootstrap.projects = new OrgDeployer.ITaskManagerBootstrap.BootstrapProjectConfig[](bootstrapJson.projects.length);
+        bootstrap.projects = new ITaskManagerBootstrap.BootstrapProjectConfig[](bootstrapJson.projects.length);
         for (uint256 i = 0; i < bootstrapJson.projects.length; i++) {
-            bootstrap.projects[i] = OrgDeployer.ITaskManagerBootstrap.BootstrapProjectConfig({
+            bootstrap.projects[i] = ITaskManagerBootstrap.BootstrapProjectConfig({
                 title: bytes(bootstrapJson.projects[i].title),
                 metadataHash: bootstrapJson.projects[i].metadataHash,
                 cap: bootstrapJson.projects[i].cap,
@@ -586,9 +586,9 @@ contract DeployOrg is Script {
         }
 
         // Build task configs
-        bootstrap.tasks = new OrgDeployer.ITaskManagerBootstrap.BootstrapTaskConfig[](bootstrapJson.tasks.length);
+        bootstrap.tasks = new ITaskManagerBootstrap.BootstrapTaskConfig[](bootstrapJson.tasks.length);
         for (uint256 i = 0; i < bootstrapJson.tasks.length; i++) {
-            bootstrap.tasks[i] = OrgDeployer.ITaskManagerBootstrap.BootstrapTaskConfig({
+            bootstrap.tasks[i] = ITaskManagerBootstrap.BootstrapTaskConfig({
                 projectIndex: bootstrapJson.tasks[i].projectIndex,
                 payout: bootstrapJson.tasks[i].payout,
                 title: bytes(bootstrapJson.tasks[i].title),

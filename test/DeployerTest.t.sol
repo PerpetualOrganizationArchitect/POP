@@ -25,7 +25,7 @@ import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
 import "../src/ImplementationRegistry.sol";
 import "../src/PoaManager.sol";
 import "../src/OrgRegistry.sol";
-import {OrgDeployer} from "../src/OrgDeployer.sol";
+import {OrgDeployer, ITaskManagerBootstrap} from "../src/OrgDeployer.sol";
 import {GovernanceFactory} from "../src/factories/GovernanceFactory.sol";
 import {AccessFactory} from "../src/factories/AccessFactory.sol";
 import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
@@ -167,7 +167,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -245,6 +246,13 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddVotingRolesBitmap: 1, // Role 0: can vote in polls
             ddCreatorRolesBitmap: 2 // Role 1: can create polls
         });
+    }
+
+    /// @dev Helper to build empty bootstrap config
+    function _emptyBootstrap() internal pure returns (OrgDeployer.BootstrapConfig memory) {
+        ITaskManagerBootstrap.BootstrapProjectConfig[] memory projects = new ITaskManagerBootstrap.BootstrapProjectConfig[](0);
+        ITaskManagerBootstrap.BootstrapTaskConfig[] memory tasks = new ITaskManagerBootstrap.BootstrapTaskConfig[](0);
+        return OrgDeployer.BootstrapConfig({projects: projects, tasks: tasks});
     }
 
     /// @dev Helper to build legacy-style voting classes
@@ -347,7 +355,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -402,7 +411,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -728,7 +738,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -857,7 +868,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         deployer.deployFullOrg(params);
@@ -895,7 +907,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -976,7 +989,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1244,7 +1258,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1456,7 +1471,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1616,7 +1632,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1750,7 +1767,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: emptyRoles,
             roleAssignments: _buildDefaultRoleAssignments(),
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         vm.expectRevert(OrgDeployer.InvalidRoleConfiguration.selector);
@@ -2023,7 +2041,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2126,7 +2145,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2290,7 +2310,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -3271,7 +3292,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: roles,
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
         });
 
         // Record logs to verify HatCreatedWithEligibility events were emitted
@@ -3369,7 +3391,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -3428,7 +3451,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -3489,7 +3513,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
             passkeyEnabled: false,
-            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false})
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
+            bootstrap: _emptyBootstrap()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
