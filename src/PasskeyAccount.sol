@@ -148,11 +148,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
 
         // Register initial credential
         l.credentials[credentialId] = PasskeyCredential({
-            publicKeyX: pubKeyX,
-            publicKeyY: pubKeyY,
-            createdAt: uint64(block.timestamp),
-            signCount: 0,
-            active: true
+            publicKeyX: pubKeyX, publicKeyY: pubKeyY, createdAt: uint64(block.timestamp), signCount: 0, active: true
         });
         l.credentialIds.push(credentialId);
 
@@ -239,11 +235,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
     /*──────────────────────────── Credential Management ───────────────*/
 
     /// @inheritdoc IPasskeyAccount
-    function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY)
-        external
-        override
-        onlySelf
-    {
+    function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY) external override onlySelf {
         Layout storage l = _layout();
 
         // Check if credential already exists
@@ -259,11 +251,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
 
         // Add credential
         l.credentials[credentialId] = PasskeyCredential({
-            publicKeyX: pubKeyX,
-            publicKeyY: pubKeyY,
-            createdAt: uint64(block.timestamp),
-            signCount: 0,
-            active: true
+            publicKeyX: pubKeyX, publicKeyY: pubKeyY, createdAt: uint64(block.timestamp), signCount: 0, active: true
         });
         l.credentialIds.push(credentialId);
 

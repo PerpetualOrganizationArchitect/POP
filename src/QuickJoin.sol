@@ -229,8 +229,8 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
         // 1. Create PasskeyAccount via universal factory (returns existing if already deployed)
-        account =
-            l.universalFactory.createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
+        account = l.universalFactory
+            .createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
 
         // 2. Register username to the account
         // Revert if account already has a username (prevents duplicate enrollment attempts)
@@ -264,8 +264,8 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
         // 1. Create PasskeyAccount via universal factory (returns existing if already deployed)
-        account =
-            l.universalFactory.createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
+        account = l.universalFactory
+            .createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
 
         // 2. Register username to the account
         // Revert if account already has a username (prevents duplicate enrollment attempts)

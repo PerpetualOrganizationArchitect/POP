@@ -137,12 +137,10 @@ contract PasskeyAccountFactory is Initializable {
      * @param poaGuardian_ The POA recovery guardian
      * @param recoveryDelay_ The recovery delay in seconds
      */
-    function initialize(
-        address poaManager_,
-        address accountBeacon_,
-        address poaGuardian_,
-        uint48 recoveryDelay_
-    ) external initializer {
+    function initialize(address poaManager_, address accountBeacon_, address poaGuardian_, uint48 recoveryDelay_)
+        external
+        initializer
+    {
         if (poaManager_ == address(0)) revert ZeroAddress();
         if (accountBeacon_ == address(0)) revert ZeroAddress();
 
