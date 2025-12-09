@@ -125,7 +125,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         hats.mintHat(VOUCHER_HAT, voucherAddr);
 
         // ════════════════════════════════════════════════════════════════
-        // Deploy PasskeyAccount infrastructure
+        // Deploy PasskeyAccount infrastructure (universal factory)
         // ════════════════════════════════════════════════════════════════
 
         accountImpl = new PasskeyAccount();
@@ -136,13 +136,12 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory factoryInitData = abi.encodeWithSelector(
             PasskeyAccountFactory.initialize.selector,
-            owner, // executor
-            address(accountBeacon)
+            owner, // poaManager
+            address(accountBeacon),
+            guardian, // poaGuardian
+            uint48(7 days) // recoveryDelay
         );
         factory = PasskeyAccountFactory(address(new BeaconProxy(address(factoryBeacon), factoryInitData)));
-
-        // Register org in factory
-        factory.registerOrg(ORG_ID, 5, guardian, 7 days);
 
         // ════════════════════════════════════════════════════════════════
         // Deploy PaymasterHub
@@ -180,7 +179,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
     function _createPasskeyAccount() internal returns (PasskeyAccount) {
         vm.prank(user);
-        address account = factory.createAccount(ORG_ID, CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
+        address account = factory.createAccount(CREDENTIAL_ID, PUB_KEY_X, PUB_KEY_Y, 0);
         return PasskeyAccount(payable(account));
     }
 
@@ -748,7 +747,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         bytes32 newPubKeyX = bytes32(uint256(0x1111));
         bytes32 newPubKeyY = bytes32(uint256(0x2222));
 
-        address newAccountAddr = factory.getAddress(ORG_ID, newCredentialId, newPubKeyX, newPubKeyY, 0);
+        address newAccountAddr = factory.getAddress(newCredentialId, newPubKeyX, newPubKeyY, 0);
 
         // Setup budget for vouched users (tracked against the voucher's subjectKey)
         bytes32 vouchedSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, bytes20(voucherAddr)));
@@ -785,7 +784,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
     function testVouched_ExpiredVouchFails() public {
         bytes32 newCredentialId = keccak256("expired_vouch_user");
-        address newAccountAddr = factory.getAddress(ORG_ID, newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
+        address newAccountAddr = factory.getAddress(newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
 
         // Setup budget
         bytes32 vouchedSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, bytes20(voucherAddr)));
@@ -813,7 +812,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         bytes32 newPubKeyX = bytes32(uint256(0x3333));
         bytes32 newPubKeyY = bytes32(uint256(0x4444));
 
-        address newAccountAddr = factory.getAddress(ORG_ID, newCredentialId, newPubKeyX, newPubKeyY, 0);
+        address newAccountAddr = factory.getAddress(newCredentialId, newPubKeyX, newPubKeyY, 0);
 
         // Setup budget
         bytes32 vouchedSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, bytes20(voucherAddr)));
@@ -842,7 +841,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
     function testVouched_NonVoucherHatWearerFails() public {
         bytes32 newCredentialId = keccak256("unauthorized_voucher_user");
-        address newAccountAddr = factory.getAddress(ORG_ID, newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
+        address newAccountAddr = factory.getAddress(newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
 
         // Setup budget
         bytes32 vouchedSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, bytes20(voucherAddr)));
@@ -886,7 +885,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
     function testVouched_InvalidSignatureFails() public {
         bytes32 newCredentialId = keccak256("invalid_sig_user");
-        address newAccountAddr = factory.getAddress(ORG_ID, newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
+        address newAccountAddr = factory.getAddress(newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
 
         // Setup budget
         bytes32 vouchedSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, bytes20(voucherAddr)));
@@ -930,16 +929,13 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Create a new org WITHOUT voucher hat
         bytes32 noVoucherOrgId = keccak256("NO_VOUCHER_ORG");
 
-        vm.prank(owner);
-        factory.registerOrg(noVoucherOrgId, 5, guardian, 7 days);
-
         vm.startPrank(owner);
         hub.registerOrg(noVoucherOrgId, ADMIN_HAT, OPERATOR_HAT); // No voucher hat!
         vm.stopPrank();
 
         // Try to use vouched onboarding
         bytes32 newCredentialId = keccak256("no_voucher_hat_user");
-        address newAccountAddr = factory.getAddress(noVoucherOrgId, newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
+        address newAccountAddr = factory.getAddress(newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
 
         uint48 expiry = uint48(block.timestamp + 1 hours);
 

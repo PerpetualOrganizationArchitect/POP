@@ -9,6 +9,18 @@ import {IAccount} from "./interfaces/IAccount.sol";
 import {IPasskeyAccount} from "./interfaces/IPasskeyAccount.sol";
 import {PackedUserOperation} from "./interfaces/PackedUserOperation.sol";
 
+/// @notice Interface for reading factory config
+interface IPasskeyAccountFactoryConfig {
+    struct GlobalConfig {
+        address poaGuardian;
+        uint48 recoveryDelay;
+        uint8 maxCredentialsPerAccount;
+        bool paused;
+    }
+
+    function getGlobalConfig() external view returns (GlobalConfig memory);
+}
+
 /*──────────────────── Libraries ────────────────────────────────────*/
 import {WebAuthnLib} from "./libs/WebAuthnLib.sol";
 
@@ -54,8 +66,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         // Passkey credentials
         mapping(bytes32 => PasskeyCredential) credentials;
         bytes32[] credentialIds;
-        // Per-org credential counts
-        mapping(bytes32 => uint8) orgCredentialCount;
         // Guardian recovery
         address guardian;
         uint48 recoveryDelay;
@@ -116,7 +126,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
      * @param credentialId Initial credential ID
      * @param pubKeyX Initial credential public key X
      * @param pubKeyY Initial credential public key Y
-     * @param orgId Organization this account is for
      * @param guardian_ Recovery guardian address
      * @param recoveryDelay_ Recovery delay in seconds
      */
@@ -125,7 +134,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         bytes32 credentialId,
         bytes32 pubKeyX,
         bytes32 pubKeyY,
-        bytes32 orgId,
         address guardian_,
         uint48 recoveryDelay_
     ) external initializer {
@@ -144,13 +152,11 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
             publicKeyY: pubKeyY,
             createdAt: uint64(block.timestamp),
             signCount: 0,
-            orgId: orgId,
             active: true
         });
         l.credentialIds.push(credentialId);
-        l.orgCredentialCount[orgId] = 1;
 
-        emit CredentialAdded(credentialId, orgId, uint64(block.timestamp));
+        emit CredentialAdded(credentialId, uint64(block.timestamp));
         if (guardian_ != address(0)) {
             emit GuardianUpdated(address(0), guardian_);
         }
@@ -233,7 +239,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
     /*──────────────────────────── Credential Management ───────────────*/
 
     /// @inheritdoc IPasskeyAccount
-    function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, bytes32 orgId)
+    function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY)
         external
         override
         onlySelf
@@ -245,14 +251,9 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
             revert CredentialExists();
         }
 
-        // Check global limit
-        if (l.credentialIds.length >= MAX_CREDENTIALS) {
-            revert MaxCredentialsReached();
-        }
-
-        // Check per-org limit from factory
-        uint8 maxPerOrg = _getMaxCredentialsPerOrg(orgId);
-        if (l.orgCredentialCount[orgId] >= maxPerOrg) {
+        // Check global limit from factory config
+        uint8 maxCreds = _getMaxCredentials();
+        if (l.credentialIds.length >= maxCreds) {
             revert MaxCredentialsReached();
         }
 
@@ -262,13 +263,11 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
             publicKeyY: pubKeyY,
             createdAt: uint64(block.timestamp),
             signCount: 0,
-            orgId: orgId,
             active: true
         });
         l.credentialIds.push(credentialId);
-        l.orgCredentialCount[orgId]++;
 
-        emit CredentialAdded(credentialId, orgId, uint64(block.timestamp));
+        emit CredentialAdded(credentialId, uint64(block.timestamp));
     }
 
     /// @inheritdoc IPasskeyAccount
@@ -284,9 +283,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         if (cred.createdAt == 0) {
             revert CredentialNotFound();
         }
-
-        // Decrement org count
-        l.orgCredentialCount[cred.orgId]--;
 
         // Remove from array
         _removeCredentialFromArray(credentialId);
@@ -377,7 +373,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
             revert RecoveryDelayNotPassed();
         }
 
-        // Add the new credential (use default org - can be updated later)
+        // Add the new credential
         bytes32 credentialId = request.credentialId;
 
         l.credentials[credentialId] = PasskeyCredential({
@@ -385,7 +381,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
             publicKeyY: request.pubKeyY,
             createdAt: uint64(block.timestamp),
             signCount: 0,
-            orgId: bytes32(0), // Recovery credentials have no org binding
             active: true
         });
         l.credentialIds.push(credentialId);
@@ -394,7 +389,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         request.executeAfter = 0;
 
         emit RecoveryCompleted(recoveryId, credentialId);
-        emit CredentialAdded(credentialId, bytes32(0), uint64(block.timestamp));
+        emit CredentialAdded(credentialId, uint64(block.timestamp));
     }
 
     /// @inheritdoc IPasskeyAccount
@@ -476,11 +471,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
     }
 
     /// @inheritdoc IPasskeyAccount
-    function getOrgCredentialCount(bytes32 orgId) external view override returns (uint8) {
-        return _layout().orgCredentialCount[orgId];
-    }
-
-    /// @inheritdoc IPasskeyAccount
     function guardian() external view override returns (address) {
         return _layout().guardian;
     }
@@ -503,26 +493,6 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
     /*──────────────────────────── Internal Helpers ────────────────────*/
 
     /**
-     * @notice Get max credentials per org from factory
-     * @param orgId The organization ID
-     * @return maxCredentials Maximum credentials allowed for this org
-     */
-    function _getMaxCredentialsPerOrg(bytes32 orgId) internal view returns (uint8) {
-        // Try to get from factory, default to 5 if not set
-        address factoryAddr = _layout().factory;
-        if (factoryAddr == address(0)) {
-            return 5;
-        }
-
-        // Call factory to get org config
-        try IPasskeyAccountFactory(factoryAddr).getMaxCredentialsPerOrg(orgId) returns (uint8 max) {
-            return max > 0 ? max : 5;
-        } catch {
-            return 5;
-        }
-    }
-
-    /**
      * @notice Remove a credential ID from the array
      * @param credentialId The credential ID to remove
      */
@@ -540,14 +510,24 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         }
     }
 
+    /// @notice Get max credentials from factory's global config
+    /// @dev Falls back to hardcoded MAX_CREDENTIALS if factory call fails
+    function _getMaxCredentials() internal view returns (uint8) {
+        Layout storage l = _layout();
+        if (l.factory == address(0)) {
+            return MAX_CREDENTIALS;
+        }
+
+        try IPasskeyAccountFactoryConfig(l.factory).getGlobalConfig() returns (
+            IPasskeyAccountFactoryConfig.GlobalConfig memory config
+        ) {
+            return config.maxCredentialsPerAccount > 0 ? config.maxCredentialsPerAccount : MAX_CREDENTIALS;
+        } catch {
+            return MAX_CREDENTIALS;
+        }
+    }
+
     /*──────────────────────────── Receive ETH ─────────────────────────*/
 
     receive() external payable {}
-}
-
-/**
- * @notice Interface for PasskeyAccountFactory (used internally)
- */
-interface IPasskeyAccountFactory {
-    function getMaxCredentialsPerOrg(bytes32 orgId) external view returns (uint8);
 }

@@ -89,6 +89,7 @@ contract OrgDeployer is Initializable {
         address poaManager;
         address hatsTreeSetup;
         address paymasterHub; // Shared PaymasterHub for all orgs
+        address universalPasskeyFactory; // Universal PasskeyAccountFactory for all orgs
         uint256 _status; // manual reentrancy guard
     }
 
@@ -136,6 +137,19 @@ contract OrgDeployer is Initializable {
         hats = IHats(_hats);
     }
 
+    /**
+     * @notice Set the universal passkey factory address
+     * @dev Callable by PoaManager, or anyone for one-time initial setup (when factory is not yet set)
+     */
+    function setUniversalPasskeyFactory(address _universalFactory) external {
+        Layout storage l = _layout();
+        // Allow one-time setup by anyone (when factory is not yet set), or require PoaManager for updates
+        if (l.universalPasskeyFactory != address(0) && msg.sender != l.poaManager) {
+            revert InvalidAddress();
+        }
+        l.universalPasskeyFactory = _universalFactory;
+    }
+
     /*════════════════  DEPLOYMENT STRUCTS  ════════════════*/
 
     struct DeploymentResult {
@@ -147,7 +161,6 @@ contract OrgDeployer is Initializable {
         address taskManager;
         address educationHub;
         address paymentManager;
-        address passkeyAccountFactory; // Optional: only set if passkey enabled
     }
 
     struct RoleAssignments {
@@ -176,7 +189,7 @@ contract OrgDeployer is Initializable {
         address[] ddInitialTargets;
         RoleConfigStructs.RoleConfig[] roles; // Complete role configuration (replaces roleNames, roleImages, roleCanVote)
         RoleAssignments roleAssignments;
-        AccessFactory.PasskeyConfig passkeyConfig; // Passkey infrastructure configuration
+        bool passkeyEnabled; // Whether passkey support is enabled (uses universal factory)
         ModulesFactory.EducationHubConfig educationHubConfig; // EducationHub deployment configuration
     }
 
@@ -290,6 +303,12 @@ contract OrgDeployer is Initializable {
                 tokenApproverRolesBitmap: params.roleAssignments.tokenApproverRolesBitmap
             });
 
+            // Use universal factory if passkey is enabled
+            AccessFactory.PasskeyConfig memory passkeyConfig = AccessFactory.PasskeyConfig({
+                enabled: params.passkeyEnabled,
+                universalFactory: params.passkeyEnabled ? l.universalPasskeyFactory : address(0)
+            });
+
             AccessFactory.AccessParams memory accessParams = AccessFactory.AccessParams({
                 orgId: params.orgId,
                 orgName: params.orgName,
@@ -302,13 +321,12 @@ contract OrgDeployer is Initializable {
                 roleHatIds: gov.roleHatIds,
                 autoUpgrade: params.autoUpgrade,
                 roleAssignments: accessRoles,
-                passkeyConfig: params.passkeyConfig
+                passkeyConfig: passkeyConfig
             });
 
             access = l.accessFactory.deployAccess(accessParams);
             result.quickJoin = access.quickJoin;
             result.participationToken = access.participationToken;
-            result.passkeyAccountFactory = access.passkeyAccountFactory;
         }
 
         /* 6. Deploy Functional Modules (TaskManager, Education, Payment) */
