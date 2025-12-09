@@ -59,6 +59,9 @@ contract DeployInfrastructure is Script {
     // POA Guardian address (for universal passkey account recovery)
     address public constant POA_GUARDIAN = address(0); // TODO: Set to actual POA guardian multisig
 
+    // Initial solidarity fund seed amount
+    uint256 public constant INITIAL_SOLIDARITY_FUND = 0.1 ether;
+
     /*═══════════════════════════ STORAGE ═══════════════════════════*/
 
     // Core infrastructure
@@ -163,6 +166,10 @@ contract DeployInfrastructure is Script {
             abi.encodeWithSignature("initialize(address,address,address)", ENTRY_POINT_V07, HATS_PROTOCOL, poaManager);
         paymasterHub = address(new BeaconProxy(paymasterHubBeacon, paymasterHubInit));
         console.log("PaymasterHub:", paymasterHub);
+
+        // Seed the solidarity fund for passkey gas sponsorship
+        PaymasterHub(payable(paymasterHub)).donateToSolidarity{value: INITIAL_SOLIDARITY_FUND}();
+        console.log("Solidarity Fund seeded with:", INITIAL_SOLIDARITY_FUND);
 
         // Deploy OrgDeployer proxy (universalPasskeyFactory set later after deployment)
         address deployerBeacon = PoaManager(poaManager).getBeaconById(keccak256("OrgDeployer"));
