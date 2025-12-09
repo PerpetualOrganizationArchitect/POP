@@ -228,7 +228,7 @@ contract GovernanceFactory {
         address hybridBeacon;
         address ddBeacon;
 
-        /* 1. Deploy HybridVoting (Governance Mechanism) - without registration */
+        /* 1. Deploy HybridVoting (Governance Mechanism) */
         {
             // Resolve proposal creator roles to hat IDs
             uint256[] memory creatorHats = RoleResolver.resolveRoleBitmap(
@@ -258,7 +258,7 @@ contract GovernanceFactory {
             );
         }
 
-        /* 2. Deploy DirectDemocracyVoting (Polling Mechanism) - without registration */
+        /* 2. Deploy DirectDemocracyVoting (Polling Mechanism) */
         {
             // Resolve voting and creator roles to hat IDs
             uint256[] memory votingHats = RoleResolver.resolveRoleBitmap(

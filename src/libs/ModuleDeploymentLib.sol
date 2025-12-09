@@ -243,8 +243,9 @@ library ModuleDeploymentLib {
         IHybridVotingInit.ClassConfig[] memory classes,
         address beacon
     ) internal returns (address hvProxy) {
-        address[] memory targets = new address[](1);
-        targets[0] = executorAddr;
+        // Targets array is kept for backwards compatibility with initialize signature
+        // but not validated - HybridVoting just passes batches to Executor
+        address[] memory targets = new address[](0);
 
         bytes memory init = abi.encodeWithSelector(
             IHybridVotingInit.initialize.selector, config.hats, executorAddr, creatorHats, targets, quorumPct, classes
