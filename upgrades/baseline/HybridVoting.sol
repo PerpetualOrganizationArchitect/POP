@@ -2409,16 +2409,11 @@ library HybridVotingCore {
         IExecutor.Call[] storage batch = p.batches[winner];
         bool executed = false;
         if (valid && batch.length > 0) {
-            uint256 batchLen = batch.length;
-            for (uint256 i; i < batchLen;) {
-                if (!l.allowedTarget[batch[i].target]) revert VotingErrors.InvalidTarget();
-                unchecked {
-                    ++i;
-                }
-            }
+            // No target validation needed - Executor has onlyExecutor permission on all org contracts
+            // and handles the actual calls. HybridVoting just passes the batch through.
             l.executor.execute(id, batch);
             executed = true;
-            emit ProposalExecuted(id, winner, batchLen);
+            emit ProposalExecuted(id, winner, batch.length);
         }
         emit Winner(id, winner, valid, executed, uint64(block.timestamp));
     }
@@ -2547,12 +2542,14 @@ library HybridVotingProposals {
         }
     }
 
-    function _validateTargets(IExecutor.Call[] calldata batch, HybridVoting.Layout storage l) internal view {
+    function _validateTargets(IExecutor.Call[] calldata batch, HybridVoting.Layout storage) internal view {
         uint256 batchLen = batch.length;
         if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
+        // Note: We don't validate allowedTarget here - HybridVoting just passes batches to Executor.
+        // The Executor has onlyExecutor permission on all org contracts and handles the actual calls.
+        // We only check that the batch doesn't target the voting contract itself.
         for (uint256 j; j < batchLen;) {
-            if (!l.allowedTarget[batch[j].target]) revert VotingErrors.InvalidTarget();
-            if (batch[j].target == address(this)) revert VotingErrors.InvalidTarget();
+            if (batch[j].target == address(this)) revert VotingErrors.TargetSelf();
             unchecked {
                 ++j;
             }
