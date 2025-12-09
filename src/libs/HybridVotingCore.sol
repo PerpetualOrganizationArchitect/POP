@@ -193,16 +193,11 @@ library HybridVotingCore {
         IExecutor.Call[] storage batch = p.batches[winner];
         bool executed = false;
         if (valid && batch.length > 0) {
-            uint256 batchLen = batch.length;
-            for (uint256 i; i < batchLen;) {
-                if (!l.allowedTarget[batch[i].target]) revert VotingErrors.InvalidTarget();
-                unchecked {
-                    ++i;
-                }
-            }
+            // No target validation needed - Executor has onlyExecutor permission on all org contracts
+            // and handles the actual calls. HybridVoting just passes the batch through.
             l.executor.execute(id, batch);
             executed = true;
-            emit ProposalExecuted(id, winner, batchLen);
+            emit ProposalExecuted(id, winner, batch.length);
         }
         emit Winner(id, winner, valid, executed, uint64(block.timestamp));
     }
