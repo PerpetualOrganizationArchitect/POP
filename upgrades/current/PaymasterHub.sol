@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity >=0.4.11 >=0.4.16 >=0.8.13 ^0.8.20 ^0.8.21 ^0.8.24;
 
 // lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol
