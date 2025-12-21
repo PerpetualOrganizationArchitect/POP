@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity >=0.8.13 ^0.8.19 ^0.8.20;
 
 // lib/hats-protocol/src/Interfaces/HatsErrors.sol
