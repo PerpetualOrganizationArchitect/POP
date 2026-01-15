@@ -91,6 +91,8 @@ contract HatsTreeSetup {
         uint256[] memory regParentHatIds = new uint256[](len);
         bool[] memory regDefaultEligibles = new bool[](len);
         bool[] memory regDefaultStandings = new bool[](len);
+        string[] memory regNames = new string[](len);
+        bytes32[] memory regMetadataCIDs = new bytes32[](len);
 
         // Multi-pass: resolve dependencies and create hats in correct order
         bool[] memory created = new bool[](len);
@@ -137,6 +139,8 @@ contract HatsTreeSetup {
                     regParentHatIds[i] = adminHatId;
                     regDefaultEligibles[i] = role.defaults.eligible;
                     regDefaultStandings[i] = role.defaults.standing;
+                    regNames[i] = role.name;
+                    regMetadataCIDs[i] = role.metadataCID;
 
                     created[i] = true;
                     createdCount++;
@@ -150,9 +154,11 @@ contract HatsTreeSetup {
             }
         }
 
-        // Batch register all hat creations for subgraph indexing (replaces N individual calls)
+        // Batch register all hat creations with metadata for subgraph indexing (replaces N individual calls)
         IEligibilityModule(params.eligibilityModule)
-            .batchRegisterHatCreation(regHatIds, regParentHatIds, regDefaultEligibles, regDefaultStandings);
+            .batchRegisterHatCreationWithMetadata(
+                regHatIds, regParentHatIds, regDefaultEligibles, regDefaultStandings, regNames, regMetadataCIDs
+            );
 
         // Step 5: Collect all eligibility and toggle operations for batch execution
         // Count total eligibility entries needed: 2 per role (executor + deployer) + additional wearers
