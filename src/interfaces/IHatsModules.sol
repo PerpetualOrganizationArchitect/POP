@@ -31,6 +31,14 @@ interface IEligibilityModule {
         bool[] calldata defaultEligibles,
         bool[] calldata defaultStandings
     ) external;
+    function batchRegisterHatCreationWithMetadata(
+        uint256[] calldata hatIds,
+        uint256[] calldata parentHatIds,
+        bool[] calldata defaultEligibles,
+        bool[] calldata defaultStandings,
+        string[] calldata names,
+        bytes32[] calldata metadataCIDs
+    ) external;
     function batchConfigureVouching(
         uint256[] calldata hatIds,
         uint32[] calldata quorums,
