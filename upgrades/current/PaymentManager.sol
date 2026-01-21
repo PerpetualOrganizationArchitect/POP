@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity >=0.4.16 >=0.6.2 ^0.8.20;
 
 // lib/openzeppelin-contracts/contracts/utils/cryptography/Hashes.sol
