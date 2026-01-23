@@ -65,10 +65,9 @@ interface ITaskManagerBootstrap {
         bool requiresApplication;
     }
 
-    function bootstrapProjectsAndTasks(
-        BootstrapProjectConfig[] calldata projects,
-        BootstrapTaskConfig[] calldata tasks
-    ) external returns (bytes32[] memory projectIds);
+    function bootstrapProjectsAndTasks(BootstrapProjectConfig[] calldata projects, BootstrapTaskConfig[] calldata tasks)
+        external
+        returns (bytes32[] memory projectIds);
 }
 
 /**
@@ -408,9 +407,8 @@ contract OrgDeployer is Initializable {
             // Resolve role indices to hat IDs in bootstrap config
             ITaskManagerBootstrap.BootstrapProjectConfig[] memory resolvedProjects =
                 _resolveBootstrapRoles(params.bootstrap.projects, gov.roleHatIds);
-            ITaskManagerBootstrap(result.taskManager).bootstrapProjectsAndTasks(
-                resolvedProjects, params.bootstrap.tasks
-            );
+            ITaskManagerBootstrap(result.taskManager)
+                .bootstrapProjectsAndTasks(resolvedProjects, params.bootstrap.tasks);
         }
 
         /* 9. Authorize QuickJoin to mint hats */

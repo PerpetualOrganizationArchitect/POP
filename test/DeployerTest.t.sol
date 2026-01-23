@@ -250,7 +250,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
     /// @dev Helper to build empty bootstrap config
     function _emptyBootstrap() internal pure returns (OrgDeployer.BootstrapConfig memory) {
-        ITaskManagerBootstrap.BootstrapProjectConfig[] memory projects = new ITaskManagerBootstrap.BootstrapProjectConfig[](0);
+        ITaskManagerBootstrap.BootstrapProjectConfig[] memory projects =
+            new ITaskManagerBootstrap.BootstrapProjectConfig[](0);
         ITaskManagerBootstrap.BootstrapTaskConfig[] memory tasks = new ITaskManagerBootstrap.BootstrapTaskConfig[](0);
         return OrgDeployer.BootstrapConfig({projects: projects, tasks: tasks});
     }

@@ -63,13 +63,8 @@ interface IParticipationTokenInit {
 }
 
 interface ITaskManagerInit {
-    function initialize(
-        address token,
-        address hats,
-        uint256[] calldata creatorHats,
-        address executor,
-        address deployer
-    ) external;
+    function initialize(address token, address hats, uint256[] calldata creatorHats, address executor, address deployer)
+        external;
 }
 
 interface IEducationHubInit {

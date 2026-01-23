@@ -891,7 +891,9 @@ contract RunOrgActionsAdvanced is Script {
         // Count bootstrap projects
         uint256 projectsLength = 0;
         for (uint256 i = 0; i < 100; i++) {
-            try vm.parseJsonString(configJson, string.concat(".bootstrap.projects[", vm.toString(i), "].title")) returns (
+            try vm.parseJsonString(
+                configJson, string.concat(".bootstrap.projects[", vm.toString(i), "].title")
+            ) returns (
                 string memory
             ) {
                 projectsLength++;
@@ -956,7 +958,8 @@ contract RunOrgActionsAdvanced is Script {
         for (uint256 i = 0; i < tasksLength; i++) {
             string memory basePath = string.concat(".bootstrap.tasks[", vm.toString(i), "]");
 
-            bootstrap.tasks[i].projectIndex = uint8(vm.parseJsonUint(configJson, string.concat(basePath, ".projectIndex")));
+            bootstrap.tasks[i].projectIndex =
+                uint8(vm.parseJsonUint(configJson, string.concat(basePath, ".projectIndex")));
             bootstrap.tasks[i].payout = vm.parseJsonUint(configJson, string.concat(basePath, ".payout"));
             bootstrap.tasks[i].title = vm.parseJsonString(configJson, string.concat(basePath, ".title"));
 

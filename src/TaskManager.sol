@@ -311,10 +311,10 @@ contract TaskManager is Initializable, ContextUpgradeable {
      * @param tasks Array of task configurations (reference projects by index)
      * @return projectIds Array of created project IDs
      */
-    function bootstrapProjectsAndTasks(
-        BootstrapProjectConfig[] calldata projects,
-        BootstrapTaskConfig[] calldata tasks
-    ) external returns (bytes32[] memory projectIds) {
+    function bootstrapProjectsAndTasks(BootstrapProjectConfig[] calldata projects, BootstrapTaskConfig[] calldata tasks)
+        external
+        returns (bytes32[] memory projectIds)
+    {
         Layout storage l = _layout();
         if (_msgSender() != l.deployer) revert NotDeployer();
 
