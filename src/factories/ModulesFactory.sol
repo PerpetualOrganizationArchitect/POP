@@ -105,7 +105,7 @@ contract ModulesFactory {
             });
 
             result.taskManager = ModuleDeploymentLib.deployTaskManager(
-                config, params.executor, params.participationToken, creatorHats, taskManagerBeacon
+                config, params.executor, params.participationToken, creatorHats, taskManagerBeacon, params.deployer
             );
         }
 
