@@ -215,9 +215,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                     adminRoleIndex: isTopRole ? type(uint256).max : i + 1
                 }),
                 distribution: RoleConfigStructs.RoleDistributionConfig({
-                    mintToDeployer: isTopRole && canVote[i],
-                    mintToExecutor: !isTopRole && canVote[i],
-                    additionalWearers: new address[](0)
+                    mintToDeployer: isTopRole && canVote[i], additionalWearers: new address[](0)
                 }),
                 hatConfig: RoleConfigStructs.HatConfig({
                     maxSupply: type(uint32).max, // Default: unlimited
@@ -1921,7 +1919,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}),
             distribution: RoleConfigStructs.RoleDistributionConfig({
-                mintToDeployer: false, mintToExecutor: true, additionalWearers: new address[](0)
+                mintToDeployer: false, additionalWearers: new address[](0)
             }),
             hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
         });
@@ -1936,7 +1934,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}),
             distribution: RoleConfigStructs.RoleDistributionConfig({
-                mintToDeployer: true, mintToExecutor: false, additionalWearers: new address[](0)
+                mintToDeployer: true, additionalWearers: new address[](0)
             }),
             hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
         });
@@ -1961,7 +1959,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}),
             distribution: RoleConfigStructs.RoleDistributionConfig({
-                mintToDeployer: true, mintToExecutor: false, additionalWearers: new address[](0)
+                mintToDeployer: true, additionalWearers: new address[](0)
             }),
             hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
         });
@@ -1983,7 +1981,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: true, standing: true}),
             hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: 0}), // Self-reference
             distribution: RoleConfigStructs.RoleDistributionConfig({
-                mintToDeployer: true, mintToExecutor: false, additionalWearers: new address[](0)
+                mintToDeployer: true, additionalWearers: new address[](0)
             }),
             hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
         });

@@ -66,7 +66,6 @@ contract DeployOrg is Script {
 
     struct RoleDistributionConfigJson {
         bool mintToDeployer;
-        bool mintToExecutor;
         address[] additionalWearers;
     }
 
@@ -274,8 +273,6 @@ contract DeployOrg is Script {
                 bool mintToDeployer
             ) {
                 config.roles[i].distribution.mintToDeployer = mintToDeployer;
-                config.roles[i].distribution.mintToExecutor =
-                    vm.parseJsonBool(configJson, string.concat(basePath, ".distribution.mintToExecutor"));
                 bytes memory additionalWearersData =
                     vm.parseJson(configJson, string.concat(basePath, ".distribution.additionalWearers"));
                 config.roles[i].distribution.additionalWearers = abi.decode(additionalWearersData, (address[]));
@@ -506,7 +503,6 @@ contract DeployOrg is Script {
                 hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: role.hierarchy.adminRoleIndex}),
                 distribution: RoleConfigStructs.RoleDistributionConfig({
                     mintToDeployer: role.distribution.mintToDeployer,
-                    mintToExecutor: role.distribution.mintToExecutor,
                     additionalWearers: role.distribution.additionalWearers
                 }),
                 hatConfig: RoleConfigStructs.HatConfig({
