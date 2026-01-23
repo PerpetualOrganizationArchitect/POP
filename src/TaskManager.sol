@@ -357,6 +357,17 @@ contract TaskManager is Initializable, ContextUpgradeable {
         }
     }
 
+    /**
+     * @notice Clear the deployer address after bootstrap phase is complete
+     * @dev Only callable by deployer. Prevents future bootstrap calls for defense-in-depth.
+     *      Should be called by OrgDeployer at the end of org deployment.
+     */
+    function clearDeployer() external {
+        Layout storage l = _layout();
+        if (_msgSender() != l.deployer) revert NotDeployer();
+        l.deployer = address(0);
+    }
+
     /*──────── Task Logic ───────*/
     function createTask(
         uint256 payout,

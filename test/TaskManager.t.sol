@@ -5238,4 +5238,95 @@ contract MockToken is Test, IERC20 {
                     abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
                 assertEq(uint8(status), uint8(TaskManager.Status.COMPLETED), "Task should be completed");
             }
+
+            /*─────────────────────────────────────────────────────────────────────────────
+                                         clearDeployer Tests
+            ─────────────────────────────────────────────────────────────────────────────*/
+
+            function test_ClearDeployerSuccess() public {
+                // deployer can clear themselves
+                vm.prank(deployer);
+                tm.clearDeployer();
+
+                // After clearing, deployer should no longer be able to bootstrap
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = _buildBootstrapProject(
+                    "Should Fail",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](0);
+
+                vm.prank(deployer);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.bootstrapProjectsAndTasks(projects, tasks);
+            }
+
+            function test_ClearDeployerOnlyDeployer() public {
+                // Non-deployer cannot clear deployer
+                vm.prank(creator1);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.clearDeployer();
+
+                vm.prank(executor);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.clearDeployer();
+
+                vm.prank(outsider);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.clearDeployer();
+            }
+
+            function test_ClearDeployerCannotBeCalledTwice() public {
+                // First clear succeeds
+                vm.prank(deployer);
+                tm.clearDeployer();
+
+                // Second clear fails (deployer is now address(0))
+                vm.prank(deployer);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.clearDeployer();
+            }
+
+            function test_BootstrapThenClear() public {
+                // Bootstrap first
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = _buildBootstrapProject(
+                    "Initial Project",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](1);
+                tasks[0] = _buildBootstrapTask(0, "Initial Task", 10 ether);
+
+                vm.prank(deployer);
+                bytes32[] memory projectIds = tm.bootstrapProjectsAndTasks(projects, tasks);
+                assertEq(projectIds.length, 1, "Should create 1 project");
+
+                // Clear deployer
+                vm.prank(deployer);
+                tm.clearDeployer();
+
+                // Cannot bootstrap again
+                TaskManager.BootstrapProjectConfig[] memory moreProjects = new TaskManager.BootstrapProjectConfig[](1);
+                moreProjects[0] = _buildBootstrapProject(
+                    "Second Project",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+                TaskManager.BootstrapTaskConfig[] memory moreTasks = new TaskManager.BootstrapTaskConfig[](0);
+
+                vm.prank(deployer);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.bootstrapProjectsAndTasks(moreProjects, moreTasks);
+            }
         }

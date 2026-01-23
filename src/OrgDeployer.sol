@@ -68,6 +68,8 @@ interface ITaskManagerBootstrap {
     function bootstrapProjectsAndTasks(BootstrapProjectConfig[] calldata projects, BootstrapTaskConfig[] calldata tasks)
         external
         returns (bytes32[] memory projectIds);
+
+    function clearDeployer() external;
 }
 
 /**
@@ -410,6 +412,9 @@ contract OrgDeployer is Initializable {
             ITaskManagerBootstrap(result.taskManager)
                 .bootstrapProjectsAndTasks(resolvedProjects, params.bootstrap.tasks);
         }
+
+        /* 8.6. Clear deployer address to prevent future bootstrap calls (defense-in-depth) */
+        ITaskManagerBootstrap(result.taskManager).clearDeployer();
 
         /* 9. Authorize QuickJoin to mint hats */
         IExecutorAdmin(result.executor).setHatMinterAuthorization(result.quickJoin, true);
