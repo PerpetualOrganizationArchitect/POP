@@ -161,10 +161,14 @@ contract HatsTreeSetup {
             );
 
         // Step 5: Collect all eligibility and toggle operations for batch execution
-        // Count total eligibility entries needed: 2 per role (executor + deployer) + additional wearers
+        // Count total eligibility entries needed: executor (always) + deployer (only if minting) + additional wearers
         uint256 eligibilityCount = 0;
         for (uint256 i = 0; i < len; i++) {
-            eligibilityCount += 2; // executor + deployer
+            eligibilityCount += 1; // executor always eligible
+            // Deployer only eligible if they're receiving the hat (matches minting conditions)
+            if (params.roles[i].canVote && params.roles[i].distribution.mintToDeployer) {
+                eligibilityCount += 1;
+            }
             eligibilityCount += params.roles[i].distribution.additionalWearers.length;
         }
 
@@ -186,14 +190,17 @@ contract HatsTreeSetup {
             uint256 hatId = result.roleHatIds[i];
             RoleConfigStructs.RoleConfig memory role = params.roles[i];
 
-            // Collect eligibility entries
+            // Executor always eligible (needed for QuickJoin and governance operations)
             eligWearers[eligIndex] = params.executor;
             eligHatIds[eligIndex] = hatId;
             eligIndex++;
 
-            eligWearers[eligIndex] = params.deployerAddress;
-            eligHatIds[eligIndex] = hatId;
-            eligIndex++;
+            // Deployer only eligible if they're receiving the hat (matches minting conditions)
+            if (role.canVote && role.distribution.mintToDeployer) {
+                eligWearers[eligIndex] = params.deployerAddress;
+                eligHatIds[eligIndex] = hatId;
+                eligIndex++;
+            }
 
             // Collect additional wearers
             for (uint256 j = 0; j < role.distribution.additionalWearers.length; j++) {
