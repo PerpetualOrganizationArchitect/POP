@@ -79,6 +79,14 @@ contract OrgDeployer is Initializable {
         bytes32 indexed orgId, uint256[] hatIds, string[] names, string[] images, bytes32[] metadataCIDs, bool[] canVote
     );
 
+    /// @notice Emitted after OrgDeployed to provide initial wearer assignments for subgraph indexing
+    event InitialWearersAssigned(
+        bytes32 indexed orgId,
+        address indexed eligibilityModule,
+        address[] wearers,
+        uint256[] hatIds
+    );
+
     /*───────────── ERC-7201 Storage ───────────*/
     /// @custom:storage-location erc7201:poa.orgdeployer.storage
     struct Layout {
@@ -426,6 +434,25 @@ contract OrgDeployer is Initializable {
             gov.roleHatIds
         );
 
+        /* 12b. Emit initial wearer assignments for subgraph User creation */
+        {
+            (address[] memory wearers, uint256[] memory hatIds) = _collectInitialWearers(
+                params.roles,
+                gov.roleHatIds,
+                params.deployerAddress,
+                result.executor
+            );
+
+            if (wearers.length > 0) {
+                emit InitialWearersAssigned(
+                    params.orgId,
+                    gov.eligibilityModule,
+                    wearers,
+                    hatIds
+                );
+            }
+        }
+
         /* 13. Emit role metadata for subgraph indexing */
         {
             uint256 roleCount = params.roles.length;
@@ -452,6 +479,52 @@ contract OrgDeployer is Initializable {
     function _orgExists(bytes32 id) internal view returns (bool) {
         (,,, bool exists) = _layout().orgRegistry.orgOf(id);
         return exists;
+    }
+
+    /**
+     * @notice Collects all initial wearers from role configurations
+     * @dev Used to emit InitialWearersAssigned event for subgraph indexing
+     */
+    function _collectInitialWearers(
+        RoleConfigStructs.RoleConfig[] calldata roles,
+        uint256[] memory roleHatIds,
+        address deployerAddress,
+        address executor
+    ) internal pure returns (address[] memory wearers, uint256[] memory hatIds) {
+        // First pass: count total wearers
+        uint256 totalCount = 0;
+        for (uint256 i = 0; i < roles.length; i++) {
+            if (!roles[i].canVote) continue;
+            if (roles[i].distribution.mintToDeployer) totalCount++;
+            if (roles[i].distribution.mintToExecutor) totalCount++;
+            totalCount += roles[i].distribution.additionalWearers.length;
+        }
+
+        // Second pass: populate arrays
+        wearers = new address[](totalCount);
+        hatIds = new uint256[](totalCount);
+        uint256 idx = 0;
+
+        for (uint256 i = 0; i < roles.length; i++) {
+            if (!roles[i].canVote) continue;
+            uint256 hatId = roleHatIds[i];
+
+            if (roles[i].distribution.mintToDeployer) {
+                wearers[idx] = deployerAddress;
+                hatIds[idx] = hatId;
+                idx++;
+            }
+            if (roles[i].distribution.mintToExecutor) {
+                wearers[idx] = executor;
+                hatIds[idx] = hatId;
+                idx++;
+            }
+            for (uint256 j = 0; j < roles[i].distribution.additionalWearers.length; j++) {
+                wearers[idx] = roles[i].distribution.additionalWearers[j];
+                hatIds[idx] = hatId;
+                idx++;
+            }
+        }
     }
 
     /**
