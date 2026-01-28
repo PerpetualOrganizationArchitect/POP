@@ -81,10 +81,7 @@ contract OrgDeployer is Initializable {
 
     /// @notice Emitted after OrgDeployed to provide initial wearer assignments for subgraph indexing
     event InitialWearersAssigned(
-        bytes32 indexed orgId,
-        address indexed eligibilityModule,
-        address[] wearers,
-        uint256[] hatIds
+        bytes32 indexed orgId, address indexed eligibilityModule, address[] wearers, uint256[] hatIds
     );
 
     /*───────────── ERC-7201 Storage ───────────*/
@@ -436,20 +433,11 @@ contract OrgDeployer is Initializable {
 
         /* 12b. Emit initial wearer assignments for subgraph User creation */
         {
-            (address[] memory wearers, uint256[] memory hatIds) = _collectInitialWearers(
-                params.roles,
-                gov.roleHatIds,
-                params.deployerAddress,
-                result.executor
-            );
+            (address[] memory wearers, uint256[] memory hatIds) =
+                _collectInitialWearers(params.roles, gov.roleHatIds, params.deployerAddress, result.executor);
 
             if (wearers.length > 0) {
-                emit InitialWearersAssigned(
-                    params.orgId,
-                    gov.eligibilityModule,
-                    wearers,
-                    hatIds
-                );
+                emit InitialWearersAssigned(params.orgId, gov.eligibilityModule, wearers, hatIds);
             }
         }
 
