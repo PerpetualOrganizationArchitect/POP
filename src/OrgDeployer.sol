@@ -481,7 +481,7 @@ contract OrgDeployer is Initializable {
         /* 12b. Emit initial wearer assignments for subgraph User creation */
         {
             (address[] memory wearers, uint256[] memory hatIds) =
-                _collectInitialWearers(params.roles, gov.roleHatIds, params.deployerAddress, result.executor);
+                _collectInitialWearers(params.roles, gov.roleHatIds, params.deployerAddress);
 
             if (wearers.length > 0) {
                 emit InitialWearersAssigned(params.orgId, gov.eligibilityModule, wearers, hatIds);
@@ -523,15 +523,13 @@ contract OrgDeployer is Initializable {
     function _collectInitialWearers(
         RoleConfigStructs.RoleConfig[] calldata roles,
         uint256[] memory roleHatIds,
-        address deployerAddress,
-        address executor
+        address deployerAddress
     ) internal pure returns (address[] memory wearers, uint256[] memory hatIds) {
         // First pass: count total wearers
         uint256 totalCount = 0;
         for (uint256 i = 0; i < roles.length; i++) {
             if (!roles[i].canVote) continue;
             if (roles[i].distribution.mintToDeployer) totalCount++;
-            if (roles[i].distribution.mintToExecutor) totalCount++;
             totalCount += roles[i].distribution.additionalWearers.length;
         }
 
@@ -546,11 +544,6 @@ contract OrgDeployer is Initializable {
 
             if (roles[i].distribution.mintToDeployer) {
                 wearers[idx] = deployerAddress;
-                hatIds[idx] = hatId;
-                idx++;
-            }
-            if (roles[i].distribution.mintToExecutor) {
-                wearers[idx] = executor;
                 hatIds[idx] = hatId;
                 idx++;
             }
