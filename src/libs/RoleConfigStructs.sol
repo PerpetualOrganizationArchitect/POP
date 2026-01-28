@@ -34,7 +34,6 @@ library RoleConfigStructs {
     /// @dev Controls who gets the role minted to them initially
     struct RoleDistributionConfig {
         bool mintToDeployer; // Mint to deployer address
-        bool mintToExecutor; // Mint to executor contract
         address[] additionalWearers; // Additional addresses to mint to
     }
 

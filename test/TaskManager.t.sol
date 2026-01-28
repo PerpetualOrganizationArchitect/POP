@@ -159,7 +159,7 @@ contract MockToken is Test, IERC20 {
                 uint256[] memory creatorHats = _hatArr(CREATOR_HAT);
 
                 vm.prank(creator1);
-                tm.initialize(address(token), address(hats), creatorHats, executor);
+                tm.initialize(address(token), address(hats), creatorHats, executor, address(0));
 
                 vm.prank(executor);
                 tm.setConfig(
@@ -4840,5 +4840,493 @@ contract MockToken is Test, IERC20 {
 
                 assertEq(spent1, 0, "Token1 spent should remain zero");
                 assertEq(spent2, 0, "Token2 spent should be rolled back");
+            }
+        }
+
+        /*────────────────── Bootstrap Test Suite ──────────────────*/
+        contract TaskManagerBootstrapTest is Test {
+            /* test actors */
+            address creator1 = makeAddr("creator1");
+            address pm1 = makeAddr("pm1");
+            address member1 = makeAddr("member1");
+            address executor = makeAddr("executor");
+            address deployer = makeAddr("deployer");
+            address outsider = makeAddr("outsider");
+
+            uint256 constant CREATOR_HAT = 1;
+            uint256 constant PM_HAT = 2;
+            uint256 constant MEMBER_HAT = 3;
+
+            TaskManager tm;
+            TaskManagerLens lens;
+            MockToken token;
+            MockHats hats;
+            MockERC20 bountyToken;
+
+            function setUp() public {
+                token = new MockToken();
+                hats = new MockHats();
+                bountyToken = new MockERC20();
+
+                hats.mintHat(CREATOR_HAT, creator1);
+                hats.mintHat(PM_HAT, pm1);
+                hats.mintHat(MEMBER_HAT, member1);
+
+                tm = new TaskManager();
+                lens = new TaskManagerLens();
+                uint256[] memory creatorHats = new uint256[](1);
+                creatorHats[0] = CREATOR_HAT;
+
+                // Initialize with deployer address
+                tm.initialize(address(token), address(hats), creatorHats, executor, deployer);
+
+                // Set up permissions
+                vm.prank(executor);
+                tm.setConfig(
+                    TaskManager.ConfigKey.ROLE_PERM,
+                    abi.encode(PM_HAT, TaskPerm.CREATE | TaskPerm.REVIEW | TaskPerm.ASSIGN)
+                );
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MEMBER_HAT, TaskPerm.CLAIM));
+            }
+
+            /* ─────────────── Helper Functions ─────────────── */
+
+            function _hatArr(uint256 hat) internal pure returns (uint256[] memory arr) {
+                arr = new uint256[](1);
+                arr[0] = hat;
+            }
+
+            function _buildBootstrapProject(
+                string memory title,
+                uint256 cap,
+                uint256[] memory createHats,
+                uint256[] memory claimHats,
+                uint256[] memory reviewHats,
+                uint256[] memory assignHats
+            ) internal pure returns (TaskManager.BootstrapProjectConfig memory) {
+                return TaskManager.BootstrapProjectConfig({
+                    title: bytes(title),
+                    metadataHash: bytes32(0),
+                    cap: cap,
+                    managers: new address[](0),
+                    createHats: createHats,
+                    claimHats: claimHats,
+                    reviewHats: reviewHats,
+                    assignHats: assignHats
+                });
+            }
+
+            function _buildBootstrapTask(uint8 projectIndex, string memory title, uint256 payout)
+                internal
+                pure
+                returns (TaskManager.BootstrapTaskConfig memory)
+            {
+                return TaskManager.BootstrapTaskConfig({
+                    projectIndex: projectIndex,
+                    payout: payout,
+                    title: bytes(title),
+                    metadataHash: bytes32(0),
+                    bountyToken: address(0),
+                    bountyPayout: 0,
+                    requiresApplication: false
+                });
+            }
+
+            /* ─────────────── Test Cases ─────────────── */
+
+            function test_BootstrapSingleProjectWithTasks() public {
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = _buildBootstrapProject(
+                    "Getting Started",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](2);
+                tasks[0] = _buildBootstrapTask(0, "Complete your profile", 10 ether);
+                tasks[1] = _buildBootstrapTask(0, "Introduce yourself", 5 ether);
+
+                vm.prank(deployer);
+                bytes32[] memory projectIds = tm.bootstrapProjectsAndTasks(projects, tasks);
+
+                // Verify project created
+                assertEq(projectIds.length, 1, "Should create 1 project");
+                bytes memory result =
+                    lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(projectIds[0]));
+                (uint256 cap, uint256 spent, bool isManager) = abi.decode(result, (uint256, uint256, bool));
+                assertEq(cap, 100 ether, "Project cap should be 100 ether");
+                assertEq(spent, 15 ether, "Project spent should be 15 ether (both tasks)");
+
+                // Verify tasks created
+                result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(0));
+                (uint256 payout, TaskManager.Status status,,, bool requiresApp) =
+                    abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
+                assertEq(payout, 10 ether, "Task 0 payout should be 10 ether");
+                assertEq(uint8(status), uint8(TaskManager.Status.UNCLAIMED), "Task 0 should be UNCLAIMED");
+                assertFalse(requiresApp, "Task 0 should not require application");
+
+                result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(1));
+                (payout,,,,) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
+                assertEq(payout, 5 ether, "Task 1 payout should be 5 ether");
+            }
+
+            function test_BootstrapMultipleProjects() public {
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](2);
+                projects[0] = _buildBootstrapProject(
+                    "Project A", 50 ether, _hatArr(CREATOR_HAT), _hatArr(MEMBER_HAT), _hatArr(PM_HAT), _hatArr(PM_HAT)
+                );
+                projects[1] = _buildBootstrapProject(
+                    "Project B", 100 ether, _hatArr(CREATOR_HAT), _hatArr(MEMBER_HAT), _hatArr(PM_HAT), _hatArr(PM_HAT)
+                );
+
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](3);
+                tasks[0] = _buildBootstrapTask(0, "Task for A", 10 ether);
+                tasks[1] = _buildBootstrapTask(1, "Task 1 for B", 20 ether);
+                tasks[2] = _buildBootstrapTask(1, "Task 2 for B", 30 ether);
+
+                vm.prank(deployer);
+                bytes32[] memory projectIds = tm.bootstrapProjectsAndTasks(projects, tasks);
+
+                assertEq(projectIds.length, 2, "Should create 2 projects");
+
+                // Verify Project A spent
+                bytes memory result =
+                    lens.getStorage(address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(projectIds[0]));
+                (, uint256 spentA,) = abi.decode(result, (uint256, uint256, bool));
+                assertEq(spentA, 10 ether, "Project A spent should be 10 ether");
+
+                // Verify Project B spent
+                result = lens.getStorage(
+                    address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(projectIds[1])
+                );
+                (, uint256 spentB,) = abi.decode(result, (uint256, uint256, bool));
+                assertEq(spentB, 50 ether, "Project B spent should be 50 ether");
+            }
+
+            function test_BootstrapWithManagers() public {
+                address[] memory managers = new address[](1);
+                managers[0] = pm1;
+
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = TaskManager.BootstrapProjectConfig({
+                    title: bytes("Managed Project"),
+                    metadataHash: bytes32(0),
+                    cap: 100 ether,
+                    managers: managers,
+                    createHats: _hatArr(CREATOR_HAT),
+                    claimHats: _hatArr(MEMBER_HAT),
+                    reviewHats: _hatArr(PM_HAT),
+                    assignHats: _hatArr(PM_HAT)
+                });
+
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](0);
+
+                // Expect the ProjectManagerUpdated event to be emitted
+                vm.expectEmit(true, true, false, true);
+                emit TaskManager.ProjectManagerUpdated(bytes32(0), pm1, true);
+
+                vm.prank(deployer);
+                tm.bootstrapProjectsAndTasks(projects, tasks);
+            }
+
+            function test_BootstrapWithRolePermissions() public {
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = _buildBootstrapProject(
+                    "Role Test Project",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](1);
+                tasks[0] = _buildBootstrapTask(0, "Claimable task", 10 ether);
+
+                vm.prank(deployer);
+                tm.bootstrapProjectsAndTasks(projects, tasks);
+
+                // member1 has MEMBER_HAT which is in claimHats, should be able to claim
+                vm.prank(member1);
+                tm.claimTask(0);
+
+                // Verify claim
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(0));
+                (, TaskManager.Status status, address claimer,,) =
+                    abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
+                assertEq(claimer, member1, "member1 should be claimer");
+                assertEq(uint8(status), uint8(TaskManager.Status.CLAIMED), "Task should be claimed");
+            }
+
+            function test_BootstrapWithBountyTasks() public {
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = _buildBootstrapProject(
+                    "Bounty Project",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](1);
+                tasks[0] = TaskManager.BootstrapTaskConfig({
+                    projectIndex: 0,
+                    payout: 10 ether,
+                    title: bytes("Bounty task"),
+                    metadataHash: bytes32(0),
+                    bountyToken: address(bountyToken),
+                    bountyPayout: 5 ether,
+                    requiresApplication: false
+                });
+
+                vm.prank(deployer);
+                bytes32[] memory projectIds = tm.bootstrapProjectsAndTasks(projects, tasks);
+
+                // Verify bounty info stored
+                bytes memory result = lens.getStorage(
+                    address(tm), TaskManagerLens.StorageKey.TASK_FULL_INFO, abi.encode(0)
+                );
+                (uint256 payout, uint256 bountyPayoutVal, address bountyTokenAddr,,,,) =
+                    abi.decode(result, (uint256, uint256, address, TaskManager.Status, address, bytes32, bool));
+                assertEq(payout, 10 ether, "Payout should be 10 ether");
+                assertEq(bountyPayoutVal, 5 ether, "Bounty payout should be 5 ether");
+                assertEq(bountyTokenAddr, address(bountyToken), "Bounty token should match");
+            }
+
+            function test_BootstrapWithRequiresApplication() public {
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = _buildBootstrapProject(
+                    "Application Project",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](1);
+                tasks[0] = TaskManager.BootstrapTaskConfig({
+                    projectIndex: 0,
+                    payout: 10 ether,
+                    title: bytes("Apply first"),
+                    metadataHash: bytes32(0),
+                    bountyToken: address(0),
+                    bountyPayout: 0,
+                    requiresApplication: true
+                });
+
+                vm.prank(deployer);
+                tm.bootstrapProjectsAndTasks(projects, tasks);
+
+                // Direct claim should fail
+                vm.prank(member1);
+                vm.expectRevert(TaskManager.RequiresApplication.selector);
+                tm.claimTask(0);
+
+                // Apply and then get approved
+                vm.prank(member1);
+                tm.applyForTask(0, keccak256("my application"));
+
+                vm.prank(pm1);
+                tm.approveApplication(0, member1);
+
+                // Now claim should work
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(0));
+                (, TaskManager.Status status, address claimer,,) =
+                    abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
+                assertEq(claimer, member1, "member1 should be claimer after approval");
+            }
+
+            function test_BootstrapOnlyDeployer() public {
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = _buildBootstrapProject(
+                    "Test Project",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](0);
+
+                // creator1 should not be able to bootstrap
+                vm.prank(creator1);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.bootstrapProjectsAndTasks(projects, tasks);
+
+                // executor should not be able to bootstrap
+                vm.prank(executor);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.bootstrapProjectsAndTasks(projects, tasks);
+
+                // outsider should not be able to bootstrap
+                vm.prank(outsider);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.bootstrapProjectsAndTasks(projects, tasks);
+            }
+
+            function test_BootstrapInvalidProjectIndex() public {
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = _buildBootstrapProject(
+                    "Only Project",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](1);
+                tasks[0] = _buildBootstrapTask(5, "Invalid reference", 10 ether); // projectIndex 5 doesn't exist
+
+                vm.prank(deployer);
+                vm.expectRevert(TaskManager.InvalidIndex.selector);
+                tm.bootstrapProjectsAndTasks(projects, tasks);
+            }
+
+            function test_BootstrapEmptyArrays() public {
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](0);
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](0);
+
+                vm.prank(deployer);
+                bytes32[] memory projectIds = tm.bootstrapProjectsAndTasks(projects, tasks);
+
+                assertEq(projectIds.length, 0, "Should return empty array for empty bootstrap");
+            }
+
+            function test_BootstrapTaskLifecycleAfterBootstrap() public {
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = _buildBootstrapProject(
+                    "Lifecycle Project",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](1);
+                tasks[0] = _buildBootstrapTask(0, "Complete me", 10 ether);
+
+                vm.prank(deployer);
+                tm.bootstrapProjectsAndTasks(projects, tasks);
+
+                // Full lifecycle: claim → submit → complete
+                uint256 balBefore = token.balanceOf(member1);
+
+                vm.prank(member1);
+                tm.claimTask(0);
+
+                vm.prank(member1);
+                tm.submitTask(0, keccak256("my work"));
+
+                vm.prank(pm1);
+                tm.completeTask(0);
+
+                // Verify minting
+                assertEq(token.balanceOf(member1), balBefore + 10 ether, "Should mint participation tokens");
+
+                // Verify task completed
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(0));
+                (, TaskManager.Status status,,,) =
+                    abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
+                assertEq(uint8(status), uint8(TaskManager.Status.COMPLETED), "Task should be completed");
+            }
+
+            /*─────────────────────────────────────────────────────────────────────────────
+                                         clearDeployer Tests
+            ─────────────────────────────────────────────────────────────────────────────*/
+
+            function test_ClearDeployerSuccess() public {
+                // deployer can clear themselves
+                vm.prank(deployer);
+                tm.clearDeployer();
+
+                // After clearing, deployer should no longer be able to bootstrap
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = _buildBootstrapProject(
+                    "Should Fail",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](0);
+
+                vm.prank(deployer);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.bootstrapProjectsAndTasks(projects, tasks);
+            }
+
+            function test_ClearDeployerOnlyDeployer() public {
+                // Non-deployer cannot clear deployer
+                vm.prank(creator1);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.clearDeployer();
+
+                vm.prank(executor);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.clearDeployer();
+
+                vm.prank(outsider);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.clearDeployer();
+            }
+
+            function test_ClearDeployerCannotBeCalledTwice() public {
+                // First clear succeeds
+                vm.prank(deployer);
+                tm.clearDeployer();
+
+                // Second clear fails (deployer is now address(0))
+                vm.prank(deployer);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.clearDeployer();
+            }
+
+            function test_BootstrapThenClear() public {
+                // Bootstrap first
+                TaskManager.BootstrapProjectConfig[] memory projects = new TaskManager.BootstrapProjectConfig[](1);
+                projects[0] = _buildBootstrapProject(
+                    "Initial Project",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+                TaskManager.BootstrapTaskConfig[] memory tasks = new TaskManager.BootstrapTaskConfig[](1);
+                tasks[0] = _buildBootstrapTask(0, "Initial Task", 10 ether);
+
+                vm.prank(deployer);
+                bytes32[] memory projectIds = tm.bootstrapProjectsAndTasks(projects, tasks);
+                assertEq(projectIds.length, 1, "Should create 1 project");
+
+                // Clear deployer
+                vm.prank(deployer);
+                tm.clearDeployer();
+
+                // Cannot bootstrap again
+                TaskManager.BootstrapProjectConfig[] memory moreProjects = new TaskManager.BootstrapProjectConfig[](1);
+                moreProjects[0] = _buildBootstrapProject(
+                    "Second Project",
+                    100 ether,
+                    _hatArr(CREATOR_HAT),
+                    _hatArr(MEMBER_HAT),
+                    _hatArr(PM_HAT),
+                    _hatArr(PM_HAT)
+                );
+                TaskManager.BootstrapTaskConfig[] memory moreTasks = new TaskManager.BootstrapTaskConfig[](0);
+
+                vm.prank(deployer);
+                vm.expectRevert(TaskManager.NotDeployer.selector);
+                tm.bootstrapProjectsAndTasks(moreProjects, moreTasks);
             }
         }

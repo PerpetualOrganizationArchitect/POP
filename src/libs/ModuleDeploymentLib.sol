@@ -63,7 +63,8 @@ interface IParticipationTokenInit {
 }
 
 interface ITaskManagerInit {
-    function initialize(address token, address hats, uint256[] calldata creatorHats, address executor) external;
+    function initialize(address token, address hats, uint256[] calldata creatorHats, address executor, address deployer)
+        external;
 }
 
 interface IEducationHubInit {
@@ -194,10 +195,11 @@ library ModuleDeploymentLib {
         address executorAddr,
         address token,
         uint256[] memory creatorHats,
-        address beacon
+        address beacon,
+        address deployer
     ) internal returns (address tmProxy) {
         bytes memory init = abi.encodeWithSelector(
-            ITaskManagerInit.initialize.selector, token, config.hats, creatorHats, executorAddr
+            ITaskManagerInit.initialize.selector, token, config.hats, creatorHats, executorAddr, deployer
         );
         tmProxy = deployCore(config, ModuleTypes.TASK_MANAGER_ID, init, beacon);
     }

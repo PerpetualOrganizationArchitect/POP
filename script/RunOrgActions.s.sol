@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Script.sol";
 import "forge-std/console.sol";
 
-import {OrgDeployer} from "../src/OrgDeployer.sol";
+import {OrgDeployer, ITaskManagerBootstrap} from "../src/OrgDeployer.sol";
 import {TaskManager} from "../src/TaskManager.sol";
 import {HybridVoting} from "../src/HybridVoting.sol";
 import {ParticipationToken} from "../src/ParticipationToken.sol";
@@ -63,6 +63,7 @@ contract RunOrgActions is Script {
         address[] ddInitialTargets;
         bool withPaymaster;
         bool withEducationHub; // Whether to deploy EducationHub (default: true)
+        BootstrapConfigJson bootstrap; // Optional: initial projects and tasks
     }
 
     struct QuorumConfig {
@@ -88,7 +89,6 @@ contract RunOrgActions is Script {
 
     struct RoleDistributionConfigJson {
         bool mintToDeployer;
-        bool mintToExecutor;
         address[] additionalWearers;
     }
 
@@ -127,6 +127,33 @@ contract RunOrgActions is Script {
         uint256[] hybridProposalCreatorRoles;
         uint256[] ddVotingRoles;
         uint256[] ddCreatorRoles;
+    }
+
+    // Bootstrap config structs for initial project/task creation
+    struct BootstrapProjectConfigJson {
+        string title;
+        bytes32 metadataHash;
+        uint256 cap;
+        address[] managers;
+        uint256[] createRoles;
+        uint256[] claimRoles;
+        uint256[] reviewRoles;
+        uint256[] assignRoles;
+    }
+
+    struct BootstrapTaskConfigJson {
+        uint8 projectIndex;
+        uint256 payout;
+        string title;
+        bytes32 metadataHash;
+        address bountyToken;
+        uint256 bountyPayout;
+        bool requiresApplication;
+    }
+
+    struct BootstrapConfigJson {
+        BootstrapProjectConfigJson[] projects;
+        BootstrapTaskConfigJson[] tasks;
     }
 
     struct OrgContracts {
@@ -656,8 +683,6 @@ contract RunOrgActions is Script {
                 bool mintToDeployer
             ) {
                 config.roles[i].distribution.mintToDeployer = mintToDeployer;
-                config.roles[i].distribution.mintToExecutor =
-                    vm.parseJsonBool(configJson, string.concat(basePath, ".distribution.mintToExecutor"));
                 bytes memory additionalWearersData =
                     vm.parseJson(configJson, string.concat(basePath, ".distribution.additionalWearers"));
                 config.roles[i].distribution.additionalWearers = abi.decode(additionalWearersData, (address[]));
@@ -736,7 +761,102 @@ contract RunOrgActions is Script {
         bytes memory ddTargetsData = vm.parseJson(configJson, ".ddInitialTargets");
         config.ddInitialTargets = abi.decode(ddTargetsData, (address[]));
 
+        // Parse bootstrap config (optional)
+        config.bootstrap = _parseBootstrapConfig(configJson);
+
         return config;
+    }
+
+    function _parseBootstrapConfig(string memory configJson) internal returns (BootstrapConfigJson memory bootstrap) {
+        // Count bootstrap projects
+        uint256 projectsLength = 0;
+        for (uint256 i = 0; i < 100; i++) {
+            try vm.parseJsonString(
+                configJson, string.concat(".bootstrap.projects[", vm.toString(i), "].title")
+            ) returns (
+                string memory
+            ) {
+                projectsLength++;
+            } catch {
+                break;
+            }
+        }
+
+        if (projectsLength == 0) {
+            return bootstrap; // No bootstrap config
+        }
+
+        bootstrap.projects = new BootstrapProjectConfigJson[](projectsLength);
+        for (uint256 i = 0; i < projectsLength; i++) {
+            string memory basePath = string.concat(".bootstrap.projects[", vm.toString(i), "]");
+
+            bootstrap.projects[i].title = vm.parseJsonString(configJson, string.concat(basePath, ".title"));
+
+            // Parse metadataHash (optional, default to 0)
+            try vm.parseJsonBytes32(configJson, string.concat(basePath, ".metadataHash")) returns (bytes32 hash) {
+                bootstrap.projects[i].metadataHash = hash;
+            } catch {
+                bootstrap.projects[i].metadataHash = bytes32(0);
+            }
+
+            bootstrap.projects[i].cap = vm.parseJsonUint(configJson, string.concat(basePath, ".cap"));
+
+            // Parse managers array (optional)
+            try vm.parseJson(configJson, string.concat(basePath, ".managers")) returns (bytes memory managersData) {
+                bootstrap.projects[i].managers = abi.decode(managersData, (address[]));
+            } catch {
+                bootstrap.projects[i].managers = new address[](0);
+            }
+
+            // Parse role arrays
+            bytes memory createRolesData = vm.parseJson(configJson, string.concat(basePath, ".createRoles"));
+            bootstrap.projects[i].createRoles = abi.decode(createRolesData, (uint256[]));
+
+            bytes memory claimRolesData = vm.parseJson(configJson, string.concat(basePath, ".claimRoles"));
+            bootstrap.projects[i].claimRoles = abi.decode(claimRolesData, (uint256[]));
+
+            bytes memory reviewRolesData = vm.parseJson(configJson, string.concat(basePath, ".reviewRoles"));
+            bootstrap.projects[i].reviewRoles = abi.decode(reviewRolesData, (uint256[]));
+
+            bytes memory assignRolesData = vm.parseJson(configJson, string.concat(basePath, ".assignRoles"));
+            bootstrap.projects[i].assignRoles = abi.decode(assignRolesData, (uint256[]));
+        }
+
+        // Count bootstrap tasks
+        uint256 tasksLength = 0;
+        for (uint256 i = 0; i < 100; i++) {
+            try vm.parseJsonString(configJson, string.concat(".bootstrap.tasks[", vm.toString(i), "].title")) returns (
+                string memory
+            ) {
+                tasksLength++;
+            } catch {
+                break;
+            }
+        }
+
+        bootstrap.tasks = new BootstrapTaskConfigJson[](tasksLength);
+        for (uint256 i = 0; i < tasksLength; i++) {
+            string memory basePath = string.concat(".bootstrap.tasks[", vm.toString(i), "]");
+
+            bootstrap.tasks[i].projectIndex =
+                uint8(vm.parseJsonUint(configJson, string.concat(basePath, ".projectIndex")));
+            bootstrap.tasks[i].payout = vm.parseJsonUint(configJson, string.concat(basePath, ".payout"));
+            bootstrap.tasks[i].title = vm.parseJsonString(configJson, string.concat(basePath, ".title"));
+
+            // Parse metadataHash (optional, default to 0)
+            try vm.parseJsonBytes32(configJson, string.concat(basePath, ".metadataHash")) returns (bytes32 hash) {
+                bootstrap.tasks[i].metadataHash = hash;
+            } catch {
+                bootstrap.tasks[i].metadataHash = bytes32(0);
+            }
+
+            bootstrap.tasks[i].bountyToken = vm.parseJsonAddress(configJson, string.concat(basePath, ".bountyToken"));
+            bootstrap.tasks[i].bountyPayout = vm.parseJsonUint(configJson, string.concat(basePath, ".bountyPayout"));
+            bootstrap.tasks[i].requiresApplication =
+                vm.parseJsonBool(configJson, string.concat(basePath, ".requiresApplication"));
+        }
+
+        return bootstrap;
     }
 
     /*=========================== PARAM BUILDING ===========================*/
@@ -788,7 +908,6 @@ contract RunOrgActions is Script {
                 hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: role.hierarchy.adminRoleIndex}),
                 distribution: RoleConfigStructs.RoleDistributionConfig({
                     mintToDeployer: role.distribution.mintToDeployer,
-                    mintToExecutor: role.distribution.mintToExecutor,
                     additionalWearers: role.distribution.additionalWearers
                 }),
                 hatConfig: RoleConfigStructs.HatConfig({
@@ -838,6 +957,52 @@ contract RunOrgActions is Script {
         // Build education hub config
         params.educationHubConfig = ModulesFactory.EducationHubConfig({enabled: config.withEducationHub});
 
+        // Build bootstrap config for initial projects/tasks
+        params.bootstrap = _buildBootstrapConfig(config.bootstrap);
+
         return params;
+    }
+
+    function _buildBootstrapConfig(BootstrapConfigJson memory bootstrapJson)
+        internal
+        pure
+        returns (OrgDeployer.BootstrapConfig memory bootstrap)
+    {
+        if (bootstrapJson.projects.length == 0) {
+            return bootstrap; // Empty bootstrap
+        }
+
+        // Build project configs
+        // Note: Role indices will be converted to hat IDs by OrgDeployer at deployment time
+        bootstrap.projects = new ITaskManagerBootstrap.BootstrapProjectConfig[](bootstrapJson.projects.length);
+        for (uint256 i = 0; i < bootstrapJson.projects.length; i++) {
+            bootstrap.projects[i] = ITaskManagerBootstrap.BootstrapProjectConfig({
+                title: bytes(bootstrapJson.projects[i].title),
+                metadataHash: bootstrapJson.projects[i].metadataHash,
+                cap: bootstrapJson.projects[i].cap,
+                managers: bootstrapJson.projects[i].managers,
+                // Note: These are role indices, OrgDeployer will resolve to hat IDs
+                createHats: bootstrapJson.projects[i].createRoles,
+                claimHats: bootstrapJson.projects[i].claimRoles,
+                reviewHats: bootstrapJson.projects[i].reviewRoles,
+                assignHats: bootstrapJson.projects[i].assignRoles
+            });
+        }
+
+        // Build task configs
+        bootstrap.tasks = new ITaskManagerBootstrap.BootstrapTaskConfig[](bootstrapJson.tasks.length);
+        for (uint256 i = 0; i < bootstrapJson.tasks.length; i++) {
+            bootstrap.tasks[i] = ITaskManagerBootstrap.BootstrapTaskConfig({
+                projectIndex: bootstrapJson.tasks[i].projectIndex,
+                payout: bootstrapJson.tasks[i].payout,
+                title: bytes(bootstrapJson.tasks[i].title),
+                metadataHash: bootstrapJson.tasks[i].metadataHash,
+                bountyToken: bootstrapJson.tasks[i].bountyToken,
+                bountyPayout: bootstrapJson.tasks[i].bountyPayout,
+                requiresApplication: bootstrapJson.tasks[i].requiresApplication
+            });
+        }
+
+        return bootstrap;
     }
 }
