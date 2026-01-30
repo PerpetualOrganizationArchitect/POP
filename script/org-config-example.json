@@ -54,5 +54,39 @@
   },
   "ddInitialTargets": [],
   "withPaymaster": false,
-  "withEducationHub": true
+  "withEducationHub": true,
+  "bootstrap": {
+    "projects": [
+      {
+        "title": "Getting Started",
+        "metadataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "cap": "1000000000000000000000",
+        "managers": [],
+        "createRoles": [1],
+        "claimRoles": [0, 1, 2],
+        "reviewRoles": [1],
+        "assignRoles": [1]
+      }
+    ],
+    "tasks": [
+      {
+        "projectIndex": 0,
+        "title": "Complete your profile",
+        "metadataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "payout": "10000000000000000000",
+        "bountyToken": "0x0000000000000000000000000000000000000000",
+        "bountyPayout": "0",
+        "requiresApplication": false
+      },
+      {
+        "projectIndex": 0,
+        "title": "Introduce yourself in the community",
+        "metadataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "payout": "5000000000000000000",
+        "bountyToken": "0x0000000000000000000000000000000000000000",
+        "bountyPayout": "0",
+        "requiresApplication": false
+      }
+    ]
+  }
 }
