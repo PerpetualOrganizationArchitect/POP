@@ -26,7 +26,6 @@
       },
       "distribution": {
         "mintToDeployer": false,
-        "mintToExecutor": false,
         "additionalWearers": []
       },
       "hatConfig": {
@@ -53,7 +52,6 @@
       },
       "distribution": {
         "mintToDeployer": false,
-        "mintToExecutor": false,
         "additionalWearers": []
       },
       "hatConfig": {
@@ -80,7 +78,6 @@
       },
       "distribution": {
         "mintToDeployer": false,
-        "mintToExecutor": false,
         "additionalWearers": []
       },
       "hatConfig": {
@@ -107,7 +104,6 @@
       },
       "distribution": {
         "mintToDeployer": true,
-        "mintToExecutor": false,
         "additionalWearers": []
       },
       "hatConfig": {

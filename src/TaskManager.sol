@@ -34,6 +34,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
     error NotCreator();
     error NotClaimer();
     error NotExecutor();
+    error NotDeployer();
     error Unauthorized();
     error NotApplicant();
     error AlreadyApplied();
@@ -86,6 +87,28 @@ contract TaskManager is Initializable, ContextUpgradeable {
         mapping(address => BudgetLib.Budget) bountyBudgets; // slot 2: rest of slot & beyond
     }
 
+    /*──────── Bootstrap Config Structs ───────*/
+    struct BootstrapProjectConfig {
+        bytes title;
+        bytes32 metadataHash;
+        uint256 cap;
+        address[] managers;
+        uint256[] createHats;
+        uint256[] claimHats;
+        uint256[] reviewHats;
+        uint256[] assignHats;
+    }
+
+    struct BootstrapTaskConfig {
+        uint8 projectIndex; // References project in same batch (0 for first project)
+        uint256 payout;
+        bytes title;
+        bytes32 metadataHash;
+        address bountyToken;
+        uint256 bountyPayout;
+        bool requiresApplication;
+    }
+
     /*──────── Storage (ERC-7201) ───────*/
     struct Layout {
         mapping(bytes32 => Project) _projects;
@@ -101,6 +124,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
         uint256[] permissionHatIds; // enumeration array for hats with permissions
         mapping(uint256 => address[]) taskApplicants; // task ID => array of applicants
         mapping(uint256 => mapping(address => bytes32)) taskApplications; // task ID => applicant => application hash
+        address deployer; // OrgDeployer address for bootstrap operations
     }
 
     bytes32 private constant _STORAGE_SLOT = 0x30bc214cbc65463577eb5b42c88d60986e26fc81ad89a2eb74550fb255f1e712;
@@ -147,7 +171,8 @@ contract TaskManager is Initializable, ContextUpgradeable {
         address tokenAddress,
         address hatsAddress,
         uint256[] calldata creatorHats,
-        address executorAddress
+        address executorAddress,
+        address deployerAddress
     ) external initializer {
         tokenAddress.requireNonZeroAddress();
         hatsAddress.requireNonZeroAddress();
@@ -159,6 +184,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
         l.token = IParticipationToken(tokenAddress);
         l.hats = IHats(hatsAddress);
         l.executor = executorAddress;
+        l.deployer = deployerAddress; // Can be address(0) if bootstrap not needed
 
         // Initialize creator hat arrays using HatManager
         for (uint256 i; i < creatorHats.length;) {
@@ -220,6 +246,22 @@ contract TaskManager is Initializable, ContextUpgradeable {
         uint256[] calldata assignHats
     ) external returns (bytes32 projectId) {
         _requireCreator();
+        projectId = _createProjectInternal(
+            title, metadataHash, cap, managers, createHats, claimHats, reviewHats, assignHats, _msgSender()
+        );
+    }
+
+    function _createProjectInternal(
+        bytes calldata title,
+        bytes32 metadataHash,
+        uint256 cap,
+        address[] calldata managers,
+        uint256[] calldata createHats,
+        uint256[] calldata claimHats,
+        uint256[] calldata reviewHats,
+        uint256[] calldata assignHats,
+        address defaultManager
+    ) internal returns (bytes32 projectId) {
         ValidationLib.requireValidTitle(title);
         ValidationLib.requireValidCapAmount(cap);
 
@@ -230,8 +272,10 @@ contract TaskManager is Initializable, ContextUpgradeable {
         p.exists = true;
 
         /* managers */
-        p.managers[_msgSender()] = true;
-        emit ProjectManagerUpdated(projectId, _msgSender(), true);
+        if (defaultManager != address(0)) {
+            p.managers[defaultManager] = true;
+            emit ProjectManagerUpdated(projectId, defaultManager, true);
+        }
         for (uint256 i; i < managers.length;) {
             managers[i].requireNonZeroAddress();
             p.managers[managers[i]] = true;
@@ -258,6 +302,70 @@ contract TaskManager is Initializable, ContextUpgradeable {
 
         delete l._projects[pid];
         emit ProjectDeleted(pid);
+    }
+
+    /**
+     * @notice Bootstrap initial projects and tasks during org deployment
+     * @dev Only callable by deployer (OrgDeployer) during bootstrap phase
+     * @param projects Array of project configurations to create
+     * @param tasks Array of task configurations (reference projects by index)
+     * @return projectIds Array of created project IDs
+     */
+    function bootstrapProjectsAndTasks(BootstrapProjectConfig[] calldata projects, BootstrapTaskConfig[] calldata tasks)
+        external
+        returns (bytes32[] memory projectIds)
+    {
+        Layout storage l = _layout();
+        if (_msgSender() != l.deployer) revert NotDeployer();
+
+        projectIds = new bytes32[](projects.length);
+
+        // Create all projects (executor is not auto-added as manager, use managers array)
+        for (uint256 i; i < projects.length;) {
+            projectIds[i] = _createProjectInternal(
+                projects[i].title,
+                projects[i].metadataHash,
+                projects[i].cap,
+                projects[i].managers,
+                projects[i].createHats,
+                projects[i].claimHats,
+                projects[i].reviewHats,
+                projects[i].assignHats,
+                address(0) // No default manager - use explicit managers array
+            );
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Create all tasks referencing projects by index
+        for (uint256 i; i < tasks.length;) {
+            if (tasks[i].projectIndex >= projects.length) revert InvalidIndex();
+            bytes32 pid = projectIds[tasks[i].projectIndex];
+            _createTask(
+                tasks[i].payout,
+                tasks[i].title,
+                tasks[i].metadataHash,
+                pid,
+                tasks[i].requiresApplication,
+                tasks[i].bountyToken,
+                tasks[i].bountyPayout
+            );
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /**
+     * @notice Clear the deployer address after bootstrap phase is complete
+     * @dev Only callable by deployer. Prevents future bootstrap calls for defense-in-depth.
+     *      Should be called by OrgDeployer at the end of org deployment.
+     */
+    function clearDeployer() external {
+        Layout storage l = _layout();
+        if (_msgSender() != l.deployer) revert NotDeployer();
+        l.deployer = address(0);
     }
 
     /*──────── Task Logic ───────*/
