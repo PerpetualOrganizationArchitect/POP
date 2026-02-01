@@ -5,6 +5,11 @@ import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {ValidationLib} from "./libs/ValidationLib.sol";
 
+/* ─────────── Hats Protocol Interface ─────────── */
+interface IHats {
+    function isWearerOfHat(address account, uint256 hatId) external view returns (bool);
+}
+
 /* ─────────── Custom errors ─────────── */
 error InvalidParam();
 error OrgExists();
@@ -12,6 +17,7 @@ error OrgUnknown();
 error TypeTaken();
 error ContractUnknown();
 error NotOrgExecutor();
+error NotOrgAdmin();
 error OwnerOnlyDuringBootstrap(); // deployer tried after bootstrap
 error AutoUpgradeRequired(); // deployer must set autoUpgrade=true
 
@@ -59,6 +65,9 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         mapping(bytes32 => mapping(uint256 => uint256)) roleHatOf; // orgId => roleIndex => hatId
         bytes32[] orgIds;
         uint256 totalContracts;
+        // New storage for admin hat feature
+        mapping(bytes32 => uint256) adminHatOf; // orgId => admin hatId for direct metadata editing
+        address hatsProtocol; // Hats Protocol contract address
     }
 
     // keccak256("poa.orgregistry.storage") to get a unique, collision-free slot
@@ -84,6 +93,8 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     );
     event AutoUpgradeSet(bytes32 indexed contractId, bool enabled);
     event HatsTreeRegistered(bytes32 indexed orgId, uint256 topHatId, uint256[] roleHatIds);
+    event OrgAdminHatSet(bytes32 indexed orgId, uint256 hatId);
+    event HatsProtocolSet(address hatsProtocol);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() initializer {}
@@ -95,6 +106,23 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     function initialize(address initialOwner) external initializer {
         if (initialOwner == address(0)) revert InvalidParam();
         __Ownable_init(initialOwner);
+    }
+
+    /**
+     * @dev Sets the Hats Protocol contract address
+     * @param _hats The Hats Protocol contract address
+     */
+    function setHatsProtocol(address _hats) external onlyOwner {
+        if (_hats == address(0)) revert InvalidParam();
+        _layout().hatsProtocol = _hats;
+        emit HatsProtocolSet(_hats);
+    }
+
+    /**
+     * @dev Gets the Hats Protocol contract address
+     */
+    function getHatsProtocol() external view returns (address) {
+        return _layout().hatsProtocol;
     }
 
     /* ═════════════════ ORG  LOGIC ═════════════════ */
@@ -157,6 +185,12 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         o.executor = executorAddr;
     }
 
+    /**
+     * @dev Updates org metadata (governance path - only executor)
+     * @param orgId The organization ID
+     * @param newName New organization name (bytes, validated by ValidationLib)
+     * @param newMetadataHash New IPFS metadata hash (bytes32)
+     */
     function updateOrgMeta(bytes32 orgId, bytes calldata newName, bytes32 newMetadataHash) external {
         ValidationLib.requireValidTitle(newName);
         Layout storage l = _layout();
@@ -165,6 +199,55 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         if (msg.sender != o.executor) revert NotOrgExecutor();
 
         emit MetaUpdated(orgId, newName, newMetadataHash);
+    }
+
+    /**
+     * @dev Allows an admin hat wearer to update org metadata directly (no governance)
+     * @param orgId The organization ID
+     * @param newName New organization name (bytes, validated by ValidationLib)
+     * @param newMetadataHash New IPFS metadata hash (bytes32)
+     */
+    function updateOrgMetaAsAdmin(bytes32 orgId, bytes calldata newName, bytes32 newMetadataHash) external {
+        ValidationLib.requireValidTitle(newName);
+        Layout storage l = _layout();
+        OrgInfo storage o = l.orgOf[orgId];
+        if (!o.exists) revert OrgUnknown();
+
+        // Check if caller wears the org's admin hat
+        uint256 adminHat = l.adminHatOf[orgId];
+        if (adminHat == 0) {
+            // No admin hat configured, fall back to topHat
+            adminHat = l.topHatOf[orgId];
+        }
+        if (adminHat == 0) revert NotOrgAdmin();
+
+        address hats = l.hatsProtocol;
+        if (hats == address(0)) revert InvalidParam();
+        if (!IHats(hats).isWearerOfHat(msg.sender, adminHat)) revert NotOrgAdmin();
+
+        emit MetaUpdated(orgId, newName, newMetadataHash);
+    }
+
+    /**
+     * @dev Set the admin hat for an org (only executor can do this)
+     * @param orgId The organization ID
+     * @param hatId The hat ID that can edit metadata directly (0 to use topHat)
+     */
+    function setOrgAdminHat(bytes32 orgId, uint256 hatId) external {
+        Layout storage l = _layout();
+        OrgInfo storage o = l.orgOf[orgId];
+        if (!o.exists) revert OrgUnknown();
+        if (msg.sender != o.executor) revert NotOrgExecutor();
+
+        l.adminHatOf[orgId] = hatId;
+        emit OrgAdminHatSet(orgId, hatId);
+    }
+
+    /**
+     * @dev Get the admin hat for an org
+     */
+    function getOrgAdminHat(bytes32 orgId) external view returns (uint256) {
+        return _layout().adminHatOf[orgId];
     }
 
     /* ══════════ CONTRACT  REGISTRATION  ══════════ */
