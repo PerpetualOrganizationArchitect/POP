@@ -8,10 +8,11 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 contract OrgRegistryTest is Test {
     OrgRegistry reg;
     bytes32 ORG_ID = keccak256("ORG");
+    address constant MOCK_HATS = address(0x1234); // Mock hats address
 
     function setUp() public {
         OrgRegistry impl = new OrgRegistry();
-        bytes memory data = abi.encodeCall(OrgRegistry.initialize, (address(this)));
+        bytes memory data = abi.encodeCall(OrgRegistry.initialize, (address(this), MOCK_HATS));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), data);
         reg = OrgRegistry(address(proxy));
     }
