@@ -5,8 +5,10 @@ import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {ValidationLib} from "./libs/ValidationLib.sol";
 
-/* ─────────── Hats Protocol Interface ─────────── */
-interface IHats {
+/* ─────────── Minimal Hats Protocol Interface ─────────── */
+/// @dev Minimal interface for Hats Protocol - only what we need for admin checks
+/// Using a distinct name to avoid collision with the full IHats in lib/hats-protocol
+interface IHatsMinimal {
     function isWearerOfHat(address account, uint256 hatId) external view returns (bool);
 }
 
@@ -223,7 +225,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
 
         address hats = l.hatsProtocol;
         if (hats == address(0)) revert InvalidParam();
-        if (!IHats(hats).isWearerOfHat(msg.sender, adminHat)) revert NotOrgAdmin();
+        if (!IHatsMinimal(hats).isWearerOfHat(msg.sender, adminHat)) revert NotOrgAdmin();
 
         emit MetaUpdated(orgId, newName, newMetadataHash);
     }
