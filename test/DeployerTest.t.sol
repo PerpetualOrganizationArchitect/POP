@@ -680,8 +680,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         address orgRegBeacon = poaManager.getBeaconById(keccak256("OrgRegistry"));
         address deployerBeacon = poaManager.getBeaconById(keccak256("OrgDeployer"));
 
-        // Create OrgRegistry proxy - initialize with poaAdmin as owner
-        bytes memory orgRegistryInit = abi.encodeWithSignature("initialize(address)", poaAdmin);
+        // Create OrgRegistry proxy - initialize with poaAdmin as owner and hats address
+        bytes memory orgRegistryInit = abi.encodeWithSignature("initialize(address,address)", poaAdmin, SEPOLIA_HATS);
         orgRegistry = OrgRegistry(address(new BeaconProxy(orgRegBeacon, orgRegistryInit)));
 
         // Debug to verify OrgRegistry owner
