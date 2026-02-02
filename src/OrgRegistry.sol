@@ -4,13 +4,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {ValidationLib} from "./libs/ValidationLib.sol";
-
-/* ─────────── Minimal Hats Protocol Interface ─────────── */
-/// @dev Minimal interface for Hats Protocol - only what we need for admin checks
-/// Using a distinct name to avoid collision with the full IHats in lib/hats-protocol
-interface IHatsMinimal {
-    function isWearerOfHat(address account, uint256 hatId) external view returns (bool);
-}
+import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 
 /* ─────────── Custom errors ─────────── */
 error InvalidParam();
@@ -225,7 +219,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
 
         address hats = l.hatsProtocol;
         if (hats == address(0)) revert InvalidParam();
-        if (!IHatsMinimal(hats).isWearerOfHat(msg.sender, adminHat)) revert NotOrgAdmin();
+        if (!IHats(hats).isWearerOfHat(msg.sender, adminHat)) revert NotOrgAdmin();
 
         emit MetaUpdated(orgId, newName, newMetadataHash);
     }
