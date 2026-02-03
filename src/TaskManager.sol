@@ -271,6 +271,8 @@ contract TaskManager is Initializable, ContextUpgradeable {
         p.cap = uint128(cap);
         p.exists = true;
 
+        emit ProjectCreated(projectId, title, metadataHash, cap);
+
         /* managers */
         if (defaultManager != address(0)) {
             p.managers[defaultManager] = true;
@@ -290,8 +292,6 @@ contract TaskManager is Initializable, ContextUpgradeable {
         _setBatchHatPerm(projectId, claimHats, TaskPerm.CLAIM);
         _setBatchHatPerm(projectId, reviewHats, TaskPerm.REVIEW);
         _setBatchHatPerm(projectId, assignHats, TaskPerm.ASSIGN);
-
-        emit ProjectCreated(projectId, title, metadataHash, cap);
     }
 
     function deleteProject(bytes32 pid) external {
