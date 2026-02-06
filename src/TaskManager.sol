@@ -162,6 +162,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
     event TaskAssigned(uint256 indexed id, address indexed assignee, address indexed assigner);
     event TaskCompleted(uint256 indexed id, address indexed completer);
     event TaskCancelled(uint256 indexed id, address indexed canceller);
+    event TaskRejected(uint256 indexed id, address indexed rejector, bytes32 rejectionHash);
     event TaskApplicationSubmitted(uint256 indexed id, address indexed applicant, bytes32 applicationHash);
     event TaskApplicationApproved(uint256 indexed id, address indexed applicant, address indexed approver);
     event ExecutorUpdated(address newExecutor);
@@ -511,6 +512,17 @@ contract TaskManager is Initializable, ContextUpgradeable {
         }
 
         emit TaskCompleted(id, _msgSender());
+    }
+
+    function rejectTask(uint256 id, bytes32 rejectionHash) external {
+        Layout storage l = _layout();
+        _checkPerm(l._tasks[id].projectId, TaskPerm.REVIEW);
+        Task storage t = _task(l, id);
+        if (t.status != Status.SUBMITTED) revert BadStatus();
+        if (rejectionHash == bytes32(0)) revert ValidationLib.InvalidString();
+
+        t.status = Status.CLAIMED;
+        emit TaskRejected(id, _msgSender(), rejectionHash);
     }
 
     function cancelTask(uint256 id) external {
