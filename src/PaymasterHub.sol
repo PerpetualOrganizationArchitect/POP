@@ -126,6 +126,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         address entryPoint;
         address hats;
         address poaManager;
+        address orgRegistrar; // authorized contract that can register orgs (e.g. OrgDeployer)
     }
 
     // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.main")) - 1))
@@ -335,6 +336,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     function registerOrgWithVoucher(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId, uint256 voucherHatId)
         public
     {
+        MainStorage storage main = _getMainStorage();
+        if (msg.sender != main.poaManager && msg.sender != main.orgRegistrar) revert NotPoaManager();
         if (adminHatId == 0) revert ZeroAddress();
 
         mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
@@ -611,18 +614,17 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
         OrgFinancials storage org = financials[orgId];
 
-        // Calculate total available funds
-        uint256 totalAvailable = uint256(org.deposited) - uint256(org.spent);
+        uint256 depositAvailable =
+            uint256(org.deposited) > uint256(org.spent) ? uint256(org.deposited) - uint256(org.spent) : 0;
 
-        // Check if org has enough in deposits to cover this
-        // Note: solidarity is checked separately in _checkSolidarityAccess
-        if (org.spent + maxCost > org.deposited) {
-            // Will need to use solidarity - that's checked elsewhere
-            // Here we just make sure they haven't overdrawn
-            if (totalAvailable == 0) {
-                revert InsufficientOrgBalance();
-            }
+        // If deposits alone cover the cost, no solidarity needed
+        if (depositAvailable >= maxCost) return;
+
+        // Deposits are fully exhausted — revert early before solidarity check
+        if (depositAvailable == 0) {
+            revert InsufficientOrgBalance();
         }
+        // Partial coverage: solidarity will cover the rest (validated by _checkSolidarityAccess)
     }
 
     /**
@@ -1031,6 +1033,16 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         grace.minDepositRequired = _minDepositRequired;
 
         emit GracePeriodConfigUpdated(_initialGraceDays, _maxSpendDuringGrace, _minDepositRequired);
+    }
+
+    /**
+     * @notice Set the authorized org registrar (e.g. OrgDeployer)
+     * @dev Only PoaManager can set the registrar
+     * @param registrar Address authorized to call registerOrg
+     */
+    function setOrgRegistrar(address registrar) external {
+        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+        _getMainStorage().orgRegistrar = registrar;
     }
 
     /**
@@ -1665,13 +1677,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
 
         if (tip > 0) {
-            // Update total paid
-            bounty.totalPaid += uint144(tip);
-
-            // Attempt payment with gas limit
             (bool success,) = bundlerOrigin.call{value: tip, gas: 30000}("");
 
             if (success) {
+                bounty.totalPaid += uint144(tip);
                 emit BountyPaid(userOpHash, bundlerOrigin, tip);
             } else {
                 emit BountyPayFailed(userOpHash, bundlerOrigin, tip);

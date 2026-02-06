@@ -22,6 +22,7 @@ interface IParticipationToken {
 interface IExecutorAdmin {
     function setCaller(address) external;
     function setHatMinterAuthorization(address minter, bool authorized) external;
+    function acceptBeaconOwnership(address beacon) external;
     function configureVouching(
         address eligibilityModule,
         uint256 hatId,
@@ -173,14 +174,12 @@ contract OrgDeployer is Initializable {
 
     /**
      * @notice Set the universal passkey factory address
-     * @dev Callable by PoaManager, or anyone for one-time initial setup (when factory is not yet set)
+     * @dev Only callable by PoaManager
      */
     function setUniversalPasskeyFactory(address _universalFactory) external {
         Layout storage l = _layout();
-        // Allow one-time setup by anyone (when factory is not yet set), or require PoaManager for updates
-        if (l.universalPasskeyFactory != address(0) && msg.sender != l.poaManager) {
-            revert InvalidAddress();
-        }
+        if (msg.sender != l.poaManager) revert InvalidAddress();
+        if (_universalFactory == address(0)) revert InvalidAddress();
         l.universalPasskeyFactory = _universalFactory;
     }
 
@@ -324,6 +323,9 @@ contract OrgDeployer is Initializable {
         /* 2. Deploy Governance Infrastructure (Executor, Hats modules, Hats tree) */
         GovernanceFactory.GovernanceResult memory gov = _deployGovernanceInfrastructure(params);
         result.executor = gov.executor;
+
+        /* 2b. Accept executor beacon ownership (two-step transfer initiated by GovernanceFactory) */
+        IExecutorAdmin(result.executor).acceptBeaconOwnership(gov.execBeacon);
 
         /* 3. Set the executor for the org */
         l.orgRegistry.setOrgExecutor(params.orgId, result.executor);

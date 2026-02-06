@@ -29,4 +29,5 @@ library VotingErrors {
     error InvalidSliceSum();
     error TooManyClasses();
     error InvalidStrategy();
+    error AlreadyExecuted();
 }

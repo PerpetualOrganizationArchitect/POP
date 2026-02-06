@@ -612,4 +612,32 @@ contract DDVotingTest is Test {
         assertEq(hats.balanceOf(bob, executiveHatId), 0, "Bob should not have executive hat");
         assertEq(hats.balanceOf(bob, managerHatId), 0, "Bob should not have manager hat");
     }
+
+    /*////////////////////////////////////////////////////////////
+                    ANNOUNCE WINNER REPLAY PROTECTION
+    ////////////////////////////////////////////////////////////*/
+
+    function testAnnounceWinnerDoubleCallReverts() public {
+        IExecutor.Call[][] memory b = new IExecutor.Call[][](2);
+        b[0] = new IExecutor.Call[](0);
+        b[1] = new IExecutor.Call[](0);
+        vm.prank(creator);
+        dd.createProposal(bytes("Replay Test"), bytes32(0), 10, 2, b, new uint256[](0));
+
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 0;
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+        vm.prank(voter);
+        dd.vote(0, idx, w);
+
+        vm.warp(block.timestamp + 11 minutes);
+
+        // First call succeeds
+        dd.announceWinner(0);
+
+        // Second call reverts
+        vm.expectRevert(VotingErrors.AlreadyExecuted.selector);
+        dd.announceWinner(0);
+    }
 }

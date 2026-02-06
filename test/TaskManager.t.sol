@@ -3214,6 +3214,201 @@ contract MockToken is Test, IERC20 {
                 emit TaskManager.TaskApplicationApproved(0, member1, pm1);
                 tm.approveApplication(0, member1);
             }
+
+            /*───────────────── TASK REJECTION ───────────────────*/
+
+            function _prepareSubmittedTask() internal returns (uint256 id, bytes32 pid) {
+                pid = _createDefaultProject("REJECT", 5 ether);
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.PROJECT_MANAGER, abi.encode(pid, pm1, true));
+
+                vm.prank(pm1);
+                tm.createTask(1 ether, bytes("reject_task"), bytes32(0), pid, address(0), 0, false);
+                id = 0;
+
+                vm.prank(member1);
+                tm.claimTask(id);
+
+                vm.prank(member1);
+                tm.submitTask(id, keccak256("submission"));
+            }
+
+            function test_RejectTaskSendsBackToClaimed() public {
+                (uint256 id, bytes32 pid) = _prepareSubmittedTask();
+
+                vm.prank(pm1);
+                tm.rejectTask(id, keccak256("needs_fixes"));
+
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(id));
+                (uint256 payout, TaskManager.Status st, address claimer,,) =
+                    abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
+                assertEq(uint8(st), uint8(TaskManager.Status.CLAIMED), "status should be CLAIMED");
+                assertEq(claimer, member1, "claimer should be unchanged");
+            }
+
+            function test_RejectTaskEmitsEvent() public {
+                (uint256 id,) = _prepareSubmittedTask();
+                bytes32 rejHash = keccak256("needs_fixes");
+
+                vm.prank(pm1);
+                vm.expectEmit(true, true, true, true);
+                emit TaskManager.TaskRejected(id, pm1, rejHash);
+                tm.rejectTask(id, rejHash);
+            }
+
+            function test_RejectThenResubmitThenComplete() public {
+                (uint256 id,) = _prepareSubmittedTask();
+
+                // reject
+                vm.prank(pm1);
+                tm.rejectTask(id, keccak256("try_again"));
+
+                // resubmit
+                vm.prank(member1);
+                tm.submitTask(id, keccak256("submission_v2"));
+
+                // complete
+                uint256 balBefore = token.balanceOf(member1);
+                vm.prank(pm1);
+                tm.completeTask(id);
+
+                assertEq(token.balanceOf(member1), balBefore + 1 ether, "minted payout after rejection cycle");
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(id));
+                (, TaskManager.Status st,,,) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
+                assertEq(uint8(st), uint8(TaskManager.Status.COMPLETED));
+            }
+
+            function test_MultipleRejectionsBeforeComplete() public {
+                (uint256 id,) = _prepareSubmittedTask();
+
+                // first rejection
+                vm.prank(pm1);
+                tm.rejectTask(id, keccak256("round_1"));
+
+                vm.prank(member1);
+                tm.submitTask(id, keccak256("v2"));
+
+                // second rejection
+                vm.prank(pm1);
+                tm.rejectTask(id, keccak256("round_2"));
+
+                vm.prank(member1);
+                tm.submitTask(id, keccak256("v3"));
+
+                // complete
+                vm.prank(pm1);
+                tm.completeTask(id);
+
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(id));
+                (, TaskManager.Status st,,,) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
+                assertEq(uint8(st), uint8(TaskManager.Status.COMPLETED));
+            }
+
+            function test_RejectTaskRequiresReviewPermission() public {
+                (uint256 id,) = _prepareSubmittedTask();
+
+                vm.prank(outsider);
+                vm.expectRevert(TaskManager.Unauthorized.selector);
+                tm.rejectTask(id, keccak256("nope"));
+
+                vm.prank(member1);
+                vm.expectRevert(TaskManager.Unauthorized.selector);
+                tm.rejectTask(id, keccak256("nope"));
+            }
+
+            function test_RejectTaskByProjectManager() public {
+                (uint256 id,) = _prepareSubmittedTask();
+
+                vm.prank(pm1);
+                tm.rejectTask(id, keccak256("pm_reject"));
+
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(id));
+                (, TaskManager.Status st,,,) = abi.decode(result, (uint256, TaskManager.Status, address, bytes32, bool));
+                assertEq(uint8(st), uint8(TaskManager.Status.CLAIMED));
+            }
+
+            function test_RejectUnclaimedTaskReverts() public {
+                bytes32 pid = _createDefaultProject("REJ_UNCL", 5 ether);
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.PROJECT_MANAGER, abi.encode(pid, pm1, true));
+
+                vm.prank(pm1);
+                tm.createTask(1 ether, bytes("unclaimed"), bytes32(0), pid, address(0), 0, false);
+
+                vm.prank(pm1);
+                vm.expectRevert(TaskManager.BadStatus.selector);
+                tm.rejectTask(0, keccak256("nope"));
+            }
+
+            function test_RejectClaimedTaskReverts() public {
+                bytes32 pid = _createDefaultProject("REJ_CL", 5 ether);
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.PROJECT_MANAGER, abi.encode(pid, pm1, true));
+
+                vm.prank(pm1);
+                tm.createTask(1 ether, bytes("claimed_only"), bytes32(0), pid, address(0), 0, false);
+
+                vm.prank(member1);
+                tm.claimTask(0);
+
+                vm.prank(pm1);
+                vm.expectRevert(TaskManager.BadStatus.selector);
+                tm.rejectTask(0, keccak256("nope"));
+            }
+
+            function test_RejectCompletedTaskReverts() public {
+                (uint256 id,) = _prepareSubmittedTask();
+
+                vm.prank(pm1);
+                tm.completeTask(id);
+
+                vm.prank(pm1);
+                vm.expectRevert(TaskManager.BadStatus.selector);
+                tm.rejectTask(id, keccak256("nope"));
+            }
+
+            function test_RejectCancelledTaskReverts() public {
+                bytes32 pid = _createDefaultProject("REJ_CAN", 5 ether);
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.PROJECT_MANAGER, abi.encode(pid, pm1, true));
+
+                vm.prank(pm1);
+                tm.createTask(1 ether, bytes("to_cancel"), bytes32(0), pid, address(0), 0, false);
+
+                vm.prank(pm1);
+                tm.cancelTask(0);
+
+                vm.prank(pm1);
+                vm.expectRevert(TaskManager.BadStatus.selector);
+                tm.rejectTask(0, keccak256("nope"));
+            }
+
+            function test_RejectTaskWithEmptyHashReverts() public {
+                (uint256 id,) = _prepareSubmittedTask();
+
+                vm.prank(pm1);
+                vm.expectRevert(ValidationLib.InvalidString.selector);
+                tm.rejectTask(id, bytes32(0));
+            }
+
+            function test_RejectTaskDoesNotChangeBudget() public {
+                (uint256 id, bytes32 pid) = _prepareSubmittedTask();
+
+                bytes memory before_ = lens.getStorage(
+                    address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(pid)
+                );
+                (, uint256 spentBefore,) = abi.decode(before_, (uint256, uint256, bool));
+
+                vm.prank(pm1);
+                tm.rejectTask(id, keccak256("reject"));
+
+                bytes memory after_ = lens.getStorage(
+                    address(tm), TaskManagerLens.StorageKey.PROJECT_INFO, abi.encode(pid)
+                );
+                (, uint256 spentAfter,) = abi.decode(after_, (uint256, uint256, bool));
+
+                assertEq(spentBefore, spentAfter, "budget spent should not change on rejection");
+            }
         }
 
         /*───────────────── BOUNTY FUNCTIONALITY TESTS ────────────────────*/
@@ -4843,6 +5038,379 @@ contract MockToken is Test, IERC20 {
             }
         }
 
+        /*────────────────── Task Application Test Suite ──────────────────*/
+
+        contract TaskManagerApplicationTest is TaskManagerTestBase {
+            bytes32 APP_PROJECT_ID;
+
+            function setUp() public {
+                setUpBase();
+                APP_PROJECT_ID = _createDefaultProject("APP_PROJECT", 10 ether);
+            }
+
+            /// @dev Helper: creates an application-required task and returns its ID
+            function _createAppTask(uint256 payout) internal returns (uint256 id) {
+                vm.prank(creator1);
+                tm.createTask(payout, bytes("app_task"), bytes32(0), APP_PROJECT_ID, address(0), 0, true);
+                id = 0; // first task
+            }
+
+            function _createAppTaskN(uint256 payout, uint256 expectedId) internal returns (uint256 id) {
+                vm.prank(creator1);
+                tm.createTask(payout, bytes("app_task"), bytes32(0), APP_PROJECT_ID, address(0), 0, true);
+                id = expectedId;
+            }
+
+            /*──────── Basic Apply ────────*/
+
+            function test_ApplyForTask() public {
+                uint256 id = _createAppTask(1 ether);
+                bytes32 appHash = keccak256("my application");
+
+                vm.prank(member1);
+                tm.applyForTask(id, appHash);
+
+                // Verify application stored via lens
+                bytes memory result =
+                    lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICATION, abi.encode(id, member1));
+                bytes32 stored = abi.decode(result, (bytes32));
+                assertEq(stored, appHash, "application hash should be stored");
+
+                // Verify applicant in list
+                bytes memory listResult =
+                    lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICANTS, abi.encode(id));
+                address[] memory applicants = abi.decode(listResult, (address[]));
+                assertEq(applicants.length, 1, "should have 1 applicant");
+                assertEq(applicants[0], member1, "applicant should be member1");
+            }
+
+            function test_ApplyForTaskEmitsEvent() public {
+                uint256 id = _createAppTask(1 ether);
+                bytes32 appHash = keccak256("my application");
+
+                vm.expectEmit(true, true, false, true);
+                emit TaskManager.TaskApplicationSubmitted(id, member1, appHash);
+
+                vm.prank(member1);
+                tm.applyForTask(id, appHash);
+            }
+
+            /*──────── Approve Application ────────*/
+
+            function test_ApproveApplicationClaimsTask() public {
+                uint256 id = _createAppTask(1 ether);
+                bytes32 appHash = keccak256("my application");
+
+                vm.prank(member1);
+                tm.applyForTask(id, appHash);
+
+                vm.prank(pm1);
+                tm.approveApplication(id, member1);
+
+                // Verify task is now CLAIMED with member1 as claimer
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(id));
+                (uint256 payout, TaskManagerLens.Status status, address claimer,,) =
+                    abi.decode(result, (uint256, TaskManagerLens.Status, address, bytes32, bool));
+                assertEq(uint8(status), uint8(TaskManagerLens.Status.CLAIMED), "status should be CLAIMED");
+                assertEq(claimer, member1, "claimer should be member1");
+            }
+
+            function test_ApproveApplicationEmitsEvent() public {
+                uint256 id = _createAppTask(1 ether);
+                bytes32 appHash = keccak256("my application");
+
+                vm.prank(member1);
+                tm.applyForTask(id, appHash);
+
+                vm.expectEmit(true, true, true, true);
+                emit TaskManager.TaskApplicationApproved(id, member1, pm1);
+
+                vm.prank(pm1);
+                tm.approveApplication(id, member1);
+            }
+
+            function test_ApproveApplicationClearsApplicantsList() public {
+                uint256 id = _createAppTask(1 ether);
+
+                // Two applicants apply
+                address member2 = makeAddr("member2");
+                setHat(member2, MEMBER_HAT);
+
+                vm.prank(member1);
+                tm.applyForTask(id, keccak256("app1"));
+                vm.prank(member2);
+                tm.applyForTask(id, keccak256("app2"));
+
+                // Approve member1
+                vm.prank(pm1);
+                tm.approveApplication(id, member1);
+
+                // Applicants list should be cleared
+                bytes memory result = lens.getStorage(
+                    address(tm), TaskManagerLens.StorageKey.TASK_APPLICANTS, abi.encode(id)
+                );
+                address[] memory applicants = abi.decode(result, (address[]));
+                assertEq(applicants.length, 0, "applicants list should be cleared after approval");
+            }
+
+            /*──────── Full Lifecycle ────────*/
+
+            function test_FullApplicationFlow() public {
+                uint256 id = _createAppTask(1 ether);
+                bytes32 appHash = keccak256("my application");
+
+                // Apply
+                vm.prank(member1);
+                tm.applyForTask(id, appHash);
+
+                // Approve
+                vm.prank(pm1);
+                tm.approveApplication(id, member1);
+
+                // Submit
+                vm.prank(member1);
+                tm.submitTask(id, keccak256("submission"));
+
+                // Complete
+                vm.prank(pm1);
+                tm.completeTask(id);
+
+                // Verify completed
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(id));
+                (, TaskManagerLens.Status status,,,) =
+                    abi.decode(result, (uint256, TaskManagerLens.Status, address, bytes32, bool));
+                assertEq(uint8(status), uint8(TaskManagerLens.Status.COMPLETED), "status should be COMPLETED");
+
+                // Verify tokens minted
+                assertEq(token.balanceOf(member1), 1 ether, "member1 should receive payout");
+            }
+
+            function test_ApplicationRejectReapplyFlow() public {
+                uint256 id = _createAppTask(1 ether);
+
+                // Apply -> Approve -> Submit -> Reject -> Resubmit -> Complete
+                vm.prank(member1);
+                tm.applyForTask(id, keccak256("app"));
+
+                vm.prank(pm1);
+                tm.approveApplication(id, member1);
+
+                vm.prank(member1);
+                tm.submitTask(id, keccak256("bad submission"));
+
+                vm.prank(pm1);
+                tm.rejectTask(id, keccak256("needs work"));
+
+                vm.prank(member1);
+                tm.submitTask(id, keccak256("good submission"));
+
+                vm.prank(pm1);
+                tm.completeTask(id);
+
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(id));
+                (, TaskManagerLens.Status status,,,) =
+                    abi.decode(result, (uint256, TaskManagerLens.Status, address, bytes32, bool));
+                assertEq(uint8(status), uint8(TaskManagerLens.Status.COMPLETED));
+            }
+
+            /*──────── Multiple Applicants ────────*/
+
+            function test_MultipleApplicants() public {
+                uint256 id = _createAppTask(1 ether);
+
+                address member2 = makeAddr("member2");
+                address member3 = makeAddr("member3");
+                setHat(member2, MEMBER_HAT);
+                setHat(member3, MEMBER_HAT);
+
+                vm.prank(member1);
+                tm.applyForTask(id, keccak256("app1"));
+                vm.prank(member2);
+                tm.applyForTask(id, keccak256("app2"));
+                vm.prank(member3);
+                tm.applyForTask(id, keccak256("app3"));
+
+                // Verify 3 applicants
+                bytes memory result =
+                    lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_APPLICANT_COUNT, abi.encode(id));
+                uint256 count = abi.decode(result, (uint256));
+                assertEq(count, 3, "should have 3 applicants");
+
+                // Approve member2
+                vm.prank(pm1);
+                tm.approveApplication(id, member2);
+
+                // Verify claimer is member2
+                result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(id));
+                (,, address claimer,,) = abi.decode(result, (uint256, TaskManagerLens.Status, address, bytes32, bool));
+                assertEq(claimer, member2, "claimer should be member2");
+            }
+
+            /*──────── Permission Checks ────────*/
+
+            function test_ApplyRequiresClaimPermission() public {
+                uint256 id = _createAppTask(1 ether);
+
+                vm.prank(outsider);
+                vm.expectRevert(TaskManager.Unauthorized.selector);
+                tm.applyForTask(id, keccak256("app"));
+            }
+
+            function test_ApproveRequiresAssignPermission() public {
+                uint256 id = _createAppTask(1 ether);
+
+                vm.prank(member1);
+                tm.applyForTask(id, keccak256("app"));
+
+                vm.prank(outsider);
+                vm.expectRevert(TaskManager.Unauthorized.selector);
+                tm.approveApplication(id, member1);
+            }
+
+            function test_ApproveByProjectManager() public {
+                uint256 id = _createAppTask(1 ether);
+
+                // Add pm1 as project manager
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.PROJECT_MANAGER, abi.encode(APP_PROJECT_ID, pm1, true));
+
+                vm.prank(member1);
+                tm.applyForTask(id, keccak256("app"));
+
+                // PM can approve (bypasses hat-based assign permission check)
+                vm.prank(pm1);
+                tm.approveApplication(id, member1);
+
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(id));
+                (, TaskManagerLens.Status status,,,) =
+                    abi.decode(result, (uint256, TaskManagerLens.Status, address, bytes32, bool));
+                assertEq(uint8(status), uint8(TaskManagerLens.Status.CLAIMED));
+            }
+
+            /*──────── Error Cases ────────*/
+
+            function test_ApplyDuplicateReverts() public {
+                uint256 id = _createAppTask(1 ether);
+
+                vm.prank(member1);
+                tm.applyForTask(id, keccak256("app"));
+
+                vm.prank(member1);
+                vm.expectRevert(TaskManager.AlreadyApplied.selector);
+                tm.applyForTask(id, keccak256("app2"));
+            }
+
+            function test_ApplyEmptyHashReverts() public {
+                uint256 id = _createAppTask(1 ether);
+
+                vm.prank(member1);
+                vm.expectRevert(ValidationLib.InvalidString.selector);
+                tm.applyForTask(id, bytes32(0));
+            }
+
+            function test_ApplyForNonApplicationTaskReverts() public {
+                // Create a regular (non-application) task
+                vm.prank(creator1);
+                tm.createTask(1 ether, bytes("regular_task"), bytes32(0), APP_PROJECT_ID, address(0), 0, false);
+                uint256 id = 0;
+
+                vm.prank(member1);
+                vm.expectRevert(TaskManager.NoApplicationRequired.selector);
+                tm.applyForTask(id, keccak256("app"));
+            }
+
+            function test_ApplyForClaimedTaskReverts() public {
+                uint256 id = _createAppTask(1 ether);
+
+                // Apply and approve to move to CLAIMED
+                vm.prank(member1);
+                tm.applyForTask(id, keccak256("app"));
+                vm.prank(pm1);
+                tm.approveApplication(id, member1);
+
+                // New applicant tries to apply for already-claimed task
+                address member2 = makeAddr("member2");
+                setHat(member2, MEMBER_HAT);
+
+                vm.prank(member2);
+                vm.expectRevert(TaskManager.BadStatus.selector);
+                tm.applyForTask(id, keccak256("app2"));
+            }
+
+            function test_ApproveNonApplicantReverts() public {
+                uint256 id = _createAppTask(1 ether);
+
+                vm.prank(member1);
+                tm.applyForTask(id, keccak256("app"));
+
+                // Try to approve someone who didn't apply
+                address member2 = makeAddr("member2");
+                vm.prank(pm1);
+                vm.expectRevert(TaskManager.NotApplicant.selector);
+                tm.approveApplication(id, member2);
+            }
+
+            function test_ApproveAlreadyClaimedReverts() public {
+                uint256 id = _createAppTask(1 ether);
+
+                vm.prank(member1);
+                tm.applyForTask(id, keccak256("app"));
+
+                vm.prank(pm1);
+                tm.approveApplication(id, member1);
+
+                // Try to approve again (task is now CLAIMED)
+                vm.prank(pm1);
+                vm.expectRevert(TaskManager.BadStatus.selector);
+                tm.approveApplication(id, member1);
+            }
+
+            function test_ClaimTaskWithApplicationRequiredReverts() public {
+                uint256 id = _createAppTask(1 ether);
+
+                // Try to claim directly (bypass application)
+                vm.prank(member1);
+                vm.expectRevert(TaskManager.RequiresApplication.selector);
+                tm.claimTask(id);
+            }
+
+            /*──────── Cancel Clears Applications ────────*/
+
+            function test_CancelTaskClearsApplications() public {
+                uint256 id = _createAppTask(1 ether);
+
+                vm.prank(member1);
+                tm.applyForTask(id, keccak256("app"));
+
+                // Cancel the task
+                vm.prank(creator1);
+                tm.cancelTask(id);
+
+                // Verify applicants list is cleared
+                bytes memory result = lens.getStorage(
+                    address(tm), TaskManagerLens.StorageKey.TASK_APPLICANTS, abi.encode(id)
+                );
+                address[] memory applicants = abi.decode(result, (address[]));
+                assertEq(applicants.length, 0, "applicants should be cleared after cancel");
+            }
+
+            /*──────── Assign bypasses application requirement ────────*/
+
+            function test_AssignTaskBypassesApplicationRequirement() public {
+                uint256 id = _createAppTask(1 ether);
+
+                // PM can directly assign even if requiresApplication is true
+                vm.prank(pm1);
+                tm.assignTask(id, member1);
+
+                bytes memory result = lens.getStorage(address(tm), TaskManagerLens.StorageKey.TASK_INFO, abi.encode(id));
+                (, TaskManagerLens.Status status, address claimer,,) =
+                    abi.decode(result, (uint256, TaskManagerLens.Status, address, bytes32, bool));
+                assertEq(uint8(status), uint8(TaskManagerLens.Status.CLAIMED));
+                assertEq(claimer, member1);
+            }
+        }
+
         /*────────────────── Bootstrap Test Suite ──────────────────*/
         contract TaskManagerBootstrapTest is Test {
             /* test actors */
@@ -5328,5 +5896,101 @@ contract MockToken is Test, IERC20 {
                 vm.prank(deployer);
                 vm.expectRevert(TaskManager.NotDeployer.selector);
                 tm.bootstrapProjectsAndTasks(moreProjects, moreTasks);
+            }
+        }
+
+        /*──────────────────── Self-Review Tests ────────────────────*/
+        contract TaskManagerSelfReviewTest is TaskManagerTestBase {
+            uint256 constant REVIEWER_HAT = 4;
+            address reviewer = makeAddr("reviewer");
+            bytes32 projectId;
+
+            function setUp() public {
+                setUpBase();
+                setHat(reviewer, REVIEWER_HAT);
+                // CLAIM | REVIEW but NOT SELF_REVIEW
+                vm.prank(executor);
+                tm.setConfig(
+                    TaskManager.ConfigKey.ROLE_PERM, abi.encode(REVIEWER_HAT, TaskPerm.CLAIM | TaskPerm.REVIEW)
+                );
+
+                projectId = _createDefaultProject("SELF_REVIEW", 10 ether);
+            }
+
+            function test_SelfReviewBlockedWithoutPermission() public {
+                vm.prank(creator1);
+                tm.createTask(1 ether, bytes("task"), bytes32(0), projectId, address(0), 0, false);
+
+                vm.prank(reviewer);
+                tm.claimTask(0);
+
+                vm.prank(reviewer);
+                tm.submitTask(0, keccak256("work"));
+
+                vm.prank(reviewer);
+                vm.expectRevert(TaskManager.SelfReviewNotAllowed.selector);
+                tm.completeTask(0);
+            }
+
+            function test_SelfReviewAllowedWithPermission() public {
+                // Grant SELF_REVIEW in addition to CLAIM | REVIEW
+                vm.prank(executor);
+                tm.setConfig(
+                    TaskManager.ConfigKey.ROLE_PERM,
+                    abi.encode(REVIEWER_HAT, TaskPerm.CLAIM | TaskPerm.REVIEW | TaskPerm.SELF_REVIEW)
+                );
+
+                vm.prank(creator1);
+                tm.createTask(1 ether, bytes("task"), bytes32(0), projectId, address(0), 0, false);
+
+                vm.prank(reviewer);
+                tm.claimTask(0);
+
+                vm.prank(reviewer);
+                tm.submitTask(0, keccak256("work"));
+
+                vm.prank(reviewer);
+                tm.completeTask(0);
+
+                assertEq(token.balanceOf(reviewer), 1 ether);
+            }
+
+            function test_PMCanAlwaysReviewOwnTask() public {
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.PROJECT_MANAGER, abi.encode(projectId, pm1, true));
+
+                vm.prank(pm1);
+                tm.createTask(1 ether, bytes("pm_task"), bytes32(0), projectId, address(0), 0, false);
+
+                // PM bypasses _checkPerm, so can claim even without CLAIM flag
+                vm.prank(pm1);
+                tm.claimTask(0);
+
+                vm.prank(pm1);
+                tm.submitTask(0, keccak256("pm_work"));
+
+                // PM bypasses self-review check
+                vm.prank(pm1);
+                tm.completeTask(0);
+
+                assertEq(token.balanceOf(pm1), 1 ether);
+            }
+
+            function test_DifferentReviewerCanAlwaysComplete() public {
+                vm.prank(creator1);
+                tm.createTask(1 ether, bytes("task"), bytes32(0), projectId, address(0), 0, false);
+
+                // reviewer claims and submits
+                vm.prank(reviewer);
+                tm.claimTask(0);
+
+                vm.prank(reviewer);
+                tm.submitTask(0, keccak256("work"));
+
+                // pm1 (different person with REVIEW permission) completes — always allowed
+                vm.prank(pm1);
+                tm.completeTask(0);
+
+                assertEq(token.balanceOf(reviewer), 1 ether);
             }
         }

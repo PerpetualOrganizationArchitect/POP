@@ -36,6 +36,7 @@ import {ModuleTypes} from "../src/libs/ModuleTypes.sol";
 import {EligibilityModule} from "../src/EligibilityModule.sol";
 import {ToggleModule} from "../src/ToggleModule.sol";
 import {IExecutor} from "../src/Executor.sol";
+import {SwitchableBeacon} from "../src/SwitchableBeacon.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
@@ -68,6 +69,10 @@ interface IEligibilityModuleEvents {
         bool defaultStanding,
         uint256 mintedCount
     );
+
+    event RoleApplicationSubmitted(uint256 indexed hatId, address indexed applicant, bytes32 applicationHash);
+
+    event RoleApplicationWithdrawn(uint256 indexed hatId, address indexed applicant);
 }
 
 /*────────────── Test contract ───────────*/
@@ -680,8 +685,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         address orgRegBeacon = poaManager.getBeaconById(keccak256("OrgRegistry"));
         address deployerBeacon = poaManager.getBeaconById(keccak256("OrgDeployer"));
 
-        // Create OrgRegistry proxy - initialize with poaAdmin as owner
-        bytes memory orgRegistryInit = abi.encodeWithSignature("initialize(address)", poaAdmin);
+        // Create OrgRegistry proxy - initialize with poaAdmin as owner and hats address
+        bytes memory orgRegistryInit = abi.encodeWithSignature("initialize(address,address)", poaAdmin, SEPOLIA_HATS);
         orgRegistry = OrgRegistry(address(new BeaconProxy(orgRegBeacon, orgRegistryInit)));
 
         // Debug to verify OrgRegistry owner
@@ -720,6 +725,12 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             address(paymasterHub)
         );
         deployer = OrgDeployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
+
+        // Authorize OrgDeployer to register orgs on PaymasterHub
+        vm.stopPrank();
+        vm.prank(address(poaManager));
+        paymasterHub.setOrgRegistrar(address(deployer));
+        vm.startPrank(poaAdmin);
 
         // Debug to verify Deployer initialization
         console.log("deployer address:", address(deployer));
@@ -3673,5 +3684,337 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         token.setEducationHub(address(0));
 
         assertEq(token.educationHub(), address(0), "EducationHub should be cleared to address(0)");
+    }
+
+    /*───────────────── ROLE APPLICATION TESTS ───────────────────*/
+
+    function testRoleApplicationBasic() public {
+        TestOrgSetup memory setup = _createTestOrg("App Basic DAO");
+        address applicant = address(0x400);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, applicant);
+
+        // Configure vouching on DEFAULT hat
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 2, setup.memberRoleHat, false, true
+        );
+
+        bytes32 appHash = keccak256("my-application-ipfs-hash");
+
+        // Apply
+        vm.prank(applicant);
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, appHash);
+
+        // Verify storage
+        assertEq(
+            EligibilityModule(setup.eligibilityModule).getRoleApplication(setup.defaultRoleHat, applicant),
+            appHash,
+            "Application hash should be stored"
+        );
+        assertTrue(
+            EligibilityModule(setup.eligibilityModule).hasActiveApplication(setup.defaultRoleHat, applicant),
+            "Should have active application"
+        );
+        address[] memory applicants = EligibilityModule(setup.eligibilityModule).getRoleApplicants(setup.defaultRoleHat);
+        assertEq(applicants.length, 1, "Should have 1 applicant");
+        assertEq(applicants[0], applicant, "Applicant address should match");
+    }
+
+    function testRoleApplicationEmitsEvent() public {
+        TestOrgSetup memory setup = _createTestOrg("App Event DAO");
+        address applicant = address(0x401);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, applicant);
+
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 2, setup.memberRoleHat, false, true
+        );
+
+        bytes32 appHash = keccak256("app-hash");
+
+        vm.prank(applicant);
+        vm.expectEmit(true, true, false, true);
+        emit RoleApplicationSubmitted(setup.defaultRoleHat, applicant, appHash);
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, appHash);
+    }
+
+    function testRoleApplicationWithdraw() public {
+        TestOrgSetup memory setup = _createTestOrg("App Withdraw DAO");
+        address applicant = address(0x402);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, applicant);
+
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 2, setup.memberRoleHat, false, true
+        );
+
+        bytes32 appHash = keccak256("app-hash");
+
+        // Apply
+        vm.prank(applicant);
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, appHash);
+
+        // Withdraw
+        vm.prank(applicant);
+        vm.expectEmit(true, true, false, false);
+        emit RoleApplicationWithdrawn(setup.defaultRoleHat, applicant);
+        EligibilityModule(setup.eligibilityModule).withdrawApplication(setup.defaultRoleHat);
+
+        assertFalse(
+            EligibilityModule(setup.eligibilityModule).hasActiveApplication(setup.defaultRoleHat, applicant),
+            "Application should be cleared"
+        );
+
+        // Can reapply after withdrawal
+        bytes32 newHash = keccak256("updated-app");
+        vm.prank(applicant);
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, newHash);
+
+        assertEq(
+            EligibilityModule(setup.eligibilityModule).getRoleApplication(setup.defaultRoleHat, applicant),
+            newHash,
+            "New application should be stored"
+        );
+    }
+
+    function testRoleApplicationInvalidHash() public {
+        TestOrgSetup memory setup = _createTestOrg("App Invalid DAO");
+        address applicant = address(0x403);
+
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 2, setup.memberRoleHat, false, true
+        );
+
+        vm.prank(applicant);
+        vm.expectRevert(EligibilityModule.InvalidApplicationHash.selector);
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, bytes32(0));
+    }
+
+    function testRoleApplicationVouchingNotEnabled() public {
+        TestOrgSetup memory setup = _createTestOrg("App NoVouch DAO");
+        address applicant = address(0x404);
+
+        // Don't configure vouching — default hat has no vouching
+        vm.prank(applicant);
+        vm.expectRevert(EligibilityModule.VouchingNotEnabled.selector);
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, keccak256("app"));
+    }
+
+    function testRoleApplicationDuplicate() public {
+        TestOrgSetup memory setup = _createTestOrg("App Dup DAO");
+        address applicant = address(0x405);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, applicant);
+
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 2, setup.memberRoleHat, false, true
+        );
+
+        vm.prank(applicant);
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, keccak256("first"));
+
+        vm.prank(applicant);
+        vm.expectRevert(EligibilityModule.ApplicationAlreadyExists.selector);
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, keccak256("second"));
+    }
+
+    function testRoleApplicationAlreadyWearing() public {
+        TestOrgSetup memory setup = _createTestOrg("App Wearing DAO");
+
+        // Mint MEMBER hat to voter1 (default eligibility is true)
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+
+        // Configure vouching with combineWithHierarchy=true so hierarchy eligibility preserves wearer status
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.memberRoleHat, 2, setup.defaultRoleHat, true, false
+        );
+
+        // voter1 already wears memberRoleHat, so applying should revert
+        vm.prank(voter1);
+        vm.expectRevert("Already wearing hat");
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.memberRoleHat, keccak256("app"));
+    }
+
+    function testRoleApplicationFullFlow() public {
+        TestOrgSetup memory setup = _createTestOrg("App Full DAO");
+        address applicant = address(0x406);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter1);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter2);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, applicant);
+
+        // Configure vouching: 2 vouches from MEMBER hat
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 2, setup.memberRoleHat, false, true
+        );
+
+        // Mint MEMBER hats to vouchers
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+        _mintHat(setup.exec, setup.memberRoleHat, voter2);
+
+        // 1. Applicant applies
+        bytes32 appHash = keccak256("my-application");
+        vm.prank(applicant);
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, appHash);
+
+        assertTrue(
+            EligibilityModule(setup.eligibilityModule).hasActiveApplication(setup.defaultRoleHat, applicant),
+            "Should have active application"
+        );
+
+        // 2. Vouchers vouch
+        _vouchFor(voter1, setup.eligibilityModule, applicant, setup.defaultRoleHat);
+        _vouchFor(voter2, setup.eligibilityModule, applicant, setup.defaultRoleHat);
+
+        // 3. Applicant claims hat
+        vm.prank(applicant);
+        EligibilityModule(setup.eligibilityModule).claimVouchedHat(setup.defaultRoleHat);
+
+        // Verify: wearing hat
+        _assertWearingHat(applicant, setup.defaultRoleHat, true, "After claim");
+
+        // Verify: application auto-cleaned
+        assertFalse(
+            EligibilityModule(setup.eligibilityModule).hasActiveApplication(setup.defaultRoleHat, applicant),
+            "Application should be cleared after claim"
+        );
+    }
+
+    function testRoleApplicationMultipleApplicants() public {
+        TestOrgSetup memory setup = _createTestOrg("App Multi DAO");
+        address applicant1 = address(0x407);
+        address applicant2 = address(0x408);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, applicant1);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, applicant2);
+
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 2, setup.memberRoleHat, false, true
+        );
+
+        vm.prank(applicant1);
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, keccak256("app1"));
+
+        vm.prank(applicant2);
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, keccak256("app2"));
+
+        // Both should have active applications
+        assertTrue(
+            EligibilityModule(setup.eligibilityModule).hasActiveApplication(setup.defaultRoleHat, applicant1),
+            "Applicant1 should have application"
+        );
+        assertTrue(
+            EligibilityModule(setup.eligibilityModule).hasActiveApplication(setup.defaultRoleHat, applicant2),
+            "Applicant2 should have application"
+        );
+
+        // Applications should be independent
+        assertEq(
+            EligibilityModule(setup.eligibilityModule).getRoleApplication(setup.defaultRoleHat, applicant1),
+            keccak256("app1"),
+            "Applicant1 hash should match"
+        );
+        assertEq(
+            EligibilityModule(setup.eligibilityModule).getRoleApplication(setup.defaultRoleHat, applicant2),
+            keccak256("app2"),
+            "Applicant2 hash should match"
+        );
+
+        address[] memory applicants = EligibilityModule(setup.eligibilityModule).getRoleApplicants(setup.defaultRoleHat);
+        assertEq(applicants.length, 2, "Should have 2 applicants");
+    }
+
+    function testRoleApplicationWhilePaused() public {
+        TestOrgSetup memory setup = _createTestOrg("App Paused DAO");
+        address applicant = address(0x409);
+
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 2, setup.memberRoleHat, false, true
+        );
+
+        // Pause the module
+        vm.prank(setup.exec);
+        EligibilityModule(setup.eligibilityModule).pause();
+
+        // Apply should revert
+        vm.prank(applicant);
+        vm.expectRevert("Contract is paused");
+        EligibilityModule(setup.eligibilityModule).applyForRole(setup.defaultRoleHat, keccak256("app"));
+
+        // Withdraw should also revert (even though there's nothing to withdraw, pause check comes first)
+        vm.prank(applicant);
+        vm.expectRevert("Contract is paused");
+        EligibilityModule(setup.eligibilityModule).withdrawApplication(setup.defaultRoleHat);
+    }
+
+    function testWithdrawApplicationNoActiveReverts() public {
+        TestOrgSetup memory setup = _createTestOrg("App NoActive DAO");
+        address applicant = address(0x410);
+
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 2, setup.memberRoleHat, false, true
+        );
+
+        vm.prank(applicant);
+        vm.expectRevert(EligibilityModule.NoActiveApplication.selector);
+        EligibilityModule(setup.eligibilityModule).withdrawApplication(setup.defaultRoleHat);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       Beacon Ownership Tests (Fix 1 — all module beacons owned by executor)
+       ═══════════════════════════════════════════════════════════════════ */
+
+    function _getBeaconForType(bytes32 typeId) internal view returns (address) {
+        bytes32 contractId = keccak256(abi.encodePacked(ORG_ID, typeId));
+        return orgRegistry.getContractBeacon(contractId);
+    }
+
+    function testExecutorBeaconOwnedByExecutor() public {
+        TestOrgSetup memory setup = _createTestOrg("Beacon Owner DAO");
+        address beacon = _getBeaconForType(ModuleTypes.EXECUTOR_ID);
+        assertEq(SwitchableBeacon(beacon).owner(), setup.exec, "Executor beacon should be owned by executor");
+    }
+
+    function testEligibilityBeaconOwnedByExecutor() public {
+        TestOrgSetup memory setup = _createTestOrg("Beacon Owner DAO");
+        address beacon = _getBeaconForType(ModuleTypes.ELIGIBILITY_MODULE_ID);
+        assertEq(SwitchableBeacon(beacon).owner(), setup.exec, "Eligibility beacon should be owned by executor");
+    }
+
+    function testToggleBeaconOwnedByExecutor() public {
+        TestOrgSetup memory setup = _createTestOrg("Beacon Owner DAO");
+        address beacon = _getBeaconForType(ModuleTypes.TOGGLE_MODULE_ID);
+        assertEq(SwitchableBeacon(beacon).owner(), setup.exec, "Toggle beacon should be owned by executor");
+    }
+
+    function testVouchRevocationCrossDay() public {
+        TestOrgSetup memory setup = _createTestOrg("Cross-Day Revoke DAO");
+        address candidate = address(0x500);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter1);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter2);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate);
+
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 2, setup.memberRoleHat, false, true
+        );
+
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+        _mintHat(setup.exec, setup.memberRoleHat, voter2);
+
+        // Vouch on day 1
+        _vouchFor(voter1, setup.eligibilityModule, candidate, setup.defaultRoleHat);
+        _vouchFor(voter2, setup.eligibilityModule, candidate, setup.defaultRoleHat);
+
+        // Warp to a different day (previously caused underflow in dailyVouchCount decrement)
+        vm.warp(block.timestamp + 2 days);
+
+        // Revoke on day 3 — should succeed without underflow
+        _revokeVouch(voter1, setup.eligibilityModule, candidate, setup.defaultRoleHat);
+
+        // Verify the revocation worked correctly
+        _assertVouchStatus(
+            setup.eligibilityModule, candidate, setup.defaultRoleHat, 1, false, "After cross-day revocation"
+        );
     }
 }

@@ -37,6 +37,9 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     error HasNotVouched();
     error VouchingRateLimitExceeded();
     error NewUserVouchingRestricted();
+    error ApplicationAlreadyExists();
+    error NoActiveApplication();
+    error InvalidApplicationHash();
 
     /*═════════════════════════════════════════ STRUCTS ═════════════════════════════════════════*/
 
@@ -88,6 +91,9 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         // Rate limiting for vouching
         mapping(address => uint256) userJoinTime;
         mapping(address => mapping(uint256 => uint32)) dailyVouchCount; // user => day => count
+        // Role application system
+        mapping(uint256 => mapping(address => bytes32)) roleApplications; // hatId => applicant => applicationHash
+        mapping(uint256 => address[]) roleApplicants; // hatId => array of applicant addresses
     }
 
     // keccak256("poa.eligibilitymodule.storage") → unique, collision-free slot
@@ -105,7 +111,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     uint256 private _notEntered = 1;
 
     modifier nonReentrant() {
-        require(_notEntered == 1, "ReentrancyGuard: reentrant call");
+        require(_notEntered != 2, "ReentrancyGuard: reentrant call");
         _notEntered = 2;
         _;
         _notEntered = 1;
@@ -166,6 +172,8 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     event Paused(address indexed account);
     event Unpaused(address indexed account);
     event HatMetadataUpdated(uint256 indexed hatId, string name, bytes32 metadataCID);
+    event RoleApplicationSubmitted(uint256 indexed hatId, address indexed applicant, bytes32 applicationHash);
+    event RoleApplicationWithdrawn(uint256 indexed hatId, address indexed applicant);
 
     /*═════════════════════════════════════════ MODIFIERS ═════════════════════════════════════════*/
 
@@ -188,6 +196,8 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
     function initialize(address _superAdmin, address _hats, address _toggleModule) external initializer {
         if (_superAdmin == address(0) || _hats == address(0)) revert ZeroAddress();
+
+        _notEntered = 1;
 
         Layout storage l = _layout();
         l.superAdmin = _superAdmin;
@@ -760,9 +770,8 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         uint32 newCount = l.currentVouchCount[hatId][wearer] - 1;
         l.currentVouchCount[hatId][wearer] = newCount;
 
-        uint256 currentDay = block.timestamp / SECONDS_PER_DAY;
-        uint32 dailyCount = l.dailyVouchCount[msg.sender][currentDay] - 1;
-        l.dailyVouchCount[msg.sender][currentDay] = dailyCount;
+        // Note: dailyVouchCount is NOT decremented on revocation.
+        // It's a rate limiter only — revoking doesn't give back vouch slots.
 
         emit VouchRevoked(msg.sender, wearer, hatId, newCount);
 
@@ -787,7 +796,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
      *      The EligibilityModule contract mints the hat using its ELIGIBILITY_ADMIN permissions.
      * @param hatId The ID of the hat to claim
      */
-    function claimVouchedHat(uint256 hatId) external whenNotPaused {
+    function claimVouchedHat(uint256 hatId) external whenNotPaused nonReentrant {
         Layout storage l = _layout();
 
         // Check if caller is eligible to claim this hat
@@ -797,11 +806,46 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         // Check if already wearing the hat
         require(!l.hats.isWearerOfHat(msg.sender, hatId), "Already wearing hat");
 
+        // State change BEFORE external call (CEI pattern)
+        delete l.roleApplications[hatId][msg.sender];
+
         // Mint the hat to the caller using EligibilityModule's admin powers
         bool success = l.hats.mintHat(hatId, msg.sender);
         require(success, "Hat minting failed");
 
         emit HatClaimed(msg.sender, hatId);
+    }
+
+    /*═══════════════════════════════════ ROLE APPLICATION SYSTEM ═══════════════════════════════════════*/
+
+    /// @notice Submit an application for a role (hat) that has vouching enabled.
+    ///         This is a signaling mechanism — it does not grant eligibility.
+    /// @param hatId The hat ID to apply for
+    /// @param applicationHash IPFS CID sha256 digest of the application details
+    function applyForRole(uint256 hatId, bytes32 applicationHash) external whenNotPaused {
+        if (applicationHash == bytes32(0)) revert InvalidApplicationHash();
+
+        Layout storage l = _layout();
+        VouchConfig memory config = l.vouchConfigs[hatId];
+        if (!_isVouchingEnabled(config.flags)) revert VouchingNotEnabled();
+        if (l.roleApplications[hatId][msg.sender] != bytes32(0)) revert ApplicationAlreadyExists();
+        require(!l.hats.isWearerOfHat(msg.sender, hatId), "Already wearing hat");
+
+        l.roleApplicants[hatId].push(msg.sender);
+        l.roleApplications[hatId][msg.sender] = applicationHash;
+
+        emit RoleApplicationSubmitted(hatId, msg.sender, applicationHash);
+    }
+
+    /// @notice Withdraw a previously submitted role application.
+    /// @param hatId The hat ID to withdraw the application from
+    function withdrawApplication(uint256 hatId) external whenNotPaused {
+        Layout storage l = _layout();
+        if (l.roleApplications[hatId][msg.sender] == bytes32(0)) revert NoActiveApplication();
+
+        delete l.roleApplications[hatId][msg.sender];
+
+        emit RoleApplicationWithdrawn(hatId, msg.sender);
     }
 
     /*═══════════════════════════════════ ELIGIBILITY INTERFACE ═══════════════════════════════════════*/
@@ -916,6 +960,18 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
     function hasSpecificWearerRules(address wearer, uint256 hatId) external view returns (bool) {
         return _layout().hasSpecificWearerRules[wearer][hatId];
+    }
+
+    function getRoleApplication(uint256 hatId, address applicant) external view returns (bytes32) {
+        return _layout().roleApplications[hatId][applicant];
+    }
+
+    function getRoleApplicants(uint256 hatId) external view returns (address[] memory) {
+        return _layout().roleApplicants[hatId];
+    }
+
+    function hasActiveApplication(uint256 hatId, address applicant) external view returns (bool) {
+        return _layout().roleApplications[hatId][applicant] != bytes32(0);
     }
 
     /*═════════════════════════════════════ PUBLIC GETTERS ═════════════════════════════════════════*/

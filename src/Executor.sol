@@ -7,6 +7,7 @@ import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.
 import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
+import {SwitchableBeacon} from "./SwitchableBeacon.sol";
 
 interface IExecutor {
     struct Call {
@@ -77,10 +78,7 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     function setCaller(address newCaller) external {
         if (newCaller == address(0)) revert ZeroAddress();
         Layout storage l = _layout();
-        if (l.allowedCaller != address(0)) {
-            // After first set, only current caller or owner can change
-            if (msg.sender != l.allowedCaller && msg.sender != owner()) revert UnauthorizedCaller();
-        }
+        if (msg.sender != l.allowedCaller && msg.sender != owner()) revert UnauthorizedCaller();
         l.allowedCaller = newCaller;
         emit CallerSet(newCaller);
     }
@@ -127,6 +125,11 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
             }
         }
         emit BatchExecuted(proposalId, len);
+    }
+
+    /* ─────────── Beacon ownership ─────────── */
+    function acceptBeaconOwnership(address beacon) external onlyOwner {
+        SwitchableBeacon(beacon).acceptOwnership();
     }
 
     /* ─────────── Guardian helpers ─────────── */

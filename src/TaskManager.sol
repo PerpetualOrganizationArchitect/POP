@@ -41,6 +41,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
     error RequiresApplication();
     error NoApplicationRequired();
     error InvalidIndex();
+    error SelfReviewNotAllowed();
 
     /*──────── Constants ─────*/
     bytes4 public constant MODULE_ID = 0x54534b32; // "TSK2"
@@ -162,6 +163,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
     event TaskAssigned(uint256 indexed id, address indexed assignee, address indexed assigner);
     event TaskCompleted(uint256 indexed id, address indexed completer);
     event TaskCancelled(uint256 indexed id, address indexed canceller);
+    event TaskRejected(uint256 indexed id, address indexed rejector, bytes32 rejectionHash);
     event TaskApplicationSubmitted(uint256 indexed id, address indexed applicant, bytes32 applicationHash);
     event TaskApplicationApproved(uint256 indexed id, address indexed applicant, address indexed approver);
     event ExecutorUpdated(address newExecutor);
@@ -271,6 +273,8 @@ contract TaskManager is Initializable, ContextUpgradeable {
         p.cap = uint128(cap);
         p.exists = true;
 
+        emit ProjectCreated(projectId, title, metadataHash, cap);
+
         /* managers */
         if (defaultManager != address(0)) {
             p.managers[defaultManager] = true;
@@ -290,8 +294,6 @@ contract TaskManager is Initializable, ContextUpgradeable {
         _setBatchHatPerm(projectId, claimHats, TaskPerm.CLAIM);
         _setBatchHatPerm(projectId, reviewHats, TaskPerm.REVIEW);
         _setBatchHatPerm(projectId, assignHats, TaskPerm.ASSIGN);
-
-        emit ProjectCreated(projectId, title, metadataHash, cap);
     }
 
     function deleteProject(bytes32 pid) external {
@@ -498,9 +500,18 @@ contract TaskManager is Initializable, ContextUpgradeable {
 
     function completeTask(uint256 id) external {
         Layout storage l = _layout();
-        _checkPerm(l._tasks[id].projectId, TaskPerm.REVIEW);
+        bytes32 pid = l._tasks[id].projectId;
+        _checkPerm(pid, TaskPerm.REVIEW);
         Task storage t = _task(l, id);
         if (t.status != Status.SUBMITTED) revert BadStatus();
+
+        // Self-review: if caller is the claimer, require SELF_REVIEW permission or PM/executor
+        address sender = _msgSender();
+        if (t.claimer == sender && !_isPM(pid, sender)) {
+            if (!TaskPerm.has(_permMask(sender, pid), TaskPerm.SELF_REVIEW)) {
+                revert SelfReviewNotAllowed();
+            }
+        }
 
         t.status = Status.COMPLETED;
         l.token.mint(t.claimer, uint256(t.payout));
@@ -511,6 +522,17 @@ contract TaskManager is Initializable, ContextUpgradeable {
         }
 
         emit TaskCompleted(id, _msgSender());
+    }
+
+    function rejectTask(uint256 id, bytes32 rejectionHash) external {
+        Layout storage l = _layout();
+        _checkPerm(l._tasks[id].projectId, TaskPerm.REVIEW);
+        Task storage t = _task(l, id);
+        if (t.status != Status.SUBMITTED) revert BadStatus();
+        if (rejectionHash == bytes32(0)) revert ValidationLib.InvalidString();
+
+        t.status = Status.CLAIMED;
+        emit TaskRejected(id, _msgSender(), rejectionHash);
     }
 
     function cancelTask(uint256 id) external {
