@@ -52,6 +52,7 @@ contract HybridVoting is Initializable {
         bool restricted; // if true only pollHatIds can vote
         mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
         ClassConfig[] classesSnapshot; // Snapshot the class config to freeze semantics for this proposal
+        bool executed; // finalization guard
     }
 
     /* ─────── ERC-7201 Storage ─────── */

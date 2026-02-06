@@ -41,6 +41,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
     error RequiresApplication();
     error NoApplicationRequired();
     error InvalidIndex();
+    error SelfReviewNotAllowed();
 
     /*──────── Constants ─────*/
     bytes4 public constant MODULE_ID = 0x54534b32; // "TSK2"
@@ -499,9 +500,18 @@ contract TaskManager is Initializable, ContextUpgradeable {
 
     function completeTask(uint256 id) external {
         Layout storage l = _layout();
-        _checkPerm(l._tasks[id].projectId, TaskPerm.REVIEW);
+        bytes32 pid = l._tasks[id].projectId;
+        _checkPerm(pid, TaskPerm.REVIEW);
         Task storage t = _task(l, id);
         if (t.status != Status.SUBMITTED) revert BadStatus();
+
+        // Self-review: if caller is the claimer, require SELF_REVIEW permission or PM/executor
+        address sender = _msgSender();
+        if (t.claimer == sender && !_isPM(pid, sender)) {
+            if (!TaskPerm.has(_permMask(sender, pid), TaskPerm.SELF_REVIEW)) {
+                revert SelfReviewNotAllowed();
+            }
+        }
 
         t.status = Status.COMPLETED;
         l.token.mint(t.claimer, uint256(t.payout));

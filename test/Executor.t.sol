@@ -70,4 +70,23 @@ contract ExecutorTest is Test {
         vm.expectRevert(Executor.UnauthorizedCaller.selector);
         exec.mintHatsForUser(user, hatIds);
     }
+
+    function testSetCallerUnauthorizedReverts() public {
+        address random = address(0x99);
+        vm.prank(random);
+        vm.expectRevert(Executor.UnauthorizedCaller.selector);
+        exec.setCaller(address(0x5));
+    }
+
+    function testSetCallerZeroAddressReverts() public {
+        vm.expectRevert(Executor.ZeroAddress.selector);
+        exec.setCaller(address(0));
+    }
+
+    function testAllowedCallerCanSetNewCaller() public {
+        address newCaller = address(0x5);
+        vm.prank(caller);
+        exec.setCaller(newCaller);
+        assertEq(exec.allowedCaller(), newCaller);
+    }
 }

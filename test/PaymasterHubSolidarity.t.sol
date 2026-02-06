@@ -287,10 +287,12 @@ contract PaymasterHubSolidarityTest is Test {
         vm.deal(user1, 100 ether);
         vm.deal(user2, 100 ether);
 
-        // Register orgs
+        // Register orgs (requires poaManager)
+        vm.startPrank(poaManager);
         hub.registerOrg(ORG_ALPHA, ADMIN_HAT, OPERATOR_HAT);
         hub.registerOrg(ORG_BETA, ADMIN_HAT, OPERATOR_HAT);
         hub.registerOrg(ORG_GAMMA, ADMIN_HAT, OPERATOR_HAT);
+        vm.stopPrank();
     }
 
     // ============ Initialization Tests ============
@@ -316,9 +318,11 @@ contract PaymasterHubSolidarityTest is Test {
     function testOrgRegistration() public {
         bytes32 newOrgId = keccak256("NEW_ORG");
 
+        vm.startPrank(poaManager);
         vm.expectEmit(true, false, false, true);
         emit OrgRegistered(newOrgId, ADMIN_HAT, OPERATOR_HAT);
         hub.registerOrg(newOrgId, ADMIN_HAT, OPERATOR_HAT);
+        vm.stopPrank();
 
         PaymasterHub.OrgConfig memory config = hub.getOrgConfig(newOrgId);
         assertEq(config.adminHatId, ADMIN_HAT);
@@ -930,5 +934,44 @@ contract PaymasterHubSolidarityTest is Test {
         (,, bool requiresDeposit, uint256 solidarityLimit) = hub.getOrgGraceStatus(ORG_ALPHA);
         assertFalse(requiresDeposit);
         assertEq(solidarityLimit, 0.006 ether); // 2x match
+    }
+
+    // ============ registerOrg Access Control Tests ============
+
+    function testRegisterOrgUnauthorizedReverts() public {
+        bytes32 newOrgId = keccak256("UNAUTHORIZED_ORG");
+
+        vm.prank(orgAdmin);
+        vm.expectRevert(PaymasterHub.NotPoaManager.selector);
+        hub.registerOrg(newOrgId, ADMIN_HAT, OPERATOR_HAT);
+    }
+
+    function testRegisterOrgRandomUserReverts() public {
+        bytes32 newOrgId = keccak256("RANDOM_ORG");
+
+        vm.prank(user1);
+        vm.expectRevert(PaymasterHub.NotPoaManager.selector);
+        hub.registerOrg(newOrgId, ADMIN_HAT, OPERATOR_HAT);
+    }
+
+    function testSetOrgRegistrar() public {
+        address registrar = address(0x99);
+
+        vm.prank(poaManager);
+        hub.setOrgRegistrar(registrar);
+
+        // Registrar can now register orgs
+        bytes32 newOrgId = keccak256("REGISTRAR_ORG");
+        vm.prank(registrar);
+        hub.registerOrg(newOrgId, ADMIN_HAT, OPERATOR_HAT);
+
+        PaymasterHub.OrgConfig memory config = hub.getOrgConfig(newOrgId);
+        assertEq(config.adminHatId, ADMIN_HAT);
+    }
+
+    function testSetOrgRegistrarUnauthorizedReverts() public {
+        vm.prank(orgAdmin);
+        vm.expectRevert(PaymasterHub.NotPoaManager.selector);
+        hub.setOrgRegistrar(address(0x99));
     }
 }
