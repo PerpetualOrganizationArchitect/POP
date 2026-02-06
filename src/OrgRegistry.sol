@@ -88,7 +88,6 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         bool autoUpgrade,
         address owner
     );
-    event AutoUpgradeSet(bytes32 indexed contractId, bool enabled);
     event HatsTreeRegistered(bytes32 indexed orgId, uint256 topHatId, uint256[] roleHatIds);
     event OrgMetadataAdminHatSet(bytes32 indexed orgId, uint256 hatId);
 
@@ -367,21 +366,6 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         if ((o.executor != address(0) && callerIsExecutor) || (callerIsOwner && lastRegister)) {
             o.bootstrap = false;
         }
-    }
-
-    function setAutoUpgrade(bytes32 orgId, bytes32 typeId, bool enabled) external {
-        Layout storage l = _layout();
-        OrgInfo storage o = l.orgOf[orgId];
-        if (!o.exists) revert OrgUnknown();
-        if (msg.sender != o.executor) revert NotOrgExecutor();
-
-        address proxy = l.proxyOf[orgId][typeId];
-        if (proxy == address(0)) revert ContractUnknown();
-
-        bytes32 contractId = keccak256(abi.encodePacked(orgId, typeId));
-        l.contractOf[contractId].autoUpgrade = enabled;
-
-        emit AutoUpgradeSet(contractId, enabled);
     }
 
     /* ═════════════════  VIEW HELPERS  ═════════════════ */
