@@ -198,7 +198,7 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         }
 
         l._modules[id] =
-            Module({answerHash: keccak256(abi.encodePacked(correctAnswer)), payout: uint128(payout), exists: true});
+            Module({answerHash: keccak256(abi.encodePacked(id, correctAnswer)), payout: uint128(payout), exists: true});
 
         emit ModuleCreated(id, title, contentHash, payout);
     }
@@ -229,7 +229,7 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         Layout storage l = _layout();
         Module storage m = _module(l, id);
         if (_isCompleted(l, _msgSender(), id)) revert AlreadyCompleted();
-        if (keccak256(abi.encodePacked(answer)) != m.answerHash) revert InvalidAnswer();
+        if (keccak256(abi.encodePacked(uint48(id), answer)) != m.answerHash) revert InvalidAnswer();
 
         l.token.mint(_msgSender(), m.payout);
         _setCompleted(l, _msgSender(), id);

@@ -1061,4 +1061,66 @@ contract PasskeyTest is Test {
         assertFalse(P256Verifier.isValidSignature(bytes32(0), s));
         assertFalse(P256Verifier.isValidSignature(r, bytes32(0)));
     }
+
+    /*════════════════════════════════════════════════════════════════════
+                    ZERO PUBKEY VALIDATION TESTS
+    ════════════════════════════════════════════════════════════════════*/
+
+    function testAddCredentialZeroPubKeyXReverts() public {
+        PasskeyAccount account = _createAccount();
+
+        vm.prank(address(account));
+        vm.expectRevert(IPasskeyAccount.InvalidSignature.selector);
+        account.addCredential(CREDENTIAL_ID_2, bytes32(0), PUB_KEY_Y);
+    }
+
+    function testAddCredentialZeroPubKeyYReverts() public {
+        PasskeyAccount account = _createAccount();
+
+        vm.prank(address(account));
+        vm.expectRevert(IPasskeyAccount.InvalidSignature.selector);
+        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, bytes32(0));
+    }
+
+    function testInitiateRecoveryZeroPubKeyXReverts() public {
+        PasskeyAccount account = _createAccount();
+
+        vm.prank(guardian);
+        vm.expectRevert(IPasskeyAccount.InvalidSignature.selector);
+        account.initiateRecovery(keccak256("new_cred"), bytes32(0), PUB_KEY_Y);
+    }
+
+    function testInitiateRecoveryZeroPubKeyYReverts() public {
+        PasskeyAccount account = _createAccount();
+
+        vm.prank(guardian);
+        vm.expectRevert(IPasskeyAccount.InvalidSignature.selector);
+        account.initiateRecovery(keccak256("new_cred"), PUB_KEY_X, bytes32(0));
+    }
+
+    function testCompleteRecoveryMaxCredentialsReverts() public {
+        // Set max credentials to 2
+        vm.prank(owner);
+        factory.setMaxCredentials(2);
+
+        PasskeyAccount account = _createAccount();
+
+        // Add second credential to reach the limit
+        vm.prank(address(account));
+        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y);
+
+        // Initiate recovery (would add a third credential)
+        bytes32 recoveryCredId = keccak256("recovery_cred");
+        vm.prank(guardian);
+        account.initiateRecovery(recoveryCredId, keccak256("rx"), keccak256("ry"));
+
+        bytes32 recoveryId = keccak256(abi.encodePacked(recoveryCredId, block.timestamp, guardian));
+
+        // Warp past recovery delay
+        vm.warp(block.timestamp + 7 days + 1);
+
+        // Complete recovery should revert — already at max credentials
+        vm.expectRevert(IPasskeyAccount.MaxCredentialsReached.selector);
+        account.completeRecovery(recoveryId);
+    }
 }

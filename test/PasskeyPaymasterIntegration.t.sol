@@ -153,10 +153,11 @@ contract PasskeyPaymasterIntegrationTest is Test {
         ERC1967Proxy hubProxy = new ERC1967Proxy(address(hubImpl), hubInitData);
         hub = PaymasterHub(payable(address(hubProxy)));
 
-        // Register org in PaymasterHub with voucher hat
-        hub.registerOrgWithVoucher(ORG_ID, ADMIN_HAT, OPERATOR_HAT, VOUCHER_HAT);
-
         vm.stopPrank();
+
+        // Register org in PaymasterHub with voucher hat (requires poaManager)
+        vm.prank(poaManager);
+        hub.registerOrgWithVoucher(ORG_ID, ADMIN_HAT, OPERATOR_HAT, VOUCHER_HAT);
 
         // Fund test accounts BEFORE using them for deposits
         vm.deal(owner, 100 ether);
@@ -929,7 +930,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Create a new org WITHOUT voucher hat
         bytes32 noVoucherOrgId = keccak256("NO_VOUCHER_ORG");
 
-        vm.startPrank(owner);
+        vm.startPrank(poaManager);
         hub.registerOrg(noVoucherOrgId, ADMIN_HAT, OPERATOR_HAT); // No voucher hat!
         vm.stopPrank();
 

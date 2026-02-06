@@ -726,6 +726,12 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         );
         deployer = OrgDeployer(address(new BeaconProxy(deployerBeacon, deployerInit)));
 
+        // Authorize OrgDeployer to register orgs on PaymasterHub
+        vm.stopPrank();
+        vm.prank(address(poaManager));
+        paymasterHub.setOrgRegistrar(address(deployer));
+        vm.startPrank(poaAdmin);
+
         // Debug to verify Deployer initialization
         console.log("deployer address:", address(deployer));
 
@@ -3979,5 +3985,36 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         TestOrgSetup memory setup = _createTestOrg("Beacon Owner DAO");
         address beacon = _getBeaconForType(ModuleTypes.TOGGLE_MODULE_ID);
         assertEq(SwitchableBeacon(beacon).owner(), setup.exec, "Toggle beacon should be owned by executor");
+    }
+
+    function testVouchRevocationCrossDay() public {
+        TestOrgSetup memory setup = _createTestOrg("Cross-Day Revoke DAO");
+        address candidate = address(0x500);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter1);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter2);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate);
+
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 2, setup.memberRoleHat, false, true
+        );
+
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+        _mintHat(setup.exec, setup.memberRoleHat, voter2);
+
+        // Vouch on day 1
+        _vouchFor(voter1, setup.eligibilityModule, candidate, setup.defaultRoleHat);
+        _vouchFor(voter2, setup.eligibilityModule, candidate, setup.defaultRoleHat);
+
+        // Warp to a different day (previously caused underflow in dailyVouchCount decrement)
+        vm.warp(block.timestamp + 2 days);
+
+        // Revoke on day 3 — should succeed without underflow
+        _revokeVouch(voter1, setup.eligibilityModule, candidate, setup.defaultRoleHat);
+
+        // Verify the revocation worked correctly
+        _assertVouchStatus(
+            setup.eligibilityModule, candidate, setup.defaultRoleHat, 1, false, "After cross-day revocation"
+        );
     }
 }
