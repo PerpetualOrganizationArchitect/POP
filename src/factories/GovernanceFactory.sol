@@ -90,6 +90,7 @@ contract GovernanceFactory {
         address toggleModule;
         address hybridVoting; // Governance mechanism
         address directDemocracyVoting; // Polling mechanism
+        address execBeacon; // Executor's SwitchableBeacon (for two-step ownership acceptance)
         uint256 topHatId;
         uint256[] roleHatIds;
     }
@@ -138,11 +139,11 @@ contract GovernanceFactory {
 
         /* 2. Deploy and configure modules for Hats tree (without registration) */
         (result.eligibilityModule, eligibilityBeacon) = _deployEligibilityModule(
-            params.orgId, params.poaManager, params.orgRegistry, params.hats, params.autoUpgrade, params.deployer
+            params.orgId, params.poaManager, params.orgRegistry, params.hats, params.autoUpgrade, result.executor
         );
 
         (result.toggleModule, toggleBeacon) = _deployToggleModule(
-            params.orgId, params.poaManager, params.orgRegistry, params.hats, params.autoUpgrade, params.deployer
+            params.orgId, params.poaManager, params.orgRegistry, params.hats, params.autoUpgrade, result.executor
         );
 
         /* 3. Setup Hats Tree */
@@ -200,8 +201,9 @@ contract GovernanceFactory {
             IOrgDeployer(params.deployer).batchRegisterContracts(params.orgId, registrations, params.autoUpgrade, false);
         }
 
-        /* 5. Transfer executor beacon ownership back to executor itself */
+        /* 5. Initiate two-step ownership transfer for executor beacon */
         SwitchableBeacon(execBeacon).transferOwnership(result.executor);
+        result.execBeacon = execBeacon;
 
         return result;
     }
@@ -350,10 +352,10 @@ contract GovernanceFactory {
         address orgRegistry,
         address hats,
         bool autoUpgrade,
-        address deployer
+        address beaconOwner
     ) internal returns (address emProxy, address beacon) {
         beacon = BeaconDeploymentLib.createBeacon(
-            ModuleTypes.ELIGIBILITY_MODULE_ID, poaManager, address(this), autoUpgrade, address(0)
+            ModuleTypes.ELIGIBILITY_MODULE_ID, poaManager, beaconOwner, autoUpgrade, address(0)
         );
 
         ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({
@@ -381,10 +383,10 @@ contract GovernanceFactory {
         address orgRegistry,
         address hats,
         bool autoUpgrade,
-        address deployer
+        address beaconOwner
     ) internal returns (address tmProxy, address beacon) {
         beacon = BeaconDeploymentLib.createBeacon(
-            ModuleTypes.TOGGLE_MODULE_ID, poaManager, address(this), autoUpgrade, address(0)
+            ModuleTypes.TOGGLE_MODULE_ID, poaManager, beaconOwner, autoUpgrade, address(0)
         );
 
         ModuleDeploymentLib.DeployConfig memory config = ModuleDeploymentLib.DeployConfig({

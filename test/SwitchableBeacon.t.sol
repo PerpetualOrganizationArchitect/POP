@@ -27,6 +27,7 @@ contract SwitchableBeaconTest is Test {
 
     // Events
     event OwnerTransferred(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event ModeChanged(SwitchableBeacon.Mode mode);
     event MirrorSet(address indexed mirrorBeacon);
     event Pinned(address indexed implementation);
@@ -46,6 +47,32 @@ contract SwitchableBeaconTest is Test {
             address(0), // No static impl needed for Mirror mode
             SwitchableBeacon.Mode.Mirror
         );
+    }
+
+    // ============ Constructor Event Tests ============
+
+    function testConstructorEmitsMirrorSetInMirrorMode() public {
+        vm.expectEmit(true, false, false, true);
+        emit MirrorSet(address(poaBeacon));
+        vm.expectEmit(false, false, false, true);
+        emit ModeChanged(SwitchableBeacon.Mode.Mirror);
+
+        new SwitchableBeacon(owner, address(poaBeacon), address(0), SwitchableBeacon.Mode.Mirror);
+    }
+
+    function testConstructorDoesNotEmitMirrorSetInStaticMode() public {
+        // Should emit Pinned is NOT expected, MirrorSet is NOT expected
+        // Only OwnerTransferred and ModeChanged
+        vm.recordLogs();
+        new SwitchableBeacon(owner, address(poaBeacon), address(implV1), SwitchableBeacon.Mode.Static);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; i++) {
+            // MirrorSet event topic
+            assertTrue(
+                logs[i].topics[0] != keccak256("MirrorSet(address)"), "MirrorSet should not be emitted in Static mode"
+            );
+        }
     }
 
     // ============ Mirror Mode Tests ============
@@ -204,14 +231,29 @@ contract SwitchableBeaconTest is Test {
     }
 
     function testOwnershipTransfer() public {
-        // Transfer ownership
+        // Initiate transfer — emits OwnershipTransferStarted, NOT OwnerTransferred
         vm.expectEmit(true, true, false, false);
-        emit OwnerTransferred(owner, newOwner);
+        emit OwnershipTransferStarted(owner, newOwner);
 
         switchableBeacon.transferOwnership(newOwner);
 
+        // Owner is still the original owner until accepted
+        assertEq(switchableBeacon.owner(), owner);
+        assertEq(switchableBeacon.pendingOwner(), newOwner);
+
+        // Old owner can still perform restricted operations
+        switchableBeacon.pin(address(implV1));
+
+        // New owner accepts
+        vm.expectEmit(true, true, false, false);
+        emit OwnerTransferred(owner, newOwner);
+
+        vm.prank(newOwner);
+        switchableBeacon.acceptOwnership();
+
         // Verify new owner
         assertEq(switchableBeacon.owner(), newOwner);
+        assertEq(switchableBeacon.pendingOwner(), address(0));
 
         // Old owner can't perform restricted operations
         vm.expectRevert(SwitchableBeacon.NotOwner.selector);
@@ -221,6 +263,70 @@ contract SwitchableBeaconTest is Test {
         vm.prank(newOwner);
         switchableBeacon.pin(address(implV2));
         assertEq(switchableBeacon.implementation(), address(implV2));
+    }
+
+    // ============ Two-Step Ownership Tests ============
+
+    function testPendingOwnerState() public {
+        assertEq(switchableBeacon.pendingOwner(), address(0));
+
+        switchableBeacon.transferOwnership(newOwner);
+        assertEq(switchableBeacon.pendingOwner(), newOwner);
+        assertEq(switchableBeacon.owner(), owner);
+    }
+
+    function testNonPendingCannotAccept() public {
+        switchableBeacon.transferOwnership(newOwner);
+
+        vm.prank(unauthorized);
+        vm.expectRevert(SwitchableBeacon.NotPendingOwner.selector);
+        switchableBeacon.acceptOwnership();
+    }
+
+    function testAcceptWithoutTransferReverts() public {
+        vm.prank(newOwner);
+        vm.expectRevert(SwitchableBeacon.NotPendingOwner.selector);
+        switchableBeacon.acceptOwnership();
+    }
+
+    function testOldOwnerRetainsControlUntilAccept() public {
+        switchableBeacon.transferOwnership(newOwner);
+
+        // Old owner can still pin, setMirror, etc.
+        switchableBeacon.pin(address(implV1));
+        assertEq(switchableBeacon.implementation(), address(implV1));
+
+        switchableBeacon.setMirror(address(poaBeacon));
+        assertTrue(switchableBeacon.isMirrorMode());
+    }
+
+    function testTransferOverwritesPending() public {
+        address secondCandidate = address(0xABCD);
+
+        switchableBeacon.transferOwnership(newOwner);
+        assertEq(switchableBeacon.pendingOwner(), newOwner);
+
+        switchableBeacon.transferOwnership(secondCandidate);
+        assertEq(switchableBeacon.pendingOwner(), secondCandidate);
+
+        // First candidate can no longer accept
+        vm.prank(newOwner);
+        vm.expectRevert(SwitchableBeacon.NotPendingOwner.selector);
+        switchableBeacon.acceptOwnership();
+
+        // Second candidate can accept
+        vm.prank(secondCandidate);
+        switchableBeacon.acceptOwnership();
+        assertEq(switchableBeacon.owner(), secondCandidate);
+    }
+
+    function testPendingClearedAfterAccept() public {
+        switchableBeacon.transferOwnership(newOwner);
+
+        vm.prank(newOwner);
+        switchableBeacon.acceptOwnership();
+
+        assertEq(switchableBeacon.pendingOwner(), address(0));
     }
 
     // ============ Zero Address Guards ============
@@ -398,7 +504,13 @@ contract SwitchableBeaconTest is Test {
         vm.assume(newAddr != address(0));
 
         switchableBeacon.transferOwnership(newAddr);
+        assertEq(switchableBeacon.pendingOwner(), newAddr);
+        assertEq(switchableBeacon.owner(), address(this)); // still original owner
+
+        vm.prank(newAddr);
+        switchableBeacon.acceptOwnership();
         assertEq(switchableBeacon.owner(), newAddr);
+        assertEq(switchableBeacon.pendingOwner(), address(0));
     }
 }
 

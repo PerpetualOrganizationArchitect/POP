@@ -22,6 +22,7 @@ interface IParticipationToken {
 interface IExecutorAdmin {
     function setCaller(address) external;
     function setHatMinterAuthorization(address minter, bool authorized) external;
+    function acceptBeaconOwnership(address beacon) external;
     function configureVouching(
         address eligibilityModule,
         uint256 hatId,
@@ -324,6 +325,9 @@ contract OrgDeployer is Initializable {
         /* 2. Deploy Governance Infrastructure (Executor, Hats modules, Hats tree) */
         GovernanceFactory.GovernanceResult memory gov = _deployGovernanceInfrastructure(params);
         result.executor = gov.executor;
+
+        /* 2b. Accept executor beacon ownership (two-step transfer initiated by GovernanceFactory) */
+        IExecutorAdmin(result.executor).acceptBeaconOwnership(gov.execBeacon);
 
         /* 3. Set the executor for the org */
         l.orgRegistry.setOrgExecutor(params.orgId, result.executor);

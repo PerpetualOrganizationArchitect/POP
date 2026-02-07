@@ -54,6 +54,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     error InsufficientOrgBalance();
     error OrgIsBanned();
     error InsufficientFunds();
+    error SolidarityDistributionIsPaused();
     error VouchExpired();
     error VouchAlreadyUsed();
     error InvalidVouchSignature();
@@ -119,6 +120,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     event VouchUsed(bytes32 indexed orgId, address indexed account, address indexed voucher);
     event OnboardingConfigUpdated(uint128 maxGasPerCreation, uint128 dailyCreationLimit, bool enabled);
     event OnboardingAccountCreated(address indexed account, uint256 gasCost);
+    event SolidarityDistributionPaused();
+    event SolidarityDistributionUnpaused();
 
     // ============ Storage Variables ============
     /// @custom:storage-location erc7201:poa.paymasterhub.main
@@ -166,7 +169,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         uint128 balance; // Current solidarity fund balance
         uint32 numActiveOrgs; // Number of orgs with deposits > 0
         uint16 feePercentageBps; // Fee as basis points (100 = 1%)
-        uint208 reserved; // Padding
+        bool distributionPaused; // When true, only collect fees, no payouts
+        uint200 reserved; // Padding
     }
 
     /**
@@ -292,9 +296,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         main.hats = _hats;
         main.poaManager = _poaManager;
 
-        // Initialize solidarity fund with 1% fee
+        // Initialize solidarity fund with 1% fee, distribution paused (collection-only mode)
         SolidarityFund storage solidarity = _getSolidarityStorage();
         solidarity.feePercentageBps = 100; // 1%
+        solidarity.distributionPaused = true;
 
         // Initialize grace period with defaults (90 days, 0.01 ETH ~$30 spend, 0.003 ETH ~$10 deposit)
         GracePeriodConfig storage grace = _getGracePeriodStorage();
@@ -410,6 +415,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param maxCost Maximum cost of the operation (for solidarity limit check)
      */
     function _checkSolidarityAccess(bytes32 orgId, uint256 maxCost) internal view {
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+
+        // If distribution is paused, skip solidarity checks entirely
+        // Orgs pay 100% from deposits when distribution is paused
+        if (solidarity.distributionPaused) return;
+
         mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
         mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
         GracePeriodConfig storage grace = _getGracePeriodStorage();
@@ -614,13 +625,22 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Calculate total available funds
         uint256 totalAvailable = uint256(org.deposited) - uint256(org.spent);
 
-        // Check if org has enough in deposits to cover this
-        // Note: solidarity is checked separately in _checkSolidarityAccess
-        if (org.spent + maxCost > org.deposited) {
-            // Will need to use solidarity - that's checked elsewhere
-            // Here we just make sure they haven't overdrawn
-            if (totalAvailable == 0) {
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+
+        if (solidarity.distributionPaused) {
+            // When distribution is paused, org must cover 100% from deposits
+            if (totalAvailable < maxCost) {
                 revert InsufficientOrgBalance();
+            }
+        } else {
+            // Check if org has enough in deposits to cover this
+            // Note: solidarity is checked separately in _checkSolidarityAccess
+            if (org.spent + maxCost > org.deposited) {
+                // Will need to use solidarity - that's checked elsewhere
+                // Here we just make sure they haven't overdrawn
+                if (totalAvailable == 0) {
+                    revert InsufficientOrgBalance();
+                }
             }
         }
     }
@@ -723,8 +743,16 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         GracePeriodConfig storage grace = _getGracePeriodStorage();
         SolidarityFund storage solidarity = _getSolidarityStorage();
 
-        // Calculate 1% solidarity fee
+        // Calculate 1% solidarity fee (always collected, even when distribution is paused)
         uint256 solidarityFee = (actualGasCost * uint256(solidarity.feePercentageBps)) / 10000;
+
+        // If distribution is paused, pay 100% from org deposits, still collect fee
+        if (solidarity.distributionPaused) {
+            org.spent += uint128(actualGasCost);
+            solidarity.balance += uint128(solidarityFee);
+            emit SolidarityFeeCollected(orgId, solidarityFee);
+            return;
+        }
 
         // Check if in initial grace period
         uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
@@ -1064,6 +1092,35 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     }
 
     /**
+     * @notice Pause solidarity fund distribution (collection-only mode)
+     * @dev When paused: 1% fees still collected, but no distribution to orgs.
+     *      Orgs must fund 100% of gas costs from their own deposits.
+     *      Only PoaManager can pause/unpause.
+     */
+    function pauseSolidarityDistribution() external {
+        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+        if (!solidarity.distributionPaused) {
+            solidarity.distributionPaused = true;
+            emit SolidarityDistributionPaused();
+        }
+    }
+
+    /**
+     * @notice Unpause solidarity fund distribution
+     * @dev When unpaused: normal grace period + tier matching resumes.
+     *      Only PoaManager can pause/unpause.
+     */
+    function unpauseSolidarityDistribution() external {
+        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+        if (solidarity.distributionPaused) {
+            solidarity.distributionPaused = false;
+            emit SolidarityDistributionUnpaused();
+        }
+    }
+
+    /**
      * @notice Configure POA onboarding for account creation from solidarity fund
      * @dev Only PoaManager can modify onboarding parameters
      * @param _maxGasPerCreation Maximum gas allowed per account creation (~200k)
@@ -1201,12 +1258,21 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
         mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
         GracePeriodConfig storage grace = _getGracePeriodStorage();
+        SolidarityFund storage solidarity = _getSolidarityStorage();
 
         OrgConfig storage config = orgs[orgId];
         OrgFinancials storage org = financials[orgId];
 
         uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
         inGrace = block.timestamp < graceEndTime;
+
+        // When distribution is paused, no solidarity is available regardless of grace/tier
+        if (solidarity.distributionPaused) {
+            spendRemaining = 0;
+            requiresDeposit = true;
+            solidarityLimit = 0;
+            return (inGrace, spendRemaining, requiresDeposit, solidarityLimit);
+        }
 
         if (inGrace) {
             // During grace: track spending limit
@@ -1403,6 +1469,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Check onboarding is enabled
         if (!onboarding.enabled) revert OnboardingDisabled();
 
+        // Onboarding is paid from solidarity fund, so block when distribution is paused
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+        if (solidarity.distributionPaused) revert SolidarityDistributionIsPaused();
+
         // Check gas cost limit
         if (maxCost > onboarding.maxGasPerCreation) revert GasTooHigh();
 
@@ -1413,7 +1483,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
 
         // Check solidarity fund has sufficient balance
-        SolidarityFund storage solidarity = _getSolidarityStorage();
         if (solidarity.balance < maxCost) revert InsufficientFunds();
 
         // Subject key for onboarding is based on the account address (natural nonce)
