@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
+import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {console2} from "forge-std/console2.sol";
 import {PaymentManager} from "../src/PaymentManager.sol";
 import {ParticipationToken} from "../src/ParticipationToken.sol";
@@ -50,7 +52,9 @@ contract PaymentManagerMerkleTest is Test {
         hats = new MockHats();
 
         // Deploy participation token
-        participationToken = new ParticipationToken();
+        ParticipationToken _ptImpl = new ParticipationToken();
+        UpgradeableBeacon _ptBeacon = new UpgradeableBeacon(address(_ptImpl), address(this));
+        participationToken = ParticipationToken(address(new BeaconProxy(address(_ptBeacon), "")));
 
         uint256[] memory memberHats = new uint256[](1);
         memberHats[0] = memberHatId;
@@ -60,7 +64,9 @@ contract PaymentManagerMerkleTest is Test {
         participationToken.initialize(executor, "Participation Token", "PART", address(hats), memberHats, approverHats);
 
         // Deploy payment manager
-        paymentManager = new PaymentManager();
+        PaymentManager _pmImpl = new PaymentManager();
+        UpgradeableBeacon _pmBeacon = new UpgradeableBeacon(address(_pmImpl), address(this));
+        paymentManager = PaymentManager(payable(address(new BeaconProxy(address(_pmBeacon), ""))));
         paymentManager.initialize(executor, address(participationToken));
 
         // Deploy payment token

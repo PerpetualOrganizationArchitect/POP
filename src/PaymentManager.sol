@@ -63,6 +63,11 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
                                     INITIALIZER
     ──────────────────────────────────────────────────────────────────────────*/
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /**
      * @notice Initializes the PaymentManager
      * @param _owner The address that will own the contract (typically the Executor)

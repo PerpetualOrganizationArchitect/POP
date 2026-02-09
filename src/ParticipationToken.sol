@@ -70,6 +70,11 @@ contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyG
     event MemberHatSet(uint256 hat, bool allowed);
     event ApproverHatSet(uint256 hat, bool allowed);
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /*─────────── Initialiser ──────*/
     function initialize(
         address executor_,

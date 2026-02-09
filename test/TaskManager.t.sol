@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "forge-std/console.sol";
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -154,7 +156,9 @@ contract MockToken is Test, IERC20 {
                 setHat(pm1, PM_HAT);
                 setHat(member1, MEMBER_HAT);
 
-                tm = new TaskManager();
+                TaskManager _tmImpl = new TaskManager();
+                UpgradeableBeacon _tmBeacon = new UpgradeableBeacon(address(_tmImpl), address(this));
+                tm = TaskManager(address(new BeaconProxy(address(_tmBeacon), "")));
                 lens = new TaskManagerLens();
                 uint256[] memory creatorHats = _hatArr(CREATOR_HAT);
 
@@ -5440,7 +5444,9 @@ contract MockToken is Test, IERC20 {
                 hats.mintHat(PM_HAT, pm1);
                 hats.mintHat(MEMBER_HAT, member1);
 
-                tm = new TaskManager();
+                TaskManager _tmImpl = new TaskManager();
+                UpgradeableBeacon _tmBeacon = new UpgradeableBeacon(address(_tmImpl), address(this));
+                tm = TaskManager(address(new BeaconProxy(address(_tmBeacon), "")));
                 lens = new TaskManagerLens();
                 uint256[] memory creatorHats = new uint256[](1);
                 creatorHats[0] = CREATOR_HAT;

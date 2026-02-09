@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "../src/UniversalAccountRegistry.sol";
 
 contract UARTest is Test {
@@ -9,7 +11,9 @@ contract UARTest is Test {
     address user = address(1);
 
     function setUp() public {
-        reg = new UniversalAccountRegistry();
+        UniversalAccountRegistry _regImpl = new UniversalAccountRegistry();
+        UpgradeableBeacon _regBeacon = new UpgradeableBeacon(address(_regImpl), address(this));
+        reg = UniversalAccountRegistry(address(new BeaconProxy(address(_regBeacon), "")));
         reg.initialize(address(this));
     }
 

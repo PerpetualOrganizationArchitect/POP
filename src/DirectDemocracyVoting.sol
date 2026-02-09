@@ -126,7 +126,10 @@ contract DirectDemocracyVoting is Initializable {
     event QuorumPercentageSet(uint8 pct);
 
     /* ─────────── Initialiser ─────────── */
-    constructor() initializer {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(
         address hats_,

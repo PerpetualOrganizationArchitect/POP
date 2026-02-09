@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 
 import {EducationHub, IParticipationToken} from "../src/EducationHub.sol";
 import {ValidationLib} from "../src/libs/ValidationLib.sol";
@@ -63,7 +65,9 @@ contract MockPT is Test, IParticipationToken {
             hats.mintHat(MEMBER_HAT, creator); // creator is also a member
             hats.mintHat(MEMBER_HAT, learner);
 
-            hub = new EducationHub();
+            EducationHub _hubImpl = new EducationHub();
+            UpgradeableBeacon _hubBeacon = new UpgradeableBeacon(address(_hubImpl), address(this));
+            hub = EducationHub(address(new BeaconProxy(address(_hubBeacon), "")));
             uint256[] memory creatorHats = new uint256[](1);
             creatorHats[0] = CREATOR_HAT;
             uint256[] memory memberHats = new uint256[](1);
@@ -87,7 +91,9 @@ contract MockPT is Test, IParticipationToken {
         }
 
         function testInitializeZeroAddressReverts() public {
-            EducationHub tmp = new EducationHub();
+            EducationHub _tmpImpl = new EducationHub();
+            UpgradeableBeacon _tmpBeacon = new UpgradeableBeacon(address(_tmpImpl), address(this));
+            EducationHub tmp = EducationHub(address(new BeaconProxy(address(_tmpBeacon), "")));
             uint256[] memory creatorHats = new uint256[](0);
             uint256[] memory memberHats = new uint256[](0);
             vm.expectRevert(EducationHub.ZeroAddress.selector);

@@ -50,6 +50,11 @@ contract ImplementationRegistry is Initializable, OwnableUpgradeable {
         bool latest
     );
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /*───────── Initializer ─────────────*/
     function initialize(address owner) external initializer {
         __Ownable_init(owner);

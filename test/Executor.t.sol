@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "../src/Executor.sol";
 import "./mocks/MockHats.sol";
 
@@ -22,7 +24,9 @@ contract ExecutorTest is Test {
 
     function setUp() public {
         hats = new MockHats();
-        exec = new Executor();
+        Executor impl = new Executor();
+        UpgradeableBeacon beacon = new UpgradeableBeacon(address(impl), address(this));
+        exec = Executor(payable(address(new BeaconProxy(address(beacon), ""))));
         exec.initialize(owner, address(hats));
         target = new Target();
         exec.setCaller(caller);

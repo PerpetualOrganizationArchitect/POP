@@ -77,6 +77,11 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     event TokenSet(address indexed newToken);
     event HatsSet(address indexed newHats);
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /*────────── Initialiser ────────*/
     function initialize(
         address tokenAddr,

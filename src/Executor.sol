@@ -62,6 +62,11 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     event HatMinterAuthorized(address indexed minter, bool authorized);
     event HatsMinted(address indexed user, uint256[] hatIds);
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /* ─────────── Initialiser ─────────── */
     function initialize(address owner_, address hats_) external initializer {
         if (owner_ == address(0) || hats_ == address(0)) revert ZeroAddress();
