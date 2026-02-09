@@ -137,6 +137,8 @@ library HybridVotingCore {
     function announceWinner(uint256 id) external returns (uint256 winner, bool valid) {
         HybridVoting.Layout storage l = _layout();
         HybridVoting.Proposal storage p = l._proposals[id];
+        if (p.executed) revert VotingErrors.AlreadyExecuted();
+        p.executed = true;
 
         // Check if any votes were cast
         bool hasVotes = false;
@@ -191,14 +193,14 @@ library HybridVotingCore {
         );
 
         IExecutor.Call[] storage batch = p.batches[winner];
-        bool executed = false;
+        bool didExecute = false;
         if (valid && batch.length > 0) {
             // No target validation needed - Executor has onlyExecutor permission on all org contracts
             // and handles the actual calls. HybridVoting just passes the batch through.
             l.executor.execute(id, batch);
-            executed = true;
+            didExecute = true;
             emit ProposalExecuted(id, winner, batch.length);
         }
-        emit Winner(id, winner, valid, executed, uint64(block.timestamp));
+        emit Winner(id, winner, valid, didExecute, uint64(block.timestamp));
     }
 }

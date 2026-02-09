@@ -111,7 +111,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     uint256 private _notEntered = 1;
 
     modifier nonReentrant() {
-        require(_notEntered == 1, "ReentrancyGuard: reentrant call");
+        require(_notEntered != 2, "ReentrancyGuard: reentrant call");
         _notEntered = 2;
         _;
         _notEntered = 1;
@@ -196,6 +196,8 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
     function initialize(address _superAdmin, address _hats, address _toggleModule) external initializer {
         if (_superAdmin == address(0) || _hats == address(0)) revert ZeroAddress();
+
+        _notEntered = 1;
 
         Layout storage l = _layout();
         l.superAdmin = _superAdmin;
@@ -768,9 +770,8 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         uint32 newCount = l.currentVouchCount[hatId][wearer] - 1;
         l.currentVouchCount[hatId][wearer] = newCount;
 
-        uint256 currentDay = block.timestamp / SECONDS_PER_DAY;
-        uint32 dailyCount = l.dailyVouchCount[msg.sender][currentDay] - 1;
-        l.dailyVouchCount[msg.sender][currentDay] = dailyCount;
+        // Note: dailyVouchCount is NOT decremented on revocation.
+        // It's a rate limiter only — revoking doesn't give back vouch slots.
 
         emit VouchRevoked(msg.sender, wearer, hatId, newCount);
 
@@ -795,7 +796,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
      *      The EligibilityModule contract mints the hat using its ELIGIBILITY_ADMIN permissions.
      * @param hatId The ID of the hat to claim
      */
-    function claimVouchedHat(uint256 hatId) external whenNotPaused {
+    function claimVouchedHat(uint256 hatId) external whenNotPaused nonReentrant {
         Layout storage l = _layout();
 
         // Check if caller is eligible to claim this hat
@@ -805,12 +806,12 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         // Check if already wearing the hat
         require(!l.hats.isWearerOfHat(msg.sender, hatId), "Already wearing hat");
 
+        // State change BEFORE external call (CEI pattern)
+        delete l.roleApplications[hatId][msg.sender];
+
         // Mint the hat to the caller using EligibilityModule's admin powers
         bool success = l.hats.mintHat(hatId, msg.sender);
         require(success, "Hat minting failed");
-
-        // Clean up any pending role application
-        delete l.roleApplications[hatId][msg.sender];
 
         emit HatClaimed(msg.sender, hatId);
     }

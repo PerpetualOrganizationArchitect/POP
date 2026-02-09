@@ -46,6 +46,7 @@ contract DirectDemocracyVoting is Initializable {
         uint256[] pollHatIds; // array of specific hat IDs for this poll
         bool restricted; // if true only allowedHats can vote
         mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
+        bool executed; // finalization guard
     }
 
     /* ─────────── ERC-7201 Storage ─────────── */
@@ -408,9 +409,13 @@ contract DirectDemocracyVoting is Initializable {
         whenNotPaused
         returns (uint256 winner, bool valid)
     {
-        (winner, valid) = _calcWinner(id);
         Layout storage l = _layout();
-        IExecutor.Call[] storage batch = l._proposals[id].batches[winner];
+        Proposal storage prop = l._proposals[id];
+        if (prop.executed) revert VotingErrors.AlreadyExecuted();
+        prop.executed = true;
+
+        (winner, valid) = _calcWinner(id);
+        IExecutor.Call[] storage batch = prop.batches[winner];
 
         if (valid && batch.length > 0) {
             uint256 len = batch.length;

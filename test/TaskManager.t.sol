@@ -5898,3 +5898,99 @@ contract MockToken is Test, IERC20 {
                 tm.bootstrapProjectsAndTasks(moreProjects, moreTasks);
             }
         }
+
+        /*──────────────────── Self-Review Tests ────────────────────*/
+        contract TaskManagerSelfReviewTest is TaskManagerTestBase {
+            uint256 constant REVIEWER_HAT = 4;
+            address reviewer = makeAddr("reviewer");
+            bytes32 projectId;
+
+            function setUp() public {
+                setUpBase();
+                setHat(reviewer, REVIEWER_HAT);
+                // CLAIM | REVIEW but NOT SELF_REVIEW
+                vm.prank(executor);
+                tm.setConfig(
+                    TaskManager.ConfigKey.ROLE_PERM, abi.encode(REVIEWER_HAT, TaskPerm.CLAIM | TaskPerm.REVIEW)
+                );
+
+                projectId = _createDefaultProject("SELF_REVIEW", 10 ether);
+            }
+
+            function test_SelfReviewBlockedWithoutPermission() public {
+                vm.prank(creator1);
+                tm.createTask(1 ether, bytes("task"), bytes32(0), projectId, address(0), 0, false);
+
+                vm.prank(reviewer);
+                tm.claimTask(0);
+
+                vm.prank(reviewer);
+                tm.submitTask(0, keccak256("work"));
+
+                vm.prank(reviewer);
+                vm.expectRevert(TaskManager.SelfReviewNotAllowed.selector);
+                tm.completeTask(0);
+            }
+
+            function test_SelfReviewAllowedWithPermission() public {
+                // Grant SELF_REVIEW in addition to CLAIM | REVIEW
+                vm.prank(executor);
+                tm.setConfig(
+                    TaskManager.ConfigKey.ROLE_PERM,
+                    abi.encode(REVIEWER_HAT, TaskPerm.CLAIM | TaskPerm.REVIEW | TaskPerm.SELF_REVIEW)
+                );
+
+                vm.prank(creator1);
+                tm.createTask(1 ether, bytes("task"), bytes32(0), projectId, address(0), 0, false);
+
+                vm.prank(reviewer);
+                tm.claimTask(0);
+
+                vm.prank(reviewer);
+                tm.submitTask(0, keccak256("work"));
+
+                vm.prank(reviewer);
+                tm.completeTask(0);
+
+                assertEq(token.balanceOf(reviewer), 1 ether);
+            }
+
+            function test_PMCanAlwaysReviewOwnTask() public {
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.PROJECT_MANAGER, abi.encode(projectId, pm1, true));
+
+                vm.prank(pm1);
+                tm.createTask(1 ether, bytes("pm_task"), bytes32(0), projectId, address(0), 0, false);
+
+                // PM bypasses _checkPerm, so can claim even without CLAIM flag
+                vm.prank(pm1);
+                tm.claimTask(0);
+
+                vm.prank(pm1);
+                tm.submitTask(0, keccak256("pm_work"));
+
+                // PM bypasses self-review check
+                vm.prank(pm1);
+                tm.completeTask(0);
+
+                assertEq(token.balanceOf(pm1), 1 ether);
+            }
+
+            function test_DifferentReviewerCanAlwaysComplete() public {
+                vm.prank(creator1);
+                tm.createTask(1 ether, bytes("task"), bytes32(0), projectId, address(0), 0, false);
+
+                // reviewer claims and submits
+                vm.prank(reviewer);
+                tm.claimTask(0);
+
+                vm.prank(reviewer);
+                tm.submitTask(0, keccak256("work"));
+
+                // pm1 (different person with REVIEW permission) completes — always allowed
+                vm.prank(pm1);
+                tm.completeTask(0);
+
+                assertEq(token.balanceOf(reviewer), 1 ether);
+            }
+        }

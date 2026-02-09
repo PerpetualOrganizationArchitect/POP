@@ -236,6 +236,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
 
     /// @inheritdoc IPasskeyAccount
     function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY) external override onlySelf {
+        if (pubKeyX == bytes32(0) || pubKeyY == bytes32(0)) revert InvalidSignature();
         Layout storage l = _layout();
 
         // Check if credential already exists
@@ -319,6 +320,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
 
     /// @inheritdoc IPasskeyAccount
     function initiateRecovery(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY) external override onlyGuardian {
+        if (pubKeyX == bytes32(0) || pubKeyY == bytes32(0)) revert InvalidSignature();
         Layout storage l = _layout();
 
         // Generate recovery ID
@@ -359,6 +361,12 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
 
         if (block.timestamp < request.executeAfter) {
             revert RecoveryDelayNotPassed();
+        }
+
+        // Check max credentials limit before adding
+        uint8 maxCreds = _getMaxCredentials();
+        if (l.credentialIds.length >= maxCreds) {
+            revert MaxCredentialsReached();
         }
 
         // Add the new credential
