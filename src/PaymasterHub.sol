@@ -1409,7 +1409,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     function _authorizeUpgrade(address newImplementation) internal override {
         MainStorage storage main = _getMainStorage();
         if (msg.sender != main.poaManager) revert NotPoaManager();
-        // newImplementation is intentionally not validated to allow flexibility
+        if (newImplementation == address(0)) revert ZeroAddress();
+        if (newImplementation.code.length == 0) revert ContractNotDeployed();
     }
 
     // ============ Internal Functions ============
@@ -1762,10 +1763,4 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     receive() external payable {
         emit BountyFunded(msg.value, address(this).balance);
     }
-
-    /**
-     * @dev Storage gap for future upgrades
-     * Reserves 50 storage slots for new variables in future versions
-     */
-    uint256[50] private __gap;
 }

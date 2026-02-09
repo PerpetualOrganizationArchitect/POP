@@ -117,7 +117,10 @@ contract HybridVoting is Initializable {
     event QuorumSet(uint8 pct);
 
     /* ─────── Initialiser ─────── */
-    constructor() initializer {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(
         address hats_,

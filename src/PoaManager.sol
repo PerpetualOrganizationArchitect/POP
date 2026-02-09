@@ -72,6 +72,7 @@ contract PoaManager is Ownable(msg.sender) {
     /*──────────── Admin: add & bootstrap ───────────*/
     function addContractType(string calldata typeName, address impl) external onlyOwner {
         if (impl == address(0)) revert ImplZero();
+        if (impl.code.length == 0) revert ImplZero();
         bytes32 tId = _id(typeName);
         if (address(beacons[tId]) != address(0)) revert TypeExists();
 
@@ -91,6 +92,7 @@ contract PoaManager is Ownable(msg.sender) {
     /*──────────── Admin: upgrade ───────────*/
     function upgradeBeacon(string calldata typeName, address newImpl, string calldata version) external onlyOwner {
         if (newImpl == address(0)) revert ImplZero();
+        if (newImpl.code.length == 0) revert ImplZero();
         bytes32 tId = _id(typeName);
         UpgradeableBeacon beacon = beacons[tId];
         if (address(beacon) == address(0)) revert TypeUnknown();

@@ -41,6 +41,11 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     event UserDeleted(address indexed user, string oldUsername);
     event BatchRegistered(uint256 count);
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /*────────────────────────── Initializer ────────────────────────────*/
     function initialize(address initialOwner) external initializer {
         if (initialOwner == address(0)) revert InvalidChars();

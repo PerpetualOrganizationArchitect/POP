@@ -140,7 +140,10 @@ contract OrgDeployer is Initializable {
 
     /*════════════════  INITIALIZATION  ════════════════*/
 
-    constructor() initializer {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(
         address _governanceFactory,

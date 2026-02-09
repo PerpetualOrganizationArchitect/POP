@@ -85,6 +85,11 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         address indexed master, address indexed account, string username, bytes32 indexed credentialId, uint256[] hatIds
     );
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /* ───────── Initialiser ───── */
     function initialize(
         address executor_,

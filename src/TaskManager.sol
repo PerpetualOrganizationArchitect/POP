@@ -168,6 +168,11 @@ contract TaskManager is Initializable, ContextUpgradeable {
     event TaskApplicationApproved(uint256 indexed id, address indexed applicant, address indexed approver);
     event ExecutorUpdated(address newExecutor);
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /*──────── Initialiser ───────*/
     function initialize(
         address tokenAddress,

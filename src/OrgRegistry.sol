@@ -92,7 +92,9 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     event OrgMetadataAdminHatSet(bytes32 indexed orgId, uint256 hatId);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() initializer {}
+    constructor() {
+        _disableInitializers();
+    }
 
     /**
      * @dev Initializes the contract, replacing the constructor for upgradeable pattern
