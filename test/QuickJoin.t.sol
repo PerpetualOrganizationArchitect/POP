@@ -2,6 +2,8 @@
 pragma solidity ^0.8.21;
 
 import "forge-std/Test.sol";
+import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "../src/QuickJoin.sol";
 import "./mocks/MockHats.sol";
 
@@ -56,7 +58,9 @@ contract QuickJoinTest is Test {
         hats = new MockHats();
         registry = new MockRegistry();
         mockExecutor = new MockExecutorHatMinter();
-        qj = new QuickJoin();
+        QuickJoin _qjImpl = new QuickJoin();
+        UpgradeableBeacon _qjBeacon = new UpgradeableBeacon(address(_qjImpl), address(this));
+        qj = QuickJoin(address(new BeaconProxy(address(_qjBeacon), "")));
 
         uint256[] memory memberHats = new uint256[](1);
         memberHats[0] = DEFAULT_HAT_ID;
@@ -76,7 +80,9 @@ contract QuickJoinTest is Test {
     }
 
     function testInitializeZeroAddressReverts() public {
-        QuickJoin tmp = new QuickJoin();
+        QuickJoin _tmpImpl = new QuickJoin();
+        UpgradeableBeacon _tmpBeacon = new UpgradeableBeacon(address(_tmpImpl), address(this));
+        QuickJoin tmp = QuickJoin(address(new BeaconProxy(address(_tmpBeacon), "")));
         uint256[] memory memberHats = new uint256[](1);
         memberHats[0] = DEFAULT_HAT_ID;
         vm.expectRevert(QuickJoin.InvalidAddress.selector);

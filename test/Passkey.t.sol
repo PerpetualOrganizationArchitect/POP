@@ -157,7 +157,9 @@ contract PasskeyTest is Test {
         mockExecutor = new MockExecutor();
 
         // Deploy account registry
-        accountRegistry = new UniversalAccountRegistry();
+        UniversalAccountRegistry _uarImpl = new UniversalAccountRegistry();
+        UpgradeableBeacon _uarBeacon = new UpgradeableBeacon(address(_uarImpl), owner);
+        accountRegistry = UniversalAccountRegistry(address(new BeaconProxy(address(_uarBeacon), "")));
         accountRegistry.initialize(owner);
 
         vm.stopPrank();
