@@ -90,7 +90,8 @@ interface IPaymentManagerInit {
 }
 
 interface IPasskeyAccountFactoryInit {
-    function initialize(address executor, address accountBeacon) external;
+    function initialize(address poaManager_, address accountBeacon_, address poaGuardian_, uint48 recoveryDelay_)
+        external;
 }
 
 library ModuleDeploymentLib {
@@ -286,12 +287,14 @@ library ModuleDeploymentLib {
 
     function deployPasskeyAccountFactory(
         DeployConfig memory config,
-        address executorAddr,
+        address poaManager,
         address accountBeacon,
+        address poaGuardian,
+        uint48 recoveryDelay,
         address factoryBeacon
     ) internal returns (address factoryProxy) {
         bytes memory init = abi.encodeWithSelector(
-            IPasskeyAccountFactoryInit.initialize.selector, executorAddr, accountBeacon
+            IPasskeyAccountFactoryInit.initialize.selector, poaManager, accountBeacon, poaGuardian, recoveryDelay
         );
         factoryProxy = deployCore(config, ModuleTypes.PASSKEY_ACCOUNT_FACTORY_ID, init, factoryBeacon);
     }

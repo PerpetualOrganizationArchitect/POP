@@ -372,6 +372,11 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         // Add the new credential
         bytes32 credentialId = request.credentialId;
 
+        // Prevent duplicate from concurrent recovery requests
+        if (l.credentials[credentialId].createdAt != 0) {
+            revert CredentialExists();
+        }
+
         l.credentials[credentialId] = PasskeyCredential({
             publicKeyX: request.pubKeyX,
             publicKeyY: request.pubKeyY,

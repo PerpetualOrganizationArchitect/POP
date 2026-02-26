@@ -183,6 +183,7 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         // Mark as claimed
         dist.claimed[msg.sender] = true;
         dist.totalClaimed += claimAmount;
+        if (dist.totalClaimed > dist.totalAmount) revert OverClaimed();
 
         // Transfer funds
         if (dist.payoutToken == address(0)) {
@@ -232,6 +233,7 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
             // Mark as claimed
             dist.claimed[msg.sender] = true;
             dist.totalClaimed += claimAmount;
+            if (dist.totalClaimed > dist.totalAmount) revert OverClaimed();
 
             // Transfer funds
             if (dist.payoutToken == address(0)) {

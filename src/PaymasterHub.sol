@@ -641,8 +641,15 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // If deposits alone cover the cost, no solidarity needed
         if (depositAvailable >= maxCost) return;
 
-        // Deposits are fully exhausted — revert early before solidarity check
+        // Deposits are fully exhausted — check if grace period allows solidarity-only coverage
         if (depositAvailable == 0) {
+            mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
+            GracePeriodConfig storage grace = _getGracePeriodStorage();
+            OrgConfig storage config = orgs[orgId];
+            uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
+            if (block.timestamp < graceEndTime) {
+                return; // Grace period: _checkSolidarityAccess handles spending limits
+            }
             revert InsufficientOrgBalance();
         }
         // Partial coverage: solidarity will cover the rest (validated by _checkSolidarityAccess)

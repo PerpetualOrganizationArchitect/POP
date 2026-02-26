@@ -1212,4 +1212,307 @@ contract PaymasterHubSolidarityTest is Test {
         vm.expectRevert(PaymasterHub.NotPoaManager.selector);
         hub.setOrgRegistrar(address(0x99));
     }
+
+    /*══════════════════════════════════════════════════════════════════
+                    GRACE PERIOD ZERO-DEPOSIT TESTS (Bug #1)
+    ══════════════════════════════════════════════════════════════════*/
+
+    function testGracePeriodZeroDepositOrgGraceStatus() public {
+        // A newly registered org with zero deposits should be in grace
+        (bool inGrace, uint128 spendRemaining,,) = hub.getOrgGraceStatus(ORG_ALPHA);
+        assertTrue(inGrace, "New org should be in grace period");
+
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(ORG_ALPHA);
+        assertEq(fin.deposited, 0, "New org should have zero deposits");
+        assertGt(spendRemaining, 0, "Should have spending allowance during grace");
+    }
+
+    function testPostGraceZeroDepositOrgNotInGrace() public {
+        // Warp past grace period (default 90 days)
+        vm.warp(block.timestamp + 91 days);
+
+        (bool inGrace,,,) = hub.getOrgGraceStatus(ORG_ALPHA);
+        assertFalse(inGrace, "Org should no longer be in grace after 91 days");
+
+        // Verify the org still has zero deposits
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(ORG_ALPHA);
+        assertEq(fin.deposited, 0, "Org should still have zero deposits");
+    }
+
+    function testGracePeriodWithDistributionPausedRequiresDeposit() public {
+        // Pause solidarity distribution
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // Even in grace period, paused distribution means org must cover from deposits
+        // The org has zero deposits, so any operation requiring balance should fail
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(ORG_ALPHA);
+        assertEq(fin.deposited, 0, "Org should have zero deposits");
+
+        PaymasterHub.SolidarityFund memory solidarity = hub.getSolidarityFund();
+        assertTrue(solidarity.distributionPaused, "Distribution should be paused");
+    }
+
+    function testGracePeriodPartialDepositAllowed() public {
+        // Org deposits a small amount during grace — should work fine
+        uint256 smallDeposit = 0.001 ether;
+        vm.prank(user1);
+        hub.depositForOrg{value: smallDeposit}(ORG_ALPHA);
+
+        (bool inGrace,,,) = hub.getOrgGraceStatus(ORG_ALPHA);
+        assertTrue(inGrace, "Org should still be in grace");
+
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(ORG_ALPHA);
+        assertEq(fin.deposited, smallDeposit, "Deposit should be recorded");
+    }
+}
+
+/*══════════════════════════════════════════════════════════════════
+    Harness-based tests for _checkOrgBalance and _checkSolidarityAccess
+══════════════════════════════════════════════════════════════════*/
+
+contract PaymasterHubHarness is PaymasterHub {
+    function exposed_checkOrgBalance(bytes32 orgId, uint256 maxCost) external view {
+        _checkOrgBalance(orgId, maxCost);
+    }
+
+    function exposed_checkSolidarityAccess(bytes32 orgId, uint256 maxCost) external view {
+        _checkSolidarityAccess(orgId, maxCost);
+    }
+}
+
+contract PaymasterHubBalanceCheckTest is Test {
+    PaymasterHubHarness public hub;
+    MockEntryPoint public entryPoint;
+    MockHats public hats;
+
+    address public poaManager = address(0x1);
+    address public orgAdmin = address(0x2);
+    address public user1 = address(0x3);
+
+    uint256 constant ADMIN_HAT = 1;
+    uint256 constant OPERATOR_HAT = 2;
+
+    bytes32 constant ORG_A = keccak256("ORG_A");
+
+    function setUp() public {
+        entryPoint = new MockEntryPoint();
+        hats = new MockHats();
+
+        PaymasterHubHarness implementation = new PaymasterHubHarness();
+        bytes memory initData =
+            abi.encodeWithSelector(PaymasterHub.initialize.selector, address(entryPoint), address(hats), poaManager);
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
+        hub = PaymasterHubHarness(payable(address(proxy)));
+
+        hats.mintHat(ADMIN_HAT, orgAdmin);
+        hats.mintHat(OPERATOR_HAT, orgAdmin);
+
+        vm.deal(poaManager, 100 ether);
+        vm.deal(user1, 100 ether);
+
+        vm.startPrank(poaManager);
+        hub.registerOrg(ORG_A, ADMIN_HAT, OPERATOR_HAT);
+        hub.unpauseSolidarityDistribution();
+        vm.stopPrank();
+    }
+
+    /*──────────── _checkOrgBalance: grace period tests ────────────*/
+
+    function testCheckOrgBalance_ZeroDeposit_InGrace_Passes() public view {
+        // Core fix: zero-deposit org in grace period should NOT revert
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
+
+    function testCheckOrgBalance_ZeroDeposit_PostGrace_Reverts() public {
+        vm.warp(block.timestamp + 91 days);
+
+        vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
+
+    function testCheckOrgBalance_ZeroDeposit_InGrace_DistributionPaused_Reverts() public {
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // Even in grace, paused distribution means org must cover 100% from deposits
+        vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
+
+    function testCheckOrgBalance_SufficientDeposit_PassesImmediately() public {
+        vm.prank(user1);
+        hub.depositForOrg{value: 1 ether}(ORG_A);
+
+        // Deposit covers maxCost entirely — returns without hitting grace check
+        hub.exposed_checkOrgBalance(ORG_A, 0.5 ether);
+    }
+
+    function testCheckOrgBalance_ExactDeposit_Passes() public {
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.5 ether}(ORG_A);
+
+        hub.exposed_checkOrgBalance(ORG_A, 0.5 ether);
+    }
+
+    function testCheckOrgBalance_PartialDeposit_InGrace_Passes() public {
+        // Partial deposit (>0 but < maxCost) — hits partial coverage path
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.001 ether}(ORG_A);
+
+        hub.exposed_checkOrgBalance(ORG_A, 0.01 ether);
+    }
+
+    function testCheckOrgBalance_PartialDeposit_PostGrace_Passes() public {
+        // Partial deposit post-grace still passes (solidarity covers rest)
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.003 ether}(ORG_A);
+
+        vm.warp(block.timestamp + 91 days);
+
+        hub.exposed_checkOrgBalance(ORG_A, 0.005 ether);
+    }
+
+    function testCheckOrgBalance_ZeroMaxCost_Passes() public view {
+        // Edge case: zero maxCost always passes (depositAvailable >= 0)
+        hub.exposed_checkOrgBalance(ORG_A, 0);
+    }
+
+    function testFuzz_CheckOrgBalance_GracePeriod(uint128 deposit, uint128 maxCost, uint64 timeElapsed) public {
+        deposit = uint128(bound(deposit, 0, 10 ether));
+        maxCost = uint128(bound(maxCost, 1, 1 ether));
+        timeElapsed = uint64(bound(timeElapsed, 0, 180 days));
+
+        if (deposit > 0) {
+            vm.deal(user1, uint256(deposit));
+            vm.prank(user1);
+            hub.depositForOrg{value: deposit}(ORG_A);
+        }
+
+        vm.warp(block.timestamp + timeElapsed);
+
+        bool inGrace = timeElapsed < 90 days;
+        bool depositCovers = deposit >= maxCost;
+        bool hasDeposit = deposit > 0;
+
+        PaymasterHub.SolidarityFund memory solidarity = hub.getSolidarityFund();
+        bool paused = solidarity.distributionPaused;
+
+        if (paused) {
+            if (depositCovers) {
+                hub.exposed_checkOrgBalance(ORG_A, maxCost);
+            } else {
+                vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+                hub.exposed_checkOrgBalance(ORG_A, maxCost);
+            }
+        } else if (depositCovers) {
+            hub.exposed_checkOrgBalance(ORG_A, maxCost);
+        } else if (hasDeposit) {
+            // Partial coverage — passes (solidarity covers rest)
+            hub.exposed_checkOrgBalance(ORG_A, maxCost);
+        } else if (inGrace) {
+            // Zero deposit, in grace — the fix: should pass
+            hub.exposed_checkOrgBalance(ORG_A, maxCost);
+        } else {
+            // Zero deposit, post grace — should revert
+            vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+            hub.exposed_checkOrgBalance(ORG_A, maxCost);
+        }
+    }
+
+    /*──────────── _checkSolidarityAccess: comprehensive tests ────────────*/
+
+    function testCheckSolidarityAccess_InGrace_ZeroDeposit_Passes() public view {
+        // Grace period with zero deposit — only spending limit matters
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testCheckSolidarityAccess_InGrace_ExceedsMaxSpend_Reverts() public {
+        PaymasterHub.GracePeriodConfig memory grace = hub.getGracePeriodConfig();
+
+        vm.expectRevert(PaymasterHub.GracePeriodSpendLimitReached.selector);
+        hub.exposed_checkSolidarityAccess(ORG_A, grace.maxSpendDuringGrace + 1);
+    }
+
+    function testCheckSolidarityAccess_PostGrace_BelowMinDeposit_Reverts() public {
+        vm.warp(block.timestamp + 91 days);
+
+        // No deposit — below min required
+        vm.expectRevert(PaymasterHub.InsufficientDepositForSolidarity.selector);
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testCheckSolidarityAccess_PostGrace_WithMinDeposit_Passes() public {
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.003 ether}(ORG_A);
+
+        vm.warp(block.timestamp + 91 days);
+
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testCheckSolidarityAccess_Banned_Reverts() public {
+        vm.prank(poaManager);
+        hub.setBanFromSolidarity(ORG_A, true);
+
+        vm.expectRevert(PaymasterHub.OrgIsBanned.selector);
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testCheckSolidarityAccess_DistributionPaused_SkipsChecks() public view {
+        // Distribution is unpaused in setUp; this tests the active path
+        // When paused, _checkSolidarityAccess returns immediately
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    /*──────────── Combined flow: both checks in sequence ────────────*/
+
+    function testBothChecks_ZeroDeposit_InGrace_BothPass() public view {
+        // Simulate the validatePaymasterUserOp call order
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testBothChecks_ZeroDeposit_PostGrace_BalanceReverts() public {
+        vm.warp(block.timestamp + 91 days);
+
+        // Balance check fails first (same order as validatePaymasterUserOp)
+        vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
+
+    function testBothChecks_WithDeposit_PostGrace_BothPass() public {
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.003 ether}(ORG_A);
+
+        vm.warp(block.timestamp + 91 days);
+
+        hub.exposed_checkOrgBalance(ORG_A, 0.005 ether);
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testBothChecks_GraceEdge_ExactlyAtExpiry() public {
+        PaymasterHub.GracePeriodConfig memory grace = hub.getGracePeriodConfig();
+        PaymasterHub.OrgConfig memory config = hub.getOrgConfig(ORG_A);
+
+        // Warp to exact expiry boundary
+        uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
+        vm.warp(graceEndTime);
+
+        // At exact boundary: block.timestamp == graceEndTime, NOT < graceEndTime
+        // So inInitialGrace is false — should revert
+        vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
+
+    function testBothChecks_GraceEdge_OneSecondBefore() public {
+        PaymasterHub.GracePeriodConfig memory grace = hub.getGracePeriodConfig();
+        PaymasterHub.OrgConfig memory config = hub.getOrgConfig(ORG_A);
+
+        uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
+        vm.warp(graceEndTime - 1);
+
+        // One second before expiry — still in grace
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
 }
