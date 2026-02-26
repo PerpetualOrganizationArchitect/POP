@@ -308,6 +308,28 @@ contract TaskManager is Initializable, ContextUpgradeable {
         Project storage p = l._projects[pid];
         if (!p.exists) revert NotFound();
 
+        // Decrement ref counts for hats that had project-specific permissions.
+        // Iterate a snapshot of permissionHatIds since _syncPermissionHat may modify it.
+        uint256 len = l.permissionHatIds.length;
+        uint256[] memory snapshot = new uint256[](len);
+        for (uint256 i; i < len;) {
+            snapshot[i] = l.permissionHatIds[i];
+            unchecked {
+                ++i;
+            }
+        }
+        for (uint256 i; i < len;) {
+            uint256 hatId = snapshot[i];
+            if (l.rolePermProj[pid][hatId] != 0) {
+                _updateProjectPermRefCount(l, hatId, l.rolePermProj[pid][hatId], 0);
+                delete l.rolePermProj[pid][hatId];
+                _syncPermissionHat(hatId);
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
         delete l._projects[pid];
         emit ProjectDeleted(pid);
     }

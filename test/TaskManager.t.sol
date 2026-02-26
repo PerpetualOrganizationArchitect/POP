@@ -3463,6 +3463,38 @@ contract MockToken is Test, IERC20 {
                 vm.prank(member1);
                 tm.createTask(1, bytes("project-only-perm"), bytes32(0), pid, address(0), 0, false);
             }
+
+            function test_DeleteProjectCleansUpPermRefCounts() public {
+                // Create project without default role hats
+                uint256[] memory empty = new uint256[](0);
+                vm.prank(creator1);
+                bytes32 pid = tm.createProject(
+                    bytes("to-delete"), bytes32(0), 0, new address[](0), empty, empty, empty, empty
+                );
+
+                // Give MEMBER_HAT project-specific CREATE (no global perm)
+                vm.prank(creator1);
+                tm.setProjectRolePerm(pid, MEMBER_HAT, uint8(TaskPerm.CREATE));
+
+                // member1 can create tasks via project perm
+                vm.prank(member1);
+                tm.createTask(1, bytes("before-delete"), bytes32(0), pid, address(0), 0, false);
+
+                // Delete the project
+                vm.prank(creator1);
+                tm.deleteProject(pid);
+
+                // Create a second project without default role hats
+                vm.prank(creator1);
+                bytes32 pid2 =
+                    tm.createProject(bytes("after-delete"), bytes32(0), 0, new address[](0), empty, empty, empty, empty);
+
+                // MEMBER_HAT should have no permissions — ref count was cleaned up,
+                // so the hat was removed from permissionHatIds
+                vm.prank(member1);
+                vm.expectRevert(TaskManager.Unauthorized.selector);
+                tm.createTask(1, bytes("should-fail"), bytes32(0), pid2, address(0), 0, false);
+            }
         }
 
         /*───────────────── BOUNTY FUNCTIONALITY TESTS ────────────────────*/
