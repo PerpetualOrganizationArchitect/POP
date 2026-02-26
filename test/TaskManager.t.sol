@@ -3413,6 +3413,56 @@ contract MockToken is Test, IERC20 {
 
                 assertEq(spentBefore, spentAfter, "budget spent should not change on rejection");
             }
+
+            function test_RemovingProjectPermKeepsGlobalPermission() public {
+                // Create project WITHOUT default role hats — avoids project-overrides-global behavior
+                uint256[] memory empty = new uint256[](0);
+                vm.prank(creator1);
+                bytes32 pid =
+                    tm.createProject(bytes("perm-test-1"), bytes32(0), 0, new address[](0), empty, empty, empty, empty);
+
+                // Give MEMBER_HAT global CREATE permission
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MEMBER_HAT, uint8(TaskPerm.CREATE)));
+
+                // member1 can create tasks (global perm, no project override)
+                vm.prank(member1);
+                tm.createTask(1, bytes("before-remove"), bytes32(0), pid, address(0), 0, false);
+
+                // Give MEMBER_HAT project-specific CREATE, then remove it
+                vm.prank(creator1);
+                tm.setProjectRolePerm(pid, MEMBER_HAT, uint8(TaskPerm.CREATE));
+                vm.prank(creator1);
+                tm.setProjectRolePerm(pid, MEMBER_HAT, 0);
+
+                // member1 should STILL be able to create tasks via global perm
+                vm.prank(member1);
+                tm.createTask(1, bytes("after-remove"), bytes32(0), pid, address(0), 0, false);
+            }
+
+            function test_RemovingGlobalPermKeepsProjectPermission() public {
+                // Create project WITHOUT default role hats
+                uint256[] memory empty = new uint256[](0);
+                vm.prank(creator1);
+                bytes32 pid =
+                    tm.createProject(bytes("perm-test-2"), bytes32(0), 0, new address[](0), empty, empty, empty, empty);
+
+                // Give MEMBER_HAT global CREATE permission
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MEMBER_HAT, uint8(TaskPerm.CREATE)));
+
+                // Also give MEMBER_HAT project-specific CREATE permission
+                vm.prank(creator1);
+                tm.setProjectRolePerm(pid, MEMBER_HAT, uint8(TaskPerm.CREATE));
+
+                // Remove global permission
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.ROLE_PERM, abi.encode(MEMBER_HAT, uint8(0)));
+
+                // member1 should STILL be able to create tasks via project-specific perm
+                vm.prank(member1);
+                tm.createTask(1, bytes("project-only-perm"), bytes32(0), pid, address(0), 0, false);
+            }
         }
 
         /*───────────────── BOUNTY FUNCTIONALITY TESTS ────────────────────*/
