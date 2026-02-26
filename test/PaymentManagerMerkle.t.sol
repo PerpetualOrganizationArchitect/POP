@@ -646,6 +646,333 @@ contract PaymentManagerMerkleTest is Test {
     }
 
     /*──────────────────────────────────────────────────────────────────────────
+                                OVER-CLAIM CAP TESTS
+    ──────────────────────────────────────────────────────────────────────────*/
+
+    function testRevertClaimDistribution_OverClaimed() public {
+        // Build a malformed merkle tree where alice(4 ether) + bob(4 ether) > totalAmount(5 ether)
+        uint256 aliceAmount = 4 ether;
+        uint256 bobAmount = 4 ether;
+        uint256 totalAmount = 5 ether;
+
+        bytes32 leafAlice = keccak256(bytes.concat(keccak256(abi.encode(alice, aliceAmount))));
+        bytes32 leafBob = keccak256(bytes.concat(keccak256(abi.encode(bob, bobAmount))));
+        bytes32 merkleRoot = _hashPair(leafAlice, leafBob);
+
+        bytes32[] memory proofAlice = new bytes32[](1);
+        proofAlice[0] = leafBob;
+        bytes32[] memory proofBob = new bytes32[](1);
+        proofBob[0] = leafAlice;
+
+        uint256 checkpointBlock = block.number;
+        vm.roll(block.number + 1);
+
+        vm.prank(executor);
+        uint256 distributionId = paymentManager.createDistribution(address(0), totalAmount, merkleRoot, checkpointBlock);
+
+        // Alice claims 4 ether (totalClaimed=4, still <= 5)
+        vm.prank(alice);
+        paymentManager.claimDistribution(distributionId, aliceAmount, proofAlice);
+
+        // Bob claims 4 ether (totalClaimed would become 8 > 5) — should revert
+        vm.prank(bob);
+        vm.expectRevert(IPaymentManager.OverClaimed.selector);
+        paymentManager.claimDistribution(distributionId, bobAmount, proofBob);
+    }
+
+    function testRevertClaimMultiple_OverClaimed() public {
+        // Same scenario but via claimMultiple
+        uint256 aliceAmount = 4 ether;
+        uint256 bobAmount = 4 ether;
+        uint256 totalAmount = 5 ether;
+
+        bytes32 leafAlice = keccak256(bytes.concat(keccak256(abi.encode(alice, aliceAmount))));
+        bytes32 leafBob = keccak256(bytes.concat(keccak256(abi.encode(bob, bobAmount))));
+        bytes32 merkleRoot = _hashPair(leafAlice, leafBob);
+
+        bytes32[] memory proofBob = new bytes32[](1);
+        proofBob[0] = leafAlice;
+
+        uint256 checkpointBlock = block.number;
+        vm.roll(block.number + 1);
+
+        vm.prank(executor);
+        uint256 distributionId = paymentManager.createDistribution(address(0), totalAmount, merkleRoot, checkpointBlock);
+
+        // Alice claims first via single claim
+        bytes32[] memory proofAlice = new bytes32[](1);
+        proofAlice[0] = leafBob;
+        vm.prank(alice);
+        paymentManager.claimDistribution(distributionId, aliceAmount, proofAlice);
+
+        // Bob claims via claimMultiple — should revert
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = distributionId;
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = bobAmount;
+        bytes32[][] memory proofs = new bytes32[][](1);
+        proofs[0] = proofBob;
+
+        vm.prank(bob);
+        vm.expectRevert(IPaymentManager.OverClaimed.selector);
+        paymentManager.claimMultiple(ids, amounts, proofs);
+    }
+
+    function testFinalizeDistribution_SafeWithinCap() public {
+        // Normal distribution where claims are within bounds
+        uint256 aliceAmount = 3 ether;
+        uint256 bobAmount = 2 ether;
+        uint256 totalAmount = 5 ether;
+
+        bytes32 leafAlice = keccak256(bytes.concat(keccak256(abi.encode(alice, aliceAmount))));
+        bytes32 leafBob = keccak256(bytes.concat(keccak256(abi.encode(bob, bobAmount))));
+        bytes32 merkleRoot = _hashPair(leafAlice, leafBob);
+
+        uint256 checkpointBlock = block.number;
+        vm.roll(block.number + 1);
+
+        vm.prank(executor);
+        uint256 distributionId = paymentManager.createDistribution(address(0), totalAmount, merkleRoot, checkpointBlock);
+
+        // Alice claims
+        bytes32[] memory proofAlice = new bytes32[](1);
+        proofAlice[0] = leafBob;
+        vm.prank(alice);
+        paymentManager.claimDistribution(distributionId, aliceAmount, proofAlice);
+
+        // Finalize (bob doesn't claim, 2 ether unclaimed)
+        vm.roll(block.number + 100);
+        vm.prank(executor);
+        paymentManager.finalizeDistribution(distributionId, 10);
+    }
+
+    /*──────────────────────────────────────────────────────────────────────────
+                        OVER-CLAIM BOUNDARY & EDGE CASE TESTS
+    ──────────────────────────────────────────────────────────────────────────*/
+
+    function testClaimExactlyTotalAmount_Succeeds() public {
+        // totalClaimed == totalAmount is allowed (not >)
+        uint256 aliceAmount = 3 ether;
+        uint256 bobAmount = 2 ether;
+        uint256 totalAmount = 5 ether; // exactly alice + bob
+
+        bytes32 leafAlice = keccak256(bytes.concat(keccak256(abi.encode(alice, aliceAmount))));
+        bytes32 leafBob = keccak256(bytes.concat(keccak256(abi.encode(bob, bobAmount))));
+        bytes32 merkleRoot = _hashPair(leafAlice, leafBob);
+
+        uint256 checkpointBlock = block.number;
+        vm.roll(block.number + 1);
+
+        vm.prank(executor);
+        uint256 distributionId = paymentManager.createDistribution(address(0), totalAmount, merkleRoot, checkpointBlock);
+
+        // Both claim — total exactly equals totalAmount
+        bytes32[] memory proofAlice = new bytes32[](1);
+        proofAlice[0] = leafBob;
+        vm.prank(alice);
+        paymentManager.claimDistribution(distributionId, aliceAmount, proofAlice);
+
+        bytes32[] memory proofBob = new bytes32[](1);
+        proofBob[0] = leafAlice;
+        vm.prank(bob);
+        paymentManager.claimDistribution(distributionId, bobAmount, proofBob);
+
+        // Finalize with zero unclaimed
+        vm.roll(block.number + 100);
+        vm.prank(executor);
+        paymentManager.finalizeDistribution(distributionId, 10);
+    }
+
+    function testSingleUserClaimsEntireDistribution() public {
+        uint256 amount = 7 ether;
+        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(alice, amount))));
+
+        uint256 checkpointBlock = block.number;
+        vm.roll(block.number + 1);
+
+        vm.prank(executor);
+        uint256 distributionId = paymentManager.createDistribution(address(0), amount, leaf, checkpointBlock);
+
+        bytes32[] memory proof = new bytes32[](0);
+        vm.prank(alice);
+        paymentManager.claimDistribution(distributionId, amount, proof);
+
+        // Verify totalClaimed == totalAmount
+        assertTrue(paymentManager.hasClaimed(distributionId, alice));
+    }
+
+    function testOverClaimDoesNotAffectOtherDistributions() public {
+        // Create two distributions
+        uint256 checkpointBlock = block.number;
+        vm.roll(block.number + 1);
+
+        // Distribution 1: malformed (allocations > total)
+        bytes32 leafAlice1 = keccak256(bytes.concat(keccak256(abi.encode(alice, 4 ether))));
+        bytes32 leafBob1 = keccak256(bytes.concat(keccak256(abi.encode(bob, 4 ether))));
+        bytes32 root1 = _hashPair(leafAlice1, leafBob1);
+
+        // Distribution 2: well-formed
+        bytes32 leafAlice2 = keccak256(bytes.concat(keccak256(abi.encode(alice, 2 ether))));
+        bytes32 leafBob2 = keccak256(bytes.concat(keccak256(abi.encode(bob, 1 ether))));
+        bytes32 root2 = _hashPair(leafAlice2, leafBob2);
+
+        vm.startPrank(executor);
+        uint256 dist1 = paymentManager.createDistribution(address(0), 5 ether, root1, checkpointBlock);
+        uint256 dist2 = paymentManager.createDistribution(address(0), 3 ether, root2, checkpointBlock);
+        vm.stopPrank();
+
+        // Dist1: Alice claims, then Bob's claim should revert
+        bytes32[] memory proof1Alice = new bytes32[](1);
+        proof1Alice[0] = leafBob1;
+        vm.prank(alice);
+        paymentManager.claimDistribution(dist1, 4 ether, proof1Alice);
+
+        bytes32[] memory proof1Bob = new bytes32[](1);
+        proof1Bob[0] = leafAlice1;
+        vm.prank(bob);
+        vm.expectRevert(IPaymentManager.OverClaimed.selector);
+        paymentManager.claimDistribution(dist1, 4 ether, proof1Bob);
+
+        // Dist2: Both should still claim fine (independent)
+        bytes32[] memory proof2Alice = new bytes32[](1);
+        proof2Alice[0] = leafBob2;
+        vm.prank(alice);
+        paymentManager.claimDistribution(dist2, 2 ether, proof2Alice);
+
+        bytes32[] memory proof2Bob = new bytes32[](1);
+        proof2Bob[0] = leafAlice2;
+        vm.prank(bob);
+        paymentManager.claimDistribution(dist2, 1 ether, proof2Bob);
+    }
+
+    function testThreeUserTree_OverClaim() public {
+        // 3-leaf merkle tree where total allocations exceed totalAmount
+        uint256 aliceAmt = 3 ether;
+        uint256 bobAmt = 3 ether;
+        uint256 charlieAmt = 3 ether;
+        uint256 totalAmount = 5 ether; // 9 allocated vs 5 total
+
+        bytes32 leafA = keccak256(bytes.concat(keccak256(abi.encode(alice, aliceAmt))));
+        bytes32 leafB = keccak256(bytes.concat(keccak256(abi.encode(bob, bobAmt))));
+        bytes32 leafC = keccak256(bytes.concat(keccak256(abi.encode(charlie, charlieAmt))));
+
+        // Build 3-leaf tree: hash(hash(A,B), C)
+        bytes32 abHash = _hashPair(leafA, leafB);
+        bytes32 merkleRoot = _hashPair(abHash, leafC);
+
+        uint256 checkpointBlock = block.number;
+        vm.roll(block.number + 1);
+
+        vm.prank(executor);
+        uint256 distId = paymentManager.createDistribution(address(0), totalAmount, merkleRoot, checkpointBlock);
+
+        // Alice claims 3 ether (totalClaimed = 3 <= 5, OK)
+        bytes32[] memory proofA = new bytes32[](2);
+        proofA[0] = leafB;
+        proofA[1] = leafC;
+        vm.prank(alice);
+        paymentManager.claimDistribution(distId, aliceAmt, proofA);
+
+        // Bob claims 3 ether (totalClaimed would be 6 > 5, REVERT)
+        bytes32[] memory proofB = new bytes32[](2);
+        proofB[0] = leafA;
+        proofB[1] = leafC;
+        vm.prank(bob);
+        vm.expectRevert(IPaymentManager.OverClaimed.selector);
+        paymentManager.claimDistribution(distId, bobAmt, proofB);
+    }
+
+    function testOverClaimGuard_ERC20Distribution() public {
+        // Test the guard with ERC20 token distributions too
+        uint256 aliceAmount = 600e18;
+        uint256 bobAmount = 600e18;
+        uint256 totalAmount = 800e18;
+
+        bytes32 leafAlice = keccak256(bytes.concat(keccak256(abi.encode(alice, aliceAmount))));
+        bytes32 leafBob = keccak256(bytes.concat(keccak256(abi.encode(bob, bobAmount))));
+        bytes32 merkleRoot = _hashPair(leafAlice, leafBob);
+
+        uint256 checkpointBlock = block.number;
+        vm.roll(block.number + 1);
+
+        vm.prank(executor);
+        uint256 distributionId =
+            paymentManager.createDistribution(address(paymentToken), totalAmount, merkleRoot, checkpointBlock);
+
+        bytes32[] memory proofAlice = new bytes32[](1);
+        proofAlice[0] = leafBob;
+        vm.prank(alice);
+        paymentManager.claimDistribution(distributionId, aliceAmount, proofAlice);
+
+        bytes32[] memory proofBob = new bytes32[](1);
+        proofBob[0] = leafAlice;
+        vm.prank(bob);
+        vm.expectRevert(IPaymentManager.OverClaimed.selector);
+        paymentManager.claimDistribution(distributionId, bobAmount, proofBob);
+    }
+
+    function testFuzz_ClaimWithinBounds(uint128 aliceAmt, uint128 bobAmt) public {
+        // Ensure amounts are reasonable
+        aliceAmt = uint128(bound(aliceAmt, 0.01 ether, 10 ether));
+        bobAmt = uint128(bound(bobAmt, 0.01 ether, 10 ether));
+        uint256 totalAmount = uint256(aliceAmt) + uint256(bobAmt);
+
+        bytes32 leafAlice = keccak256(bytes.concat(keccak256(abi.encode(alice, uint256(aliceAmt)))));
+        bytes32 leafBob = keccak256(bytes.concat(keccak256(abi.encode(bob, uint256(bobAmt)))));
+        bytes32 merkleRoot = _hashPair(leafAlice, leafBob);
+
+        uint256 checkpointBlock = block.number;
+        vm.roll(block.number + 1);
+
+        vm.prank(executor);
+        uint256 distributionId = paymentManager.createDistribution(address(0), totalAmount, merkleRoot, checkpointBlock);
+
+        // Both claims should succeed when totalAmount == sum of allocations
+        bytes32[] memory proofAlice = new bytes32[](1);
+        proofAlice[0] = leafBob;
+        vm.prank(alice);
+        paymentManager.claimDistribution(distributionId, aliceAmt, proofAlice);
+
+        bytes32[] memory proofBob = new bytes32[](1);
+        proofBob[0] = leafAlice;
+        vm.prank(bob);
+        paymentManager.claimDistribution(distributionId, bobAmt, proofBob);
+    }
+
+    function testFuzz_OverClaimReverts(uint128 aliceAmt, uint128 bobAmt, uint128 totalShort) public {
+        // totalAmount is intentionally less than sum of allocations
+        aliceAmt = uint128(bound(aliceAmt, 1 ether, 5 ether));
+        bobAmt = uint128(bound(bobAmt, 1 ether, 5 ether));
+        totalShort = uint128(bound(totalShort, 1, uint256(aliceAmt) + uint256(bobAmt) - 1));
+        uint256 totalAmount = totalShort;
+
+        // Need totalAmount > aliceAmt so first claim passes, but < aliceAmt + bobAmt
+        vm.assume(totalAmount >= aliceAmt);
+
+        bytes32 leafAlice = keccak256(bytes.concat(keccak256(abi.encode(alice, uint256(aliceAmt)))));
+        bytes32 leafBob = keccak256(bytes.concat(keccak256(abi.encode(bob, uint256(bobAmt)))));
+        bytes32 merkleRoot = _hashPair(leafAlice, leafBob);
+
+        uint256 checkpointBlock = block.number;
+        vm.roll(block.number + 1);
+
+        vm.prank(executor);
+        uint256 distributionId = paymentManager.createDistribution(address(0), totalAmount, merkleRoot, checkpointBlock);
+
+        bytes32[] memory proofAlice = new bytes32[](1);
+        proofAlice[0] = leafBob;
+        vm.prank(alice);
+        paymentManager.claimDistribution(distributionId, aliceAmt, proofAlice);
+
+        // Bob's claim should revert (totalClaimed would exceed totalAmount)
+        bytes32[] memory proofBob = new bytes32[](1);
+        proofBob[0] = leafAlice;
+        vm.prank(bob);
+        vm.expectRevert(IPaymentManager.OverClaimed.selector);
+        paymentManager.claimDistribution(distributionId, bobAmt, proofBob);
+    }
+
+    /*──────────────────────────────────────────────────────────────────────────
                                     HELPER FUNCTIONS
     ──────────────────────────────────────────────────────────────────────────*/
 
