@@ -149,4 +149,14 @@ contract PoaManagerHub is Ownable(msg.sender) {
         paused = _paused;
         emit PauseSet(_paused);
     }
+
+    /// @notice Rescue ETH accidentally sent to this contract.
+    /// @dev    dispatch() calls are made without value (fees handled via Hyperlane IGP).
+    ///         This function recovers any ETH stuck in the contract.
+    function withdrawETH(address payable to) external onlyOwner {
+        if (to == address(0)) revert ZeroAddress();
+        uint256 balance = address(this).balance;
+        (bool ok,) = to.call{value: balance}("");
+        require(ok);
+    }
 }

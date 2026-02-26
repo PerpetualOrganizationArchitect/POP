@@ -289,4 +289,31 @@ contract PoaManagerSatelliteTest is Test {
         vm.expectRevert(PoaManager.SameImplementation.selector);
         satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), body);
     }
+
+    // ══════════════════════════════════════════════════════════
+    //  18. Constructor reverts on zero poaManager
+    // ══════════════════════════════════════════════════════════
+
+    function testConstructorRevertsZeroPoaManager() public {
+        vm.expectRevert(PoaManagerSatellite.ZeroAddress.selector);
+        new PoaManagerSatellite(address(0), mailbox, hubDomain, hubAddr);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  19. Constructor reverts on zero mailbox
+    // ══════════════════════════════════════════════════════════
+
+    function testConstructorRevertsZeroMailbox() public {
+        vm.expectRevert(PoaManagerSatellite.ZeroAddress.selector);
+        new PoaManagerSatellite(address(pm), address(0), hubDomain, hubAddr);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  20. Constructor reverts on zero hubAddress
+    // ══════════════════════════════════════════════════════════
+
+    function testConstructorRevertsZeroHubAddress() public {
+        vm.expectRevert(PoaManagerSatellite.ZeroAddress.selector);
+        new PoaManagerSatellite(address(pm), mailbox, hubDomain, address(0));
+    }
 }

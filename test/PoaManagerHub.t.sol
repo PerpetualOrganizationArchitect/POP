@@ -440,4 +440,74 @@ contract PoaManagerHubTest is Test {
         emit PoaManagerHub.PauseSet(true);
         hub.setPaused(true);
     }
+
+    // ══════════════════════════════════════════════════════════
+    //  27. withdrawETH rescues stuck ETH
+    // ══════════════════════════════════════════════════════════
+
+    function testWithdrawETHRescuesStuckFunds() public {
+        // Send ETH to hub via payable function (simulating accidental overpayment)
+        vm.deal(address(hub), 1 ether);
+
+        address payable recipient = payable(address(0xCAFE));
+        uint256 before = recipient.balance;
+
+        hub.withdrawETH(recipient);
+
+        assertEq(recipient.balance - before, 1 ether, "Recipient should receive 1 ether");
+        assertEq(address(hub).balance, 0, "Hub should have 0 balance");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  28. withdrawETH reverts on zero address
+    // ══════════════════════════════════════════════════════════
+
+    function testWithdrawETHRevertsZeroAddress() public {
+        vm.deal(address(hub), 1 ether);
+
+        vm.expectRevert(PoaManagerHub.ZeroAddress.selector);
+        hub.withdrawETH(payable(address(0)));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  29. Non-owner cannot withdrawETH
+    // ══════════════════════════════════════════════════════════
+
+    function testNonOwnerCannotWithdrawETH() public {
+        vm.deal(address(hub), 1 ether);
+
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        hub.withdrawETH(payable(nonOwner));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  30. withdrawETH with zero balance succeeds (no-op)
+    // ══════════════════════════════════════════════════════════
+
+    function testWithdrawETHWithZeroBalanceSucceeds() public {
+        assertEq(address(hub).balance, 0);
+
+        address payable recipient = payable(address(0xCAFE));
+        hub.withdrawETH(recipient);
+
+        assertEq(recipient.balance, 0, "No ETH to send");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  31. Duplicate satellite registration causes duplicate dispatches
+    // ══════════════════════════════════════════════════════════
+
+    function testDuplicateSatelliteCausesDuplicateDispatches() public {
+        // Register the same satellite twice
+        hub.registerSatellite(42, address(noopSatellite));
+        hub.registerSatellite(42, address(noopSatellite));
+        assertEq(hub.satelliteCount(), 2, "Should have 2 entries (duplicates allowed)");
+
+        hub.addContractType("Widget", address(implV1));
+        hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
+
+        // Both entries dispatch, so 2 messages sent (duplicate)
+        assertEq(mailbox.dispatchedCount(), 2, "Duplicate satellite = duplicate dispatch");
+    }
 }

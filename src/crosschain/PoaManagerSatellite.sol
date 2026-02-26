@@ -25,6 +25,7 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
     error UnauthorizedOrigin();
     error UnauthorizedSender();
     error UnknownMessageType();
+    error ZeroAddress();
 
     /*──────────── Events ──────────────*/
     event UpgradeReceived(bytes32 indexed typeId, address newImpl, string version, uint32 origin);
@@ -32,6 +33,9 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
 
     /*──────────── Constructor ─────────*/
     constructor(address _poaManager, address _mailbox, uint32 _hubDomain, address _hubAddress) {
+        if (_poaManager == address(0) || _mailbox == address(0) || _hubAddress == address(0)) {
+            revert ZeroAddress();
+        }
         poaManager = PoaManager(_poaManager);
         mailbox = _mailbox;
         hubDomain = _hubDomain;
