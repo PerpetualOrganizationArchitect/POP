@@ -9,7 +9,8 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 ///         The resulting address depends only on this deployer's address + the salt,
 ///         NOT on the creation bytecode. Deploy this contract to the same address on
 ///         every chain (via CREATE2) and the same salt yields the same address everywhere.
-contract DeterministicDeployer is Ownable(msg.sender) {
+contract DeterministicDeployer is Ownable {
+    constructor(address _owner) Ownable(_owner) {}
     /*──────────── Errors ───────────*/
     error EmptyBytecode();
 

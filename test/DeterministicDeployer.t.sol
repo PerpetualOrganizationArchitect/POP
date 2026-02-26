@@ -18,7 +18,7 @@ contract DeterministicDeployerTest is Test {
     address nonOwner = address(0xBEEF);
 
     function setUp() public {
-        deployer = new DeterministicDeployer();
+        deployer = new DeterministicDeployer(address(this));
     }
 
     // ══════════════════════════════════════════════════════════
@@ -113,7 +113,7 @@ contract DeterministicDeployerTest is Test {
     // ══════════════════════════════════════════════════════════
 
     function testDifferentDeployersProduceDifferentAddresses() public {
-        DeterministicDeployer deployer2 = new DeterministicDeployer();
+        DeterministicDeployer deployer2 = new DeterministicDeployer(address(this));
 
         bytes32 salt = deployer.computeSalt("Test", "v1");
         address predicted1 = deployer.computeAddress(salt);
