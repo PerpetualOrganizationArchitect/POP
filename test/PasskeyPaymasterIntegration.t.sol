@@ -653,13 +653,10 @@ contract PasskeyPaymasterIntegrationTest is Test {
         assertEq(validationData, 0, "Validation should succeed");
         assertTrue(context.length > 0, "Context should be returned");
 
-        // Verify context contains correct orgId and subjectKey
-        bytes32 decodedOrgId;
-        bytes32 decodedSubjectKey;
-        assembly {
-            decodedOrgId := mload(add(context, 32))
-            decodedSubjectKey := mload(add(context, 64))
-        }
+        // Verify context contains explicit onboarding flag + correct orgId.
+        (bool isOnboarding, bytes32 decodedOrgId,,,,,,,) =
+            abi.decode(context, (bool, bytes32, bytes32, uint32, bytes32, uint64, address, address, address));
+        assertFalse(isOnboarding, "Regular org operation should not be flagged as onboarding");
         assertEq(decodedOrgId, ORG_ID, "Context should contain correct orgId");
     }
 
@@ -716,13 +713,19 @@ contract PasskeyPaymasterIntegrationTest is Test {
     ══════════════════════════════════════════════════════════════════════*/
 
     /// @notice Helper to build vouch paymasterAndData with signature
-    function _buildVouchedPaymasterData(address account, address voucher, uint48 expiry)
-        internal
-        view
-        returns (bytes memory)
-    {
-        // Sign the vouch
-        bytes32 vouchHash = keccak256(abi.encodePacked(ORG_ID, account, expiry, block.chainid));
+    function _buildVouchedPaymasterData(
+        address account,
+        address voucher,
+        uint48 expiry,
+        bytes memory initCode,
+        bytes memory callData
+    ) internal view returns (bytes memory) {
+        // Sign the vouch and bind to operation intent + paymaster address.
+        bytes32 vouchHash = keccak256(
+            abi.encodePacked(
+                ORG_ID, account, keccak256(initCode), keccak256(callData), expiry, block.chainid, address(hub)
+            )
+        );
         bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", vouchHash));
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(VOUCHER_PRIVATE_KEY, ethSignedHash);
@@ -759,13 +762,11 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
-        // Build vouch paymasterAndData
-        uint48 expiry = uint48(block.timestamp + 1 hours);
-        bytes memory paymasterAndData = _buildVouchedPaymasterData(newAccountAddr, voucherAddr, expiry);
-
         // Build UserOp
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        uint48 expiry = uint48(block.timestamp + 1 hours);
+        bytes memory paymasterAndData = _buildVouchedPaymasterData(newAccountAddr, voucherAddr, expiry, "", callData);
 
         PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
 
@@ -777,8 +778,11 @@ contract PasskeyPaymasterIntegrationTest is Test {
         assertEq(validationData, 0, "Validation should succeed");
         assertTrue(context.length > 0, "Context should be returned");
 
-        // Verify vouch is marked as used
-        assertTrue(hub.isVouchUsed(ORG_ID, newAccountAddr), "Vouch should be marked as used");
+        // Vouch should be consumed only after successful postOp.
+        assertFalse(hub.isVouchUsed(ORG_ID, newAccountAddr), "Vouch should not be consumed during validation");
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, 0.005 ether);
+        assertTrue(hub.isVouchUsed(ORG_ID, newAccountAddr), "Vouch should be marked as used after success");
 
         // Emit VouchUsed event was emitted (checked via context)
     }
@@ -795,12 +799,11 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
-        // Build vouch with EXPIRED timestamp
-        uint48 expiry = uint48(block.timestamp - 1); // Already expired
-        bytes memory paymasterAndData = _buildVouchedPaymasterData(newAccountAddr, voucherAddr, expiry);
-
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        // Build vouch with EXPIRED timestamp
+        uint48 expiry = uint48(block.timestamp - 1); // Already expired
+        bytes memory paymasterAndData = _buildVouchedPaymasterData(newAccountAddr, voucherAddr, expiry, "", callData);
         PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));
@@ -823,16 +826,17 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
-        uint48 expiry = uint48(block.timestamp + 1 hours);
-        bytes memory paymasterAndData = _buildVouchedPaymasterData(newAccountAddr, voucherAddr, expiry);
-
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        uint48 expiry = uint48(block.timestamp + 1 hours);
+        bytes memory paymasterAndData = _buildVouchedPaymasterData(newAccountAddr, voucherAddr, expiry, "", callData);
         PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
 
         // First validation should succeed
         vm.prank(address(entryPoint));
-        hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, 0.005 ether);
 
         // Second validation with same vouch should fail
         vm.prank(address(entryPoint));
@@ -856,9 +860,15 @@ contract PasskeyPaymasterIntegrationTest is Test {
         uint256 unauthorizedPrivateKey = 0xbadbeef;
         address unauthorizedVoucher = vm.addr(unauthorizedPrivateKey);
 
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
         // Build the vouch with unauthorized signer
         uint48 expiry = uint48(block.timestamp + 1 hours);
-        bytes32 vouchHash = keccak256(abi.encodePacked(ORG_ID, newAccountAddr, expiry, block.chainid));
+        bytes32 vouchHash = keccak256(
+            abi.encodePacked(
+                ORG_ID, newAccountAddr, keccak256(""), keccak256(callData), expiry, block.chainid, address(hub)
+            )
+        );
         bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", vouchHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(unauthorizedPrivateKey, ethSignedHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -874,9 +884,6 @@ contract PasskeyPaymasterIntegrationTest is Test {
             expiry,
             signature
         );
-
-        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
-        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
         PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));
@@ -896,10 +903,16 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
         // Build valid signature but for WRONG account address
         uint48 expiry = uint48(block.timestamp + 1 hours);
         address wrongAccount = address(0xdead);
-        bytes32 vouchHash = keccak256(abi.encodePacked(ORG_ID, wrongAccount, expiry, block.chainid));
+        bytes32 vouchHash = keccak256(
+            abi.encodePacked(
+                ORG_ID, wrongAccount, keccak256(""), keccak256(callData), expiry, block.chainid, address(hub)
+            )
+        );
         bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", vouchHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(VOUCHER_PRIVATE_KEY, ethSignedHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -916,9 +929,6 @@ contract PasskeyPaymasterIntegrationTest is Test {
             expiry,
             signature
         );
-
-        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
-        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
         PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));
@@ -940,8 +950,14 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         uint48 expiry = uint48(block.timestamp + 1 hours);
 
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
         // Build signature (will be valid but org doesn't support vouching)
-        bytes32 vouchHash = keccak256(abi.encodePacked(noVoucherOrgId, newAccountAddr, expiry, block.chainid));
+        bytes32 vouchHash = keccak256(
+            abi.encodePacked(
+                noVoucherOrgId, newAccountAddr, keccak256(""), keccak256(callData), expiry, block.chainid, address(hub)
+            )
+        );
         bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", vouchHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(VOUCHER_PRIVATE_KEY, ethSignedHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -957,9 +973,6 @@ contract PasskeyPaymasterIntegrationTest is Test {
             expiry,
             signature
         );
-
-        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
-        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
         PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));

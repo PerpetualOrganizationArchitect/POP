@@ -9,6 +9,11 @@ import {PackedUserOperation, UserOpLib} from "../src/interfaces/PackedUserOperat
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
+/// @dev Minimal contract used as a pre-deployed sender in onboarding rejection tests
+contract DummySender {
+    fallback() external payable {}
+}
+
 contract MockEntryPoint is IEntryPoint {
     mapping(address => uint256) private _deposits;
 
@@ -1265,6 +1270,222 @@ contract PaymasterHubSolidarityTest is Test {
         PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(ORG_ALPHA);
         assertEq(fin.deposited, smallDeposit, "Deposit should be recorded");
     }
+
+    // ============ Security Regression Tests ============
+
+    uint8 constant PAYMASTER_DATA_VERSION = 1;
+    uint8 constant SUBJECT_TYPE_ACCOUNT = 0x00;
+    uint8 constant SUBJECT_TYPE_VOUCHED = 0x02;
+    uint8 constant SUBJECT_TYPE_POA_ONBOARDING = 0x03;
+    uint32 constant RULE_ID_COARSE = 0x000000FF;
+    uint32 constant RULE_ID_GENERIC = 0;
+    uint256 constant VOUCHER_HAT = 3;
+    uint256 constant VOUCHER_PK = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+    uint256 constant MAX_COST = 100_000;
+
+    event OnboardingAccountCreated(address indexed account, uint256 gasCost);
+
+    function _buildPaymasterData(
+        bytes32 orgId,
+        uint8 subjectType,
+        bytes20 subjectId,
+        uint32 ruleId,
+        uint64 mailboxCommit8
+    ) internal view returns (bytes memory) {
+        return abi.encodePacked(
+            address(hub), PAYMASTER_DATA_VERSION, orgId, subjectType, subjectId, ruleId, mailboxCommit8
+        );
+    }
+
+    function _buildUserOp(address sender, bytes memory callData, bytes memory paymasterAndData)
+        internal
+        pure
+        returns (PackedUserOperation memory userOp)
+    {
+        userOp = PackedUserOperation({
+            sender: sender,
+            nonce: 0,
+            initCode: "",
+            callData: callData,
+            accountGasLimits: UserOpLib.packAccountGasLimits(100_000, 100_000),
+            preVerificationGas: 100_000,
+            maxFeePerGas: 1,
+            maxPriorityFeePerGas: 1,
+            paymasterAndData: paymasterAndData,
+            signature: ""
+        });
+    }
+
+    function _buildVouchedPaymasterData(
+        bytes32 orgId,
+        address account,
+        uint48 expiry,
+        bytes memory initCode,
+        bytes memory callData
+    ) internal view returns (bytes memory) {
+        address voucherAddr = vm.addr(VOUCHER_PK);
+        bytes32 vouchHash = keccak256(
+            abi.encodePacked(
+                orgId, account, keccak256(initCode), keccak256(callData), expiry, block.chainid, address(hub)
+            )
+        );
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", vouchHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(VOUCHER_PK, ethSignedHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        return abi.encodePacked(
+            address(hub),
+            PAYMASTER_DATA_VERSION,
+            orgId,
+            SUBJECT_TYPE_VOUCHED,
+            bytes20(voucherAddr),
+            RULE_ID_COARSE,
+            uint64(0),
+            expiry,
+            signature
+        );
+    }
+
+    /// @notice Onboarding must reject when orgId is non-zero
+    function testOnboardingRejectsNonZeroOrgId() public {
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true);
+        bytes memory pmData =
+            _buildPaymasterData(ORG_ALPHA, SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp = _buildUserOp(address(0xdead), "", pmData);
+        userOp.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOnboardingRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Onboarding must reject when sender already has code deployed (not a creation)
+    function testOnboardingRejectsNonCreationUserOp() public {
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true);
+        address deployed = address(new DummySender());
+        bytes memory pmData =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp = _buildUserOp(deployed, "", pmData);
+        userOp.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOnboardingRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice A reverted onboarding op must NOT emit OnboardingAccountCreated
+    function testOnboardingRevertedOpDoesNotEmitCreationEvent() public {
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true);
+        address newAccount = address(0xbeef);
+        bytes memory pmData =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp = _buildUserOp(newAccount, "", pmData);
+        userOp.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+        vm.recordLogs();
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opReverted, context, 50_000);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 creationEventSig = keccak256("OnboardingAccountCreated(address,uint256)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(
+                logs[i].topics[0] != creationEventSig, "OnboardingAccountCreated should not be emitted on revert"
+            );
+        }
+    }
+
+    /// @notice Failed (reverted) onboarding ops must still consume a throttle attempt
+    function testOnboardingFailedOpsStillConsumeAttemptThrottle() public {
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 1, true);
+        address account1 = address(0xaa01);
+        bytes memory pmData1 =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp1 = _buildUserOp(account1, "", pmData1);
+        userOp1.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        (bytes memory context1,) = hub.validatePaymasterUserOp(userOp1, keccak256("hash1"), MAX_COST);
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opReverted, context1, 50_000);
+        address account2 = address(0xaa02);
+        bytes memory pmData2 =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp2 = _buildUserOp(account2, "", pmData2);
+        userOp2.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.OnboardingDailyLimitExceeded.selector);
+        hub.validatePaymasterUserOp(userOp2, keccak256("hash2"), MAX_COST);
+    }
+
+    /// @notice Vouch should only be consumed on successful execution, not on revert
+    function testVouchConsumedOnlyOnSuccessfulExecution() public {
+        address voucherAddr = vm.addr(VOUCHER_PK);
+        bytes32 vouchOrgId = keccak256("VOUCH_ORG");
+        hats.mintHat(VOUCHER_HAT, voucherAddr);
+        vm.prank(poaManager);
+        hub.registerOrgWithVoucher(vouchOrgId, ADMIN_HAT, OPERATOR_HAT, VOUCHER_HAT);
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+        vm.prank(user1);
+        hub.depositForOrg{value: 1 ether}(vouchOrgId);
+        bytes32 subjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, bytes20(voucherAddr)));
+        vm.prank(orgAdmin);
+        hub.setBudget(vouchOrgId, subjectKey, 1 ether, 1 days);
+        address newUser = address(0xcc01);
+        uint48 expiry = uint48(block.timestamp + 1 hours);
+        bytes memory innerCall = abi.encodeWithSelector(
+            bytes4(0xb61d27f6), address(0x9999), uint256(0), abi.encodeWithSelector(bytes4(0xdeadbeef))
+        );
+        vm.prank(orgAdmin);
+        hub.setRule(vouchOrgId, newUser, bytes4(0xb61d27f6), true, 0);
+        bytes memory pmData = _buildVouchedPaymasterData(vouchOrgId, newUser, expiry, "", innerCall);
+        PackedUserOperation memory userOp = _buildUserOp(newUser, innerCall, pmData);
+        vm.prank(address(entryPoint));
+        (bytes memory ctx1,) = hub.validatePaymasterUserOp(userOp, keccak256("h1"), MAX_COST);
+        assertFalse(hub.isVouchUsed(vouchOrgId, newUser), "Vouch should not be consumed after validate");
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opReverted, ctx1, 50_000);
+        assertFalse(hub.isVouchUsed(vouchOrgId, newUser), "Vouch should not be consumed after reverted postOp");
+        vm.prank(address(entryPoint));
+        (bytes memory ctx2,) = hub.validatePaymasterUserOp(userOp, keccak256("h2"), MAX_COST);
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx2, 50_000);
+        assertTrue(hub.isVouchUsed(vouchOrgId, newUser), "Vouch should be consumed after successful postOp");
+    }
+
+    /// @notice registerOrg must reject bytes32(0) as orgId
+    function testRegisterOrgRejectsZeroOrgId() public {
+        vm.prank(poaManager);
+        vm.expectRevert(PaymasterHub.InvalidOrgId.selector);
+        hub.registerOrg(bytes32(0), ADMIN_HAT, OPERATOR_HAT);
+    }
+
+    /// @notice Grace-period path must check solidarity fund liquidity before approving
+    function testGracePathChecksSolidarityLiquidity() public {
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(90, 100 ether, 0.003 ether);
+        hub.donateToSolidarity{value: 0.001 ether}();
+        bytes32 accountKey = keccak256(abi.encodePacked(SUBJECT_TYPE_ACCOUNT, bytes20(user1)));
+        vm.startPrank(orgAdmin);
+        hub.setBudget(ORG_ALPHA, accountKey, 10 ether, 1 days);
+        hub.setRule(ORG_ALPHA, address(0x9999), bytes4(0xdeadbeef), true, 0);
+        vm.stopPrank();
+        bytes memory innerCall = abi.encodeWithSelector(
+            bytes4(0xb61d27f6), address(0x9999), uint256(0), abi.encodeWithSelector(bytes4(0xdeadbeef))
+        );
+        bytes memory pmData =
+            _buildPaymasterData(ORG_ALPHA, SUBJECT_TYPE_ACCOUNT, bytes20(user1), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp = _buildUserOp(user1, innerCall, pmData);
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InsufficientFunds.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), 2 ether);
+    }
 }
 
 /*══════════════════════════════════════════════════════════════════
@@ -1315,6 +1536,9 @@ contract PaymasterHubBalanceCheckTest is Test {
         hub.registerOrg(ORG_A, ADMIN_HAT, OPERATOR_HAT);
         hub.unpauseSolidarityDistribution();
         vm.stopPrank();
+
+        // Fund solidarity so grace-period checks pass the balance requirement
+        hub.donateToSolidarity{value: 10 ether}();
     }
 
     /*──────────── _checkOrgBalance: grace period tests ────────────*/
@@ -1459,9 +1683,11 @@ contract PaymasterHubBalanceCheckTest is Test {
         hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
     }
 
-    function testCheckSolidarityAccess_DistributionPaused_SkipsChecks() public view {
-        // Distribution is unpaused in setUp; this tests the active path
-        // When paused, _checkSolidarityAccess returns immediately
+    function testCheckSolidarityAccess_DistributionPaused_SkipsChecks() public {
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // When paused, _checkSolidarityAccess returns immediately (skips all checks)
         hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
     }
 

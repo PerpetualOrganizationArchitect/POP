@@ -126,6 +126,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
         mapping(uint256 => address[]) taskApplicants; // task ID => array of applicants
         mapping(uint256 => mapping(address => bytes32)) taskApplications; // task ID => applicant => application hash
         address deployer; // OrgDeployer address for bootstrap operations
+        mapping(uint256 => uint256) projectPermHatRefCount; // hat ID => number of projects with non-zero project mask
     }
 
     bytes32 private constant _STORAGE_SLOT = 0x30bc214cbc65463577eb5b42c88d60986e26fc81ad89a2eb74550fb255f1e712;
@@ -306,6 +307,28 @@ contract TaskManager is Initializable, ContextUpgradeable {
         Layout storage l = _layout();
         Project storage p = l._projects[pid];
         if (!p.exists) revert NotFound();
+
+        // Decrement ref counts for hats that had project-specific permissions.
+        // Iterate a snapshot of permissionHatIds since _syncPermissionHat may modify it.
+        uint256 len = l.permissionHatIds.length;
+        uint256[] memory snapshot = new uint256[](len);
+        for (uint256 i; i < len;) {
+            snapshot[i] = l.permissionHatIds[i];
+            unchecked {
+                ++i;
+            }
+        }
+        for (uint256 i; i < len;) {
+            uint256 hatId = snapshot[i];
+            if (l.rolePermProj[pid][hatId] != 0) {
+                _updateProjectPermRefCount(l, hatId, l.rolePermProj[pid][hatId], 0);
+                delete l.rolePermProj[pid][hatId];
+                _syncPermissionHat(hatId);
+            }
+            unchecked {
+                ++i;
+            }
+        }
 
         delete l._projects[pid];
         emit ProjectDeleted(pid);
@@ -708,7 +731,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
         if (key == ConfigKey.ROLE_PERM) {
             (uint256 hatId, uint8 mask) = abi.decode(value, (uint256, uint8));
             l.rolePermGlobal[hatId] = mask;
-            HatManager.setHatInArray(l.permissionHatIds, hatId, mask != 0);
+            _syncPermissionHat(hatId);
             return;
         }
 
@@ -748,14 +771,11 @@ contract TaskManager is Initializable, ContextUpgradeable {
         _requireCreator();
         _requireProjectExists(pid);
         Layout storage l = _layout();
+        uint8 oldMask = l.rolePermProj[pid][hatId];
         l.rolePermProj[pid][hatId] = mask;
+        _updateProjectPermRefCount(l, hatId, oldMask, mask);
 
-        // Track that this hat has permissions (project-specific permissions count too)
-        if (mask != 0) {
-            HatManager.setHatInArray(l.permissionHatIds, hatId, true);
-        } else {
-            HatManager.setHatInArray(l.permissionHatIds, hatId, false);
-        }
+        _syncPermissionHat(hatId);
 
         emit ProjectRolePermSet(pid, hatId, mask);
     }
@@ -808,13 +828,72 @@ contract TaskManager is Initializable, ContextUpgradeable {
         Layout storage l = _layout();
         for (uint256 i; i < hatIds.length;) {
             uint256 hatId = hatIds[i];
+            uint8 oldMask = l.rolePermProj[pid][hatId];
             uint8 newMask = l.rolePermProj[pid][hatId] | flag;
             l.rolePermProj[pid][hatId] = newMask;
+            _updateProjectPermRefCount(l, hatId, oldMask, newMask);
 
-            // Track that this hat has permissions
-            HatManager.setHatInArray(l.permissionHatIds, hatId, true);
+            _syncPermissionHat(hatId);
 
             emit ProjectRolePermSet(pid, hatId, newMask);
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /**
+     * @dev Keep `permissionHatIds` consistent with effective permissions.
+     * A hat should remain tracked if it has any non-zero global or project mask.
+     */
+    function _syncPermissionHat(uint256 hatId) internal {
+        Layout storage l = _layout();
+        bool hasGlobalPerm = l.rolePermGlobal[hatId] != 0;
+        bool hasProjectPerm = l.projectPermHatRefCount[hatId] != 0;
+
+        // Upgrade-safe fallback: if refcount wasn't initialized for existing data,
+        // rebuild it lazily only when we would otherwise remove the hat.
+        if (!hasProjectPerm && _hasAnyProjectPermissionLegacy(l, hatId)) {
+            l.projectPermHatRefCount[hatId] = _rebuildProjectPermRefCount(l, hatId);
+            hasProjectPerm = l.projectPermHatRefCount[hatId] != 0;
+        }
+
+        HatManager.setHatInArray(l.permissionHatIds, hatId, hasGlobalPerm || hasProjectPerm);
+    }
+
+    function _updateProjectPermRefCount(Layout storage l, uint256 hatId, uint8 oldMask, uint8 newMask) internal {
+        if (oldMask == 0 && newMask != 0) {
+            l.projectPermHatRefCount[hatId]++;
+        } else if (oldMask != 0 && newMask == 0) {
+            uint256 count = l.projectPermHatRefCount[hatId];
+            if (count > 0) {
+                l.projectPermHatRefCount[hatId] = count - 1;
+            }
+        }
+    }
+
+    function _hasAnyProjectPermissionLegacy(Layout storage l, uint256 hatId) internal view returns (bool) {
+        uint48 nextProjectId = l.nextProjectId;
+        for (uint48 i; i < nextProjectId;) {
+            bytes32 pid = bytes32(uint256(i));
+            if (l._projects[pid].exists && l.rolePermProj[pid][hatId] != 0) {
+                return true;
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
+        return false;
+    }
+
+    function _rebuildProjectPermRefCount(Layout storage l, uint256 hatId) internal view returns (uint256 count) {
+        uint48 nextProjectId = l.nextProjectId;
+        for (uint48 i; i < nextProjectId;) {
+            bytes32 pid = bytes32(uint256(i));
+            if (l._projects[pid].exists && l.rolePermProj[pid][hatId] != 0) {
+                count++;
+            }
             unchecked {
                 ++i;
             }

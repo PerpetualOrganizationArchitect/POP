@@ -62,6 +62,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     error VoucherHatNotSet();
     error OnboardingDisabled();
     error OnboardingDailyLimitExceeded();
+    error InvalidOnboardingRequest();
+    error InvalidOrgId();
 
     // ============ Constants ============
     uint8 private constant PAYMASTER_DATA_VERSION = 1;
@@ -189,7 +191,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     struct OnboardingConfig {
         uint128 maxGasPerCreation; // Max gas per account creation (~200k)
         uint128 dailyCreationLimit; // Max accounts globally per day
-        uint128 createdToday; // Counter for current day
+        uint128 attemptsToday; // Validation attempts in current day window
         uint32 currentDay; // Day tracker (timestamp / 1 days)
         bool enabled; // Whether onboarding sponsorship is active
     }
@@ -343,6 +345,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     {
         MainStorage storage main = _getMainStorage();
         if (msg.sender != main.poaManager && msg.sender != main.orgRegistrar) revert NotPoaManager();
+        if (orgId == bytes32(0)) revert InvalidOrgId();
         if (adminHatId == 0) revert ZeroAddress();
 
         mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
@@ -430,6 +433,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         OrgConfig storage config = orgs[orgId];
         OrgFinancials storage org = financials[orgId];
+        uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
 
         // Check if org is banned from solidarity
         if (config.bannedFromSolidarity) revert OrgIsBanned();
@@ -444,11 +448,13 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             if (org.solidarityUsedThisPeriod + maxCost > grace.maxSpendDuringGrace) {
                 revert GracePeriodSpendLimitReached();
             }
+            // In initial grace period, operations are paid 100% from solidarity.
+            if (solidarity.balance < maxCost) revert InsufficientFunds();
         } else {
             // After startup: must MAINTAIN minimum deposit (like $10/month commitment)
             // This checks deposited (current balance), not totalDeposited (cumulative)
             // Orgs must keep funds in reserve to access solidarity
-            if (org.deposited < grace.minDepositRequired) {
+            if (depositAvailable < grace.minDepositRequired) {
                 revert InsufficientDepositForSolidarity();
             }
 
@@ -456,10 +462,16 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             // Tier 1: deposit 0.003 ETH → 0.006 ETH match → 0.009 ETH total per 90 days
             // Tier 2: deposit 0.006 ETH → 0.009 ETH match → 0.015 ETH total per 90 days
             // Tier 3: deposit >= 0.017 ETH → no match, self-funded
-            uint256 matchAllowance = _calculateMatchAllowance(org.deposited, grace.minDepositRequired);
-            if (org.solidarityUsedThisPeriod + maxCost > matchAllowance) {
+            uint256 matchAllowance = _calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
+            uint256 solidarityRemaining =
+                matchAllowance > org.solidarityUsedThisPeriod ? matchAllowance - org.solidarityUsedThisPeriod : 0;
+
+            // Minimum solidarity needed after using available deposits.
+            uint256 requiredSolidarity = maxCost > depositAvailable ? maxCost - depositAvailable : 0;
+            if (requiredSolidarity > solidarityRemaining) {
                 revert SolidarityLimitExceeded();
             }
+            if (solidarity.balance < requiredSolidarity) revert InsufficientFunds();
         }
     }
 
@@ -569,12 +581,23 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         bytes32 subjectKey;
         uint32 currentEpochStart;
+        bytes32 contextOrgId = orgId;
+        address vouchedAccount = address(0);
+        address voucherSigner = address(0);
+
+        bool isOnboarding = subjectType == SUBJECT_TYPE_POA_ONBOARDING;
 
         // Handle POA onboarding separately (no org required)
-        if (subjectType == SUBJECT_TYPE_POA_ONBOARDING) {
+        if (isOnboarding) {
+            // Global-only onboarding path: never org-scoped billing.
+            if (orgId != bytes32(0) || subjectId != bytes20(0) || ruleId != RULE_ID_GENERIC) {
+                revert InvalidOnboardingRequest();
+            }
+
             // Validate POA onboarding eligibility
-            subjectKey = _validateOnboardingEligibility(userOp.sender, maxCost);
+            subjectKey = _validateOnboardingEligibility(userOp, maxCost);
             currentEpochStart = uint32(block.timestamp);
+            contextOrgId = bytes32(0);
 
             // For onboarding, we don't validate org rules/caps/budgets
             // The onboarding config has its own limits
@@ -587,7 +610,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             // Validate subject eligibility
             if (subjectType == SUBJECT_TYPE_VOUCHED) {
                 // Vouched onboarding: validate vouch signature from hat wearer
-                subjectKey = _validateVouchedEligibility(userOp.sender, orgId, org, subjectId, userOp.paymasterAndData);
+                (subjectKey, voucherSigner) =
+                    _validateVouchedEligibility(userOp, orgId, org, subjectId, userOp.paymasterAndData);
+                vouchedAccount = userOp.sender;
             } else {
                 subjectKey = _validateSubjectEligibility(userOp.sender, subjectType, subjectId);
             }
@@ -609,7 +634,17 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
 
         // Prepare context for postOp
-        context = abi.encode(orgId, subjectKey, currentEpochStart, userOpHash, mailboxCommit8, uint160(tx.origin));
+        context = abi.encode(
+            isOnboarding,
+            contextOrgId,
+            subjectKey,
+            currentEpochStart,
+            userOpHash,
+            mailboxCommit8,
+            uint160(tx.origin),
+            vouchedAccount,
+            voucherSigner
+        );
 
         // Return 0 for no signature failure and no time restrictions
         validationData = 0;
@@ -669,18 +704,22 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         nonReentrant
     {
         (
+            bool isOnboarding,
             bytes32 orgId,
             bytes32 subjectKey,
             uint32 epochStart,
             bytes32 userOpHash,
             uint64 mailboxCommit8,
-            address bundlerOrigin
-        ) = abi.decode(context, (bytes32, bytes32, uint32, bytes32, uint64, address));
+            address bundlerOrigin,
+            address vouchedAccount,
+            address voucherSigner
+        ) = abi.decode(context, (bool, bytes32, bytes32, uint32, bytes32, uint64, address, address, address));
 
-        // Check if this is POA onboarding (orgId will be bytes32(0))
-        if (orgId == bytes32(0)) {
-            // POA onboarding: deduct from solidarity fund, update counter
-            _updateOnboardingUsage(subjectKey, actualGasCost);
+        // Onboarding uses a dedicated context flag (not orgId sentinel).
+        if (isOnboarding) {
+            // POA onboarding: deduct from solidarity fund.
+            // Count a created account only when the operation succeeded.
+            _updateOnboardingUsage(actualGasCost, mode == IPaymaster.PostOpMode.opSucceeded);
         } else {
             // Regular org operation
             // Update per-subject budget usage (existing functionality)
@@ -688,6 +727,15 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
             // Update per-org financial tracking and collect solidarity fee (new)
             _updateOrgFinancials(orgId, actualGasCost);
+
+            // Consume vouch only on successful execution to avoid griefing/DoS burns.
+            if (mode == IPaymaster.PostOpMode.opSucceeded && vouchedAccount != address(0)) {
+                mapping(bytes32 => mapping(address => bool)) storage usedVouches = _getUsedVouchesStorage();
+                if (!usedVouches[orgId][vouchedAccount]) {
+                    usedVouches[orgId][vouchedAccount] = true;
+                    emit VouchUsed(orgId, vouchedAccount, voucherSigner);
+                }
+            }
 
             // Process bounty only on successful execution
             if (mode == IPaymaster.PostOpMode.opSucceeded && mailboxCommit8 != 0) {
@@ -771,9 +819,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Determine how much comes from org's deposits vs solidarity
         uint256 fromDeposits = 0;
         uint256 fromSolidarity = 0;
+        uint256 solidarityLiquidity = solidarity.balance;
 
         if (inInitialGrace) {
             // Grace period: 100% from solidarity (deposits untouched)
+            if (solidarityLiquidity < actualGasCost) revert InsufficientFunds();
             fromSolidarity = actualGasCost;
         } else {
             // Post-grace: 50/50 split with tier-based solidarity allowance
@@ -784,6 +834,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             uint256 matchAllowance = _calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
             uint256 solidarityRemaining =
                 matchAllowance > org.solidarityUsedThisPeriod ? matchAllowance - org.solidarityUsedThisPeriod : 0;
+            if (solidarityRemaining > solidarityLiquidity) {
+                solidarityRemaining = solidarityLiquidity;
+            }
 
             uint256 halfCost = actualGasCost / 2;
 
@@ -1476,19 +1529,24 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     /**
      * @notice Validate POA onboarding eligibility for gasless account creation
      * @dev Checks onboarding config and daily rate limits
-     * @param account The account being created
+     * @param userOp The user operation being validated
      * @param maxCost Maximum gas cost for the operation
      * @return subjectKey The subject key for tracking
      */
-    function _validateOnboardingEligibility(address account, uint256 maxCost)
+    function _validateOnboardingEligibility(PackedUserOperation calldata userOp, uint256 maxCost)
         private
-        view
         returns (bytes32 subjectKey)
     {
+        address account = userOp.sender;
         OnboardingConfig storage onboarding = _getOnboardingStorage();
 
         // Check onboarding is enabled
         if (!onboarding.enabled) revert OnboardingDisabled();
+
+        // Onboarding must only sponsor account creation, not arbitrary operations.
+        if (userOp.initCode.length == 0) revert InvalidOnboardingRequest();
+        if (account.code.length != 0) revert InvalidOnboardingRequest();
+        if (userOp.callData.length != 0) revert InvalidOnboardingRequest();
 
         // Onboarding is paid from solidarity fund, so block when distribution is paused
         SolidarityFund storage solidarity = _getSolidarityStorage();
@@ -1499,9 +1557,14 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         // Check daily rate limit
         uint32 today = uint32(block.timestamp / 1 days);
-        if (today == onboarding.currentDay && onboarding.createdToday >= onboarding.dailyCreationLimit) {
+        if (today != onboarding.currentDay) {
+            onboarding.currentDay = today;
+            onboarding.attemptsToday = 0;
+        }
+        if (onboarding.attemptsToday >= onboarding.dailyCreationLimit) {
             revert OnboardingDailyLimitExceeded();
         }
+        onboarding.attemptsToday++;
 
         // Check solidarity fund has sufficient balance
         if (solidarity.balance < maxCost) revert InsufficientFunds();
@@ -1517,22 +1580,26 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      *      Vouch paymasterAndData format (157 bytes total):
      *      [paymaster(20) | version(1) | orgId(32) | subjectType(1) | voucherAddr(20) | ruleId(4) | mailboxCommit(8) | expiry(6) | signature(65)]
      *
-     *      The voucher signs: keccak256(abi.encodePacked(orgId, account, expiry, chainId))
+     *      The voucher signs:
+     *      keccak256(abi.encodePacked(orgId, account, keccak256(initCode), keccak256(callData), expiry, chainId, paymaster))
      *
-     * @param account The account being created (sender)
+     * @param userOp Full user operation (includes sender/initCode/callData)
      * @param orgId The organization identifier
      * @param org The org config (for voucher hat)
      * @param subjectId The voucher address (packed as bytes20)
      * @param paymasterAndData Full paymaster data including vouch signature
      * @return subjectKey The subject key for budget tracking
+     * @return voucherSigner The voucher signer address to emit on successful consumption
      */
     function _validateVouchedEligibility(
-        address account,
+        PackedUserOperation calldata userOp,
         bytes32 orgId,
         OrgConfig storage org,
         bytes20 subjectId,
         bytes calldata paymasterAndData
-    ) private returns (bytes32 subjectKey) {
+    ) private view returns (bytes32 subjectKey, address voucherSigner) {
+        address account = userOp.sender;
+
         // Check voucher hat is configured
         if (org.voucherHatId == 0) revert VoucherHatNotSet();
 
@@ -1557,20 +1624,26 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Check expiry
         if (block.timestamp > expiry) revert VouchExpired();
 
-        // Verify signature
-        bytes32 vouchHash = keccak256(abi.encodePacked(orgId, account, expiry, block.chainid));
+        // Verify signature and bind intent to operation payload + this paymaster.
+        bytes32 vouchHash = keccak256(
+            abi.encodePacked(
+                orgId,
+                account,
+                keccak256(userOp.initCode),
+                keccak256(userOp.callData),
+                expiry,
+                block.chainid,
+                address(this)
+            )
+        );
         bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(vouchHash);
 
         address recoveredSigner = ECDSA.recover(ethSignedHash, signature);
         if (recoveredSigner != voucher) revert InvalidVouchSignature();
-
-        // Mark vouch as used
-        usedVouches[orgId][account] = true;
+        voucherSigner = recoveredSigner;
 
         // Subject key based on voucher (for budget tracking against voucher's allowance)
         subjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, subjectId));
-
-        emit VouchUsed(orgId, account, voucher);
     }
 
     function _validateRules(PackedUserOperation calldata userOp, uint32 ruleId, bytes32 orgId) private view {
@@ -1709,30 +1782,19 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     /**
      * @notice Update onboarding usage and deduct from solidarity fund
      * @dev Called in postOp for POA onboarding operations
-     * @param subjectKey The subject key (account address hash)
      * @param actualGasCost Actual gas cost to deduct
+     * @param countAsCreation Whether to emit creation event (true when op succeeded)
      */
-    function _updateOnboardingUsage(bytes32 subjectKey, uint256 actualGasCost) private {
-        OnboardingConfig storage onboarding = _getOnboardingStorage();
+    function _updateOnboardingUsage(uint256 actualGasCost, bool countAsCreation) private {
         SolidarityFund storage solidarity = _getSolidarityStorage();
 
-        // Update daily counter
-        uint32 today = uint32(block.timestamp / 1 days);
-        if (today != onboarding.currentDay) {
-            // New day - reset counter
-            onboarding.currentDay = today;
-            onboarding.createdToday = 1;
-        } else {
-            onboarding.createdToday++;
+        if (countAsCreation) {
+            emit OnboardingAccountCreated(address(0), actualGasCost);
         }
 
-        // Deduct from solidarity fund
+        // Deduct from solidarity fund (validated during _validateOnboardingEligibility)
+        if (solidarity.balance < actualGasCost) revert InsufficientFunds();
         solidarity.balance -= uint128(actualGasCost);
-
-        // Extract account address from subject key for event
-        // subjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_POA_ONBOARDING, bytes20(account)))
-        // We can't reverse the hash, so we emit the gas cost only
-        emit OnboardingAccountCreated(address(0), actualGasCost);
     }
 
     function _processBounty(bytes32 orgId, bytes32 userOpHash, address bundlerOrigin, uint256 actualGasCost) private {
