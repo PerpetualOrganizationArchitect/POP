@@ -225,4 +225,219 @@ contract PoaManagerHubTest is Test {
         assertEq(typeName, "Widget");
         assertEq(sentImpl, address(implV1));
     }
+
+    // ══════════════════════════════════════════════════════════
+    //  10. Constructor reverts on zero poaManager address
+    // ══════════════════════════════════════════════════════════
+
+    function testConstructorRevertsZeroPoaManager() public {
+        vm.expectRevert(PoaManagerHub.ZeroAddress.selector);
+        new PoaManagerHub(address(0), address(mailbox));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  11. Constructor reverts on zero mailbox address
+    // ══════════════════════════════════════════════════════════
+
+    function testConstructorRevertsZeroMailbox() public {
+        vm.expectRevert(PoaManagerHub.ZeroAddress.selector);
+        new PoaManagerHub(address(pm), address(0));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  12. registerSatellite reverts on zero address
+    // ══════════════════════════════════════════════════════════
+
+    function testRegisterSatelliteRevertsZeroAddress() public {
+        vm.expectRevert(PoaManagerHub.ZeroAddress.selector);
+        hub.registerSatellite(42, address(0));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  13. Non-owner cannot removeSatellite
+    // ══════════════════════════════════════════════════════════
+
+    function testNonOwnerCannotRemoveSatellite() public {
+        hub.registerSatellite(42, address(noopSatellite));
+
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        hub.removeSatellite(0);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  14. Non-owner cannot setPaused
+    // ══════════════════════════════════════════════════════════
+
+    function testNonOwnerCannotSetPaused() public {
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        hub.setPaused(true);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  15. Non-owner cannot addContractType
+    // ══════════════════════════════════════════════════════════
+
+    function testNonOwnerCannotAddContractType() public {
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        hub.addContractType("Widget", address(implV1));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  16. Non-owner cannot addContractTypeCrossChain
+    // ══════════════════════════════════════════════════════════
+
+    function testNonOwnerCannotAddContractTypeCrossChain() public {
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        hub.addContractTypeCrossChain("Widget", address(implV1));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  17. Non-owner cannot updateImplRegistry
+    // ══════════════════════════════════════════════════════════
+
+    function testNonOwnerCannotUpdateImplRegistry() public {
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        hub.updateImplRegistry(address(0x1234));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  18. Paused hub blocks addContractTypeCrossChain
+    // ══════════════════════════════════════════════════════════
+
+    function testPausedHubBlocksAddContractTypeCrossChain() public {
+        hub.registerSatellite(42, address(noopSatellite));
+        hub.setPaused(true);
+
+        vm.expectRevert(PoaManagerHub.IsPaused.selector);
+        hub.addContractTypeCrossChain("Widget", address(implV1));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  19. Multiple active satellites all receive dispatch
+    // ══════════════════════════════════════════════════════════
+
+    function testMultipleActiveSatellitesAllReceiveDispatch() public {
+        NoopRecipient noop2 = new NoopRecipient();
+        NoopRecipient noop3 = new NoopRecipient();
+        hub.registerSatellite(10, address(noopSatellite));
+        hub.registerSatellite(20, address(noop2));
+        hub.registerSatellite(30, address(noop3));
+
+        hub.addContractType("Widget", address(implV1));
+        hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
+
+        assertEq(mailbox.dispatchedCount(), 3, "All 3 active satellites should receive dispatch");
+
+        (uint32 d0,,) = mailbox.dispatched(0);
+        (uint32 d1,,) = mailbox.dispatched(1);
+        (uint32 d2,,) = mailbox.dispatched(2);
+        assertEq(d0, 10);
+        assertEq(d1, 20);
+        assertEq(d2, 30);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  20. Upgrade with no satellites registered dispatches nothing
+    // ══════════════════════════════════════════════════════════
+
+    function testUpgradeWithNoSatellitesDispatchesNothing() public {
+        hub.addContractType("Widget", address(implV1));
+
+        hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
+
+        bytes32 typeId = keccak256(bytes("Widget"));
+        assertEq(pm.getCurrentImplementationById(typeId), address(implV2), "Local upgrade should still work");
+        assertEq(mailbox.dispatchedCount(), 0, "No dispatch with empty satellite list");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  21. updateImplRegistry passthrough works
+    // ══════════════════════════════════════════════════════════
+
+    function testUpdateImplRegistryPassthrough() public {
+        // Deploy a new registry
+        ImplementationRegistry newRegImpl = new ImplementationRegistry();
+        UpgradeableBeacon newRegBeacon = new UpgradeableBeacon(address(newRegImpl), address(this));
+        ImplementationRegistry newReg = ImplementationRegistry(address(new BeaconProxy(address(newRegBeacon), "")));
+        newReg.initialize(address(this));
+        newReg.transferOwnership(address(pm));
+
+        hub.updateImplRegistry(address(newReg));
+        assertEq(address(pm.registry()), address(newReg), "Registry should be updated via hub");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  22. Pause and unpause toggle works
+    // ══════════════════════════════════════════════════════════
+
+    function testPauseUnpauseToggle() public {
+        hub.addContractType("Widget", address(implV1));
+        hub.registerSatellite(42, address(noopSatellite));
+
+        hub.setPaused(true);
+        assertTrue(hub.paused());
+
+        vm.expectRevert(PoaManagerHub.IsPaused.selector);
+        hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
+
+        hub.setPaused(false);
+        assertFalse(hub.paused());
+
+        // Should work again after unpause
+        hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
+        bytes32 typeId = keccak256(bytes("Widget"));
+        assertEq(pm.getCurrentImplementationById(typeId), address(implV2));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  23. Events emitted on cross-chain upgrade
+    // ══════════════════════════════════════════════════════════
+
+    function testEmitsCrossChainUpgradeDispatchedEvent() public {
+        hub.addContractType("Widget", address(implV1));
+        hub.registerSatellite(42, address(noopSatellite));
+
+        bytes32 typeId = keccak256(bytes("Widget"));
+
+        vm.expectEmit(true, true, false, false);
+        emit PoaManagerHub.CrossChainUpgradeDispatched(typeId, address(implV2), "v2", 42, bytes32(0));
+        hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  24. Events emitted on satellite registration
+    // ══════════════════════════════════════════════════════════
+
+    function testEmitsSatelliteRegisteredEvent() public {
+        vm.expectEmit(true, false, false, true);
+        emit PoaManagerHub.SatelliteRegistered(42, address(noopSatellite));
+        hub.registerSatellite(42, address(noopSatellite));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  25. Events emitted on satellite removal
+    // ══════════════════════════════════════════════════════════
+
+    function testEmitsSatelliteRemovedEvent() public {
+        hub.registerSatellite(42, address(noopSatellite));
+
+        vm.expectEmit(true, false, false, false);
+        emit PoaManagerHub.SatelliteRemoved(42);
+        hub.removeSatellite(0);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  26. Events emitted on pause set
+    // ══════════════════════════════════════════════════════════
+
+    function testEmitsPauseSetEvent() public {
+        vm.expectEmit(false, false, false, true);
+        emit PoaManagerHub.PauseSet(true);
+        hub.setPaused(true);
+    }
 }

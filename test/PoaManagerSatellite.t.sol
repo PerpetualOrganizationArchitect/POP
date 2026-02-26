@@ -184,4 +184,109 @@ contract PoaManagerSatelliteTest is Test {
         vm.expectRevert(PoaManager.ImplZero.selector);
         satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), body);
     }
+
+    // ══════════════════════════════════════════════════════════
+    //  10. Non-owner cannot addContractType
+    // ══════════════════════════════════════════════════════════
+
+    function testNonOwnerCannotAddContractType() public {
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        satellite.addContractType("Widget", address(implV1));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  11. Non-owner cannot updateImplRegistry
+    // ══════════════════════════════════════════════════════════
+
+    function testNonOwnerCannotUpdateImplRegistry() public {
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        satellite.updateImplRegistry(address(0x1234));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  12. updateImplRegistry passthrough works
+    // ══════════════════════════════════════════════════════════
+
+    function testUpdateImplRegistryPassthrough() public {
+        ImplementationRegistry newRegImpl = new ImplementationRegistry();
+        UpgradeableBeacon newRegBeacon = new UpgradeableBeacon(address(newRegImpl), address(this));
+        ImplementationRegistry newReg = ImplementationRegistry(address(new BeaconProxy(address(newRegBeacon), "")));
+        newReg.initialize(address(this));
+        newReg.transferOwnership(address(pm));
+
+        satellite.updateImplRegistry(address(newReg));
+        assertEq(address(pm.registry()), address(newReg), "Registry should be updated via satellite");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  13. handle upgrade emits UpgradeReceived event
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleUpgradeEmitsEvent() public {
+        satellite.addContractType("Widget", address(implV1));
+
+        bytes32 typeId = keccak256(bytes("Widget"));
+
+        vm.expectEmit(true, false, false, true);
+        emit PoaManagerSatellite.UpgradeReceived(typeId, address(implV2), "v2", hubDomain);
+        _deliverMessage(_upgradePayload("Widget", address(implV2), "v2"));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  14. handle addContractType emits ContractTypeReceived event
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleAddTypeEmitsEvent() public {
+        bytes32 typeId = keccak256(bytes("Gadget"));
+
+        vm.expectEmit(true, false, false, true);
+        emit PoaManagerSatellite.ContractTypeReceived(typeId, "Gadget", address(implV1), hubDomain);
+        _deliverMessage(_addTypePayload("Gadget", address(implV1)));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  15. handle upgrade reverts for unknown type
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleUpgradeRevertsForUnknownType() public {
+        // Attempt to upgrade a type that was never registered
+        bytes memory body = _upgradePayload("NonExistent", address(implV2), "v2");
+
+        vm.prank(mailbox);
+        vm.expectRevert(PoaManager.TypeUnknown.selector);
+        satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), body);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  16. Sequential upgrades via handle
+    // ══════════════════════════════════════════════════════════
+
+    function testSequentialUpgradesViaHandle() public {
+        SatDummyImplV1 implV1b = new SatDummyImplV1(); // different address, same code
+        satellite.addContractType("Widget", address(implV1));
+
+        _deliverMessage(_upgradePayload("Widget", address(implV2), "v2"));
+        bytes32 typeId = keccak256(bytes("Widget"));
+        assertEq(pm.getCurrentImplementationById(typeId), address(implV2), "Should be V2");
+
+        // Upgrade again to implV1b (different address)
+        _deliverMessage(_upgradePayload("Widget", address(implV1b), "v3"));
+        assertEq(pm.getCurrentImplementationById(typeId), address(implV1b), "Should be V1b");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  17. handle upgrade with same impl reverts (SameImplementation)
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleUpgradeWithSameImplReverts() public {
+        satellite.addContractType("Widget", address(implV1));
+
+        bytes memory body = _upgradePayload("Widget", address(implV1), "v2");
+
+        vm.prank(mailbox);
+        vm.expectRevert(PoaManager.SameImplementation.selector);
+        satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), body);
+    }
 }

@@ -218,6 +218,162 @@ contract CrossChainUpgradeIntegrationTest is Test {
         IntegrationImplV2 proxyV2 = IntegrationImplV2(address(proxy));
         assertEq(proxyV2.version(), 2);
     }
+
+    // ══════════════════════════════════════════════════════════
+    //  8. Removed satellite excluded from upgrade
+    // ══════════════════════════════════════════════════════════
+
+    function testRemovedSatelliteExcludedFromUpgrade() public {
+        // Remove satellite 2 (index 1 in hub's satellite array)
+        hub.removeSatellite(1);
+
+        hub.upgradeBeaconCrossChain("TestType", address(implV2), "v2");
+
+        bytes32 typeId = keccak256(bytes("TestType"));
+        assertEq(homePm.getCurrentImplementationById(typeId), address(implV2), "Home should be V2");
+        assertEq(sat1Pm.getCurrentImplementationById(typeId), address(implV2), "Sat1 should be V2");
+        // Sat2 was removed — still on V1
+        assertEq(sat2Pm.getCurrentImplementationById(typeId), address(implV1), "Sat2 should still be V1");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  9. Emergency direct upgrade on satellite
+    // ══════════════════════════════════════════════════════════
+
+    function testEmergencyDirectUpgradeOnSatellite() public {
+        satellite1.upgradeBeaconDirect("TestType", address(implV2), "v2");
+
+        bytes32 typeId = keccak256(bytes("TestType"));
+        assertEq(sat1Pm.getCurrentImplementationById(typeId), address(implV2), "Sat1 should be V2 via direct");
+        // Others unaffected
+        assertEq(homePm.getCurrentImplementationById(typeId), address(implV1), "Home should still be V1");
+        assertEq(sat2Pm.getCurrentImplementationById(typeId), address(implV1), "Sat2 should still be V1");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  10. Dynamic satellite registration receives future upgrades
+    // ══════════════════════════════════════════════════════════
+
+    function testDynamicSatelliteRegistration() public {
+        // Deploy a third satellite
+        PoaManager sat3Pm = _deployPoaManager();
+        PoaManagerSatellite satellite3 = new PoaManagerSatellite(address(sat3Pm), address(mailbox), 1, address(hub));
+        sat3Pm.transferOwnership(address(satellite3));
+        satellite3.addContractType("TestType", address(implV1));
+
+        // Register it on the hub
+        hub.registerSatellite(4, address(satellite3));
+
+        // Now upgrade — all 3 satellites should get it
+        hub.upgradeBeaconCrossChain("TestType", address(implV2), "v2");
+
+        bytes32 typeId = keccak256(bytes("TestType"));
+        assertEq(sat1Pm.getCurrentImplementationById(typeId), address(implV2), "Sat1 should be V2");
+        assertEq(sat2Pm.getCurrentImplementationById(typeId), address(implV2), "Sat2 should be V2");
+        assertEq(sat3Pm.getCurrentImplementationById(typeId), address(implV2), "Sat3 should be V2");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  11. Multiple independent contract types
+    // ══════════════════════════════════════════════════════════
+
+    function testMultipleIndependentContractTypes() public {
+        IntegrationImplV1 implA = new IntegrationImplV1();
+        IntegrationImplV2 implB = new IntegrationImplV2();
+
+        // Register a second type on all chains
+        hub.addContractType("TypeB", address(implA));
+        satellite1.addContractType("TypeB", address(implA));
+        satellite2.addContractType("TypeB", address(implA));
+
+        // Upgrade only TestType
+        hub.upgradeBeaconCrossChain("TestType", address(implV2), "v2");
+
+        bytes32 testTypeId = keccak256(bytes("TestType"));
+        bytes32 typeBId = keccak256(bytes("TypeB"));
+
+        // TestType upgraded everywhere
+        assertEq(homePm.getCurrentImplementationById(testTypeId), address(implV2));
+        assertEq(sat1Pm.getCurrentImplementationById(testTypeId), address(implV2));
+
+        // TypeB unchanged
+        assertEq(homePm.getCurrentImplementationById(typeBId), address(implA), "TypeB should be unchanged");
+        assertEq(sat1Pm.getCurrentImplementationById(typeBId), address(implA), "TypeB should be unchanged on sat1");
+
+        // Now upgrade TypeB independently
+        hub.upgradeBeaconCrossChain("TypeB", address(implB), "v2");
+        assertEq(homePm.getCurrentImplementationById(typeBId), address(implB), "TypeB should now be upgraded");
+        assertEq(sat1Pm.getCurrentImplementationById(typeBId), address(implB), "TypeB sat1 should be upgraded");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  12. Mixed: one satellite pinned, one mirroring
+    // ══════════════════════════════════════════════════════════
+
+    function testMixedPinnedAndMirroringSatellites() public {
+        bytes32 typeId = keccak256(bytes("TestType"));
+
+        // Sat1 SwitchableBeacon in Mirror mode
+        address sat1Beacon = sat1Pm.getBeaconById(typeId);
+        SwitchableBeacon sat1Mirror =
+            new SwitchableBeacon(address(this), sat1Beacon, address(0), SwitchableBeacon.Mode.Mirror);
+
+        // Sat2 SwitchableBeacon in Static mode (pinned to V1)
+        address sat2Beacon = sat2Pm.getBeaconById(typeId);
+        SwitchableBeacon sat2Static =
+            new SwitchableBeacon(address(this), sat2Beacon, address(implV1), SwitchableBeacon.Mode.Static);
+
+        assertEq(sat1Mirror.implementation(), address(implV1));
+        assertEq(sat2Static.implementation(), address(implV1));
+
+        // Upgrade cross-chain
+        hub.upgradeBeaconCrossChain("TestType", address(implV2), "v2");
+
+        // Mirror follows, static stays
+        assertEq(sat1Mirror.implementation(), address(implV2), "Mirror should follow upgrade");
+        assertEq(sat2Static.implementation(), address(implV1), "Static should stay pinned");
+
+        // Both underlying PoaManagers are upgraded
+        assertEq(sat1Pm.getCurrentImplementationById(typeId), address(implV2));
+        assertEq(sat2Pm.getCurrentImplementationById(typeId), address(implV2));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  13. Full E2E: upgrade, then proxy on each chain
+    // ══════════════════════════════════════════════════════════
+
+    function testFullE2EProxiesOnAllChains() public {
+        bytes32 typeId = keccak256(bytes("TestType"));
+
+        // Create a BeaconProxy on each chain via SwitchableBeacon (Mirror)
+        address homeOZBeacon = homePm.getBeaconById(typeId);
+        SwitchableBeacon homeSB =
+            new SwitchableBeacon(address(this), homeOZBeacon, address(0), SwitchableBeacon.Mode.Mirror);
+        BeaconProxy homeProxy = new BeaconProxy(address(homeSB), "");
+
+        address sat1OZBeacon = sat1Pm.getBeaconById(typeId);
+        SwitchableBeacon sat1SB =
+            new SwitchableBeacon(address(this), sat1OZBeacon, address(0), SwitchableBeacon.Mode.Mirror);
+        BeaconProxy sat1Proxy = new BeaconProxy(address(sat1SB), "");
+
+        address sat2OZBeacon = sat2Pm.getBeaconById(typeId);
+        SwitchableBeacon sat2SB =
+            new SwitchableBeacon(address(this), sat2OZBeacon, address(0), SwitchableBeacon.Mode.Mirror);
+        BeaconProxy sat2Proxy = new BeaconProxy(address(sat2SB), "");
+
+        // All proxies use V1
+        assertEq(IntegrationImplV1(address(homeProxy)).version(), 1);
+        assertEq(IntegrationImplV1(address(sat1Proxy)).version(), 1);
+        assertEq(IntegrationImplV1(address(sat2Proxy)).version(), 1);
+
+        // Cross-chain upgrade to V3
+        hub.upgradeBeaconCrossChain("TestType", address(implV3), "v3");
+
+        // All proxies now use V3
+        assertEq(IntegrationImplV3(address(homeProxy)).version(), 3, "Home proxy should be V3");
+        assertEq(IntegrationImplV3(address(sat1Proxy)).version(), 3, "Sat1 proxy should be V3");
+        assertEq(IntegrationImplV3(address(sat2Proxy)).version(), 3, "Sat2 proxy should be V3");
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
