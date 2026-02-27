@@ -263,6 +263,23 @@ preflight_checks() {
     success "Build complete."
 }
 
+# Lightweight pre-flight for read-only steps (only checks home chain RPC)
+preflight_checks_minimal() {
+    header "Pre-flight Checks (read-only)"
+
+    if ! command -v forge &>/dev/null; then
+        error "forge not found. Install Foundry first."
+        exit 1
+    fi
+
+    # Verify home chain RPC is reachable
+    cast chain-id --rpc-url "$HOME_RPC" &>/dev/null || {
+        error "Cannot reach home chain (--rpc-url $HOME_RPC). Check foundry.toml."
+        exit 1
+    }
+    success "Home chain RPC reachable."
+}
+
 # ═══════════════════════════ Confirmation ═══════════════════════════
 
 confirm_deployment() {
@@ -508,11 +525,28 @@ print_summary() {
 # ═══════════════════════════ Main ═══════════════════════════
 
 main() {
-    load_env
-
     header "POA Protocol Cross-Chain Deployment"
     echo "  Home:       Arbitrum (domain $HOME_DOMAIN)"
     echo "  Satellites: Ethereum (1), Optimism (10), Gnosis (100)"
+
+    # Summary only reads local JSON files — no env, RPC, or build needed
+    if [ "$STEP" = "summary" ]; then
+        print_summary
+        echo ""
+        success "Done."
+        return
+    fi
+
+    load_env
+
+    # Step 4 is read-only on home chain — only check that RPC
+    if [ "$STEP" = "4" ]; then
+        preflight_checks_minimal
+        step4_verify
+        echo ""
+        success "Done."
+        return
+    fi
 
     preflight_checks
 
@@ -537,12 +571,6 @@ main() {
             3)
                 confirm_deployment
                 step3_register_and_transfer
-                ;;
-            4)
-                step4_verify
-                ;;
-            summary)
-                print_summary
                 ;;
             *)
                 error "Unknown step: $STEP (valid: 1, 2, 3, 4, summary)"
