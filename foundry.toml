@@ -37,6 +37,7 @@ optimism = "https://optimism.drpc.org"
 base = "https://base.drpc.org"
 arbitrum = "https://arbitrum.drpc.org"
 polygon = "https://polygon.drpc.org"
+gnosis = "https://gnosis.drpc.org"
 
 # Local development
 local = "http://localhost:8545"
