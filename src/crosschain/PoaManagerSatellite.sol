@@ -92,6 +92,15 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
         emit PauseSet(_paused);
     }
 
+    /*══════════════════ Admin Call Passthrough ══════════════════*/
+
+    /// @notice Execute an arbitrary call through the local PoaManager.
+    /// @dev Owner can use this to call admin functions on sub-contracts
+    ///      that gate on `msg.sender == poaManager`.
+    function adminCall(address target, bytes calldata data) external onlyOwner returns (bytes memory) {
+        return poaManager.adminCall(target, data);
+    }
+
     /*══════════════════ Emergency / Direct Admin ══════════════════*/
 
     /// @notice Emergency local-only upgrade (bypasses cross-chain path).

@@ -708,8 +708,40 @@ contract PoaManagerHubTest is Test {
     }
 
     // ══════════════════════════════════════════════════════════
+    //  Admin Call Passthrough
+    // ══════════════════════════════════════════════════════════
+
+    function testHubAdminCallPassthrough() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+        hub.adminCall(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 99));
+        assertEq(target.value(), 99);
+    }
+
+    function testHubAdminCallOnlyOwner() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        hub.adminCall(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 99));
+    }
+
+    // ══════════════════════════════════════════════════════════
     //  Helper: accept ETH refunds
     // ══════════════════════════════════════════════════════════
 
     receive() external payable {}
+}
+
+/// @dev Mock target that gates a function behind msg.sender == poaManager
+contract MockAdminTargetHub {
+    address public poaManager;
+    uint256 public value;
+
+    constructor(address _pm) {
+        poaManager = _pm;
+    }
+
+    function setValueOnlyPM(uint256 _val) external {
+        require(msg.sender == poaManager, "not pm");
+        value = _val;
+    }
 }

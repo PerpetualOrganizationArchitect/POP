@@ -129,6 +129,15 @@ contract PoaManagerHub is Ownable(msg.sender) {
         _refundExcess(preBalance);
     }
 
+    /*══════════════════ Admin Call Passthrough ══════════════════*/
+
+    /// @notice Execute an arbitrary call through the local PoaManager.
+    /// @dev Governance (Executor → Hub → PM) can use this to call admin functions
+    ///      on sub-contracts that gate on `msg.sender == poaManager`.
+    function adminCall(address target, bytes calldata data) external onlyOwner returns (bytes memory) {
+        return poaManager.adminCall(target, data);
+    }
+
     /*══════════════════ Registry Passthrough ══════════════════*/
 
     /// @notice Update the ImplementationRegistry on the local PoaManager.

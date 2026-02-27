@@ -109,6 +109,10 @@ contract DeployHomeChain is Script {
 
         vm.startBroadcast(deployerKey);
 
+        // Verify hardcoded external contracts exist on this chain
+        require(HATS_PROTOCOL.code.length > 0, "Hats Protocol not deployed on this chain");
+        require(ENTRY_POINT_V07.code.length > 0, "EntryPoint v0.7 not deployed on this chain");
+
         // 1. Deploy DeterministicDeployer
         address dd = _deployDeterministicDeployer(deployer);
 
@@ -201,7 +205,7 @@ contract DeployHomeChain is Script {
 
         // Deploy OrgRegistry proxy
         address orgRegBeacon = PoaManager(infra.poaManager).getBeaconById(keccak256("OrgRegistry"));
-        bytes memory orgRegInit = abi.encodeWithSignature("initialize(address)", deployer);
+        bytes memory orgRegInit = abi.encodeWithSignature("initialize(address,address)", deployer, HATS_PROTOCOL);
         infra.orgRegistry = address(new BeaconProxy(orgRegBeacon, orgRegInit));
         console.log("OrgRegistry:", infra.orgRegistry);
 
@@ -241,6 +245,11 @@ contract DeployHomeChain is Script {
         // Transfer OrgRegistry ownership
         OrgRegistry(infra.orgRegistry).transferOwnership(infra.orgDeployer);
 
+        // Authorize OrgDeployer to register orgs with PaymasterHub
+        PoaManager(infra.poaManager)
+            .adminCall(infra.paymasterHub, abi.encodeWithSignature("setOrgRegistrar(address)", infra.orgDeployer));
+        console.log("OrgDeployer authorized as orgRegistrar on PaymasterHub");
+
         // Register all contract types
         PoaManager pm = PoaManager(infra.poaManager);
         pm.addContractType("HybridVoting", hybridVotingImpl);
@@ -274,7 +283,11 @@ contract DeployHomeChain is Script {
             uint48(7 days)
         );
         infra.universalPasskeyFactory = address(new BeaconProxy(passkeyFactoryBeaconAddr, passkeyFactoryInit));
-        OrgDeployer(infra.orgDeployer).setUniversalPasskeyFactory(infra.universalPasskeyFactory);
+        PoaManager(infra.poaManager)
+            .adminCall(
+                infra.orgDeployer,
+                abi.encodeWithSignature("setUniversalPasskeyFactory(address)", infra.universalPasskeyFactory)
+            );
         console.log("UniversalPasskeyFactory:", infra.universalPasskeyFactory);
 
         // Register infrastructure for subgraph indexing
@@ -460,6 +473,24 @@ contract DeployHomeChain is Script {
             '",\n',
             '    "globalAccountRegistry": "',
             vm.toString(infra.globalAccountRegistry),
+            '",\n',
+            '    "universalPasskeyFactory": "',
+            vm.toString(infra.universalPasskeyFactory),
+            '",\n'
+        );
+
+        string memory part2b = string.concat(
+            '    "governanceFactory": "',
+            vm.toString(infra.governanceFactory),
+            '",\n',
+            '    "accessFactory": "',
+            vm.toString(infra.accessFactory),
+            '",\n',
+            '    "modulesFactory": "',
+            vm.toString(infra.modulesFactory),
+            '",\n',
+            '    "hatsTreeSetup": "',
+            vm.toString(infra.hatsTreeSetup),
             '",\n'
         );
 
@@ -504,7 +535,7 @@ contract DeployHomeChain is Script {
             "}\n"
         );
 
-        string memory json = string.concat(part1, part2, part3, part4, part5);
+        string memory json = string.concat(part1, part2, part2b, part3, part4, part5);
         vm.writeFile("script/main-deploy-state.json", json);
         console.log("\nState written to script/main-deploy-state.json");
     }
@@ -761,7 +792,7 @@ contract RegisterAndTransfer is Script {
 /**
  * @title VerifyDeployment
  * @notice Read-only verification of the full deployment. Checks ownership chain
- *         and satellite registration.
+ *         and satellite registration on home chain.
  *
  * Usage:
  *   forge script script/MainDeploy.s.sol:VerifyDeployment \
@@ -773,8 +804,12 @@ contract VerifyDeployment is Script {
         address hubAddr = vm.parseJsonAddress(state, ".homeChain.hub");
         address executorAddr = vm.parseJsonAddress(state, ".homeChain.governance.executor");
         address pmAddr = vm.parseJsonAddress(state, ".homeChain.poaManager");
+        address orgDeployerAddr = vm.parseJsonAddress(state, ".homeChain.orgDeployer");
 
-        console.log("\n=== Deployment Verification ===");
+        console.log("\n=== Deployment Verification (Home Chain) ===");
+
+        uint256 checks;
+        uint256 passed;
 
         // Check Hub owner
         address hubOwner = PoaManagerHub(payable(hubAddr)).owner();
@@ -782,6 +817,8 @@ contract VerifyDeployment is Script {
         console.log("Expected (Executor):", executorAddr);
         bool hubCheck = hubOwner == executorAddr;
         console.log("Hub ownership:", hubCheck ? "PASS" : "FAIL");
+        checks++;
+        if (hubCheck) passed++;
 
         // Check PoaManager owner
         address pmOwner = PoaManager(pmAddr).owner();
@@ -789,22 +826,41 @@ contract VerifyDeployment is Script {
         console.log("Expected (Hub):", hubAddr);
         bool pmCheck = pmOwner == hubAddr;
         console.log("PoaManager ownership:", pmCheck ? "PASS" : "FAIL");
+        checks++;
+        if (pmCheck) passed++;
 
         // Check satellite count
         uint256 satCount = PoaManagerHub(payable(hubAddr)).satelliteCount();
         console.log("\nRegistered satellites:", satCount);
+        bool satCheck = satCount > 0;
+        console.log("Has satellites:", satCheck ? "PASS" : "WARNING - none registered");
+        checks++;
+        if (satCheck) passed++;
 
         // Check Executor ETH balance
         uint256 execBal = executorAddr.balance;
         console.log("Executor ETH balance:", execBal);
-        console.log("Has Hyperlane funds:", execBal > 0 ? "PASS" : "WARNING - no ETH");
+        bool execCheck = execBal > 0;
+        console.log("Has Hyperlane funds:", execCheck ? "PASS" : "WARNING - no ETH");
+        checks++;
+        if (execCheck) passed++;
+
+        // Check OrgDeployer is set as orgRegistrar on PaymasterHub
+        address paymasterAddr = vm.parseJsonAddress(state, ".homeChain.paymasterHub");
+        // Note: We can't directly read orgRegistrar from PaymasterHub (it's in private storage),
+        // but we verify OrgDeployer exists
+        bool deployerCheck = orgDeployerAddr.code.length > 0;
+        console.log("\nOrgDeployer has code:", deployerCheck ? "PASS" : "FAIL");
+        checks++;
+        if (deployerCheck) passed++;
 
         // Summary
         console.log("\n=== Verification Summary ===");
-        if (hubCheck && pmCheck) {
-            console.log("All ownership checks PASSED");
+        console.log("Passed:", passed, "/", checks);
+        if (passed == checks) {
+            console.log("All checks PASSED");
         } else {
-            console.log("SOME CHECKS FAILED - review above");
+            console.log("SOME CHECKS FAILED or WARNINGS - review above");
         }
     }
 }

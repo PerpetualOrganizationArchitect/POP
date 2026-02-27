@@ -105,6 +105,20 @@ contract PoaManager is Ownable(msg.sender) {
         emit BeaconUpgraded(tId, newImpl, version);
     }
 
+    /*──────────── Admin: arbitrary call ───────────*/
+    /// @notice Execute an arbitrary call from this contract.
+    /// @dev Sub-contracts (OrgDeployer, PaymasterHub) gate admin functions behind
+    ///      `msg.sender == address(this)`. This lets the owner invoke them.
+    function adminCall(address target, bytes calldata data) external onlyOwner returns (bytes memory) {
+        (bool success, bytes memory result) = target.call(data);
+        if (!success) {
+            assembly {
+                revert(add(result, 32), mload(result))
+            }
+        }
+        return result;
+    }
+
     /*──────────── Views ───────────*/
     function getBeaconById(bytes32 typeId) external view returns (address) {
         address b = address(beacons[typeId]);

@@ -73,12 +73,12 @@ header() {
 json_get() {
     local file="$1" dot_path="$2"
     python3 -c "
-import json
-d = json.load(open('$file'))
-for k in '$dot_path'.strip('.').split('.'):
+import json, sys
+d = json.load(open(sys.argv[1]))
+for k in sys.argv[2].strip('.').split('.'):
     d = d[k]
 print(d)
-" 2>/dev/null
+" "$file" "$dot_path" 2>/dev/null
 }
 
 # ═══════════════════════════ Argument Parsing ═══════════════════════════
@@ -139,6 +139,9 @@ load_env() {
         source "$PROJECT_DIR/.env"
         set +a
     fi
+
+    # Prevent .env from overriding chain-specific vars managed by this script
+    unset MAILBOX SATELLITE_DOMAIN HUB_DOMAIN 2>/dev/null || true
 
     # Support both PRIVATE_KEY and DEPLOYER_PRIVATE_KEY
     if [ -z "${PRIVATE_KEY:-}" ] && [ -n "${DEPLOYER_PRIVATE_KEY:-}" ]; then
@@ -229,8 +232,8 @@ preflight_checks() {
         exit 1
     fi
 
-    # Derive deployer address
-    DEPLOYER_ADDRESS=$(cast wallet address "$PRIVATE_KEY" 2>/dev/null) || {
+    # Derive deployer address (pipe key through stdin to avoid exposure in process list)
+    DEPLOYER_ADDRESS=$(echo "$PRIVATE_KEY" | cast wallet address --stdin 2>/dev/null) || {
         error "Invalid PRIVATE_KEY. Could not derive address."
         exit 1
     }
@@ -340,6 +343,18 @@ step1_deploy_home() {
     CURRENT_STEP_NUM=1
     header "Step 1: Deploy Home Chain (Arbitrum, domain $HOME_DOMAIN)"
 
+    if [ -f "$STATE_FILE" ]; then
+        warn "State file already exists: $STATE_FILE"
+        warn "Home chain may already be deployed."
+        if [ "$SKIP_CONFIRM" != true ]; then
+            read -rp "  Overwrite and redeploy? (yes/no): " confirm
+            if [ "$confirm" != "yes" ]; then
+                info "Skipping step 1. Using existing state."
+                return
+            fi
+        fi
+    fi
+
     MAILBOX="$HOME_MAILBOX" \
     HUB_DOMAIN="$HOME_DOMAIN" \
     run_forge_script DeployHomeChain "$HOME_RPC"
@@ -390,13 +405,25 @@ step2_deploy_satellites() {
 
         CURRENT_STEP="Deploy Satellite: $name (domain $domain)"
         CURRENT_SAT_INDEX=$i
+
+        local sat_state_file="$SCRIPT_DIR/satellite-state-${domain}.json"
+        if [ -f "$sat_state_file" ]; then
+            warn "$name satellite state already exists: $sat_state_file"
+            if [ "$SKIP_CONFIRM" != true ]; then
+                read -rp "  Redeploy $name? (yes/no): " confirm
+                if [ "$confirm" != "yes" ]; then
+                    info "Skipping $name."
+                    continue
+                fi
+            fi
+        fi
+
         header "Step 2.$((i + 1)): Deploy Satellite on $name (domain $domain)"
 
         MAILBOX="$mailbox" \
         SATELLITE_DOMAIN="$domain" \
         run_forge_script DeploySatellite "$rpc"
 
-        local sat_state_file="$SCRIPT_DIR/satellite-state-${domain}.json"
         if [ ! -f "$sat_state_file" ]; then
             error "Satellite state file not created: $sat_state_file"
             exit 1
@@ -525,7 +552,12 @@ print_summary() {
 # ═══════════════════════════ Main ═══════════════════════════
 
 main() {
+    # Log all output to timestamped file
+    LOG_FILE="$SCRIPT_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
+    exec > >(tee -a "$LOG_FILE") 2>&1
+
     header "POA Protocol Cross-Chain Deployment"
+    info "Logging to $LOG_FILE"
     echo "  Home:       Arbitrum (domain $HOME_DOMAIN)"
     echo "  Satellites: Ethereum (1), Optimism (10), Gnosis (100)"
 

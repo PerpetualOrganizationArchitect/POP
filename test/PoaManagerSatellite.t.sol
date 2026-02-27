@@ -458,4 +458,36 @@ contract PoaManagerSatelliteTest is Test {
         vm.expectRevert(PoaManagerSatellite.UnauthorizedMailbox.selector);
         satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), hex"00");
     }
+
+    // ══════════════════════════════════════════════════════════
+    //  32. Admin Call Passthrough
+    // ══════════════════════════════════════════════════════════
+
+    function testSatelliteAdminCallPassthrough() public {
+        MockAdminTargetSat target = new MockAdminTargetSat(address(pm));
+        satellite.adminCall(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 77));
+        assertEq(target.value(), 77);
+    }
+
+    function testSatelliteAdminCallOnlyOwner() public {
+        MockAdminTargetSat target = new MockAdminTargetSat(address(pm));
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        satellite.adminCall(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 77));
+    }
+}
+
+/// @dev Mock target that gates a function behind msg.sender == poaManager
+contract MockAdminTargetSat {
+    address public poaManager;
+    uint256 public value;
+
+    constructor(address _pm) {
+        poaManager = _pm;
+    }
+
+    function setValueOnlyPM(uint256 _val) external {
+        require(msg.sender == poaManager, "not pm");
+        value = _val;
+    }
 }
