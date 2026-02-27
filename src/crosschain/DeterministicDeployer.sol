@@ -2,17 +2,26 @@
 pragma solidity ^0.8.20;
 
 import {CREATE3} from "solady/utils/CREATE3.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @title DeterministicDeployer
 /// @notice Deploys contracts to deterministic addresses using CREATE3.
 ///         The resulting address depends only on this deployer's address + the salt,
 ///         NOT on the creation bytecode. Deploy this contract to the same address on
 ///         every chain (via CREATE2) and the same salt yields the same address everywhere.
-contract DeterministicDeployer is Ownable {
+/// @dev    Uses Ownable2Step to prevent accidental ownership loss. Ownership cannot be
+///         renounced since losing it permanently bricks the cross-chain deploy pipeline.
+contract DeterministicDeployer is Ownable2Step {
     constructor(address _owner) Ownable(_owner) {}
+
     /*──────────── Errors ───────────*/
+    error CannotRenounce();
     error EmptyBytecode();
+
+    /// @dev Ownership cannot be renounced — losing it bricks the deployer permanently.
+    function renounceOwnership() public pure override {
+        revert CannotRenounce();
+    }
 
     /*──────────── Events ──────────*/
     event Deployed(bytes32 indexed salt, address deployed);

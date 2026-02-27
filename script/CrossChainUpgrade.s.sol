@@ -88,7 +88,7 @@ contract TriggerUpgrade is Script {
 
         vm.startBroadcast(deployerKey);
 
-        PoaManagerHub(hubAddr).upgradeBeaconCrossChain(typeName, newImpl, version);
+        PoaManagerHub(payable(hubAddr)).upgradeBeaconCrossChain(typeName, newImpl, version);
 
         vm.stopBroadcast();
 

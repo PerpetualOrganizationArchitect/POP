@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {PoaManager} from "../src/PoaManager.sol";
 import {ImplementationRegistry} from "../src/ImplementationRegistry.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {PoaManagerHub} from "../src/crosschain/PoaManagerHub.sol";
 import {MockMailbox} from "./mocks/MockMailbox.sol";
 import {IMessageRecipient} from "../src/crosschain/interfaces/IHyperlane.sol";
@@ -170,11 +171,11 @@ contract PoaManagerHubTest is Test {
         hub.addContractType("Widget", address(implV1));
 
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
 
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         hub.upgradeBeaconLocal("Widget", address(implV2), "v2");
     }
 
@@ -184,7 +185,7 @@ contract PoaManagerHubTest is Test {
 
     function testOnlyOwnerCanRegisterSatellite() public {
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         hub.registerSatellite(42, address(0x1234));
     }
 
@@ -261,7 +262,7 @@ contract PoaManagerHubTest is Test {
         hub.registerSatellite(42, address(noopSatellite));
 
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         hub.removeSatellite(0);
     }
 
@@ -271,7 +272,7 @@ contract PoaManagerHubTest is Test {
 
     function testNonOwnerCannotSetPaused() public {
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         hub.setPaused(true);
     }
 
@@ -281,7 +282,7 @@ contract PoaManagerHubTest is Test {
 
     function testNonOwnerCannotAddContractType() public {
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         hub.addContractType("Widget", address(implV1));
     }
 
@@ -291,7 +292,7 @@ contract PoaManagerHubTest is Test {
 
     function testNonOwnerCannotAddContractTypeCrossChain() public {
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         hub.addContractTypeCrossChain("Widget", address(implV1));
     }
 
@@ -301,7 +302,7 @@ contract PoaManagerHubTest is Test {
 
     function testNonOwnerCannotUpdateImplRegistry() public {
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         hub.updateImplRegistry(address(0x1234));
     }
 
@@ -477,7 +478,7 @@ contract PoaManagerHubTest is Test {
         vm.deal(address(hub), 1 ether);
 
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         hub.withdrawETH(payable(nonOwner));
     }
 
@@ -510,4 +511,205 @@ contract PoaManagerHubTest is Test {
         // Both entries dispatch, so 2 messages sent (duplicate)
         assertEq(mailbox.dispatchedCount(), 2, "Duplicate satellite = duplicate dispatch");
     }
+
+    // ══════════════════════════════════════════════════════════
+    //  32. ETH remainder refunded after upgrade
+    // ══════════════════════════════════════════════════════════
+
+    function testEthRemainderRefundedAfterUpgrade() public {
+        NoopRecipient noop2 = new NoopRecipient();
+        NoopRecipient noop3 = new NoopRecipient();
+        hub.registerSatellite(10, address(noopSatellite));
+        hub.registerSatellite(20, address(noop2));
+        hub.registerSatellite(30, address(noop3));
+        hub.addContractType("Widget", address(implV1));
+
+        uint256 balanceBefore = address(this).balance;
+        hub.upgradeBeaconCrossChain{value: 10}("Widget", address(implV2), "v2");
+        uint256 balanceAfter = address(this).balance;
+
+        // 10 / 3 = 3 per satellite, 1 remainder refunded
+        assertEq(balanceBefore - balanceAfter, 9, "Should spend 9 wei (3 per satellite), refund 1");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  33. ETH remainder refunded after addContractTypeCrossChain
+    // ══════════════════════════════════════════════════════════
+
+    function testEthRemainderRefundedAfterAddType() public {
+        NoopRecipient noop2 = new NoopRecipient();
+        NoopRecipient noop3 = new NoopRecipient();
+        hub.registerSatellite(10, address(noopSatellite));
+        hub.registerSatellite(20, address(noop2));
+        hub.registerSatellite(30, address(noop3));
+
+        uint256 balanceBefore = address(this).balance;
+        hub.addContractTypeCrossChain{value: 10}("Widget", address(implV1));
+        uint256 balanceAfter = address(this).balance;
+
+        assertEq(balanceBefore - balanceAfter, 9, "Should spend 9 wei, refund 1");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  34. Hub can receive plain ETH
+    // ══════════════════════════════════════════════════════════
+
+    function testHubCanReceiveEth() public {
+        (bool ok,) = address(hub).call{value: 1 ether}("");
+        assertTrue(ok, "Hub should accept ETH via receive()");
+        assertEq(address(hub).balance, 1 ether);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  35. Upgrade with ETH but no active satellites reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testUpgradeWithEthButNoActiveSatellitesReverts() public {
+        hub.registerSatellite(42, address(noopSatellite));
+        hub.removeSatellite(0); // deactivate
+        hub.addContractType("Widget", address(implV1));
+
+        vm.expectRevert(PoaManagerHub.NoActiveSatellites.selector);
+        hub.upgradeBeaconCrossChain{value: 1}("Widget", address(implV2), "v2");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  36. Upgrade with zero ETH and no active satellites succeeds
+    // ══════════════════════════════════════════════════════════
+
+    function testUpgradeWithZeroEthAndNoSatellitesSucceeds() public {
+        hub.registerSatellite(42, address(noopSatellite));
+        hub.removeSatellite(0);
+        hub.addContractType("Widget", address(implV1));
+
+        // No ETH sent, no active satellites — should succeed (local upgrade only)
+        hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
+
+        bytes32 typeId = keccak256(bytes("Widget"));
+        assertEq(pm.getCurrentImplementationById(typeId), address(implV2));
+        assertEq(mailbox.dispatchedCount(), 0);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  37. Upgrade after all satellites removed
+    // ══════════════════════════════════════════════════════════
+
+    function testUpgradeAfterAllSatellitesRemoved() public {
+        hub.registerSatellite(10, address(noopSatellite));
+        NoopRecipient noop2 = new NoopRecipient();
+        hub.registerSatellite(20, address(noop2));
+        hub.removeSatellite(0);
+        hub.removeSatellite(1);
+
+        hub.addContractType("Widget", address(implV1));
+        hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
+
+        bytes32 typeId = keccak256(bytes("Widget"));
+        assertEq(pm.getCurrentImplementationById(typeId), address(implV2), "Local upgrade should work");
+        assertEq(mailbox.dispatchedCount(), 0, "No dispatches when all removed");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  38. Re-register after remove dispatches to new entry
+    // ══════════════════════════════════════════════════════════
+
+    function testReRegisterAfterRemove() public {
+        hub.registerSatellite(42, address(noopSatellite));
+        hub.removeSatellite(0);
+        hub.registerSatellite(42, address(noopSatellite)); // re-register as new entry
+
+        hub.addContractType("Widget", address(implV1));
+        hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
+
+        // Only index 1 is active, index 0 is inactive
+        assertEq(mailbox.dispatchedCount(), 1, "Only the re-registered entry should dispatch");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  39. Hub upgrade unknown type reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testHubUpgradeUnknownTypeReverts() public {
+        vm.expectRevert(PoaManager.TypeUnknown.selector);
+        hub.upgradeBeaconCrossChain("NonExistent", address(implV2), "v2");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  40. Hub add duplicate type reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testHubAddDuplicateTypeReverts() public {
+        hub.addContractType("Widget", address(implV1));
+
+        vm.expectRevert(PoaManager.TypeExists.selector);
+        hub.addContractType("Widget", address(implV2));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  41. renounceOwnership reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testRenounceOwnershipReverts() public {
+        vm.expectRevert(PoaManagerHub.CannotRenounce.selector);
+        hub.renounceOwnership();
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  42. transferPoaManagerOwnership works
+    // ══════════════════════════════════════════════════════════
+
+    function testTransferPoaManagerOwnership() public {
+        address newOwner = address(0xCAFE);
+        hub.transferPoaManagerOwnership(newOwner);
+        assertEq(pm.owner(), newOwner, "PM ownership should transfer");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  43. Non-owner cannot transferPoaManagerOwnership
+    // ══════════════════════════════════════════════════════════
+
+    function testNonOwnerCannotTransferPoaManagerOwnership() public {
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        hub.transferPoaManagerOwnership(address(0xCAFE));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  44. transferPoaManagerOwnership reverts on zero address
+    // ══════════════════════════════════════════════════════════
+
+    function testTransferPoaManagerOwnershipRevertsZeroAddress() public {
+        vm.expectRevert(PoaManagerHub.ZeroAddress.selector);
+        hub.transferPoaManagerOwnership(address(0));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  45. ETH refund preserves pre-existing balance
+    // ══════════════════════════════════════════════════════════
+
+    function testEthRefundPreservesPreExistingBalance() public {
+        NoopRecipient noop2 = new NoopRecipient();
+        NoopRecipient noop3 = new NoopRecipient();
+        hub.registerSatellite(10, address(noopSatellite));
+        hub.registerSatellite(20, address(noop2));
+        hub.registerSatellite(30, address(noop3));
+        hub.addContractType("Widget", address(implV1));
+
+        // Pre-fund the Hub with ETH (simulating Hyperlane refunds)
+        vm.deal(address(hub), 5 ether);
+
+        uint256 callerBefore = address(this).balance;
+        hub.upgradeBeaconCrossChain{value: 10}("Widget", address(implV2), "v2");
+        uint256 callerAfter = address(this).balance;
+
+        // Caller should only get back the 1 wei remainder (10 % 3 = 1), not the 5 ether
+        assertEq(callerBefore - callerAfter, 9, "Caller spends 9 wei (3 per satellite)");
+        assertEq(address(hub).balance, 5 ether, "Pre-existing 5 ether must remain in hub");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  Helper: accept ETH refunds
+    // ══════════════════════════════════════════════════════════
+
+    receive() external payable {}
 }

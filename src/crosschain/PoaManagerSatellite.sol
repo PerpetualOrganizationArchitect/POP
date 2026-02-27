@@ -20,16 +20,22 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
     uint32 public immutable hubDomain;
     bytes32 public immutable hubAddress;
 
+    /*──────────── Storage ─────────────*/
+    bool public paused;
+
     /*──────────── Errors ──────────────*/
     error UnauthorizedMailbox();
     error UnauthorizedOrigin();
     error UnauthorizedSender();
     error UnknownMessageType();
     error ZeroAddress();
+    error IsPaused();
+    error CannotRenounce();
 
     /*──────────── Events ──────────────*/
     event UpgradeReceived(bytes32 indexed typeId, address newImpl, string version, uint32 origin);
     event ContractTypeReceived(bytes32 indexed typeId, string typeName, address impl, uint32 origin);
+    event PauseSet(bool paused);
 
     /*──────────── Constructor ─────────*/
     constructor(address _poaManager, address _mailbox, uint32 _hubDomain, address _hubAddress) {
@@ -50,6 +56,7 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
         if (msg.sender != mailbox) revert UnauthorizedMailbox();
         if (_origin != hubDomain) revert UnauthorizedOrigin();
         if (_sender != hubAddress) revert UnauthorizedSender();
+        if (paused) revert IsPaused();
 
         uint8 msgType = abi.decode(_body[:32], (uint8));
 
@@ -71,6 +78,20 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
         }
     }
 
+    /*══════════════════ Ownership Safety ══════════════════*/
+
+    /// @dev Ownership cannot be renounced — losing it bricks the satellite permanently.
+    function renounceOwnership() public pure override {
+        revert CannotRenounce();
+    }
+
+    /*══════════════════ Pause ══════════════════*/
+
+    function setPaused(bool _paused) external onlyOwner {
+        paused = _paused;
+        emit PauseSet(_paused);
+    }
+
     /*══════════════════ Emergency / Direct Admin ══════════════════*/
 
     /// @notice Emergency local-only upgrade (bypasses cross-chain path).
@@ -89,5 +110,11 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
     /// @notice Update the ImplementationRegistry on the local PoaManager.
     function updateImplRegistry(address registryAddr) external onlyOwner {
         poaManager.updateImplRegistry(registryAddr);
+    }
+
+    /// @notice Transfer PoaManager ownership (e.g. to a replacement satellite).
+    function transferPoaManagerOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert ZeroAddress();
+        poaManager.transferOwnership(newOwner);
     }
 }

@@ -25,7 +25,7 @@ contract RegisterSatellite is Script {
         console.log("Satellite address:", satAddr);
 
         vm.startBroadcast(deployerKey);
-        PoaManagerHub(hubAddr).registerSatellite(satDomain, satAddr);
+        PoaManagerHub(payable(hubAddr)).registerSatellite(satDomain, satAddr);
         vm.stopBroadcast();
 
         console.log("Satellite registered successfully");

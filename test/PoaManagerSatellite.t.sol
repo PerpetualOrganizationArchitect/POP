@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {PoaManager} from "../src/PoaManager.sol";
 import {ImplementationRegistry} from "../src/ImplementationRegistry.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {PoaManagerSatellite} from "../src/crosschain/PoaManagerSatellite.sol";
 
 /*──────────── Dummy implementations for testing ───────────*/
@@ -168,7 +169,7 @@ contract PoaManagerSatelliteTest is Test {
         satellite.addContractType("Widget", address(implV1));
 
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         satellite.upgradeBeaconDirect("Widget", address(implV2), "v2");
     }
 
@@ -191,7 +192,7 @@ contract PoaManagerSatelliteTest is Test {
 
     function testNonOwnerCannotAddContractType() public {
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         satellite.addContractType("Widget", address(implV1));
     }
 
@@ -201,7 +202,7 @@ contract PoaManagerSatelliteTest is Test {
 
     function testNonOwnerCannotUpdateImplRegistry() public {
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         satellite.updateImplRegistry(address(0x1234));
     }
 
@@ -315,5 +316,146 @@ contract PoaManagerSatelliteTest is Test {
     function testConstructorRevertsZeroHubAddress() public {
         vm.expectRevert(PoaManagerSatellite.ZeroAddress.selector);
         new PoaManagerSatellite(address(pm), mailbox, hubDomain, address(0));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  21. Paused satellite blocks handle
+    // ══════════════════════════════════════════════════════════
+
+    function testPausedSatelliteBlocksHandle() public {
+        satellite.addContractType("Widget", address(implV1));
+        satellite.setPaused(true);
+
+        bytes memory body = _upgradePayload("Widget", address(implV2), "v2");
+
+        vm.prank(mailbox);
+        vm.expectRevert(PoaManagerSatellite.IsPaused.selector);
+        satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), body);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  22. Paused satellite allows direct upgrade
+    // ══════════════════════════════════════════════════════════
+
+    function testPausedSatelliteAllowsDirectUpgrade() public {
+        satellite.addContractType("Widget", address(implV1));
+        satellite.setPaused(true);
+
+        satellite.upgradeBeaconDirect("Widget", address(implV2), "v2");
+
+        bytes32 typeId = keccak256(bytes("Widget"));
+        assertEq(pm.getCurrentImplementationById(typeId), address(implV2));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  23. Pause/unpause toggle works
+    // ══════════════════════════════════════════════════════════
+
+    function testPauseUnpauseToggle() public {
+        satellite.addContractType("Widget", address(implV1));
+
+        satellite.setPaused(true);
+        assertTrue(satellite.paused());
+
+        // handle blocked
+        bytes memory body = _upgradePayload("Widget", address(implV2), "v2");
+        vm.prank(mailbox);
+        vm.expectRevert(PoaManagerSatellite.IsPaused.selector);
+        satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), body);
+
+        // unpause
+        satellite.setPaused(false);
+        assertFalse(satellite.paused());
+
+        // handle succeeds
+        _deliverMessage(body);
+        bytes32 typeId = keccak256(bytes("Widget"));
+        assertEq(pm.getCurrentImplementationById(typeId), address(implV2));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  24. Non-owner cannot setPaused
+    // ══════════════════════════════════════════════════════════
+
+    function testNonOwnerCannotSetPaused() public {
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        satellite.setPaused(true);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  25. transferPoaManagerOwnership works
+    // ══════════════════════════════════════════════════════════
+
+    function testTransferPoaManagerOwnership() public {
+        address newOwner = address(0xCAFE);
+
+        satellite.transferPoaManagerOwnership(newOwner);
+
+        assertEq(pm.owner(), newOwner, "PM ownership should transfer");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  26. Non-owner cannot transferPoaManagerOwnership
+    // ══════════════════════════════════════════════════════════
+
+    function testNonOwnerCannotTransferPoaManagerOwnership() public {
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        satellite.transferPoaManagerOwnership(address(0xCAFE));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  27. transferPoaManagerOwnership reverts on zero address
+    // ══════════════════════════════════════════════════════════
+
+    function testTransferPoaManagerOwnershipRevertsZeroAddress() public {
+        vm.expectRevert(PoaManagerSatellite.ZeroAddress.selector);
+        satellite.transferPoaManagerOwnership(address(0));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  28. handle with malformed payload reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleMalformedPayloadReverts() public {
+        // Send a truncated payload (< 32 bytes)
+        bytes memory truncated = hex"0102";
+
+        vm.prank(mailbox);
+        vm.expectRevert();
+        satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), truncated);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  29. Pause emits PauseSet event
+    // ══════════════════════════════════════════════════════════
+
+    function testPauseEmitsEvent() public {
+        vm.expectEmit(false, false, false, true);
+        emit PoaManagerSatellite.PauseSet(true);
+        satellite.setPaused(true);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  30. renounceOwnership reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testRenounceOwnershipReverts() public {
+        vm.expectRevert(PoaManagerSatellite.CannotRenounce.selector);
+        satellite.renounceOwnership();
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  31. Paused satellite still rejects unauthorized callers first
+    // ══════════════════════════════════════════════════════════
+
+    function testPausedSatelliteRejectsUnauthorizedFirst() public {
+        satellite.setPaused(true);
+
+        // An unauthorized caller should get UnauthorizedMailbox, NOT IsPaused
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(PoaManagerSatellite.UnauthorizedMailbox.selector);
+        satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), hex"00");
     }
 }

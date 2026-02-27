@@ -69,7 +69,7 @@ contract TriggerCrossChainUpgrade is Script {
         console.log("Sending fee:", fee);
 
         vm.startBroadcast(deployerKey);
-        PoaManagerHub(hubAddr).upgradeBeaconCrossChain{value: fee}("HybridVoting", newImpl, "v2");
+        PoaManagerHub(payable(hubAddr)).upgradeBeaconCrossChain{value: fee}("HybridVoting", newImpl, "v2");
         vm.stopBroadcast();
 
         console.log("Upgrade dispatched. Hyperlane will relay to satellites.");

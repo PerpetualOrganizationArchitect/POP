@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {DeterministicDeployer} from "../src/crosschain/DeterministicDeployer.sol";
 
 /*──────────── Simple contract for deployment testing ───────────*/
@@ -67,7 +69,7 @@ contract DeterministicDeployerTest is Test {
         bytes32 salt = deployer.computeSalt("Test", "v1");
 
         vm.prank(nonOwner);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         deployer.deploy(salt, type(SimpleContract).creationCode);
     }
 
@@ -133,5 +135,58 @@ contract DeterministicDeployerTest is Test {
         vm.expectEmit(true, false, false, true);
         emit DeterministicDeployer.Deployed(salt, predicted);
         deployer.deploy(salt, type(SimpleContract).creationCode);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  10. renounceOwnership reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testRenounceOwnershipReverts() public {
+        vm.expectRevert(DeterministicDeployer.CannotRenounce.selector);
+        deployer.renounceOwnership();
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  11. Ownership transfer is two-step
+    // ══════════════════════════════════════════════════════════
+
+    function testOwnershipTransferIsTwoStep() public {
+        address newOwner = address(0xCAFE);
+
+        // Step 1: transferOwnership sets pendingOwner but does NOT change owner
+        deployer.transferOwnership(newOwner);
+        assertEq(deployer.owner(), address(this), "Owner should not change yet");
+        assertEq(deployer.pendingOwner(), newOwner, "Pending owner should be set");
+
+        // Step 2: new owner accepts
+        vm.prank(newOwner);
+        deployer.acceptOwnership();
+        assertEq(deployer.owner(), newOwner, "Owner should now be newOwner");
+        assertEq(deployer.pendingOwner(), address(0), "Pending owner should be cleared");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  12. Deploy with constructor args
+    // ══════════════════════════════════════════════════════════
+
+    function testDeployWithConstructorArgs() public {
+        bytes32 salt = deployer.computeSalt("ContractWithArgs", "v1");
+        address predicted = deployer.computeAddress(salt);
+
+        // Deploy ContractWithArgs with constructor arg (uint256 42)
+        bytes memory creationCode = abi.encodePacked(type(ContractWithArgs).creationCode, abi.encode(uint256(42)));
+        address deployed = deployer.deploy(salt, creationCode);
+
+        assertEq(deployed, predicted, "Should match predicted address");
+        assertEq(ContractWithArgs(deployed).initValue(), 42, "Constructor arg should be applied");
+    }
+}
+
+/*──────────── Contract with constructor args for testing ───────────*/
+contract ContractWithArgs {
+    uint256 public initValue;
+
+    constructor(uint256 _val) {
+        initValue = _val;
     }
 }

@@ -34,6 +34,9 @@ contract PoaManagerHub is Ownable(msg.sender) {
     /*──────────── Errors ──────────────*/
     error IsPaused();
     error ZeroAddress();
+    error NoActiveSatellites();
+    error CannotRenounce();
+    error TransferFailed();
 
     /*──────────── Events ──────────────*/
     event CrossChainUpgradeDispatched(
@@ -63,6 +66,7 @@ contract PoaManagerHub is Ownable(msg.sender) {
         onlyOwner
     {
         if (paused) revert IsPaused();
+        uint256 preBalance = address(this).balance - msg.value;
 
         // 1. Upgrade locally (validates impl, updates registry, upgrades beacon)
         poaManager.upgradeBeacon(typeName, newImpl, version);
@@ -82,6 +86,8 @@ contract PoaManagerHub is Ownable(msg.sender) {
                 ++i;
             }
         }
+
+        _refundExcess(preBalance);
     }
 
     /// @notice Upgrade a beacon on the home chain only (no cross-chain propagation).
@@ -101,6 +107,7 @@ contract PoaManagerHub is Ownable(msg.sender) {
     ///         Send enough ETH to cover Hyperlane protocol fees for all active satellites.
     function addContractTypeCrossChain(string calldata typeName, address impl) external payable onlyOwner {
         if (paused) revert IsPaused();
+        uint256 preBalance = address(this).balance - msg.value;
 
         poaManager.addContractType(typeName, impl);
 
@@ -118,6 +125,8 @@ contract PoaManagerHub is Ownable(msg.sender) {
                 ++i;
             }
         }
+
+        _refundExcess(preBalance);
     }
 
     /*══════════════════ Registry Passthrough ══════════════════*/
@@ -147,6 +156,19 @@ contract PoaManagerHub is Ownable(msg.sender) {
         return satellites.length;
     }
 
+    /*══════════════════ Ownership Safety ══════════════════*/
+
+    /// @dev Ownership cannot be renounced — losing it bricks the Hub permanently.
+    function renounceOwnership() public pure override {
+        revert CannotRenounce();
+    }
+
+    /// @notice Transfer PoaManager ownership (e.g. to a replacement Hub).
+    function transferPoaManagerOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert ZeroAddress();
+        poaManager.transferOwnership(newOwner);
+    }
+
     /*══════════════════ Emergency ══════════════════*/
 
     function setPaused(bool _paused) external onlyOwner {
@@ -159,12 +181,13 @@ contract PoaManagerHub is Ownable(msg.sender) {
         if (to == address(0)) revert ZeroAddress();
         uint256 balance = address(this).balance;
         (bool ok,) = to.call{value: balance}("");
-        require(ok);
+        if (!ok) revert TransferFailed();
     }
 
     /*══════════════════ Internal ══════════════════*/
 
     /// @dev Computes the fee to send per active satellite by dividing msg.value evenly.
+    ///      Reverts if ETH is sent but there are no active satellites (would be lost).
     function _feePerActiveSatellite() internal view returns (uint256) {
         uint256 len = satellites.length;
         uint256 activeCount;
@@ -178,6 +201,20 @@ contract PoaManagerHub is Ownable(msg.sender) {
                 ++i;
             }
         }
+        if (activeCount == 0 && msg.value > 0) revert NoActiveSatellites();
         return activeCount > 0 ? msg.value / activeCount : 0;
     }
+
+    /// @dev Refunds only the caller's overpayment (integer division remainder).
+    ///      Pre-existing contract balance (e.g. Hyperlane refunds) is preserved.
+    function _refundExcess(uint256 preBalance) internal {
+        uint256 excess = address(this).balance - preBalance;
+        if (excess > 0) {
+            (bool ok,) = msg.sender.call{value: excess}("");
+            if (!ok) revert TransferFailed();
+        }
+    }
+
+    /// @dev Accept ETH (e.g. Hyperlane fee refunds).
+    receive() external payable {}
 }
