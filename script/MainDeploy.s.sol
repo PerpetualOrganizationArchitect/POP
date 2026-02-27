@@ -53,7 +53,9 @@ import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
  *         until satellites are registered (see RegisterAndTransfer).
  *
  * Environment Variables:
- *   Required: PRIVATE_KEY, MAILBOX
+ *   Required: PRIVATE_KEY, MAILBOX, HUB_DOMAIN
+ *     HUB_DOMAIN - Hyperlane domain ID for the home chain
+ *       Ethereum=1, Arbitrum=42161, Optimism=10, Gnosis=100
  *   Optional (IPFS metadata):
  *     ORG_METADATA_HASH         - bytes32 IPFS CID sha256 digest for org metadata
  *     MEMBER_ROLE_IMAGE         - IPFS URI for MEMBER role image (e.g. "ipfs://Qm...")
@@ -62,7 +64,7 @@ import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
  *     CONTRIBUTOR_ROLE_METADATA - bytes32 IPFS CID for CONTRIBUTOR role metadata
  *
  * Usage:
- *   PRIVATE_KEY=0x... MAILBOX=0x... \
+ *   PRIVATE_KEY=0x... MAILBOX=0x... HUB_DOMAIN=1 \
  *   ORG_METADATA_HASH=0x... MEMBER_ROLE_IMAGE="ipfs://Qm..." \
  *   forge script script/MainDeploy.s.sol:DeployHomeChain \
  *     --rpc-url $HOME_RPC --broadcast --slow
@@ -97,11 +99,13 @@ contract DeployHomeChain is Script {
     function run() public {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
         address mailboxAddr = vm.envAddress("MAILBOX");
+        uint32 hubDomain = uint32(vm.envUint("HUB_DOMAIN"));
         address deployer = vm.addr(deployerKey);
 
         console.log("\n=== MainDeploy: Home Chain ===");
         console.log("Deployer:", deployer);
         console.log("Mailbox:", mailboxAddr);
+        console.log("Hub domain:", hubDomain);
 
         vm.startBroadcast(deployerKey);
 
@@ -128,7 +132,7 @@ contract DeployHomeChain is Script {
         vm.stopBroadcast();
 
         // 6. Write state JSON
-        _writeState(dd, infra, address(hub), orgResult);
+        _writeState(dd, infra, address(hub), orgResult, hubDomain);
 
         console.log("\n=== Home Chain Deployment Complete ===");
         console.log("Hub ownership remains with deployer for satellite registration.");
@@ -420,17 +424,21 @@ contract DeployHomeChain is Script {
 
     /*═══════════════════════════ STATE OUTPUT ═══════════════════════════*/
 
-    function _writeState(address dd, InfraResult memory infra, address hub, OrgDeployer.DeploymentResult memory org)
-        internal
-    {
+    function _writeState(
+        address dd,
+        InfraResult memory infra,
+        address hub,
+        OrgDeployer.DeploymentResult memory org,
+        uint32 hubDomain
+    ) internal {
         string memory part1 = string.concat(
             "{\n",
             '  "deterministicDeployer": "',
             vm.toString(dd),
             '",\n',
             '  "homeChain": {\n',
-            '    "chainId": ',
-            vm.toString(block.chainid),
+            '    "hubDomain": ',
+            vm.toString(uint256(hubDomain)),
             ",\n",
             '    "poaManager": "',
             vm.toString(infra.poaManager),
@@ -511,8 +519,13 @@ contract DeployHomeChain is Script {
  * @notice Deploys satellite infrastructure on a remote chain with deterministic
  *         implementation addresses and a PoaManagerSatellite.
  *
+ * Environment Variables:
+ *   Required: PRIVATE_KEY, MAILBOX, SATELLITE_DOMAIN
+ *     SATELLITE_DOMAIN - Hyperlane domain ID for the satellite chain
+ *       Ethereum=1, Arbitrum=42161, Optimism=10, Gnosis=100
+ *
  * Usage:
- *   PRIVATE_KEY=0x... MAILBOX=0x... SATELLITE_DOMAIN=84532 \
+ *   PRIVATE_KEY=0x... MAILBOX=0x... SATELLITE_DOMAIN=42161 \
  *   forge script script/MainDeploy.s.sol:DeploySatellite \
  *     --rpc-url $SATELLITE_RPC --broadcast --slow
  */
@@ -527,7 +540,7 @@ contract DeploySatellite is Script {
         // Read hub address and domain from state file
         string memory state = vm.readFile("script/main-deploy-state.json");
         address hubAddress = vm.parseJsonAddress(state, ".homeChain.hub");
-        uint32 hubDomain = uint32(vm.parseJsonUint(state, ".homeChain.chainId"));
+        uint32 hubDomain = uint32(vm.parseJsonUint(state, ".homeChain.hubDomain"));
 
         console.log("\n=== MainDeploy: Satellite Chain ===");
         console.log("Deployer:", deployer);
