@@ -72,12 +72,12 @@ contract HybridVoting is Initializable {
         uint256 _lock; // Inline reentrancy guard state
     }
 
-    // keccak256("poa.hybridvoting.v2.storage") → unique, collision-free slot for v2
-    bytes32 private constant _STORAGE_SLOT = 0x7a3e8e3d8e9c8f7b6a5d4c3b2a1908070605040302010009080706050403020a;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.hybridvoting.v2.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

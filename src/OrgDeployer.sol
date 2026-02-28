@@ -130,11 +130,12 @@ contract OrgDeployer is Initializable {
 
     IHats public hats;
 
-    bytes32 private constant _STORAGE_SLOT = 0x9f1e8f9f8d4c3b2a1e7f6d5c4b3a2e1f0d9c8b7a6e5f4d3c2b1a0e9f8d7c6b5a;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.orgdeployer.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

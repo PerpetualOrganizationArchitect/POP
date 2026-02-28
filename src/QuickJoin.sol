@@ -62,12 +62,12 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         uint256 salt;
     }
 
-    // keccak256("poa.quickjoin.storage")
-    bytes32 private constant _STORAGE_SLOT = 0x566f0545117c69d7a3001f74fa210927792975a5c779e9cbf2876fbc68ef7fa2;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.quickjoin.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

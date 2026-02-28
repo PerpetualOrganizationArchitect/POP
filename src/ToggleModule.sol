@@ -29,12 +29,12 @@ contract ToggleModule is Initializable {
         mapping(uint256 => bool) hatActive;
     }
 
-    // keccak256("poa.togglemodule.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x48a7efb8656f02a8591e22e17dff92b9ee0d73547a5595fbb83f382a43ba28cf;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.togglemodule.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

@@ -10,7 +10,7 @@ import {IExecutor} from "../Executor.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 
 library HybridVotingProposals {
-    bytes32 private constant _STORAGE_SLOT = 0x7a3e8e3d8e9c8f7b6a5d4c3b2a1908070605040302010009080706050403020a;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.hybridvoting.v2.storage");
 
     uint8 public constant MAX_OPTIONS = 50;
     uint8 public constant MAX_CALLS = 20;
@@ -29,8 +29,9 @@ library HybridVotingProposals {
     );
 
     function _layout() private pure returns (HybridVoting.Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 
