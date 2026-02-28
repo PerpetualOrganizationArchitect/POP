@@ -499,17 +499,25 @@ contract PoaManagerHubTest is Test {
     //  31. Duplicate satellite registration causes duplicate dispatches
     // ══════════════════════════════════════════════════════════
 
-    function testDuplicateSatelliteCausesDuplicateDispatches() public {
-        // Register the same satellite twice
+    function testDuplicateSatelliteReverts() public {
         hub.registerSatellite(42, address(noopSatellite));
+
+        vm.expectRevert(abi.encodeWithSelector(PoaManagerHub.DuplicateDomain.selector, uint32(42)));
         hub.registerSatellite(42, address(noopSatellite));
-        assertEq(hub.satelliteCount(), 2, "Should have 2 entries (duplicates allowed)");
+    }
+
+    function testReRegisterAfterRemoveAllowsSameDomain() public {
+        hub.registerSatellite(42, address(noopSatellite));
+        hub.removeSatellite(0); // deactivate
+
+        // Re-registering same domain after removal should succeed
+        NoopRecipient noop2 = new NoopRecipient();
+        hub.registerSatellite(42, address(noop2));
+        assertEq(hub.satelliteCount(), 2, "Should have 2 entries (1 inactive + 1 active)");
 
         hub.addContractType("Widget", address(implV1));
         hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
-
-        // Both entries dispatch, so 2 messages sent (duplicate)
-        assertEq(mailbox.dispatchedCount(), 2, "Duplicate satellite = duplicate dispatch");
+        assertEq(mailbox.dispatchedCount(), 1, "Only the active re-registered entry should dispatch");
     }
 
     // ══════════════════════════════════════════════════════════

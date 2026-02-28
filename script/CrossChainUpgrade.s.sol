@@ -24,10 +24,10 @@ import {PoaManager} from "../src/PoaManager.sol";
  *     --rpc-url $RPC_URL --broadcast
  *
  *   # Step 2: Trigger upgrade on home chain
- *   HUB=0x... DETERMINISTIC_DEPLOYER=0x... \
+ *   HUB=0x... DETERMINISTIC_DEPLOYER=0x... HYPERLANE_FEE=10000000000000000 \
  *   forge script script/CrossChainUpgrade.s.sol:TriggerUpgrade \
  *     --sig "run(string,string)" "HybridVoting" "v3" \
- *     --rpc-url $HOME_RPC_URL --broadcast
+ *     --rpc-url $HOME_RPC_URL --broadcast --value $HYPERLANE_FEE
  *
  *   # Step 3: Verify (read-only)
  *   POAMANAGER=0x... \
@@ -68,11 +68,14 @@ contract DeployImplAllChains is Script {
 }
 
 /// @notice Trigger a cross-chain upgrade from the home chain Hub.
+///         Set HYPERLANE_FEE (in wei) to cover Hyperlane protocol fees for all active satellites.
+///         On testnets/local this can be 0; mainnet Hyperlane mailboxes require payment.
 contract TriggerUpgrade is Script {
     function run(string calldata typeName, string calldata version) public {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
         address hubAddr = vm.envAddress("HUB");
         address ddAddr = vm.envAddress("DETERMINISTIC_DEPLOYER");
+        uint256 fee = vm.envOr("HYPERLANE_FEE", uint256(0));
 
         DeterministicDeployer dd = DeterministicDeployer(ddAddr);
         bytes32 salt = dd.computeSalt(typeName, version);
@@ -83,12 +86,13 @@ contract TriggerUpgrade is Script {
         console.log("Version:", version);
         console.log("New impl:", newImpl);
         console.log("Hub:", hubAddr);
+        console.log("Hyperlane fee:", fee);
 
         require(newImpl.code.length > 0, "Implementation not deployed on this chain");
 
         vm.startBroadcast(deployerKey);
 
-        PoaManagerHub(payable(hubAddr)).upgradeBeaconCrossChain(typeName, newImpl, version);
+        PoaManagerHub(payable(hubAddr)).upgradeBeaconCrossChain{value: fee}(typeName, newImpl, version);
 
         vm.stopBroadcast();
 

@@ -758,11 +758,28 @@ contract RegisterAndTransfer is Script {
 
         PoaManagerHub hub = PoaManagerHub(payable(hubAddr));
 
+        // Build set of already-registered active domains (for idempotent re-runs)
+        uint256 existingCount = hub.satelliteCount();
+
         // Register each satellite by reading its state file
         for (uint256 i = 0; i < numSatellites; i++) {
             // Read domain from numbered env var (SATELLITE_DOMAIN_0, SATELLITE_DOMAIN_1, ...)
             string memory envKey = string.concat("SATELLITE_DOMAIN_", vm.toString(i));
             uint32 domain = uint32(vm.envUint(envKey));
+
+            // Skip if this domain is already actively registered
+            bool alreadyRegistered = false;
+            for (uint256 j = 0; j < existingCount; j++) {
+                (uint32 existingDomain,, bool active) = hub.satellites(j);
+                if (existingDomain == domain && active) {
+                    alreadyRegistered = true;
+                    break;
+                }
+            }
+            if (alreadyRegistered) {
+                console.log("Satellite already registered, skipping domain:", domain);
+                continue;
+            }
 
             // Read satellite address from its state file
             string memory filename = string.concat("script/satellite-state-", vm.toString(uint256(domain)), ".json");

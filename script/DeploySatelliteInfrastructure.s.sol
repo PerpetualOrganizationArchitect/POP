@@ -39,13 +39,14 @@ import {PasskeyAccountFactory} from "../src/PasskeyAccountFactory.sol";
 contract DeploySatelliteInfrastructure is Script {
     function run() public {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
+        address deployer = vm.addr(deployerKey);
         address deterministicDeployer = vm.envAddress("DETERMINISTIC_DEPLOYER");
         uint32 hubDomain = uint32(vm.envUint("HUB_DOMAIN"));
         address hubAddress = vm.envAddress("HUB_ADDRESS");
         address mailboxAddr = vm.envAddress("MAILBOX");
 
         console.log("\n=== Deploying Satellite Infrastructure ===");
-        console.log("Deployer:", vm.addr(deployerKey));
+        console.log("Deployer:", deployer);
         console.log("Hub domain:", hubDomain);
         console.log("Hub address:", hubAddress);
 
@@ -65,7 +66,7 @@ contract DeploySatelliteInfrastructure is Script {
         // 4. Setup ImplementationRegistry behind a beacon
         pm.addContractType("ImplementationRegistry", regImplAddr);
         address regBeacon = pm.getBeaconById(keccak256("ImplementationRegistry"));
-        bytes memory regInit = abi.encodeWithSignature("initialize(address)", msg.sender);
+        bytes memory regInit = abi.encodeWithSignature("initialize(address)", deployer);
         ImplementationRegistry reg = ImplementationRegistry(address(new BeaconProxy(regBeacon, regInit)));
         pm.updateImplRegistry(address(reg));
         reg.registerImplementation("ImplementationRegistry", "v1", regImplAddr, true);

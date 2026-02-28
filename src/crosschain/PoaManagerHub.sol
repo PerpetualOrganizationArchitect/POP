@@ -37,6 +37,7 @@ contract PoaManagerHub is Ownable(msg.sender) {
     error NoActiveSatellites();
     error CannotRenounce();
     error TransferFailed();
+    error DuplicateDomain(uint32 domain);
 
     /*──────────── Events ──────────────*/
     event CrossChainUpgradeDispatched(
@@ -149,6 +150,18 @@ contract PoaManagerHub is Ownable(msg.sender) {
 
     function registerSatellite(uint32 domain, address satellite) external onlyOwner {
         if (satellite == address(0)) revert ZeroAddress();
+
+        // Reject duplicate active domains — prevents double-dispatch and fee burn
+        uint256 len = satellites.length;
+        for (uint256 i; i < len;) {
+            if (satellites[i].domain == domain && satellites[i].active) {
+                revert DuplicateDomain(domain);
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
         satellites.push(
             SatelliteConfig({domain: domain, satellite: bytes32(uint256(uint160(satellite))), active: true})
         );

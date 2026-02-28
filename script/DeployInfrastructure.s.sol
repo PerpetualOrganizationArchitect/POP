@@ -83,14 +83,15 @@ contract DeployInfrastructure is Script {
 
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        address deployer = vm.addr(deployerPrivateKey);
 
         console.log("\n=== Starting POA Infrastructure Deployment ===");
-        console.log("Deployer:", vm.addr(deployerPrivateKey));
+        console.log("Deployer:", deployer);
         console.log("Hats Protocol:", HATS_PROTOCOL);
 
         vm.startBroadcast(deployerPrivateKey);
 
-        _deployAll();
+        _deployAll(deployer);
 
         vm.stopBroadcast();
 
@@ -99,7 +100,7 @@ contract DeployInfrastructure is Script {
         console.log("\n=== Infrastructure Deployment Complete ===\n");
     }
 
-    function _deployAll() internal {
+    function _deployAll(address deployer) internal {
         // Deploy all implementations
         address hybridVotingImpl = address(new HybridVoting());
         address ddVotingImpl = address(new DirectDemocracyVoting());
@@ -127,7 +128,7 @@ contract DeployInfrastructure is Script {
         // Setup ImplementationRegistry
         PoaManager(poaManager).addContractType("ImplementationRegistry", implRegImpl);
         address implRegBeacon = PoaManager(poaManager).getBeaconById(keccak256("ImplementationRegistry"));
-        bytes memory implRegInit = abi.encodeWithSignature("initialize(address)", msg.sender);
+        bytes memory implRegInit = abi.encodeWithSignature("initialize(address)", deployer);
         implRegistry = address(new BeaconProxy(implRegBeacon, implRegInit));
 
         PoaManager(poaManager).updateImplRegistry(implRegistry);
@@ -141,7 +142,7 @@ contract DeployInfrastructure is Script {
 
         // Deploy OrgRegistry proxy
         address orgRegBeacon = PoaManager(poaManager).getBeaconById(keccak256("OrgRegistry"));
-        bytes memory orgRegInit = abi.encodeWithSignature("initialize(address)", msg.sender);
+        bytes memory orgRegInit = abi.encodeWithSignature("initialize(address,address)", deployer, HATS_PROTOCOL);
         orgRegistry = address(new BeaconProxy(orgRegBeacon, orgRegInit));
         console.log("OrgRegistry:", orgRegistry);
 
@@ -190,6 +191,10 @@ contract DeployInfrastructure is Script {
         // Transfer OrgRegistry ownership
         OrgRegistry(orgRegistry).transferOwnership(orgDeployer);
 
+        // Authorize OrgDeployer to register orgs with PaymasterHub
+        PoaManager(poaManager).adminCall(paymasterHub, abi.encodeWithSignature("setOrgRegistrar(address)", orgDeployer));
+        console.log("OrgDeployer authorized as orgRegistrar on PaymasterHub");
+
         // Register all contract types
         PoaManager pm = PoaManager(poaManager);
         pm.addContractType("HybridVoting", hybridVotingImpl);
@@ -210,7 +215,7 @@ contract DeployInfrastructure is Script {
 
         // Deploy global account registry
         address accRegBeacon = pm.getBeaconById(keccak256("UniversalAccountRegistry"));
-        bytes memory accRegInit = abi.encodeWithSignature("initialize(address)", msg.sender);
+        bytes memory accRegInit = abi.encodeWithSignature("initialize(address)", deployer);
         globalAccountRegistry = address(new BeaconProxy(accRegBeacon, accRegInit));
         console.log("GlobalAccountRegistry:", globalAccountRegistry);
 
@@ -223,8 +228,11 @@ contract DeployInfrastructure is Script {
         universalPasskeyFactory = address(new BeaconProxy(passkeyFactoryBeaconAddr, passkeyFactoryInit));
         console.log("UniversalPasskeyFactory:", universalPasskeyFactory);
 
-        // Wire up universal factory to OrgDeployer
-        OrgDeployer(orgDeployer).setUniversalPasskeyFactory(universalPasskeyFactory);
+        // Wire up universal factory to OrgDeployer (via adminCall since it requires msg.sender == poaManager)
+        PoaManager(poaManager)
+            .adminCall(
+                orgDeployer, abi.encodeWithSignature("setUniversalPasskeyFactory(address)", universalPasskeyFactory)
+            );
         console.log("UniversalPasskeyFactory set on OrgDeployer");
 
         // Emit InfrastructureDeployed event for subgraph dynamic discovery
