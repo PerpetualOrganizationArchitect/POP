@@ -5,20 +5,8 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 
-// Implementation contracts
-import {HybridVoting} from "../src/HybridVoting.sol";
-import {DirectDemocracyVoting} from "../src/DirectDemocracyVoting.sol";
-import {Executor} from "../src/Executor.sol";
-import {QuickJoin} from "../src/QuickJoin.sol";
-import {ParticipationToken} from "../src/ParticipationToken.sol";
-import {TaskManager} from "../src/TaskManager.sol";
-import {EducationHub} from "../src/EducationHub.sol";
-import {PaymentManager} from "../src/PaymentManager.sol";
-import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
-import {EligibilityModule} from "../src/EligibilityModule.sol";
-import {ToggleModule} from "../src/ToggleModule.sol";
-import {PasskeyAccount} from "../src/PasskeyAccount.sol";
-import {PasskeyAccountFactory} from "../src/PasskeyAccountFactory.sol";
+// Shared contract type registry (single source of truth for the 13 application types)
+import {DeployHelper} from "./helpers/DeployHelper.s.sol";
 
 // Infrastructure
 import {ImplementationRegistry} from "../src/ImplementationRegistry.sol";
@@ -69,7 +57,7 @@ import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
  *   forge script script/MainDeploy.s.sol:DeployHomeChain \
  *     --rpc-url $HOME_RPC --broadcast --slow
  */
-contract DeployHomeChain is Script {
+contract DeployHomeChain is DeployHelper {
     /*═══════════════════════════ CONSTANTS ═══════════════════════════*/
 
     address public constant HATS_PROTOCOL = 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137;
@@ -164,25 +152,10 @@ contract DeployHomeChain is Script {
     /*═══════════════════════════ INFRASTRUCTURE ═══════════════════════════*/
 
     function _deployInfrastructure(address deployer) internal returns (InfraResult memory infra) {
-        // Deploy all implementations
-        address hybridVotingImpl = address(new HybridVoting());
-        address ddVotingImpl = address(new DirectDemocracyVoting());
-        address executorImpl = address(new Executor());
-        address quickJoinImpl = address(new QuickJoin());
-        address pTokenImpl = address(new ParticipationToken());
-        address taskMgrImpl = address(new TaskManager());
-        address eduHubImpl = address(new EducationHub());
-        address paymentMgrImpl = address(new PaymentManager());
-        address accountRegImpl = address(new UniversalAccountRegistry());
-        address eligibilityImpl = address(new EligibilityModule());
-        address toggleImpl = address(new ToggleModule());
-        address passkeyAccountImpl = address(new PasskeyAccount());
-        address passkeyAccountFactoryImpl = address(new PasskeyAccountFactory());
+        // Deploy infrastructure implementations (app types deployed via _deployAndRegisterTypes below)
         address implRegImpl = address(new ImplementationRegistry());
         address orgRegImpl = address(new OrgRegistry());
         address deployerImpl = address(new OrgDeployer());
-
-        console.log("\n--- Implementations Deployed ---");
 
         // Deploy PoaManager
         infra.poaManager = address(new PoaManager(address(0)));
@@ -250,21 +223,9 @@ contract DeployHomeChain is Script {
             .adminCall(infra.paymasterHub, abi.encodeWithSignature("setOrgRegistrar(address)", infra.orgDeployer));
         console.log("OrgDeployer authorized as orgRegistrar on PaymasterHub");
 
-        // Register all contract types
+        // Deploy and register all application contract types (single source of truth in DeployHelper)
         PoaManager pm = PoaManager(infra.poaManager);
-        pm.addContractType("HybridVoting", hybridVotingImpl);
-        pm.addContractType("DirectDemocracyVoting", ddVotingImpl);
-        pm.addContractType("Executor", executorImpl);
-        pm.addContractType("QuickJoin", quickJoinImpl);
-        pm.addContractType("ParticipationToken", pTokenImpl);
-        pm.addContractType("TaskManager", taskMgrImpl);
-        pm.addContractType("EducationHub", eduHubImpl);
-        pm.addContractType("PaymentManager", paymentMgrImpl);
-        pm.addContractType("UniversalAccountRegistry", accountRegImpl);
-        pm.addContractType("EligibilityModule", eligibilityImpl);
-        pm.addContractType("ToggleModule", toggleImpl);
-        pm.addContractType("PasskeyAccount", passkeyAccountImpl);
-        pm.addContractType("PasskeyAccountFactory", passkeyAccountFactoryImpl);
+        _deployAndRegisterTypes(pm);
 
         // Deploy global account registry
         address accRegBeacon = pm.getBeaconById(keccak256("UniversalAccountRegistry"));
@@ -444,99 +405,42 @@ contract DeployHomeChain is Script {
         OrgDeployer.DeploymentResult memory org,
         uint32 hubDomain
     ) internal {
-        string memory part1 = string.concat(
-            "{\n",
-            '  "deterministicDeployer": "',
-            vm.toString(dd),
-            '",\n',
-            '  "homeChain": {\n',
-            '    "hubDomain": ',
-            vm.toString(uint256(hubDomain)),
-            ",\n",
-            '    "poaManager": "',
-            vm.toString(infra.poaManager),
-            '",\n',
-            '    "implRegistry": "',
-            vm.toString(infra.implRegistry),
-            '",\n'
-        );
+        // Build governance object
+        string memory gov = "governance";
+        vm.serializeAddress(gov, "executor", org.executor);
+        vm.serializeAddress(gov, "hybridVoting", org.hybridVoting);
+        vm.serializeAddress(gov, "directDemocracyVoting", org.directDemocracyVoting);
+        vm.serializeAddress(gov, "quickJoin", org.quickJoin);
+        vm.serializeAddress(gov, "participationToken", org.participationToken);
+        vm.serializeAddress(gov, "taskManager", org.taskManager);
+        vm.serializeAddress(gov, "educationHub", org.educationHub);
+        string memory govJson = vm.serializeAddress(gov, "paymentManager", org.paymentManager);
 
-        string memory part2 = string.concat(
-            '    "orgRegistry": "',
-            vm.toString(infra.orgRegistry),
-            '",\n',
-            '    "orgDeployer": "',
-            vm.toString(infra.orgDeployer),
-            '",\n',
-            '    "paymasterHub": "',
-            vm.toString(infra.paymasterHub),
-            '",\n',
-            '    "globalAccountRegistry": "',
-            vm.toString(infra.globalAccountRegistry),
-            '",\n',
-            '    "universalPasskeyFactory": "',
-            vm.toString(infra.universalPasskeyFactory),
-            '",\n'
-        );
+        // Build homeChain object
+        string memory home = "homeChain";
+        vm.serializeUint(home, "hubDomain", uint256(hubDomain));
+        vm.serializeAddress(home, "poaManager", infra.poaManager);
+        vm.serializeAddress(home, "implRegistry", infra.implRegistry);
+        vm.serializeAddress(home, "orgRegistry", infra.orgRegistry);
+        vm.serializeAddress(home, "orgDeployer", infra.orgDeployer);
+        vm.serializeAddress(home, "paymasterHub", infra.paymasterHub);
+        vm.serializeAddress(home, "globalAccountRegistry", infra.globalAccountRegistry);
+        vm.serializeAddress(home, "universalPasskeyFactory", infra.universalPasskeyFactory);
+        vm.serializeAddress(home, "governanceFactory", infra.governanceFactory);
+        vm.serializeAddress(home, "accessFactory", infra.accessFactory);
+        vm.serializeAddress(home, "modulesFactory", infra.modulesFactory);
+        vm.serializeAddress(home, "hatsTreeSetup", infra.hatsTreeSetup);
+        vm.serializeAddress(home, "hub", hub);
+        string memory homeJson = vm.serializeString(home, "governance", govJson);
 
-        string memory part2b = string.concat(
-            '    "governanceFactory": "',
-            vm.toString(infra.governanceFactory),
-            '",\n',
-            '    "accessFactory": "',
-            vm.toString(infra.accessFactory),
-            '",\n',
-            '    "modulesFactory": "',
-            vm.toString(infra.modulesFactory),
-            '",\n',
-            '    "hatsTreeSetup": "',
-            vm.toString(infra.hatsTreeSetup),
-            '",\n'
-        );
+        // Build root object
+        string memory root = "root";
+        vm.serializeAddress(root, "deterministicDeployer", dd);
+        string memory rootJson = vm.serializeString(root, "homeChain", homeJson);
 
-        string memory part3 = string.concat(
-            '    "hub": "',
-            vm.toString(hub),
-            '",\n',
-            '    "governance": {\n',
-            '      "executor": "',
-            vm.toString(org.executor),
-            '",\n',
-            '      "hybridVoting": "',
-            vm.toString(org.hybridVoting),
-            '",\n'
-        );
-
-        string memory part4 = string.concat(
-            '      "directDemocracyVoting": "',
-            vm.toString(org.directDemocracyVoting),
-            '",\n',
-            '      "quickJoin": "',
-            vm.toString(org.quickJoin),
-            '",\n',
-            '      "participationToken": "',
-            vm.toString(org.participationToken),
-            '",\n'
-        );
-
-        string memory part5 = string.concat(
-            '      "taskManager": "',
-            vm.toString(org.taskManager),
-            '",\n',
-            '      "educationHub": "',
-            vm.toString(org.educationHub),
-            '",\n',
-            '      "paymentManager": "',
-            vm.toString(org.paymentManager),
-            '"\n',
-            "    }\n",
-            "  },\n",
-            '  "satellites": []\n',
-            "}\n"
-        );
-
-        string memory json = string.concat(part1, part2, part2b, part3, part4, part5);
-        vm.writeFile("script/main-deploy-state.json", json);
+        // Write main JSON, then add empty satellites array
+        vm.writeJson(rootJson, "script/main-deploy-state.json");
+        vm.writeJson("[]", "script/main-deploy-state.json", ".satellites");
         console.log("\nState written to script/main-deploy-state.json");
     }
 }
@@ -560,7 +464,7 @@ contract DeployHomeChain is Script {
  *   forge script script/MainDeploy.s.sol:DeploySatellite \
  *     --rpc-url $SATELLITE_RPC --broadcast --slow
  */
-contract DeploySatellite is Script {
+contract DeploySatellite is DeployHelper {
     bytes32 public constant DD_SALT = keccak256("POA_DETERMINISTIC_DEPLOYER_V1");
 
     function run() public {
@@ -585,10 +489,7 @@ contract DeploySatellite is Script {
         address ddAddr = _deployDeterministicDeployer(deployer);
         DeterministicDeployer dd = DeterministicDeployer(ddAddr);
 
-        // 2. Deploy implementations via DeterministicDeployer
-        _deployImplementations(dd);
-
-        // 3. Deploy local PoaManager + ImplementationRegistry
+        // 2. Deploy local PoaManager + ImplementationRegistry
         PoaManager pm = new PoaManager(address(0));
 
         ImplementationRegistry regImpl = new ImplementationRegistry();
@@ -600,13 +501,13 @@ contract DeploySatellite is Script {
         reg.registerImplementation("ImplementationRegistry", "v1", address(regImpl), true);
         reg.transferOwnership(address(pm));
 
-        // 4. Register all contract types
-        _registerContractTypes(pm, dd);
+        // 3. Deploy implementations via DD and register all contract types
+        _deployAndRegisterTypesDD(pm, dd);
 
-        // 5. Deploy PoaManagerSatellite
+        // 4. Deploy PoaManagerSatellite
         PoaManagerSatellite satellite = new PoaManagerSatellite(address(pm), mailboxAddr, hubDomain, hubAddress);
 
-        // 6. Transfer PoaManager ownership to Satellite
+        // 5. Transfer PoaManager ownership to Satellite
         pm.transferOwnership(address(satellite));
 
         vm.stopBroadcast();
@@ -624,24 +525,13 @@ contract DeploySatellite is Script {
         console.log('    "poaManager": "', address(pm), '" }');
 
         // Write satellite-specific state file
-        string memory satJson = string.concat(
-            "{\n",
-            '  "domain": ',
-            vm.toString(uint256(satDomain)),
-            ",\n",
-            '  "satellite": "',
-            vm.toString(address(satellite)),
-            '",\n',
-            '  "poaManager": "',
-            vm.toString(address(pm)),
-            '",\n',
-            '  "implRegistry": "',
-            vm.toString(address(reg)),
-            '"\n',
-            "}\n"
-        );
+        string memory satObj = "satellite_state";
+        vm.serializeUint(satObj, "domain", uint256(satDomain));
+        vm.serializeAddress(satObj, "satellite", address(satellite));
+        vm.serializeAddress(satObj, "poaManager", address(pm));
+        string memory satJson = vm.serializeAddress(satObj, "implRegistry", address(reg));
         string memory filename = string.concat("script/satellite-state-", vm.toString(uint256(satDomain)), ".json");
-        vm.writeFile(filename, satJson);
+        vm.writeJson(satJson, filename);
         console.log("Satellite state written to", filename);
     }
 
@@ -659,61 +549,6 @@ contract DeploySatellite is Script {
         console.log("DeterministicDeployer:", address(dd));
         require(address(dd) == predicted, "DD address mismatch");
         return address(dd);
-    }
-
-    function _deployImplementations(DeterministicDeployer dd) internal {
-        _deployIfNeeded(dd, "HybridVoting", "v1", type(HybridVoting).creationCode);
-        _deployIfNeeded(dd, "DirectDemocracyVoting", "v1", type(DirectDemocracyVoting).creationCode);
-        _deployIfNeeded(dd, "Executor", "v1", type(Executor).creationCode);
-        _deployIfNeeded(dd, "QuickJoin", "v1", type(QuickJoin).creationCode);
-        _deployIfNeeded(dd, "ParticipationToken", "v1", type(ParticipationToken).creationCode);
-        _deployIfNeeded(dd, "TaskManager", "v1", type(TaskManager).creationCode);
-        _deployIfNeeded(dd, "EducationHub", "v1", type(EducationHub).creationCode);
-        _deployIfNeeded(dd, "PaymentManager", "v1", type(PaymentManager).creationCode);
-        _deployIfNeeded(dd, "UniversalAccountRegistry", "v1", type(UniversalAccountRegistry).creationCode);
-        _deployIfNeeded(dd, "EligibilityModule", "v1", type(EligibilityModule).creationCode);
-        _deployIfNeeded(dd, "ToggleModule", "v1", type(ToggleModule).creationCode);
-        _deployIfNeeded(dd, "PasskeyAccount", "v1", type(PasskeyAccount).creationCode);
-        _deployIfNeeded(dd, "PasskeyAccountFactory", "v1", type(PasskeyAccountFactory).creationCode);
-    }
-
-    function _deployIfNeeded(DeterministicDeployer dd, string memory typeName, string memory version, bytes memory code)
-        internal
-    {
-        bytes32 salt = dd.computeSalt(typeName, version);
-        address predicted = dd.computeAddress(salt);
-
-        if (predicted.code.length > 0) {
-            console.log("  Already deployed:", typeName, "at", predicted);
-            return;
-        }
-
-        address deployed = dd.deploy(salt, code);
-        console.log("  Deployed:", typeName, "at", deployed);
-    }
-
-    function _registerContractTypes(PoaManager pm, DeterministicDeployer dd) internal {
-        _registerType(pm, dd, "HybridVoting", "v1");
-        _registerType(pm, dd, "DirectDemocracyVoting", "v1");
-        _registerType(pm, dd, "Executor", "v1");
-        _registerType(pm, dd, "QuickJoin", "v1");
-        _registerType(pm, dd, "ParticipationToken", "v1");
-        _registerType(pm, dd, "TaskManager", "v1");
-        _registerType(pm, dd, "EducationHub", "v1");
-        _registerType(pm, dd, "PaymentManager", "v1");
-        _registerType(pm, dd, "UniversalAccountRegistry", "v1");
-        _registerType(pm, dd, "EligibilityModule", "v1");
-        _registerType(pm, dd, "ToggleModule", "v1");
-        _registerType(pm, dd, "PasskeyAccount", "v1");
-        _registerType(pm, dd, "PasskeyAccountFactory", "v1");
-    }
-
-    function _registerType(PoaManager pm, DeterministicDeployer dd, string memory typeName, string memory version)
-        internal
-    {
-        bytes32 salt = dd.computeSalt(typeName, version);
-        address impl = dd.computeAddress(salt);
-        pm.addContractType(typeName, impl);
     }
 }
 

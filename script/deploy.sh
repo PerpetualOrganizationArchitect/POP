@@ -10,7 +10,7 @@ set -euo pipefail
 #
 # Prerequisites:
 #   - .env with DEPLOYER_PRIVATE_KEY (funded on all 4 chains)
-#   - Python 3 (for JSON parsing)
+#   - jq (for JSON parsing: brew install jq)
 #   - foundry.toml with RPC endpoints configured
 #
 # Usage:
@@ -71,14 +71,7 @@ header() {
 # ═══════════════════════════ JSON Helper ═══════════════════════════
 
 json_get() {
-    local file="$1" dot_path="$2"
-    python3 -c "
-import json, sys
-d = json.load(open(sys.argv[1]))
-for k in sys.argv[2].strip('.').split('.'):
-    d = d[k]
-print(d)
-" "$file" "$dot_path" 2>/dev/null
+    jq -r ".$2" "$1"
 }
 
 # ═══════════════════════════ Argument Parsing ═══════════════════════════
@@ -227,8 +220,8 @@ preflight_checks() {
         error "cast not found. Install Foundry first."
         exit 1
     fi
-    if ! command -v python3 &>/dev/null; then
-        error "python3 required for JSON parsing."
+    if ! command -v jq &>/dev/null; then
+        error "jq required for JSON parsing. Install with: brew install jq"
         exit 1
     fi
 

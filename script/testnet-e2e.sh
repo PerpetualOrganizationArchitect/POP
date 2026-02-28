@@ -10,7 +10,7 @@ set -euo pipefail
 # Prerequisites:
 #   - .env with PRIVATE_KEY (funded on both Sepolia and Base Sepolia)
 #   - forge build must succeed
-#   - Python 3 (for JSON parsing)
+#   - jq (for JSON parsing: brew install jq)
 #
 # Usage:
 #   ./script/testnet-e2e.sh                # Full deploy + upgrade test
@@ -47,10 +47,14 @@ if [ -z "${PRIVATE_KEY:-}" ]; then
     exit 1
 fi
 
+if ! command -v jq &>/dev/null; then
+    echo "ERROR: jq required for JSON parsing. Install with: brew install jq"
+    exit 1
+fi
+
 # ── Helper: extract JSON field ──
 json_get() {
-    local file="$1" path="$2"
-    python3 -c "import json,sys; d=json.load(open('$file')); print(d$(echo $path))" 2>/dev/null
+    jq -r ".$2" "$1"
 }
 
 echo "============================================================"
@@ -120,8 +124,8 @@ forge script script/e2e/TestnetE2EHomeChain.s.sol:TestnetE2EHomeChain \
     --slow
 echo ""
 
-HUB_ADDR=$(json_get "$STATE_FILE" "['homeChain']['hub']")
-HOME_PM=$(json_get "$STATE_FILE" "['homeChain']['poaManager']")
+HUB_ADDR=$(json_get "$STATE_FILE" "homeChain.hub")
+HOME_PM=$(json_get "$STATE_FILE" "homeChain.poaManager")
 echo "    Hub: $HUB_ADDR"
 echo "    Home PoaManager: $HOME_PM"
 echo ""
@@ -140,8 +144,8 @@ forge script script/e2e/TestnetE2ESatellite.s.sol:TestnetE2ESatellite \
     --slow
 echo ""
 
-SAT_ADDR=$(json_get "$STATE_FILE" "['satellite']['satellite']")
-SAT_PM=$(json_get "$STATE_FILE" "['satellite']['poaManager']")
+SAT_ADDR=$(json_get "$STATE_FILE" "satellite.satellite")
+SAT_PM=$(json_get "$STATE_FILE" "satellite.poaManager")
 echo "    Satellite: $SAT_ADDR"
 echo "    Satellite PoaManager: $SAT_PM"
 echo ""
@@ -167,11 +171,11 @@ else
         echo "ERROR: --skip-deploy requires existing $STATE_FILE"
         exit 1
     fi
-    DD_ADDR=$(json_get "$STATE_FILE" "['deterministicDeployer']")
-    HUB_ADDR=$(json_get "$STATE_FILE" "['homeChain']['hub']")
-    HOME_PM=$(json_get "$STATE_FILE" "['homeChain']['poaManager']")
-    SAT_ADDR=$(json_get "$STATE_FILE" "['satellite']['satellite']")
-    SAT_PM=$(json_get "$STATE_FILE" "['satellite']['poaManager']")
+    DD_ADDR=$(json_get "$STATE_FILE" "deterministicDeployer")
+    HUB_ADDR=$(json_get "$STATE_FILE" "homeChain.hub")
+    HOME_PM=$(json_get "$STATE_FILE" "homeChain.poaManager")
+    SAT_ADDR=$(json_get "$STATE_FILE" "satellite.satellite")
+    SAT_PM=$(json_get "$STATE_FILE" "satellite.poaManager")
     echo "    DeterministicDeployer: $DD_ADDR"
     echo "    Hub: $HUB_ADDR"
     echo "    Satellite: $SAT_ADDR"
