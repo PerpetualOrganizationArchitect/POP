@@ -67,12 +67,12 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         IHats hats;
     }
 
-    // keccak256("poa.orgregistry.storage") to get a unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x3ffb0627b419b7b77c77f589dd229844c112a8c125dceec0d56dda0674b35489;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.orgregistry.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

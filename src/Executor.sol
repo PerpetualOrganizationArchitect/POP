@@ -44,12 +44,12 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
         mapping(address => bool) authorizedHatMinters; // contracts authorized to request hat minting
     }
 
-    // keccak256("poa.executor.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x4a2328a3c3b056def98e04ebb0cc7ccc084886f7998dd0a6d16fd24be55ffa5d;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.executor.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

@@ -50,12 +50,12 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         uint256 distributionCounter;
     }
 
-    // keccak256("poa.paymentmanager.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x3e5fec24aa4dc4e5aee2e025e51e1392c72a2500577559fae9665c6d52bd6a31;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.paymentmanager.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 
