@@ -56,12 +56,12 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         uint256[] memberHatIds; // enumeration array for member hats
     }
 
-    // keccak256("poa.educationhub.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x5dc09eed2545e1c49e29265cd02140e8b217f2e2a19c33f42e35fa06d63dcb0a;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.educationhub.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

@@ -129,11 +129,12 @@ contract TaskManager is Initializable, ContextUpgradeable {
         mapping(uint256 => uint256) projectPermHatRefCount; // hat ID => number of projects with non-zero project mask
     }
 
-    bytes32 private constant _STORAGE_SLOT = 0x30bc214cbc65463577eb5b42c88d60986e26fc81ad89a2eb74550fb255f1e712;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.taskmanager.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

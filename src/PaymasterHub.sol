@@ -120,8 +120,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         address orgRegistrar; // authorized contract that can register orgs (e.g. OrgDeployer)
     }
 
-    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.main")) - 1))
-    bytes32 private constant MAIN_STORAGE_LOCATION = 0x79313178bb7ec733585695efb4bda9fb0a2460b07c17173a160d53a584d7fdf1;
+    bytes32 private constant MAIN_STORAGE_LOCATION =
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.main")) - 1));
 
     // ============ Storage Structs ============
 
@@ -210,40 +210,23 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     }
 
     // ============ ERC-7201 Storage Locations ============
-    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.orgs")) - 1))
-    bytes32 private constant ORGS_STORAGE_LOCATION = 0x1577b5f3d975f3e4c3ad36823cfc47ce59d96a4692a043664a68f0cf2b1a08e5;
-
-    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.feeCaps")) - 1))
+    bytes32 private constant ORGS_STORAGE_LOCATION =
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.orgs")) - 1));
     bytes32 private constant FEECAPS_STORAGE_LOCATION =
-        0x31c1f70de237698620907d8a0468bf5356fb50f4719bfcd111876a981cbccb5c;
-
-    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.rules")) - 1))
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.feeCaps")) - 1));
     bytes32 private constant RULES_STORAGE_LOCATION =
-        0xbe2280b3d3247ad137be1f9de7cbb32fc261644cda199a3a24b0a06528ef326f;
-
-    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.budgets")) - 1))
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.rules")) - 1));
     bytes32 private constant BUDGETS_STORAGE_LOCATION =
-        0xf14d4c678226f6697d18c9cd634533b58566936459364e55f23c57845d71389e;
-
-    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.bounty")) - 1))
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.budgets")) - 1));
     bytes32 private constant BOUNTY_STORAGE_LOCATION =
-        0x5aefd14c2f5001261e819816e3c40d9d9cc763af84e5df87cd5955f0f5cfd09e;
-
-    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.financials")) - 1))
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.bounty")) - 1));
     bytes32 private constant FINANCIALS_STORAGE_LOCATION =
-        0xc5d8b6edce490eeae75e971366b4e3a6142abb5df4486ab4290826e6cd008210;
-
-    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.solidarity")) - 1))
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.financials")) - 1));
     bytes32 private constant SOLIDARITY_STORAGE_LOCATION =
-        0xa83be0d588222d6e3c8e88a987c1439474749e44cafa67ced60ef5911863ad5b;
-
-    // keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.graceperiod")) - 1))
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.solidarity")) - 1));
     bytes32 private constant GRACEPERIOD_STORAGE_LOCATION =
-        0xb32fa2cc2be738bb7360ed872bdb5f34f0611b5e6c897349c7f50d1becdb3984;
-
-    // keccak256("poa.paymasterhub.onboarding")
-    bytes32 private constant ONBOARDING_STORAGE_LOCATION =
-        0x4b1e497b56331764ad6bf7b8c88df82cd3770c256224ec222ba11219a197de90;
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.graceperiod")) - 1));
+    bytes32 private constant ONBOARDING_STORAGE_LOCATION = keccak256("poa.paymasterhub.onboarding");
 
     // ============ Constructor ============
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -1280,20 +1263,23 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
     // ============ Storage Accessors ============
     function _getMainStorage() private pure returns (MainStorage storage $) {
+        bytes32 slot = MAIN_STORAGE_LOCATION;
         assembly {
-            $.slot := MAIN_STORAGE_LOCATION
+            $.slot := slot
         }
     }
 
     function _getOrgsStorage() private pure returns (mapping(bytes32 => OrgConfig) storage $) {
+        bytes32 slot = ORGS_STORAGE_LOCATION;
         assembly {
-            $.slot := ORGS_STORAGE_LOCATION
+            $.slot := slot
         }
     }
 
     function _getFeeCapsStorage() private pure returns (mapping(bytes32 => FeeCaps) storage $) {
+        bytes32 slot = FEECAPS_STORAGE_LOCATION;
         assembly {
-            $.slot := FEECAPS_STORAGE_LOCATION
+            $.slot := slot
         }
     }
 
@@ -1302,44 +1288,51 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         pure
         returns (mapping(bytes32 => mapping(address => mapping(bytes4 => Rule))) storage $)
     {
+        bytes32 slot = RULES_STORAGE_LOCATION;
         assembly {
-            $.slot := RULES_STORAGE_LOCATION
+            $.slot := slot
         }
     }
 
     function _getBudgetsStorage() private pure returns (mapping(bytes32 => mapping(bytes32 => Budget)) storage $) {
+        bytes32 slot = BUDGETS_STORAGE_LOCATION;
         assembly {
-            $.slot := BUDGETS_STORAGE_LOCATION
+            $.slot := slot
         }
     }
 
     function _getBountyStorage() private pure returns (mapping(bytes32 => Bounty) storage $) {
+        bytes32 slot = BOUNTY_STORAGE_LOCATION;
         assembly {
-            $.slot := BOUNTY_STORAGE_LOCATION
+            $.slot := slot
         }
     }
 
     function _getFinancialsStorage() private pure returns (mapping(bytes32 => OrgFinancials) storage $) {
+        bytes32 slot = FINANCIALS_STORAGE_LOCATION;
         assembly {
-            $.slot := FINANCIALS_STORAGE_LOCATION
+            $.slot := slot
         }
     }
 
     function _getSolidarityStorage() private pure returns (SolidarityFund storage $) {
+        bytes32 slot = SOLIDARITY_STORAGE_LOCATION;
         assembly {
-            $.slot := SOLIDARITY_STORAGE_LOCATION
+            $.slot := slot
         }
     }
 
     function _getGracePeriodStorage() private pure returns (GracePeriodConfig storage $) {
+        bytes32 slot = GRACEPERIOD_STORAGE_LOCATION;
         assembly {
-            $.slot := GRACEPERIOD_STORAGE_LOCATION
+            $.slot := slot
         }
     }
 
     function _getOnboardingStorage() private pure returns (OnboardingConfig storage $) {
+        bytes32 slot = ONBOARDING_STORAGE_LOCATION;
         assembly {
-            $.slot := ONBOARDING_STORAGE_LOCATION
+            $.slot := slot
         }
     }
 

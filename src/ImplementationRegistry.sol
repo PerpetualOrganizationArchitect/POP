@@ -31,12 +31,12 @@ contract ImplementationRegistry is Initializable, OwnableUpgradeable {
         bytes32[] typeIds;
     }
 
-    // keccak256("poa.implementationregistry.storage") to get a unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x5f9c962a1b4199db74b9968808a6126c9e2ae410e9b0e0c406e3de1c293c43d1;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.implementationregistry.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

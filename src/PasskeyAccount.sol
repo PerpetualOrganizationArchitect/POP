@@ -73,12 +73,12 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         bytes32[] pendingRecoveryIds;
     }
 
-    // keccak256("poa.passkeyaccount.storage")
-    bytes32 private constant _STORAGE_SLOT = 0x7cfc8294c1be3fa32b08d50f0668cc2726e1306f195499e2d5283b8967b03fef;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.passkeyaccount.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

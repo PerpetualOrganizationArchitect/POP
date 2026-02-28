@@ -26,12 +26,12 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         mapping(bytes32 => address) ownerOfUsernameHash;
     }
 
-    // keccak256("poa.universalaccountregistry.storage") to unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x7930448747c45b59575e0d27c83e46a902e6071fea71aa7dda420fff16e39ee5;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.universalaccountregistry.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

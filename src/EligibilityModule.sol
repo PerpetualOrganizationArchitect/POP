@@ -96,13 +96,13 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         mapping(uint256 => address[]) roleApplicants; // hatId => array of applicant addresses
     }
 
-    // keccak256("poa.eligibilitymodule.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x8f7c0d6a29b3e7e2f1a0c9b8d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.eligibilitymodule.storage");
 
     /// @dev Use assembly for gas-optimized storage access
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 

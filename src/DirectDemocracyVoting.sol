@@ -63,12 +63,12 @@ contract DirectDemocracyVoting is Initializable {
         uint256 _lock; // Inline reentrancy guard state
     }
 
-    // keccak256("poa.directdemocracy.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x1da04eb4a741346cdb49b5da943a0c13e79399ef962f913efcd36d95ee6d7c38;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.directdemocracy.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 
