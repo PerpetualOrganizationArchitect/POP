@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// CI trigger
 pragma solidity ^0.8.24;
 
 import {IPaymaster} from "./interfaces/IPaymaster.sol";
