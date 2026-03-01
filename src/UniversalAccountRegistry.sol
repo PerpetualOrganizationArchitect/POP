@@ -14,6 +14,7 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     error AccountExists();
     error AccountUnknown();
     error ArrayLenMismatch();
+    error UnauthorizedCaller();
 
     /*─────────────────────────── Constants ─────────────────────────────*/
     uint256 private constant MAX_LEN = 64;
@@ -24,6 +25,7 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     struct Layout {
         mapping(address => string) addressToUsername;
         mapping(bytes32 => address) ownerOfUsernameHash;
+        mapping(address => bool) authorizedCallers;
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.universalaccountregistry.storage");
@@ -40,6 +42,7 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     event UsernameChanged(address indexed user, string newUsername);
     event UserDeleted(address indexed user, string oldUsername);
     event BatchRegistered(uint256 count);
+    event AuthorizedCallerSet(address indexed caller, bool authorized);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -52,17 +55,25 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         __Ownable_init(initialOwner);
     }
 
+    /*──────────────── Authorized Caller Management ─────────────────*/
+    function setAuthorizedCaller(address caller, bool authorized) external onlyOwner {
+        if (caller == address(0)) revert InvalidChars();
+        _layout().authorizedCallers[caller] = authorized;
+        emit AuthorizedCallerSet(caller, authorized);
+    }
+
     /*──────────────────── Public Registration API ─────────────────────*/
     function registerAccount(string calldata username) external {
         _register(msg.sender, username);
     }
 
     /**
-     * @notice Permission‑less QuickJoin path. Anyone can call but the
+     * @notice QuickJoin path restricted to authorized callers.
      *         `newUser` must NOT already have a username and the handle
      *         must still be free.
      */
     function registerAccountQuickJoin(string calldata username, address newUser) external {
+        if (!_layout().authorizedCallers[msg.sender]) revert UnauthorizedCaller();
         _register(newUser, username);
     }
 
@@ -70,7 +81,7 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
      * @notice Batch onboarding helper (gas‑friendlier for DAOs).
      * @dev Arrays must be equal length and ≤ 100 to stay within block gas.
      */
-    function registerBatch(address[] calldata users, string[] calldata names) external {
+    function registerBatch(address[] calldata users, string[] calldata names) external onlyOwner {
         uint256 len = users.length;
         if (len != names.length) revert ArrayLenMismatch();
         require(len <= 100, "batch>100");

@@ -94,6 +94,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         // Role application system
         mapping(uint256 => mapping(address => bytes32)) roleApplications; // hatId => applicant => applicationHash
         mapping(uint256 => address[]) roleApplicants; // hatId => array of applicant addresses
+        uint256 _notEntered; // reentrancy guard (moved from slot 0 to ERC-7201 namespace)
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.eligibilitymodule.storage");
@@ -108,13 +109,12 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
     /*═══════════════════════════════════════ REENTRANCY PROTECTION ═══════════════════════════════════*/
 
-    uint256 private _notEntered = 1;
-
     modifier nonReentrant() {
-        require(_notEntered != 2, "ReentrancyGuard: reentrant call");
-        _notEntered = 2;
+        Layout storage l = _layout();
+        require(l._notEntered != 2, "ReentrancyGuard: reentrant call");
+        l._notEntered = 2;
         _;
-        _notEntered = 1;
+        l._notEntered = 1;
     }
 
     modifier whenNotPaused() {
@@ -197,9 +197,8 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     function initialize(address _superAdmin, address _hats, address _toggleModule) external initializer {
         if (_superAdmin == address(0) || _hats == address(0)) revert ZeroAddress();
 
-        _notEntered = 1;
-
         Layout storage l = _layout();
+        l._notEntered = 1;
         l.superAdmin = _superAdmin;
         l.hats = IHats(_hats);
         l.toggleModule = _toggleModule;

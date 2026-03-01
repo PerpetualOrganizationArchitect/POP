@@ -208,11 +208,9 @@ library WebAuthnLib {
         // Edge cases handled:
         //   - lastSignCount=0, newSignCount=0: PASSES (authenticator doesn't support counters)
         //   - lastSignCount=0, newSignCount>0: PASSES (first use after counter-enabled auth)
-        //   - lastSignCount>0, newSignCount=0: PASSES (new authenticator without counters)
+        //   - lastSignCount>0, newSignCount=0: FAILS (possible cloned key)
         //   - lastSignCount>0, newSignCount<=last: FAILS (replay attack or cloned key)
-        // NOTE: Authenticators that don't support counters (e.g., some security keys) always
-        // return 0. We intentionally allow this to maximize compatibility.
-        if (lastSignCount > 0 && newSignCount > 0 && newSignCount <= lastSignCount) {
+        if (lastSignCount > 0 && (newSignCount == 0 || newSignCount <= lastSignCount)) {
             return (false, newSignCount);
         }
 
@@ -334,7 +332,13 @@ library WebAuthnLib {
                 return false;
             }
         }
-
+        // Verify the type string is terminated by a closing quote
+        if (typeIndex + expected.length >= clientDataJSON.length) {
+            return false;
+        }
+        if (clientDataJSON[typeIndex + expected.length] != '"') {
+            return false;
+        }
         return true;
     }
 

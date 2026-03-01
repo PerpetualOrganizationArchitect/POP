@@ -48,6 +48,8 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         mapping(uint256 => Distribution) distributions;
         /// @notice Distribution counter
         uint256 distributionCounter;
+        /// @notice Total committed amounts per token across active (non-finalized) distributions
+        mapping(address => uint256) totalCommitted;
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.paymentmanager.storage");
@@ -59,14 +61,14 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         }
     }
 
-    /*──────────────────────────────────────────────────────────────────────────
-                                    INITIALIZER
-    ──────────────────────────────────────────────────────────────────────────*/
-
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
+
+    /*──────────────────────────────────────────────────────────────────────────
+                                    INITIALIZER
+    ──────────────────────────────────────────────────────────────────────────*/
 
     /**
      * @notice Initializes the PaymentManager
@@ -136,14 +138,18 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         if (merkleRoot == bytes32(0)) revert InvalidMerkleRoot();
         if (checkpointBlock >= block.number) revert InvalidCheckpoint();
 
-        // Check contract has sufficient balance
-        if (payoutToken == address(0)) {
-            if (address(this).balance < amount) revert InsufficientFunds();
-        } else {
-            if (IERC20(payoutToken).balanceOf(address(this)) < amount) revert InsufficientFunds();
-        }
-
         Layout storage s = _layout();
+
+        // Check against total committed (existing + new) to prevent over-promising
+        if (payoutToken == address(0)) {
+            if (address(this).balance < s.totalCommitted[address(0)] + amount) revert InsufficientFunds();
+        } else {
+            if (IERC20(payoutToken).balanceOf(address(this)) < s.totalCommitted[payoutToken] + amount) {
+                revert InsufficientFunds();
+            }
+        }
+        s.totalCommitted[payoutToken] += amount;
+
         distributionId = ++s.distributionCounter;
         Distribution storage dist = s.distributions[distributionId];
 
@@ -180,10 +186,14 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
             revert InvalidProof();
         }
 
+        // Over-claim guard
+        if (dist.totalClaimed + claimAmount > dist.totalAmount) {
+            revert OverClaimed();
+        }
+
         // Mark as claimed
         dist.claimed[msg.sender] = true;
         dist.totalClaimed += claimAmount;
-        if (dist.totalClaimed > dist.totalAmount) revert OverClaimed();
 
         // Transfer funds
         if (dist.payoutToken == address(0)) {
@@ -230,10 +240,14 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
                 revert InvalidProof();
             }
 
+            // Over-claim guard
+            if (dist.totalClaimed + claimAmount > dist.totalAmount) {
+                revert OverClaimed();
+            }
+
             // Mark as claimed
             dist.claimed[msg.sender] = true;
             dist.totalClaimed += claimAmount;
-            if (dist.totalClaimed > dist.totalAmount) revert OverClaimed();
 
             // Transfer funds
             if (dist.payoutToken == address(0)) {
@@ -263,6 +277,7 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         }
 
         dist.finalized = true;
+        s.totalCommitted[dist.payoutToken] -= dist.totalAmount;
         uint256 unclaimed = dist.totalAmount - dist.totalClaimed;
 
         // Return unclaimed funds to owner (executor)

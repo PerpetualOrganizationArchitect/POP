@@ -21,7 +21,7 @@ contract SwitchableBeacon is IBeacon {
     /// @notice Current owner of this beacon (typically the Executor or UpgradeAdmin)
     address public owner;
 
-    /// @notice Address that has been proposed as the new owner (two-step transfer)
+    /// @notice The pending owner awaiting acceptance of ownership transfer
     address public pendingOwner;
 
     /// @notice The global POA beacon to mirror when in Mirror mode
@@ -38,6 +38,14 @@ contract SwitchableBeacon is IBeacon {
     /// @param newOwner The address of the new owner
     event OwnerTransferred(address indexed previousOwner, address indexed newOwner);
 
+    /// @notice Emitted when a pending ownership transfer is started
+    /// @param pendingOwner The address of the pending new owner
+    event OwnershipTransferStarted(address indexed pendingOwner);
+
+    /// @notice Emitted when a pending ownership transfer is cancelled
+    /// @param cancelledOwner The address of the cancelled pending owner
+    event OwnershipTransferCancelled(address indexed cancelledOwner);
+
     /// @notice Emitted when the beacon mode changes
     /// @param mode The new mode (Mirror or Static)
     event ModeChanged(Mode mode);
@@ -50,14 +58,8 @@ contract SwitchableBeacon is IBeacon {
     /// @param implementation The address of the pinned implementation
     event Pinned(address indexed implementation);
 
-    /// @notice Emitted when a new ownership transfer is initiated
-    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
-
     /// @notice Thrown when a non-owner attempts a restricted operation
     error NotOwner();
-
-    /// @notice Thrown when caller is not the pending owner
-    error NotPendingOwner();
 
     /// @notice Thrown when a zero address is provided where not allowed
     error ZeroAddress();
@@ -70,6 +72,12 @@ contract SwitchableBeacon is IBeacon {
 
     /// @notice Thrown when an address is not a contract when it should be
     error NotContract();
+
+    /// @notice Thrown when there is no pending ownership transfer to cancel
+    error NoPendingTransfer();
+
+    /// @notice Thrown when the caller is not the pending owner
+    error NotPendingOwner();
 
     /// @notice Restricts function access to the owner only
     modifier onlyOwner() {
@@ -104,36 +112,43 @@ contract SwitchableBeacon is IBeacon {
         mode = _mode;
 
         emit OwnerTransferred(address(0), _owner);
-        if (_mode == Mode.Mirror) {
-            emit MirrorSet(_mirrorBeacon);
-        }
         emit ModeChanged(_mode);
     }
 
     /**
-     * @notice Initiates a two-step ownership transfer
-     * @param newOwner The address of the proposed new owner
-     * @dev Only callable by the current owner. The new owner must call acceptOwnership() to complete.
+     * @notice Initiates a two-step ownership transfer to a new address
+     * @param newOwner The address of the pending new owner
+     * @dev Only callable by the current owner. The new owner must call acceptOwnership() to complete the transfer.
      */
     function transferOwnership(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert ZeroAddress();
 
         pendingOwner = newOwner;
-        emit OwnershipTransferStarted(owner, newOwner);
+
+        emit OwnershipTransferStarted(newOwner);
     }
 
     /**
-     * @notice Completes the two-step ownership transfer
-     * @dev Only callable by the pending owner set via transferOwnership()
+     * @notice Completes the ownership transfer
+     * @dev Only callable by the pending owner
      */
     function acceptOwnership() external {
         if (msg.sender != pendingOwner) revert NotPendingOwner();
 
         address previousOwner = owner;
-        owner = msg.sender;
+        owner = pendingOwner;
         pendingOwner = address(0);
 
         emit OwnerTransferred(previousOwner, msg.sender);
+    }
+
+    /// @notice Cancels a pending ownership transfer
+    /// @dev Only callable by the current owner
+    function cancelOwnershipTransfer() external onlyOwner {
+        if (pendingOwner == address(0)) revert NoPendingTransfer();
+        address cancelled = pendingOwner;
+        pendingOwner = address(0);
+        emit OwnershipTransferCancelled(cancelled);
     }
 
     /**

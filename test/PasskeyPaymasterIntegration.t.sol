@@ -83,6 +83,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
     uint8 constant PAYMASTER_DATA_VERSION = 1;
     uint8 constant SUBJECT_TYPE_ACCOUNT = 0x00;
     uint8 constant SUBJECT_TYPE_HAT = 0x01;
+    uint8 constant SUBJECT_TYPE_VOUCHED = 0x02;
     uint32 constant RULE_ID_GENERIC = 0x00000000;
     uint32 constant RULE_ID_EXECUTOR = 0x00000001;
     uint32 constant RULE_ID_COARSE = 0x000000FF;
@@ -154,9 +155,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         vm.stopPrank();
 
-        // Register org in PaymasterHub (requires poaManager)
+        // Register org in PaymasterHub with voucher hat (must be called by poaManager)
         vm.prank(poaManager);
-        hub.registerOrg(ORG_ID, ADMIN_HAT, OPERATOR_HAT);
+        hub.registerOrgWithVoucher(ORG_ID, ADMIN_HAT, OPERATOR_HAT, VOUCHER_HAT);
 
         // Fund test accounts BEFORE using them for deposits
         vm.deal(owner, 100 ether);
@@ -237,8 +238,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
             callData: callData,
             accountGasLimits: UserOpLib.packAccountGasLimits(500000, 500000), // verification, call
             preVerificationGas: 100000,
-            maxFeePerGas: 10 gwei,
-            maxPriorityFeePerGas: 1 gwei,
+            gasFees: UserOpLib.packGasFees(1 gwei, 10 gwei),
             paymasterAndData: paymasterAndData,
             signature: signature
         });
@@ -525,8 +525,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
             callData: callData,
             accountGasLimits: UserOpLib.packAccountGasLimits(400000, 800000), // verification=400k (within 500k cap)
             preVerificationGas: 100000,
-            maxFeePerGas: 50 gwei,
-            maxPriorityFeePerGas: 5 gwei,
+            gasFees: UserOpLib.packGasFees(5 gwei, 50 gwei),
             paymasterAndData: paymasterAndData,
             signature: ""
         });
@@ -561,8 +560,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
             callData: callData,
             accountGasLimits: UserOpLib.packAccountGasLimits(400000, 800000), // verification=400k exceeds 300k cap
             preVerificationGas: 100000,
-            maxFeePerGas: 50 gwei,
-            maxPriorityFeePerGas: 5 gwei,
+            gasFees: UserOpLib.packGasFees(5 gwei, 50 gwei),
             paymasterAndData: paymasterAndData,
             signature: ""
         });
@@ -653,8 +651,8 @@ contract PasskeyPaymasterIntegrationTest is Test {
         assertTrue(context.length > 0, "Context should be returned");
 
         // Verify context contains explicit onboarding flag + correct orgId.
-        (bool isOnboarding, bytes32 decodedOrgId,,,,,) =
-            abi.decode(context, (bool, bytes32, bytes32, uint32, bytes32, uint64, address));
+        (bool isOnboarding, bytes32 decodedOrgId,,,,,,,) =
+            abi.decode(context, (bool, bytes32, bytes32, uint32, bytes32, uint64, address, address, address));
         assertFalse(isOnboarding, "Regular org operation should not be flagged as onboarding");
         assertEq(decodedOrgId, ORG_ID, "Context should contain correct orgId");
     }
@@ -708,170 +706,267 @@ contract PasskeyPaymasterIntegrationTest is Test {
     }
 
     /*══════════════════════════════════════════════════════════════════════
-                    HAT ELIGIBILITY TESTS
+                    VOUCHED ONBOARDING TESTS
     ══════════════════════════════════════════════════════════════════════*/
 
-    /// @notice Test that a user who is eligible for a hat (but not yet wearing it) passes SUBJECT_TYPE_HAT validation
-    function testHat_EligibleButNotWearing_Succeeds() public {
-        // Use a new address that is NOT a hat wearer but IS eligible
-        address eligibleUser = address(0xE119);
+    /// @notice Helper to build vouch paymasterAndData with signature
+    function _buildVouchedPaymasterData(
+        address account,
+        address voucher,
+        uint48 expiry,
+        bytes memory initCode,
+        bytes memory callData
+    ) internal view returns (bytes memory) {
+        // Sign the vouch and bind to operation intent + paymaster address.
+        bytes32 vouchHash = keccak256(
+            abi.encodePacked(
+                ORG_ID, account, keccak256(initCode), keccak256(callData), expiry, block.chainid, address(hub)
+            )
+        );
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", vouchHash));
 
-        // Set the user as eligible (but not wearing) via the mock
-        MockHatsIntegration(address(hats)).setEligible(eligibleUser, USER_HAT, true);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(VOUCHER_PRIVATE_KEY, ethSignedHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
 
-        // Setup budget for hat-based subject
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
+        // Format: paymaster(20) | version(1) | orgId(32) | subjectType(1) | voucherAddr(20) | ruleId(4) | mailboxCommit(8) | expiry(6) | signature(65) = 157 bytes
+        return abi.encodePacked(
+            address(hub),
+            PAYMASTER_DATA_VERSION,
+            ORG_ID,
+            SUBJECT_TYPE_VOUCHED,
+            bytes20(voucher),
+            RULE_ID_GENERIC,
+            uint64(0), // mailboxCommit
+            expiry,
+            signature
+        );
+    }
+
+    function testVouched_SuccessfulOnboarding() public {
+        // Compute counterfactual address for new passkey account
+        bytes32 newCredentialId = keccak256("new_user_credential");
+        bytes32 newPubKeyX = bytes32(uint256(0x1111));
+        bytes32 newPubKeyY = bytes32(uint256(0x2222));
+
+        address newAccountAddr = factory.getAddress(newCredentialId, newPubKeyX, newPubKeyY, 0);
+
+        // Setup budget for vouched users (tracked against the voucher's subjectKey)
+        bytes32 vouchedSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, bytes20(voucherAddr)));
         vm.prank(orgAdmin);
-        hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
+        hub.setBudget(ORG_ID, vouchedSubjectKey, 1 ether, 1 days);
 
         // Set rule allowing execute on mockTarget
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
-        // Build UserOp with SUBJECT_TYPE_HAT
+        // Build UserOp callData first (needed for vouch signature)
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
 
-        PackedUserOperation memory userOp = _createUserOp(eligibleUser, callData, paymasterAndData, "");
+        // Build vouch paymasterAndData
+        uint48 expiry = uint48(block.timestamp + 1 hours);
+        bytes memory paymasterAndData = _buildVouchedPaymasterData(newAccountAddr, voucherAddr, expiry, "", callData);
 
-        // Validate should succeed — user is eligible even though they don't wear the hat yet
+        PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
+
+        // Validate should succeed
         vm.prank(address(entryPoint));
         (bytes memory context, uint256 validationData) =
             hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
 
-        assertEq(validationData, 0, "Validation should succeed for eligible user");
+        assertEq(validationData, 0, "Validation should succeed");
         assertTrue(context.length > 0, "Context should be returned");
+
+        // Vouch should be consumed only after successful postOp.
+        assertFalse(hub.isVouchUsed(ORG_ID, newAccountAddr), "Vouch should not be consumed during validation");
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, 0.005 ether);
+        assertTrue(hub.isVouchUsed(ORG_ID, newAccountAddr), "Vouch should be marked as used after success");
     }
 
-    /// @notice Test that a user who is NOT eligible for a hat fails SUBJECT_TYPE_HAT validation
-    function testHat_NotEligible_Fails() public {
-        address ineligibleUser = address(0xBAD);
+    function testVouched_ExpiredVouchFails() public {
+        bytes32 newCredentialId = keccak256("expired_vouch_user");
+        address newAccountAddr = factory.getAddress(newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
 
-        // Do NOT set eligible — user is neither wearing nor eligible
-
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
+        // Setup budget
+        bytes32 vouchedSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, bytes20(voucherAddr)));
         vm.prank(orgAdmin);
-        hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
+        hub.setBudget(ORG_ID, vouchedSubjectKey, 1 ether, 1 days);
 
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
 
-        PackedUserOperation memory userOp = _createUserOp(ineligibleUser, callData, paymasterAndData, "");
+        // Build vouch with EXPIRED timestamp
+        uint48 expiry = uint48(block.timestamp - 1); // Already expired
+        bytes memory paymasterAndData = _buildVouchedPaymasterData(newAccountAddr, voucherAddr, expiry, "", callData);
+        PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.Ineligible.selector);
+        vm.expectRevert(PaymasterHub.VouchExpired.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.01 ether);
     }
 
-    /// @notice Test that an existing hat wearer still passes SUBJECT_TYPE_HAT validation
-    function testHat_ExistingWearer_Succeeds() public {
-        // `user` already wears USER_HAT from setUp (mintHat sets both wearer and active)
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
+    function testVouched_ReusedVouchFails() public {
+        bytes32 newCredentialId = keccak256("reuse_vouch_user");
+        bytes32 newPubKeyX = bytes32(uint256(0x3333));
+        bytes32 newPubKeyY = bytes32(uint256(0x4444));
+
+        address newAccountAddr = factory.getAddress(newCredentialId, newPubKeyX, newPubKeyY, 0);
+
+        // Setup budget
+        bytes32 vouchedSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, bytes20(voucherAddr)));
         vm.prank(orgAdmin);
-        hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
+        hub.setBudget(ORG_ID, vouchedSubjectKey, 1 ether, 1 days);
 
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
 
-        PackedUserOperation memory userOp = _createUserOp(user, callData, paymasterAndData, "");
+        uint48 expiry = uint48(block.timestamp + 1 hours);
+        bytes memory paymasterAndData = _buildVouchedPaymasterData(newAccountAddr, voucherAddr, expiry, "", callData);
+        PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
 
+        // First validation should succeed
         vm.prank(address(entryPoint));
-        (bytes memory context, uint256 validationData) =
-            hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, 0.005 ether);
 
-        assertEq(validationData, 0, "Validation should succeed for existing hat wearer");
-        assertTrue(context.length > 0, "Context should be returned");
+        // Second validation with same vouch should fail
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.VouchAlreadyUsed.selector);
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.01 ether);
     }
 
-    /// @notice Test that deactivating a hat blocks sponsorship even if user is eligible
-    function testHat_DeactivatedHat_Fails() public {
-        address eligibleUser = address(0xE119);
+    function testVouched_NonVoucherHatWearerFails() public {
+        bytes32 newCredentialId = keccak256("unauthorized_voucher_user");
+        address newAccountAddr = factory.getAddress(newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
 
-        // Set the user as eligible
-        MockHatsIntegration(address(hats)).setEligible(eligibleUser, USER_HAT, true);
-
-        // Deactivate the hat
-        MockHatsIntegration(address(hats)).setActive(USER_HAT, false);
-
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
+        // Setup budget
+        bytes32 vouchedSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, bytes20(voucherAddr)));
         vm.prank(orgAdmin);
-        hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
+        hub.setBudget(ORG_ID, vouchedSubjectKey, 1 ether, 1 days);
 
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
+        // Use a different private key that doesn't wear the voucher hat
+        uint256 unauthorizedPrivateKey = 0xbadbeef;
+        address unauthorizedVoucher = vm.addr(unauthorizedPrivateKey);
+
+        // Build the vouch with unauthorized signer
+        uint48 expiry = uint48(block.timestamp + 1 hours);
+        bytes32 vouchHash = keccak256(abi.encodePacked(ORG_ID, newAccountAddr, expiry, block.chainid));
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", vouchHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(unauthorizedPrivateKey, ethSignedHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        bytes memory paymasterAndData = abi.encodePacked(
+            address(hub),
+            PAYMASTER_DATA_VERSION,
+            ORG_ID,
+            SUBJECT_TYPE_VOUCHED,
+            bytes20(unauthorizedVoucher),
+            RULE_ID_GENERIC,
+            uint64(0),
+            expiry,
+            signature
+        );
+
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
-
-        PackedUserOperation memory userOp = _createUserOp(eligibleUser, callData, paymasterAndData, "");
+        PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.Ineligible.selector);
+        vm.expectRevert(PaymasterHub.VoucherNotAuthorized.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.01 ether);
     }
 
-    /// @notice Test that deactivating a hat blocks existing wearers too
-    function testHat_DeactivatedHat_BlocksExistingWearer() public {
-        // `user` wears USER_HAT from setUp
-        // Deactivate the hat
-        MockHatsIntegration(address(hats)).setActive(USER_HAT, false);
+    function testVouched_InvalidSignatureFails() public {
+        bytes32 newCredentialId = keccak256("invalid_sig_user");
+        address newAccountAddr = factory.getAddress(newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
 
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
+        // Setup budget
+        bytes32 vouchedSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_VOUCHED, bytes20(voucherAddr)));
         vm.prank(orgAdmin);
-        hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
+        hub.setBudget(ORG_ID, vouchedSubjectKey, 1 ether, 1 days);
 
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
+        // Build valid signature but for WRONG account address
+        uint48 expiry = uint48(block.timestamp + 1 hours);
+        address wrongAccount = address(0xdead);
+        bytes32 vouchHash = keccak256(abi.encodePacked(ORG_ID, wrongAccount, expiry, block.chainid));
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", vouchHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(VOUCHER_PRIVATE_KEY, ethSignedHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        // But include it in paymasterAndData for newAccountAddr
+        bytes memory paymasterAndData = abi.encodePacked(
+            address(hub),
+            PAYMASTER_DATA_VERSION,
+            ORG_ID,
+            SUBJECT_TYPE_VOUCHED,
+            bytes20(voucherAddr),
+            RULE_ID_GENERIC,
+            uint64(0),
+            expiry,
+            signature
+        );
+
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
-
-        PackedUserOperation memory userOp = _createUserOp(user, callData, paymasterAndData, "");
+        PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.Ineligible.selector);
+        vm.expectRevert(PaymasterHub.InvalidVouchSignature.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.01 ether);
     }
 
-    /// @notice Test that reactivating a hat restores sponsorship
-    function testHat_ReactivatedHat_RestoresAccess() public {
-        address eligibleUser = address(0xE119);
-        MockHatsIntegration(address(hats)).setEligible(eligibleUser, USER_HAT, true);
+    function testVouched_VoucherHatNotSetFails() public {
+        // Create a new org WITHOUT voucher hat
+        bytes32 noVoucherOrgId = keccak256("NO_VOUCHER_ORG");
 
-        // Deactivate then reactivate
-        MockHatsIntegration(address(hats)).setActive(USER_HAT, false);
-        MockHatsIntegration(address(hats)).setActive(USER_HAT, true);
+        vm.prank(poaManager);
+        hub.registerOrg(noVoucherOrgId, ADMIN_HAT, OPERATOR_HAT); // No voucher hat!
 
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
-        vm.prank(orgAdmin);
-        hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
+        // Try to use vouched onboarding
+        bytes32 newCredentialId = keccak256("no_voucher_hat_user");
+        address newAccountAddr = factory.getAddress(newCredentialId, PUB_KEY_X, PUB_KEY_Y, 0);
 
-        vm.prank(orgAdmin);
-        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+        uint48 expiry = uint48(block.timestamp + 1 hours);
+
+        // Build signature (will be valid but org doesn't support vouching)
+        bytes32 vouchHash = keccak256(abi.encodePacked(noVoucherOrgId, newAccountAddr, expiry, block.chainid));
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", vouchHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(VOUCHER_PRIVATE_KEY, ethSignedHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        bytes memory paymasterAndData = abi.encodePacked(
+            address(hub),
+            PAYMASTER_DATA_VERSION,
+            noVoucherOrgId,
+            SUBJECT_TYPE_VOUCHED,
+            bytes20(voucherAddr),
+            RULE_ID_GENERIC,
+            uint64(0),
+            expiry,
+            signature
+        );
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
-
-        PackedUserOperation memory userOp = _createUserOp(eligibleUser, callData, paymasterAndData, "");
+        PackedUserOperation memory userOp = _createUserOp(newAccountAddr, callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));
-        (bytes memory context, uint256 validationData) =
-            hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
-
-        assertEq(validationData, 0, "Validation should succeed after hat reactivation");
-        assertTrue(context.length > 0, "Context should be returned");
+        vm.expectRevert(PaymasterHub.VoucherHatNotSet.selector);
+        hub.validatePaymasterUserOp(userOp, bytes32(0), 0.01 ether);
     }
 }
 
@@ -901,29 +996,10 @@ contract MockEntryPointIntegration is IEntryPoint {
 
 contract MockHatsIntegration is IHats {
     mapping(address => mapping(uint256 => bool)) private _wearers;
-    mapping(address => mapping(uint256 => bool)) private _eligibles;
-    mapping(uint256 => bool) private _activeHats;
-    mapping(uint256 => bool) private _hatExists;
 
     function mintHat(uint256 _hatId, address _wearer) external returns (bool success) {
         _wearers[_wearer][_hatId] = true;
-        if (!_hatExists[_hatId]) {
-            _hatExists[_hatId] = true;
-            _activeHats[_hatId] = true;
-        }
         return true;
-    }
-
-    function setEligible(address _wearer, uint256 _hatId, bool _eligible) external {
-        _eligibles[_wearer][_hatId] = _eligible;
-        if (!_hatExists[_hatId]) {
-            _hatExists[_hatId] = true;
-            _activeHats[_hatId] = true;
-        }
-    }
-
-    function setActive(uint256 _hatId, bool _active) external {
-        _activeHats[_hatId] = _active;
     }
 
     function isWearerOfHat(address _wearer, uint256 _hatId) external view returns (bool) {
@@ -959,13 +1035,12 @@ contract MockHatsIntegration is IHats {
         return true;
     }
 
-    function setHatStatus(uint256 _hatId, bool _active) external returns (bool) {
-        _activeHats[_hatId] = _active;
+    function setHatStatus(uint256, bool) external pure returns (bool) {
         return true;
     }
 
-    function checkHatStatus(uint256 _hatId) external view returns (bool) {
-        return _activeHats[_hatId];
+    function checkHatStatus(uint256) external pure returns (bool) {
+        return true;
     }
 
     function setHatWearerStatus(uint256, address, bool, bool) external pure returns (bool) {
@@ -987,12 +1062,12 @@ contract MockHatsIntegration is IHats {
     function requestLinkTopHatToTree(uint32, uint256) external {}
     function unlinkTopHatFromTree(uint32, address) external {}
 
-    function viewHat(uint256 _hatId)
+    function viewHat(uint256)
         external
-        view
+        pure
         returns (string memory, uint32, uint32, address, address, string memory, uint16, bool, bool)
     {
-        return ("", 0, 0, address(0), address(0), "", 0, false, _activeHats[_hatId]);
+        return ("", 0, 0, address(0), address(0), "", 0, false, true);
     }
 
     function changeHatDetails(uint256, string memory) external {}
@@ -1111,8 +1186,8 @@ contract MockHatsIntegration is IHats {
         return false;
     }
 
-    function isEligible(address _wearer, uint256 _hatId) external view returns (bool) {
-        return _wearers[_wearer][_hatId] || _eligibles[_wearer][_hatId];
+    function isEligible(address, uint256) external pure returns (bool) {
+        return true;
     }
 
     function isInGoodStanding(address, uint256) external pure returns (bool) {

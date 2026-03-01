@@ -90,7 +90,12 @@ contract ExecutorTest is Test {
     function testAllowedCallerCanSetNewCaller() public {
         address newCaller = address(0x5);
         vm.prank(caller);
-        exec.setCaller(newCaller);
+        exec.proposeCaller(newCaller);
+
+        vm.warp(block.timestamp + 2 days);
+
+        vm.prank(caller);
+        exec.acceptCaller();
         assertEq(exec.allowedCaller(), newCaller);
     }
 }

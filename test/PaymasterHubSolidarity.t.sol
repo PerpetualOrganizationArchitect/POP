@@ -1326,8 +1326,7 @@ contract PaymasterHubSolidarityTest is Test {
             callData: callData,
             accountGasLimits: UserOpLib.packAccountGasLimits(100_000, 100_000),
             preVerificationGas: 100_000,
-            maxFeePerGas: 1,
-            maxPriorityFeePerGas: 1,
+            gasFees: UserOpLib.packGasFees(1, 1),
             paymasterAndData: paymasterAndData,
             signature: ""
         });
@@ -1387,7 +1386,7 @@ contract PaymasterHubSolidarityTest is Test {
     }
 
     /// @notice Failed (reverted) onboarding ops must still consume a throttle attempt
-    function testOnboardingFailedOpsStillConsumeAttemptThrottle() public {
+    function testOnboardingFailedOpsDoNotConsumeAttemptThrottle() public {
         hub.donateToSolidarity{value: 1 ether}();
         vm.prank(poaManager);
         hub.setOnboardingConfig(uint128(MAX_COST), 1, true);
@@ -1398,16 +1397,29 @@ contract PaymasterHubSolidarityTest is Test {
         userOp1.initCode = hex"01";
         vm.prank(address(entryPoint));
         (bytes memory context1,) = hub.validatePaymasterUserOp(userOp1, keccak256("hash1"), MAX_COST);
+        // Failed op — counter was incremented in validation but refunded in postOp
         vm.prank(address(entryPoint));
         hub.postOp(IPaymaster.PostOpMode.opReverted, context1, 50_000);
+        // Second onboarding should succeed because the failed op's slot was refunded
         address account2 = address(0xaa02);
         bytes memory pmData2 =
             _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
         PackedUserOperation memory userOp2 = _buildUserOp(account2, "", pmData2);
         userOp2.initCode = hex"01";
         vm.prank(address(entryPoint));
+        (bytes memory context2,) = hub.validatePaymasterUserOp(userOp2, keccak256("hash2"), MAX_COST);
+        // Successful op — counter stays incremented (no refund)
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context2, 50_000);
+        // Third onboarding should now be blocked (limit of 1 reached)
+        address account3 = address(0xaa03);
+        bytes memory pmData3 =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp3 = _buildUserOp(account3, "", pmData3);
+        userOp3.initCode = hex"01";
+        vm.prank(address(entryPoint));
         vm.expectRevert(PaymasterHub.OnboardingDailyLimitExceeded.selector);
-        hub.validatePaymasterUserOp(userOp2, keccak256("hash2"), MAX_COST);
+        hub.validatePaymasterUserOp(userOp3, keccak256("hash3"), MAX_COST);
     }
 
     /// @notice registerOrg must reject bytes32(0) as orgId
