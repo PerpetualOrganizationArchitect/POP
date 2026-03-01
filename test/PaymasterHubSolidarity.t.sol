@@ -459,6 +459,22 @@ contract PaymasterHubSolidarityTest is Test {
         assertEq(solidarity.balance, donationAmount);
     }
 
+    // ============ Overflow Protection Tests ============
+
+    function testDepositForOrgOverflowReverts() public {
+        vm.deal(user1, type(uint256).max);
+        vm.prank(user1);
+        vm.expectRevert(PaymasterHub.Overflow.selector);
+        hub.depositForOrg{value: uint256(type(uint128).max) + 1}(ORG_ALPHA);
+    }
+
+    function testDonateToSolidarityOverflowReverts() public {
+        vm.deal(user1, type(uint256).max);
+        vm.prank(user1);
+        vm.expectRevert(PaymasterHub.Overflow.selector);
+        hub.donateToSolidarity{value: uint256(type(uint128).max) + 1}();
+    }
+
     // ============ Period Reset Tests ============
 
     function testPeriodResetOnTimeElapse() public {

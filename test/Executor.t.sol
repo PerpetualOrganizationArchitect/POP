@@ -98,4 +98,46 @@ contract ExecutorTest is Test {
         exec.acceptCaller();
         assertEq(exec.allowedCaller(), newCaller);
     }
+
+    function testProposeCallerUnauthorizedReverts() public {
+        address random = address(0x99);
+        vm.prank(random);
+        vm.expectRevert(Executor.UnauthorizedCaller.selector);
+        exec.proposeCaller(address(0x5));
+    }
+
+    function testAcceptCallerBeforeTimelockReverts() public {
+        vm.prank(caller);
+        exec.proposeCaller(address(0x5));
+
+        // Try to accept immediately (before 2-day delay)
+        vm.prank(caller);
+        vm.expectRevert(Executor.TimelockNotExpired.selector);
+        exec.acceptCaller();
+    }
+
+    function testCancelCallerChange() public {
+        address newCaller = address(0x5);
+        vm.prank(caller);
+        exec.proposeCaller(newCaller);
+
+        // Cancel the change
+        vm.prank(caller);
+        exec.cancelCallerChange();
+
+        // Warp past delay and try to accept — should fail (pending cleared)
+        vm.warp(block.timestamp + 2 days);
+        vm.prank(caller);
+        vm.expectRevert(Executor.ZeroAddress.selector);
+        exec.acceptCaller();
+
+        // Caller should be unchanged
+        assertEq(exec.allowedCaller(), caller);
+    }
+
+    function testProposeCallerZeroAddressReverts() public {
+        vm.prank(caller);
+        vm.expectRevert(Executor.ZeroAddress.selector);
+        exec.proposeCaller(address(0));
+    }
 }
