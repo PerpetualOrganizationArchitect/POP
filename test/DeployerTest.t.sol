@@ -817,15 +817,11 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         /* basic invariants */
         // Version getters removed - contracts are upgradeable via beacon pattern
 
-        // Authorize QuickJoin to call registerAccountQuickJoin on the global UAR
-        vm.prank(poaAdmin);
-        UniversalAccountRegistry(accountRegProxy).setAuthorizedCaller(quickJoinProxy, true);
-
         /*—————————————————— quick smoke test: join + vote —————————————————*/
         vm.prank(voter1);
-        QuickJoin(quickJoinProxy).quickJoinNoUser("testUser1");
+        QuickJoin(quickJoinProxy).quickJoinNoUser();
         vm.prank(voter2);
-        QuickJoin(quickJoinProxy).quickJoinNoUser("v2");
+        QuickJoin(quickJoinProxy).quickJoinNoUser();
 
         // Give voter1 the EXECUTIVE role hat for creating proposals
         // (voter1 already has DEFAULT hat from QuickJoin, but needs EXECUTIVE for creating)

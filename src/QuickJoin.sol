@@ -14,7 +14,6 @@ import {HatManager} from "./libs/HatManager.sol";
 
 interface IUniversalAccountRegistry {
     function getUsername(address account) external view returns (string memory);
-    function registerAccountQuickJoin(string memory username, address newUser) external;
 }
 
 interface IExecutorHatMinter {
@@ -33,14 +32,11 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     error InvalidAddress();
     error OnlyMasterDeploy();
     error ZeroUser();
-    error UsernameTooLong();
     error NoUsername();
     error Unauthorized();
     error PasskeyFactoryNotSet();
-    error AccountAlreadyRegistered();
 
     /* ───────── Constants ────── */
-    uint256 internal constant MAX_USERNAME_LEN = 64;
     bytes4 public constant MODULE_ID = bytes4(keccak256("QuickJoin"));
 
     /* ───────── ERC-7201 Storage ──────── */
@@ -75,14 +71,12 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     event AddressesUpdated(address hats, address registry, address master);
     event ExecutorUpdated(address newExecutor);
     event MemberHatIdsUpdated(uint256[] hatIds);
-    event QuickJoined(address indexed user, bool usernameCreated, uint256[] hatIds);
-    event QuickJoinedByMaster(address indexed master, address indexed user, bool usernameCreated, uint256[] hatIds);
+    event QuickJoined(address indexed user, uint256[] hatIds);
+    event QuickJoinedByMaster(address indexed master, address indexed user, uint256[] hatIds);
     event UniversalFactoryUpdated(address indexed universalFactory);
-    event QuickJoinedWithPasskey(
-        address indexed account, string username, bytes32 indexed credentialId, uint256[] hatIds
-    );
+    event QuickJoinedWithPasskey(address indexed account, bytes32 indexed credentialId, uint256[] hatIds);
     event QuickJoinedWithPasskeyByMaster(
-        address indexed master, address indexed account, string username, bytes32 indexed credentialId, uint256[] hatIds
+        address indexed master, address indexed account, bytes32 indexed credentialId, uint256[] hatIds
     );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -174,32 +168,24 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     }
 
     /* ───────── Internal helper ─────── */
-    function _quickJoin(address user, string memory username) private nonReentrant {
+    function _quickJoin(address user) private nonReentrant {
         if (user == address(0)) revert ZeroUser();
-        if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
         Layout storage l = _layout();
-        bool created;
-
-        if (bytes(l.accountRegistry.getUsername(user)).length == 0) {
-            if (bytes(username).length == 0) revert NoUsername();
-            l.accountRegistry.registerAccountQuickJoin(username, user);
-            created = true;
-        }
 
         // Request executor to mint all configured member hats to the user
         if (l.memberHatIds.length > 0) {
             IExecutorHatMinter(l.executor).mintHatsForUser(user, l.memberHatIds);
         }
 
-        emit QuickJoined(user, created, l.memberHatIds);
+        emit QuickJoined(user, l.memberHatIds);
     }
 
     /* ───────── Public user paths ─────── */
 
-    /// 1) caller supplies username if they don't have one yet
-    function quickJoinNoUser(string calldata username) external {
-        _quickJoin(_msgSender(), username);
+    /// 1) caller joins org (username registration handled separately by the user)
+    function quickJoinNoUser() external {
+        _quickJoin(_msgSender());
     }
 
     /// 2) caller already registered a username elsewhere
@@ -213,51 +199,34 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
             IExecutorHatMinter(l.executor).mintHatsForUser(_msgSender(), l.memberHatIds);
         }
 
-        emit QuickJoined(_msgSender(), false, l.memberHatIds);
+        emit QuickJoined(_msgSender(), l.memberHatIds);
     }
 
     /* ───────── Passkey join paths ─────── */
 
     /// @notice Join org with a new passkey account
-    /// @param username Username to register
     /// @param passkey Passkey enrollment data
     /// @return account The created passkey account address
-    /// @dev Reverts if the passkey already has a registered account with a username
-    function quickJoinWithPasskey(string calldata username, PasskeyEnrollment calldata passkey)
-        external
-        nonReentrant
-        returns (address account)
-    {
+    function quickJoinWithPasskey(PasskeyEnrollment calldata passkey) external nonReentrant returns (address account) {
         Layout storage l = _layout();
         if (address(l.universalFactory) == address(0)) revert PasskeyFactoryNotSet();
-        if (bytes(username).length == 0) revert NoUsername();
-        if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
         // 1. Create PasskeyAccount via universal factory (returns existing if already deployed)
         account = l.universalFactory
             .createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
 
-        // 2. Register username to the account
-        // Revert if account already has a username (prevents duplicate enrollment attempts)
-        if (bytes(l.accountRegistry.getUsername(account)).length != 0) {
-            revert AccountAlreadyRegistered();
-        }
-        l.accountRegistry.registerAccountQuickJoin(username, account);
-
-        // 3. Mint member hats to the account
+        // 2. Mint member hats to the account
         if (l.memberHatIds.length > 0) {
             IExecutorHatMinter(l.executor).mintHatsForUser(account, l.memberHatIds);
         }
 
-        emit QuickJoinedWithPasskey(account, username, passkey.credentialId, l.memberHatIds);
+        emit QuickJoinedWithPasskey(account, passkey.credentialId, l.memberHatIds);
     }
 
     /// @notice Master-deploy path for passkey onboarding
-    /// @param username Username to register
     /// @param passkey Passkey enrollment data
     /// @return account The created passkey account address
-    /// @dev Reverts if the passkey already has a registered account with a username
-    function quickJoinWithPasskeyMasterDeploy(string calldata username, PasskeyEnrollment calldata passkey)
+    function quickJoinWithPasskeyMasterDeploy(PasskeyEnrollment calldata passkey)
         external
         onlyMasterDeploy
         nonReentrant
@@ -265,33 +234,24 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     {
         Layout storage l = _layout();
         if (address(l.universalFactory) == address(0)) revert PasskeyFactoryNotSet();
-        if (bytes(username).length == 0) revert NoUsername();
-        if (bytes(username).length > MAX_USERNAME_LEN) revert UsernameTooLong();
 
         // 1. Create PasskeyAccount via universal factory (returns existing if already deployed)
         account = l.universalFactory
             .createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
 
-        // 2. Register username to the account
-        // Revert if account already has a username (prevents duplicate enrollment attempts)
-        if (bytes(l.accountRegistry.getUsername(account)).length != 0) {
-            revert AccountAlreadyRegistered();
-        }
-        l.accountRegistry.registerAccountQuickJoin(username, account);
-
-        // 3. Mint member hats to the account
+        // 2. Mint member hats to the account
         if (l.memberHatIds.length > 0) {
             IExecutorHatMinter(l.executor).mintHatsForUser(account, l.memberHatIds);
         }
 
-        emit QuickJoinedWithPasskeyByMaster(_msgSender(), account, username, passkey.credentialId, l.memberHatIds);
+        emit QuickJoinedWithPasskeyByMaster(_msgSender(), account, passkey.credentialId, l.memberHatIds);
     }
 
     /* ───────── Master-deploy helper paths ─────── */
 
-    function quickJoinNoUserMasterDeploy(string calldata username, address newUser) external onlyMasterDeploy {
-        _quickJoin(newUser, username);
-        emit QuickJoinedByMaster(_msgSender(), newUser, bytes(username).length > 0, _layout().memberHatIds);
+    function quickJoinNoUserMasterDeploy(address newUser) external onlyMasterDeploy {
+        _quickJoin(newUser);
+        emit QuickJoinedByMaster(_msgSender(), newUser, _layout().memberHatIds);
     }
 
     function quickJoinWithUserMasterDeploy(address newUser) external onlyMasterDeploy nonReentrant {
@@ -305,7 +265,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
             IExecutorHatMinter(l.executor).mintHatsForUser(newUser, l.memberHatIds);
         }
 
-        emit QuickJoinedByMaster(_msgSender(), newUser, false, l.memberHatIds);
+        emit QuickJoinedByMaster(_msgSender(), newUser, l.memberHatIds);
     }
 
     /* ───────── Misc view helpers ─────── */

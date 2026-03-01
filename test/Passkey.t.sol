@@ -679,9 +679,6 @@ contract PasskeyTest is Test {
         // Configure universal passkey factory in QuickJoin
         quickJoin.setUniversalFactory(address(factory));
 
-        // Authorize QuickJoin as a caller on the account registry
-        accountRegistry.setAuthorizedCaller(address(quickJoin), true);
-
         vm.stopPrank();
 
         return quickJoin;
@@ -696,27 +693,11 @@ contract PasskeyTest is Test {
             credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
         });
 
-        address account = qj.quickJoinWithPasskey("testuser", enrollment);
+        address account = qj.quickJoinWithPasskey(enrollment);
 
         // Verify account was created
         assertTrue(account != address(0));
         assertTrue(factory.isDeployedAccount(account));
-
-        // Verify username was registered
-        assertEq(accountRegistry.getUsername(account), "testuser");
-    }
-
-    function testQuickJoinWithPasskeyNoUsername() public {
-        QuickJoin qj = _setupQuickJoin();
-
-        vm.prank(user);
-
-        QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
-        });
-
-        vm.expectRevert(QuickJoin.NoUsername.selector);
-        qj.quickJoinWithPasskey("", enrollment);
     }
 
     function testQuickJoinWithPasskeyFactoryNotSet() public {
@@ -748,7 +729,7 @@ contract PasskeyTest is Test {
         });
 
         vm.expectRevert(QuickJoin.PasskeyFactoryNotSet.selector);
-        qj.quickJoinWithPasskey("testuser", enrollment);
+        qj.quickJoinWithPasskey(enrollment);
     }
 
     function testQuickJoinWithPasskeyMasterDeploy() public {
@@ -760,10 +741,10 @@ contract PasskeyTest is Test {
             credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
         });
 
-        address account = qj.quickJoinWithPasskeyMasterDeploy("masteruser", enrollment);
+        address account = qj.quickJoinWithPasskeyMasterDeploy(enrollment);
 
         assertTrue(account != address(0));
-        assertEq(accountRegistry.getUsername(account), "masteruser");
+        assertTrue(factory.isDeployedAccount(account));
     }
 
     function testQuickJoinWithPasskeyMasterDeployUnauthorized() public {
@@ -776,7 +757,7 @@ contract PasskeyTest is Test {
         });
 
         vm.expectRevert(QuickJoin.OnlyMasterDeploy.selector);
-        qj.quickJoinWithPasskeyMasterDeploy("attackeruser", enrollment);
+        qj.quickJoinWithPasskeyMasterDeploy(enrollment);
     }
 
     /*════════════════════════════════════════════════════════════════════
@@ -976,7 +957,7 @@ contract PasskeyTest is Test {
                     QUICKJOIN DUPLICATE ACCOUNT TESTS
     ════════════════════════════════════════════════════════════════════*/
 
-    function testQuickJoinWithPasskeyDuplicateReverts() public {
+    function testQuickJoinWithPasskeyDuplicateReturnsExisting() public {
         QuickJoin qj = _setupQuickJoin();
 
         // First user joins with passkey
@@ -984,28 +965,12 @@ contract PasskeyTest is Test {
         QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
             credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
         });
-        qj.quickJoinWithPasskey("firstuser", enrollment);
+        address first = qj.quickJoinWithPasskey(enrollment);
 
-        // Second user tries to join with same passkey (should revert)
+        // Second call with same passkey returns same account (factory returns existing)
         vm.prank(attacker);
-        vm.expectRevert(QuickJoin.AccountAlreadyRegistered.selector);
-        qj.quickJoinWithPasskey("seconduser", enrollment);
-    }
-
-    function testQuickJoinWithPasskeyMasterDeployDuplicateReverts() public {
-        QuickJoin qj = _setupQuickJoin();
-
-        // First enrollment
-        vm.prank(owner);
-        QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
-        });
-        qj.quickJoinWithPasskeyMasterDeploy("firstuser", enrollment);
-
-        // Second enrollment with same passkey (should revert)
-        vm.prank(owner);
-        vm.expectRevert(QuickJoin.AccountAlreadyRegistered.selector);
-        qj.quickJoinWithPasskeyMasterDeploy("seconduser", enrollment);
+        address second = qj.quickJoinWithPasskey(enrollment);
+        assertEq(first, second);
     }
 
     /*════════════════════════════════════════════════════════════════════

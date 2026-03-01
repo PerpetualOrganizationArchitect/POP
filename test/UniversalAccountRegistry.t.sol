@@ -34,47 +34,6 @@ contract UARTest is Test {
         assertEq(reg.getUsername(user), "");
     }
 
-    /*════════════════════════════════════════════════════════════════════
-                    ACCESS CONTROL TESTS
-    ════════════════════════════════════════════════════════════════════*/
-
-    function testQuickJoinUnauthorizedCallerReverts() public {
-        address unauthorized = address(0x99);
-        vm.prank(unauthorized);
-        vm.expectRevert(UniversalAccountRegistry.UnauthorizedCaller.selector);
-        reg.registerAccountQuickJoin("newuser", address(0x50));
-    }
-
-    function testQuickJoinAuthorizedCallerSucceeds() public {
-        address quickJoin = address(0x10);
-        address newUser = address(0x50);
-
-        // Authorize the caller
-        reg.setAuthorizedCaller(quickJoin, true);
-
-        // Should succeed now
-        vm.prank(quickJoin);
-        reg.registerAccountQuickJoin("newuser", newUser);
-        assertEq(reg.getUsername(newUser), "newuser");
-    }
-
-    function testSetAuthorizedCallerOnlyOwner() public {
-        address random = address(0x99);
-        vm.prank(random);
-        vm.expectRevert();
-        reg.setAuthorizedCaller(address(0x10), true);
-    }
-
-    function testDeauthorizeCallerReverts() public {
-        address quickJoin = address(0x10);
-        reg.setAuthorizedCaller(quickJoin, true);
-        reg.setAuthorizedCaller(quickJoin, false);
-
-        vm.prank(quickJoin);
-        vm.expectRevert(UniversalAccountRegistry.UnauthorizedCaller.selector);
-        reg.registerAccountQuickJoin("newuser", address(0x50));
-    }
-
     function testRegisterBatchOnlyOwner() public {
         address random = address(0x99);
         address[] memory users = new address[](1);
