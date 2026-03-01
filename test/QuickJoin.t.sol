@@ -23,6 +23,7 @@ contract MockExecutorHatMinter {
 
 contract MockRegistry is IUniversalAccountRegistry {
     mapping(address => string) public usernames;
+    mapping(address => uint256) private _nonces;
 
     function getUsername(address account) external view returns (string memory) {
         return usernames[account];
@@ -30,6 +31,38 @@ contract MockRegistry is IUniversalAccountRegistry {
 
     function setUsername(address user, string memory name) external {
         usernames[user] = name;
+    }
+
+    function registerAccountBySig(
+        address user,
+        string calldata username,
+        uint256 deadline,
+        uint256 nonce,
+        bytes calldata /* signature */
+    ) external {
+        require(block.timestamp <= deadline, "expired");
+        require(nonce == _nonces[user], "bad nonce");
+        _nonces[user]++;
+        usernames[user] = username;
+    }
+
+    function registerAccountByPasskeySig(
+        bytes32, /* credentialId */
+        bytes32, /* pubKeyX */
+        bytes32, /* pubKeyY */
+        uint256, /* salt */
+        string calldata username,
+        uint256 deadline,
+        uint256, /* nonce */
+        WebAuthnLib.WebAuthnAuth calldata /* auth */
+    ) external {
+        // In mock: skip sig verification, just register.
+        require(block.timestamp <= deadline, "expired");
+        usernames[address(0)] = username; // placeholder, tests override via setUsername
+    }
+
+    function nonces(address user) external view returns (uint256) {
+        return _nonces[user];
     }
 }
 
@@ -238,4 +271,70 @@ contract QuickJoinTest is Test {
         vm.expectRevert(QuickJoin.OnlyMasterDeploy.selector);
         qj.quickJoinWithUserMasterDeploy(user1);
     }
+
+    /* ═══════════════════ registerAndQuickJoin (EOA) tests ═══════════════════ */
+
+    function testRegisterAndQuickJoin() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        uint256 nonce = 0;
+        bytes memory sig = hex"00"; // Mock registry doesn't verify sig
+
+        address sponsor = address(0xBEEF);
+        vm.prank(sponsor);
+        qj.registerAndQuickJoin(user1, "alice", deadline, nonce, sig);
+
+        // Verify username was set on mock registry
+        assertEq(registry.usernames(user1), "alice");
+        // Verify hats were minted
+        assertTrue(mockExecutor.hats().isWearerOfHat(user1, DEFAULT_HAT_ID));
+    }
+
+    function testRegisterAndQuickJoinEmitsEvent() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = hex"00";
+
+        vm.expectEmit(true, true, true, true);
+        uint256[] memory expectedHats = new uint256[](1);
+        expectedHats[0] = DEFAULT_HAT_ID;
+        emit RegisterAndQuickJoined(user1, "alice", expectedHats);
+        qj.registerAndQuickJoin(user1, "alice", deadline, 0, sig);
+    }
+
+    function testRegisterAndQuickJoinZeroUser() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = hex"00";
+
+        vm.expectRevert(QuickJoin.ZeroUser.selector);
+        qj.registerAndQuickJoin(address(0), "alice", deadline, 0, sig);
+    }
+
+    /* ═══════════════════ registerAndQuickJoinWithPasskey tests ═══════════════════ */
+
+    function testRegisterAndQuickJoinWithPasskeyNoFactory() public {
+        QuickJoin.PasskeyEnrollment memory passkey = QuickJoin.PasskeyEnrollment({
+            credentialId: bytes32(uint256(1)), publicKeyX: bytes32(uint256(2)), publicKeyY: bytes32(uint256(3)), salt: 0
+        });
+
+        WebAuthnLib.WebAuthnAuth memory auth;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.expectRevert(QuickJoin.PasskeyFactoryNotSet.selector);
+        qj.registerAndQuickJoinWithPasskey(passkey, "alice", deadline, 0, auth);
+    }
+
+    function testRegisterAndQuickJoinWithPasskeyMasterDeployUnauthorized() public {
+        QuickJoin.PasskeyEnrollment memory passkey = QuickJoin.PasskeyEnrollment({
+            credentialId: bytes32(uint256(1)), publicKeyX: bytes32(uint256(2)), publicKeyY: bytes32(uint256(3)), salt: 0
+        });
+
+        WebAuthnLib.WebAuthnAuth memory auth;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        // Random caller, not master or executor
+        vm.prank(address(0x999));
+        vm.expectRevert(QuickJoin.OnlyMasterDeploy.selector);
+        qj.registerAndQuickJoinWithPasskeyMasterDeploy(passkey, "alice", deadline, 0, auth);
+    }
+
+    event RegisterAndQuickJoined(address indexed user, string username, uint256[] hatIds);
 }
