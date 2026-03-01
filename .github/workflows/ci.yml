@@ -8,11 +8,19 @@ on:
 
 jobs:
   foundry-cicd:
-    uses: BreadchainCoop/etherform/.github/workflows/_foundry-cicd.yml@foundry-profile-input
+    uses: BreadchainCoop/etherform/.github/workflows/_foundry-cicd.yml@214cc6e48a9d8084f32de5192754c3c078d588fa
     with:
       # CI Options
       check-formatting: true
       test-verbosity: 'vvv'
+
+      # Slither Analysis
+      run-slither: true
+      slither-fail-on: 'high'
+
+      # Coverage
+      run-coverage: true
+      coverage-source-filter: ' src/'
 
       # Upgrade Safety
       run-upgrade-safety: true
@@ -27,7 +35,6 @@ jobs:
       indexing-wait: 90
       flatten-contracts: true
       upgrades-path: 'upgrades'
-      deployment-foundry-profile: 'production'
     secrets:
       PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
       RPC_URL: ${{ secrets.HOODI_RPC_URL }}
