@@ -15,3 +15,11 @@ docs/book.toml
 
 # Dotenv file
 .env
+
+# E2E testnet state (contains deployment-specific addresses)
+script/e2e/e2e-state.json
+
+# Deployment state files (contain deployment-specific addresses)
+script/main-deploy-state.json
+script/satellite-state-*.json
+script/deploy-*.log

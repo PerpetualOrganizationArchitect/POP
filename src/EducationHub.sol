@@ -56,12 +56,12 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         uint256[] memberHatIds; // enumeration array for member hats
     }
 
-    // keccak256("poa.educationhub.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x5dc09eed2545e1c49e29265cd02140e8b217f2e2a19c33f42e35fa06d63dcb0a;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.educationhub.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 
@@ -76,6 +76,11 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     event ExecutorSet(address indexed newExecutor);
     event TokenSet(address indexed newToken);
     event HatsSet(address indexed newHats);
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     /*────────── Initialiser ────────*/
     function initialize(
@@ -198,7 +203,7 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         }
 
         l._modules[id] =
-            Module({answerHash: keccak256(abi.encodePacked(correctAnswer)), payout: uint128(payout), exists: true});
+            Module({answerHash: keccak256(abi.encodePacked(id, correctAnswer)), payout: uint128(payout), exists: true});
 
         emit ModuleCreated(id, title, contentHash, payout);
     }
@@ -229,7 +234,7 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         Layout storage l = _layout();
         Module storage m = _module(l, id);
         if (_isCompleted(l, _msgSender(), id)) revert AlreadyCompleted();
-        if (keccak256(abi.encodePacked(answer)) != m.answerHash) revert InvalidAnswer();
+        if (keccak256(abi.encodePacked(uint48(id), answer)) != m.answerHash) revert InvalidAnswer();
 
         l.token.mint(_msgSender(), m.payout);
         _setCompleted(l, _msgSender(), id);

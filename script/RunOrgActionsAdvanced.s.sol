@@ -344,19 +344,19 @@ contract RunOrgActionsAdvanced is Script {
         // Member 1 joins (registers username only, no hats - vouching required for MEMBER hat)
         console.log("\n-> Member 1 joining (username only, no hats)...");
         vm.broadcast(memberKeys.member1);
-        quickJoin.quickJoinNoUser("member1");
+        quickJoin.quickJoinNoUser();
         console.log("  [OK] Registered username");
 
         // Member 2 joins
         console.log("-> Member 2 joining (username only, no hats)...");
         vm.broadcast(memberKeys.member2);
-        quickJoin.quickJoinNoUser("member2");
+        quickJoin.quickJoinNoUser();
         console.log("  [OK] Registered username");
 
         // Coordinator joins
         console.log("-> Coordinator joining (username only, no hats)...");
         vm.broadcast(memberKeys.coordinator);
-        quickJoin.quickJoinNoUser("coordinator");
+        quickJoin.quickJoinNoUser();
         console.log("  [OK] Registered username");
 
         console.log("\n[OK] All Members Registered");

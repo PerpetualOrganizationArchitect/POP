@@ -73,12 +73,12 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         bytes32[] pendingRecoveryIds;
     }
 
-    // keccak256("poa.passkeyaccount.storage")
-    bytes32 private constant _STORAGE_SLOT = 0x7cfc8294c1be3fa32b08d50f0668cc2726e1306f195499e2d5283b8967b03fef;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.passkeyaccount.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 
@@ -236,6 +236,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
 
     /// @inheritdoc IPasskeyAccount
     function addCredential(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY) external override onlySelf {
+        if (pubKeyX == bytes32(0) || pubKeyY == bytes32(0)) revert InvalidSignature();
         Layout storage l = _layout();
 
         // Check if credential already exists
@@ -319,6 +320,7 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
 
     /// @inheritdoc IPasskeyAccount
     function initiateRecovery(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY) external override onlyGuardian {
+        if (pubKeyX == bytes32(0) || pubKeyY == bytes32(0)) revert InvalidSignature();
         Layout storage l = _layout();
 
         // Generate recovery ID
@@ -361,6 +363,15 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
             revert RecoveryDelayNotPassed();
         }
 
+        // Deactivate all existing credentials for security
+        for (uint256 i = 0; i < l.credentialIds.length; i++) {
+            bytes32 existingCredId = l.credentialIds[i];
+            if (l.credentials[existingCredId].active) {
+                l.credentials[existingCredId].active = false;
+                emit CredentialStatusChanged(existingCredId, false);
+            }
+        }
+
         // Add the new credential
         bytes32 credentialId = request.credentialId;
 
@@ -378,6 +389,8 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
 
         emit RecoveryCompleted(recoveryId, credentialId);
         emit CredentialAdded(credentialId, uint64(block.timestamp));
+
+        _removePendingRecovery(recoveryId);
     }
 
     /// @inheritdoc IPasskeyAccount
@@ -391,6 +404,8 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
 
         request.cancelled = true;
         emit RecoveryCancelled(recoveryId);
+
+        _removePendingRecovery(recoveryId);
     }
 
     /*──────────────────────────── Execution Functions ─────────────────*/
@@ -493,6 +508,22 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
                 // Swap with last element and pop
                 l.credentialIds[i] = l.credentialIds[length - 1];
                 l.credentialIds.pop();
+                break;
+            }
+        }
+    }
+
+    /**
+     * @notice Remove a recovery ID from the pending array
+     * @param recoveryId The recovery ID to remove
+     */
+    function _removePendingRecovery(bytes32 recoveryId) private {
+        Layout storage l = _layout();
+        uint256 len = l.pendingRecoveryIds.length;
+        for (uint256 i = 0; i < len; i++) {
+            if (l.pendingRecoveryIds[i] == recoveryId) {
+                l.pendingRecoveryIds[i] = l.pendingRecoveryIds[len - 1];
+                l.pendingRecoveryIds.pop();
                 break;
             }
         }

@@ -1483,4 +1483,24 @@ contract MockERC20 is IERC20 {
             assertTrue(ok, "Should have quorum with multiple participants");
             // The result depends on the complex interaction of all classes
         }
+
+        /* ───────────── ANNOUNCE WINNER REPLAY PROTECTION ───────────── */
+
+        function testAnnounceWinnerDoubleCallReverts() public {
+            uint256 id = _create();
+
+            _voteYES(alice);
+            _voteYES(carol);
+
+            vm.warp(block.timestamp + 16 minutes);
+
+            // First call succeeds
+            vm.prank(alice);
+            hv.announceWinner(id);
+
+            // Second call reverts
+            vm.expectRevert(VotingErrors.AlreadyExecuted.selector);
+            vm.prank(alice);
+            hv.announceWinner(id);
+        }
     }

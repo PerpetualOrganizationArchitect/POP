@@ -52,6 +52,7 @@ contract HybridVoting is Initializable {
         bool restricted; // if true only pollHatIds can vote
         mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
         ClassConfig[] classesSnapshot; // Snapshot the class config to freeze semantics for this proposal
+        bool executed; // finalization guard
     }
 
     /* ─────── ERC-7201 Storage ─────── */
@@ -71,12 +72,12 @@ contract HybridVoting is Initializable {
         uint256 _lock; // Inline reentrancy guard state
     }
 
-    // keccak256("poa.hybridvoting.v2.storage") → unique, collision-free slot for v2
-    bytes32 private constant _STORAGE_SLOT = 0x7a3e8e3d8e9c8f7b6a5d4c3b2a1908070605040302010009080706050403020a;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.hybridvoting.v2.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 
@@ -116,7 +117,10 @@ contract HybridVoting is Initializable {
     event QuorumSet(uint8 pct);
 
     /* ─────── Initialiser ─────── */
-    constructor() initializer {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(
         address hats_,

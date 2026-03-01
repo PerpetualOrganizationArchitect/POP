@@ -10,6 +10,7 @@ library TaskPerm {
     uint8 internal constant CLAIM = 1 << 1;
     uint8 internal constant REVIEW = 1 << 2;
     uint8 internal constant ASSIGN = 1 << 3;
+    uint8 internal constant SELF_REVIEW = 1 << 4;
 
     function has(uint8 mask, uint8 flag) internal pure returns (bool) {
         return mask & flag != 0;

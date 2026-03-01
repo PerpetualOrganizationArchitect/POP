@@ -27,6 +27,8 @@ contract SwitchableBeaconTest is Test {
 
     // Events
     event OwnerTransferred(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferStarted(address indexed pendingOwner);
+    event OwnershipTransferCancelled(address indexed cancelledOwner);
     event ModeChanged(SwitchableBeacon.Mode mode);
     event MirrorSet(address indexed mirrorBeacon);
     event Pinned(address indexed implementation);
@@ -204,14 +206,25 @@ contract SwitchableBeaconTest is Test {
     }
 
     function testOwnershipTransfer() public {
-        // Transfer ownership
-        vm.expectEmit(true, true, false, false);
-        emit OwnerTransferred(owner, newOwner);
+        // Initiate ownership transfer
+        vm.expectEmit(true, false, false, false);
+        emit OwnershipTransferStarted(newOwner);
 
         switchableBeacon.transferOwnership(newOwner);
 
+        // Owner should still be the original owner
+        assertEq(switchableBeacon.owner(), owner);
+        assertEq(switchableBeacon.pendingOwner(), newOwner);
+
+        // Pending owner accepts ownership
+        vm.prank(newOwner);
+        vm.expectEmit(true, true, false, false);
+        emit OwnerTransferred(owner, newOwner);
+        switchableBeacon.acceptOwnership();
+
         // Verify new owner
         assertEq(switchableBeacon.owner(), newOwner);
+        assertEq(switchableBeacon.pendingOwner(), address(0));
 
         // Old owner can't perform restricted operations
         vm.expectRevert(SwitchableBeacon.NotOwner.selector);
@@ -221,6 +234,50 @@ contract SwitchableBeaconTest is Test {
         vm.prank(newOwner);
         switchableBeacon.pin(address(implV2));
         assertEq(switchableBeacon.implementation(), address(implV2));
+    }
+
+    function testAcceptOwnershipRevertsIfNotPendingOwner() public {
+        switchableBeacon.transferOwnership(newOwner);
+
+        // Unauthorized address cannot accept
+        vm.prank(unauthorized);
+        vm.expectRevert(SwitchableBeacon.NotPendingOwner.selector);
+        switchableBeacon.acceptOwnership();
+    }
+
+    function testCancelOwnershipTransfer() public {
+        // Initiate ownership transfer
+        switchableBeacon.transferOwnership(newOwner);
+        assertEq(switchableBeacon.pendingOwner(), newOwner);
+
+        // Cancel the transfer
+        vm.expectEmit(true, false, false, false);
+        emit OwnershipTransferCancelled(newOwner);
+        switchableBeacon.cancelOwnershipTransfer();
+
+        // Verify pending owner is cleared
+        assertEq(switchableBeacon.pendingOwner(), address(0));
+        assertEq(switchableBeacon.owner(), owner);
+
+        // Cancelled pending owner cannot accept
+        vm.prank(newOwner);
+        vm.expectRevert(SwitchableBeacon.NotPendingOwner.selector);
+        switchableBeacon.acceptOwnership();
+    }
+
+    function testCancelOwnershipTransferRevertsWhenNoPending() public {
+        // No pending transfer to cancel
+        vm.expectRevert(SwitchableBeacon.NoPendingTransfer.selector);
+        switchableBeacon.cancelOwnershipTransfer();
+    }
+
+    function testCancelOwnershipTransferOnlyOwner() public {
+        switchableBeacon.transferOwnership(newOwner);
+
+        // Non-owner cannot cancel
+        vm.prank(unauthorized);
+        vm.expectRevert(SwitchableBeacon.NotOwner.selector);
+        switchableBeacon.cancelOwnershipTransfer();
     }
 
     // ============ Zero Address Guards ============
@@ -398,7 +455,13 @@ contract SwitchableBeaconTest is Test {
         vm.assume(newAddr != address(0));
 
         switchableBeacon.transferOwnership(newAddr);
+        assertEq(switchableBeacon.pendingOwner(), newAddr);
+        assertEq(switchableBeacon.owner(), owner); // Owner unchanged until accepted
+
+        vm.prank(newAddr);
+        switchableBeacon.acceptOwnership();
         assertEq(switchableBeacon.owner(), newAddr);
+        assertEq(switchableBeacon.pendingOwner(), address(0));
     }
 }
 

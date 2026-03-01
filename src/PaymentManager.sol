@@ -48,15 +48,22 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         mapping(uint256 => Distribution) distributions;
         /// @notice Distribution counter
         uint256 distributionCounter;
+        /// @notice Total committed amounts per token across active (non-finalized) distributions
+        mapping(address => uint256) totalCommitted;
     }
 
-    // keccak256("poa.paymentmanager.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x3e5fec24aa4dc4e5aee2e025e51e1392c72a2500577559fae9665c6d52bd6a31;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.paymentmanager.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
+    }
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
 
     /*──────────────────────────────────────────────────────────────────────────
@@ -131,14 +138,18 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         if (merkleRoot == bytes32(0)) revert InvalidMerkleRoot();
         if (checkpointBlock >= block.number) revert InvalidCheckpoint();
 
-        // Check contract has sufficient balance
-        if (payoutToken == address(0)) {
-            if (address(this).balance < amount) revert InsufficientFunds();
-        } else {
-            if (IERC20(payoutToken).balanceOf(address(this)) < amount) revert InsufficientFunds();
-        }
-
         Layout storage s = _layout();
+
+        // Check against total committed (existing + new) to prevent over-promising
+        if (payoutToken == address(0)) {
+            if (address(this).balance < s.totalCommitted[address(0)] + amount) revert InsufficientFunds();
+        } else {
+            if (IERC20(payoutToken).balanceOf(address(this)) < s.totalCommitted[payoutToken] + amount) {
+                revert InsufficientFunds();
+            }
+        }
+        s.totalCommitted[payoutToken] += amount;
+
         distributionId = ++s.distributionCounter;
         Distribution storage dist = s.distributions[distributionId];
 
@@ -173,6 +184,11 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender, claimAmount))));
         if (!MerkleProof.verify(merkleProof, dist.merkleRoot, leaf)) {
             revert InvalidProof();
+        }
+
+        // Over-claim guard
+        if (dist.totalClaimed + claimAmount > dist.totalAmount) {
+            revert OverClaimed();
         }
 
         // Mark as claimed
@@ -224,6 +240,11 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
                 revert InvalidProof();
             }
 
+            // Over-claim guard
+            if (dist.totalClaimed + claimAmount > dist.totalAmount) {
+                revert OverClaimed();
+            }
+
             // Mark as claimed
             dist.claimed[msg.sender] = true;
             dist.totalClaimed += claimAmount;
@@ -256,6 +277,7 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
         }
 
         dist.finalized = true;
+        s.totalCommitted[dist.payoutToken] -= dist.totalAmount;
         uint256 unclaimed = dist.totalAmount - dist.totalClaimed;
 
         // Return unclaimed funds to owner (executor)

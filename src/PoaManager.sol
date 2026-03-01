@@ -72,6 +72,7 @@ contract PoaManager is Ownable(msg.sender) {
     /*──────────── Admin: add & bootstrap ───────────*/
     function addContractType(string calldata typeName, address impl) external onlyOwner {
         if (impl == address(0)) revert ImplZero();
+        if (impl.code.length == 0) revert ImplZero();
         bytes32 tId = _id(typeName);
         if (address(beacons[tId]) != address(0)) revert TypeExists();
 
@@ -91,6 +92,7 @@ contract PoaManager is Ownable(msg.sender) {
     /*──────────── Admin: upgrade ───────────*/
     function upgradeBeacon(string calldata typeName, address newImpl, string calldata version) external onlyOwner {
         if (newImpl == address(0)) revert ImplZero();
+        if (newImpl.code.length == 0) revert ImplZero();
         bytes32 tId = _id(typeName);
         UpgradeableBeacon beacon = beacons[tId];
         if (address(beacon) == address(0)) revert TypeUnknown();
@@ -101,6 +103,20 @@ contract PoaManager is Ownable(msg.sender) {
         beacon.upgradeTo(newImpl);
 
         emit BeaconUpgraded(tId, newImpl, version);
+    }
+
+    /*──────────── Admin: arbitrary call ───────────*/
+    /// @notice Execute an arbitrary call from this contract.
+    /// @dev Sub-contracts (OrgDeployer, PaymasterHub) gate admin functions behind
+    ///      `msg.sender == address(this)`. This lets the owner invoke them.
+    function adminCall(address target, bytes calldata data) external onlyOwner returns (bytes memory) {
+        (bool success, bytes memory result) = target.call(data);
+        if (!success) {
+            assembly {
+                revert(add(result, 32), mload(result))
+            }
+        }
+        return result;
     }
 
     /*──────────── Views ───────────*/

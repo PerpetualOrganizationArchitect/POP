@@ -7,6 +7,7 @@ import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.
 import "@openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
+import {SwitchableBeacon} from "./SwitchableBeacon.sol";
 
 interface IExecutor {
     struct Call {
@@ -31,9 +32,11 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     error TooManyCalls();
     error TargetSelf();
     error ZeroAddress();
+    error TimelockNotExpired();
 
     /* ─────────── Constants ─────────── */
     uint8 public constant MAX_CALLS_PER_BATCH = 20;
+    uint256 public constant CALLER_CHANGE_DELAY = 2 days;
 
     /* ─────────── ERC-7201 Storage ─────────── */
     /// @custom:storage-location erc7201:poa.executor.storage
@@ -41,25 +44,34 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
         address allowedCaller; // sole authorised governor
         IHats hats; // Hats Protocol interface
         mapping(address => bool) authorizedHatMinters; // contracts authorized to request hat minting
+        address pendingCaller;
+        uint256 callerChangeTimestamp;
     }
 
-    // keccak256("poa.executor.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x4a2328a3c3b056def98e04ebb0cc7ccc084886f7998dd0a6d16fd24be55ffa5d;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.executor.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 
     /* ─────────── Events ─────────── */
     event CallerSet(address indexed caller);
+    event CallerChangeProposed(address indexed newCaller, uint256 effectiveAt);
+    event CallerChangeCancelled();
     event BatchExecuted(uint256 indexed proposalId, uint256 calls);
     event CallExecuted(uint256 indexed proposalId, uint256 indexed index, address target, uint256 value);
     event Swept(address indexed to, uint256 amount);
     event HatsSet(address indexed hats);
     event HatMinterAuthorized(address indexed minter, bool authorized);
     event HatsMinted(address indexed user, uint256[] hatIds);
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     /* ─────────── Initialiser ─────────── */
     function initialize(address owner_, address hats_) external initializer {
@@ -74,15 +86,46 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     }
 
     /* ─────────── Governor management ─────────── */
+
+    /// @notice Instant set only allowed for first-time setup (allowedCaller == address(0)), restricted to owner
     function setCaller(address newCaller) external {
         if (newCaller == address(0)) revert ZeroAddress();
         Layout storage l = _layout();
-        if (l.allowedCaller != address(0)) {
-            // After first set, only current caller or owner can change
-            if (msg.sender != l.allowedCaller && msg.sender != owner()) revert UnauthorizedCaller();
-        }
+        if (l.allowedCaller != address(0)) revert UnauthorizedCaller();
+        if (msg.sender != owner()) revert UnauthorizedCaller();
         l.allowedCaller = newCaller;
         emit CallerSet(newCaller);
+    }
+
+    /// @notice Propose a new caller (subject to CALLER_CHANGE_DELAY)
+    function proposeCaller(address newCaller) external {
+        if (newCaller == address(0)) revert ZeroAddress();
+        Layout storage l = _layout();
+        if (msg.sender != l.allowedCaller && msg.sender != owner()) revert UnauthorizedCaller();
+        l.pendingCaller = newCaller;
+        l.callerChangeTimestamp = block.timestamp;
+        emit CallerChangeProposed(newCaller, block.timestamp + CALLER_CHANGE_DELAY);
+    }
+
+    /// @notice Accept the pending caller after the timelock delay
+    function acceptCaller() external {
+        Layout storage l = _layout();
+        if (l.pendingCaller == address(0)) revert ZeroAddress();
+        if (block.timestamp < l.callerChangeTimestamp + CALLER_CHANGE_DELAY) revert TimelockNotExpired();
+        if (msg.sender != l.allowedCaller && msg.sender != owner()) revert UnauthorizedCaller();
+        l.allowedCaller = l.pendingCaller;
+        l.pendingCaller = address(0);
+        l.callerChangeTimestamp = 0;
+        emit CallerSet(l.allowedCaller);
+    }
+
+    /// @notice Cancel a pending caller change
+    function cancelCallerChange() external {
+        Layout storage l = _layout();
+        if (msg.sender != l.allowedCaller && msg.sender != owner()) revert UnauthorizedCaller();
+        l.pendingCaller = address(0);
+        l.callerChangeTimestamp = 0;
+        emit CallerChangeCancelled();
     }
 
     /* ─────────── Hat minting management ─────────── */
@@ -127,6 +170,11 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
             }
         }
         emit BatchExecuted(proposalId, len);
+    }
+
+    /* ─────────── Beacon ownership ─────────── */
+    function acceptBeaconOwnership(address beacon) external onlyOwner {
+        SwitchableBeacon(beacon).acceptOwnership();
     }
 
     /* ─────────── Guardian helpers ─────────── */

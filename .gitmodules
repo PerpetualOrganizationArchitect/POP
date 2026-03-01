@@ -10,3 +10,6 @@
 [submodule "lib/hats-protocol"]
 	path = lib/hats-protocol
 	url = https://github.com/hats-protocol/hats-protocol
+[submodule "lib/solady"]
+	path = lib/solady
+	url = https://github.com/Vectorized/solady
