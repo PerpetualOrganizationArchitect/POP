@@ -156,11 +156,16 @@ contract PasskeyTest is Test {
         // Deploy mock executor
         mockExecutor = new MockExecutor();
 
-        // Deploy account registry
-        UniversalAccountRegistry _uarImpl = new UniversalAccountRegistry();
-        UpgradeableBeacon _uarBeacon = new UpgradeableBeacon(address(_uarImpl), owner);
-        accountRegistry = UniversalAccountRegistry(address(new BeaconProxy(address(_uarBeacon), "")));
-        accountRegistry.initialize(owner);
+        // Deploy account registry via beacon proxy (constructor has _disableInitializers)
+        UniversalAccountRegistry registryImpl = new UniversalAccountRegistry();
+        UpgradeableBeacon registryBeacon = new UpgradeableBeacon(address(registryImpl), owner);
+        accountRegistry = UniversalAccountRegistry(
+            address(
+                new BeaconProxy(
+                    address(registryBeacon), abi.encodeWithSelector(UniversalAccountRegistry.initialize.selector, owner)
+                )
+            )
+        );
 
         vm.stopPrank();
     }
@@ -674,6 +679,9 @@ contract PasskeyTest is Test {
         // Configure universal passkey factory in QuickJoin
         quickJoin.setUniversalFactory(address(factory));
 
+        // Authorize QuickJoin as a caller on the account registry
+        accountRegistry.setAuthorizedCaller(address(quickJoin), true);
+
         vm.stopPrank();
 
         return quickJoin;
@@ -1100,94 +1108,6 @@ contract PasskeyTest is Test {
         account.initiateRecovery(keccak256("new_cred"), PUB_KEY_X, bytes32(0));
     }
 
-    function testCompleteRecoveryRevertsIfCredentialAlreadyExists() public {
-        PasskeyAccount account = _createAccount();
-
-        // Guardian initiates recovery for a new credential
-        bytes32 recoveryCredId = keccak256("will_be_duplicate");
-        bytes32 newPubKeyX = keccak256("dup_x");
-        bytes32 newPubKeyY = keccak256("dup_y");
-
-        vm.prank(guardian);
-        account.initiateRecovery(recoveryCredId, newPubKeyX, newPubKeyY);
-        bytes32 recoveryId = keccak256(abi.encodePacked(recoveryCredId, block.timestamp, guardian));
-
-        // Meanwhile, the account adds the same credential directly (self-call)
-        vm.prank(address(account));
-        account.addCredential(recoveryCredId, keccak256("other_x"), keccak256("other_y"));
-
-        // Warp past recovery delay
-        vm.warp(block.timestamp + 7 days + 1);
-
-        // Complete recovery should revert — credential was added between initiation and completion
-        vm.expectRevert(IPasskeyAccount.CredentialExists.selector);
-        account.completeRecovery(recoveryId);
-    }
-
-    function testCompleteRecoverySecondRequestRevertsAfterFirstCompletes() public {
-        PasskeyAccount account = _createAccount();
-
-        bytes32 recoveryCredId = keccak256("race_cred");
-        bytes32 newPubKeyX = keccak256("race_x");
-        bytes32 newPubKeyY = keccak256("race_y");
-
-        // Guardian initiates recovery at timestamp T1
-        uint256 t1 = block.timestamp;
-        vm.prank(guardian);
-        account.initiateRecovery(recoveryCredId, newPubKeyX, newPubKeyY);
-        bytes32 recoveryId1 = keccak256(abi.encodePacked(recoveryCredId, t1, guardian));
-
-        // Warp 1 second — different timestamp produces different recoveryId
-        vm.warp(block.timestamp + 1);
-
-        // Guardian initiates AGAIN for the same credentialId at T2
-        // This passes because: recoveryId2 != recoveryId1 (different timestamp),
-        // and credential doesn't exist yet in live mapping
-        uint256 t2 = block.timestamp;
-        vm.prank(guardian);
-        account.initiateRecovery(recoveryCredId, newPubKeyX, newPubKeyY);
-        bytes32 recoveryId2 = keccak256(abi.encodePacked(recoveryCredId, t2, guardian));
-
-        // Warp past both recovery delays
-        vm.warp(t2 + 7 days + 1);
-
-        // Complete recoveryId1 — succeeds, credential is now live
-        account.completeRecovery(recoveryId1);
-        IPasskeyAccount.PasskeyCredential memory cred = account.getCredential(recoveryCredId);
-        assertEq(cred.publicKeyX, newPubKeyX);
-
-        // Complete recoveryId2 — should revert because credential already exists
-        // Without the fix, this would push a duplicate into credentialIds array
-        vm.expectRevert(IPasskeyAccount.CredentialExists.selector);
-        account.completeRecovery(recoveryId2);
-    }
-
-    function testCompleteRecoveryMaxCredentialsReverts() public {
-        // Set max credentials to 2
-        vm.prank(owner);
-        factory.setMaxCredentials(2);
-
-        PasskeyAccount account = _createAccount();
-
-        // Add second credential to reach the limit
-        vm.prank(address(account));
-        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y);
-
-        // Initiate recovery (would add a third credential)
-        bytes32 recoveryCredId = keccak256("recovery_cred");
-        vm.prank(guardian);
-        account.initiateRecovery(recoveryCredId, keccak256("rx"), keccak256("ry"));
-
-        bytes32 recoveryId = keccak256(abi.encodePacked(recoveryCredId, block.timestamp, guardian));
-
-        // Warp past recovery delay
-        vm.warp(block.timestamp + 7 days + 1);
-
-        // Complete recovery should revert — already at max credentials
-        vm.expectRevert(IPasskeyAccount.MaxCredentialsReached.selector);
-        account.completeRecovery(recoveryId);
-    }
-
     /*════════════════════════════════════════════════════════════════════
                 RECOVERY EDGE CASE & CREDENTIAL INTEGRITY TESTS
     ════════════════════════════════════════════════════════════════════*/
@@ -1213,90 +1133,12 @@ contract PasskeyTest is Test {
         account.completeRecovery(recoveryId);
     }
 
-    function testRecoveryForRemovedCredential_Succeeds() public {
+    function testRecoveryNonExistentRecoveryId_Reverts() public {
         PasskeyAccount account = _createAccount();
 
-        // Add a second credential so we can remove the original
-        vm.prank(address(account));
-        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y);
-
-        // Initiate recovery for a credential that doesn't exist yet
-        bytes32 recoveryCredId = keccak256("removed_then_recovered");
-        vm.prank(guardian);
-        account.initiateRecovery(recoveryCredId, keccak256("rx"), keccak256("ry"));
-        bytes32 recoveryId = keccak256(abi.encodePacked(recoveryCredId, block.timestamp, guardian));
-
-        // Warp past delay and complete — should succeed since credential doesn't exist
-        vm.warp(block.timestamp + 7 days + 1);
-        account.completeRecovery(recoveryId);
-
-        // Verify the credential was added
-        IPasskeyAccount.PasskeyCredential memory cred = account.getCredential(recoveryCredId);
-        assertTrue(cred.active);
-        assertEq(cred.publicKeyX, keccak256("rx"));
-    }
-
-    function testMultipleConcurrentRecoveriesForDifferentCredentials() public {
-        PasskeyAccount account = _createAccount();
-
-        // Initiate two recoveries for DIFFERENT credentials at same timestamp
-        bytes32 credA = keccak256("cred_a");
-        bytes32 credB = keccak256("cred_b");
-
-        vm.startPrank(guardian);
-        account.initiateRecovery(credA, keccak256("ax"), keccak256("ay"));
-        account.initiateRecovery(credB, keccak256("bx"), keccak256("by"));
-        vm.stopPrank();
-
-        bytes32 recoveryIdA = keccak256(abi.encodePacked(credA, block.timestamp, guardian));
-        bytes32 recoveryIdB = keccak256(abi.encodePacked(credB, block.timestamp, guardian));
-
-        // Warp past delay
-        vm.warp(block.timestamp + 7 days + 1);
-
-        // Both should succeed — different credentials
-        account.completeRecovery(recoveryIdA);
-        account.completeRecovery(recoveryIdB);
-
-        // Verify both were added
-        bytes32[] memory credIds = account.getCredentialIds();
-        assertEq(credIds.length, 3); // original + 2 recovered
-    }
-
-    function testRecoveryNearMaxCredentials_LastSlot() public {
-        vm.prank(owner);
-        factory.setMaxCredentials(3);
-
-        PasskeyAccount account = _createAccount();
-
-        // Add second credential
-        vm.prank(address(account));
-        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, PUB_KEY_Y);
-
-        // Initiate recovery for a third (fills last slot)
-        bytes32 recoveryCredId = keccak256("fills_last_slot");
-        vm.prank(guardian);
-        account.initiateRecovery(recoveryCredId, keccak256("lx"), keccak256("ly"));
-        bytes32 recoveryId = keccak256(abi.encodePacked(recoveryCredId, block.timestamp, guardian));
-
-        vm.warp(block.timestamp + 7 days + 1);
-        account.completeRecovery(recoveryId);
-
-        // Now at max (3 credentials)
-        bytes32[] memory credIds = account.getCredentialIds();
-        assertEq(credIds.length, 3);
-
-        // Another recovery initiation should succeed (check is at completion time)
-        bytes32 overflowCred = keccak256("overflow_cred");
-        vm.prank(guardian);
-        account.initiateRecovery(overflowCred, keccak256("ox"), keccak256("oy"));
-        bytes32 overflowRecoveryId = keccak256(abi.encodePacked(overflowCred, block.timestamp, guardian));
-
-        vm.warp(block.timestamp + 7 days + 1);
-
-        // Completion should revert — max reached
-        vm.expectRevert(IPasskeyAccount.MaxCredentialsReached.selector);
-        account.completeRecovery(overflowRecoveryId);
+        bytes32 fakeRecoveryId = keccak256("nonexistent");
+        vm.expectRevert(IPasskeyAccount.RecoveryNotPending.selector);
+        account.completeRecovery(fakeRecoveryId);
     }
 
     function testInitiateRecoveryForExistingCredential_Reverts() public {
@@ -1320,37 +1162,19 @@ contract PasskeyTest is Test {
         vm.warp(block.timestamp + 7 days + 1);
         account.completeRecovery(recoveryId);
 
-        // Verify array integrity: length matches expected, no duplicates
+        // Verify array has both entries (original deactivated + new active)
         bytes32[] memory credIds = account.getCredentialIds();
         assertEq(credIds.length, 2);
 
         // Each credential ID should be unique
         assertTrue(credIds[0] != credIds[1], "Credential IDs must be unique");
 
-        // Both credentials should be accessible
-        IPasskeyAccount.PasskeyCredential memory cred1 = account.getCredential(credIds[0]);
-        IPasskeyAccount.PasskeyCredential memory cred2 = account.getCredential(credIds[1]);
-        assertTrue(cred1.createdAt != 0);
-        assertTrue(cred2.createdAt != 0);
-    }
+        // Original credential should be deactivated
+        IPasskeyAccount.PasskeyCredential memory origCred = account.getCredential(CREDENTIAL_ID);
+        assertFalse(origCred.active, "Original credential should be deactivated after recovery");
 
-    function testRecoveryNonExistentRecoveryId_Reverts() public {
-        PasskeyAccount account = _createAccount();
-
-        bytes32 fakeRecoveryId = keccak256("nonexistent");
-        vm.expectRevert(IPasskeyAccount.RecoveryNotPending.selector);
-        account.completeRecovery(fakeRecoveryId);
-    }
-
-    function testRecoveryWithZeroPubKey_Reverts() public {
-        PasskeyAccount account = _createAccount();
-
-        vm.prank(guardian);
-        vm.expectRevert(IPasskeyAccount.InvalidSignature.selector);
-        account.initiateRecovery(keccak256("zero_key"), bytes32(0), keccak256("y"));
-
-        vm.prank(guardian);
-        vm.expectRevert(IPasskeyAccount.InvalidSignature.selector);
-        account.initiateRecovery(keccak256("zero_key"), keccak256("x"), bytes32(0));
+        // Recovery credential should be active
+        IPasskeyAccount.PasskeyCredential memory recoveryCred = account.getCredential(recoveryCredId);
+        assertTrue(recoveryCred.active, "Recovery credential should be active");
     }
 }

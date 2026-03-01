@@ -233,7 +233,22 @@ contract VotingMathTest is Test {
         (uint256 win, bool ok,,) = VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, true);
 
         assertEq(win, 1, "Option 1 should be winner candidate");
-        assertFalse(ok, "Should not meet quorum (20 * 100 = 2000, not > 2500)");
+        assertFalse(ok, "Should not meet quorum (20 * 100 = 2000, not >= 2500)");
+    }
+
+    function testPickWinnerMajority_ExactQuorumPasses() public {
+        uint256[] memory scores = new uint256[](3);
+        scores[0] = 10;
+        scores[1] = 25; // Exactly 25% of 100
+        scores[2] = 15;
+
+        uint256 totalWeight = 100;
+        uint8 quorumPct = 25; // Requires >= 25% of total weight
+
+        (uint256 win, bool ok,,) = VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, false);
+
+        assertEq(win, 1, "Option 1 should be winner");
+        assertTrue(ok, "Should meet quorum (25 * 100 = 2500, >= 2500)");
     }
 
     function testPickWinnerMajority_TieWithStrictRequirement() public {

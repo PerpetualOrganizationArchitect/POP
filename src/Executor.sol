@@ -32,9 +32,11 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     error TooManyCalls();
     error TargetSelf();
     error ZeroAddress();
+    error TimelockNotExpired();
 
     /* ─────────── Constants ─────────── */
     uint8 public constant MAX_CALLS_PER_BATCH = 20;
+    uint256 public constant CALLER_CHANGE_DELAY = 2 days;
 
     /* ─────────── ERC-7201 Storage ─────────── */
     /// @custom:storage-location erc7201:poa.executor.storage
@@ -42,6 +44,8 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
         address allowedCaller; // sole authorised governor
         IHats hats; // Hats Protocol interface
         mapping(address => bool) authorizedHatMinters; // contracts authorized to request hat minting
+        address pendingCaller;
+        uint256 callerChangeTimestamp;
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.executor.storage");
@@ -55,6 +59,8 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
 
     /* ─────────── Events ─────────── */
     event CallerSet(address indexed caller);
+    event CallerChangeProposed(address indexed newCaller, uint256 effectiveAt);
+    event CallerChangeCancelled();
     event BatchExecuted(uint256 indexed proposalId, uint256 calls);
     event CallExecuted(uint256 indexed proposalId, uint256 indexed index, address target, uint256 value);
     event Swept(address indexed to, uint256 amount);
@@ -80,12 +86,46 @@ contract Executor is Initializable, OwnableUpgradeable, PausableUpgradeable, Ree
     }
 
     /* ─────────── Governor management ─────────── */
+
+    /// @notice Instant set only allowed for first-time setup (allowedCaller == address(0)), restricted to owner
     function setCaller(address newCaller) external {
         if (newCaller == address(0)) revert ZeroAddress();
         Layout storage l = _layout();
-        if (msg.sender != l.allowedCaller && msg.sender != owner()) revert UnauthorizedCaller();
+        if (l.allowedCaller != address(0)) revert UnauthorizedCaller();
+        if (msg.sender != owner()) revert UnauthorizedCaller();
         l.allowedCaller = newCaller;
         emit CallerSet(newCaller);
+    }
+
+    /// @notice Propose a new caller (subject to CALLER_CHANGE_DELAY)
+    function proposeCaller(address newCaller) external {
+        if (newCaller == address(0)) revert ZeroAddress();
+        Layout storage l = _layout();
+        if (msg.sender != l.allowedCaller && msg.sender != owner()) revert UnauthorizedCaller();
+        l.pendingCaller = newCaller;
+        l.callerChangeTimestamp = block.timestamp;
+        emit CallerChangeProposed(newCaller, block.timestamp + CALLER_CHANGE_DELAY);
+    }
+
+    /// @notice Accept the pending caller after the timelock delay
+    function acceptCaller() external {
+        Layout storage l = _layout();
+        if (l.pendingCaller == address(0)) revert ZeroAddress();
+        if (block.timestamp < l.callerChangeTimestamp + CALLER_CHANGE_DELAY) revert TimelockNotExpired();
+        if (msg.sender != l.allowedCaller && msg.sender != owner()) revert UnauthorizedCaller();
+        l.allowedCaller = l.pendingCaller;
+        l.pendingCaller = address(0);
+        l.callerChangeTimestamp = 0;
+        emit CallerSet(l.allowedCaller);
+    }
+
+    /// @notice Cancel a pending caller change
+    function cancelCallerChange() external {
+        Layout storage l = _layout();
+        if (msg.sender != l.allowedCaller && msg.sender != owner()) revert UnauthorizedCaller();
+        l.pendingCaller = address(0);
+        l.callerChangeTimestamp = 0;
+        emit CallerChangeCancelled();
     }
 
     /* ─────────── Hat minting management ─────────── */

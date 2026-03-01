@@ -55,6 +55,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     error SolidarityDistributionIsPaused();
     error OnboardingDisabled();
     error OnboardingDailyLimitExceeded();
+    error Overflow();
     error InvalidOnboardingRequest();
     error InvalidOrgId();
 
@@ -463,6 +464,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Track if this is first deposit (for numActiveOrgs counter and period init)
         bool wasUnfunded = org.deposited == 0;
 
+        // Safe cast check
+        if (msg.value > type(uint128).max) revert Overflow();
+
         // Update org financials
         org.deposited += uint128(msg.value);
         org.totalDeposited += uint128(msg.value);
@@ -494,6 +498,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      */
     function donateToSolidarity() external payable {
         if (msg.value == 0) revert ZeroAddress();
+        if (msg.value > type(uint128).max) revert Overflow();
 
         SolidarityFund storage solidarity = _getSolidarityStorage();
         solidarity.balance += uint128(msg.value);
@@ -677,27 +682,26 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @return matchAllowance How much solidarity can be used per 90-day period
      */
     function _calculateMatchAllowance(uint256 deposited, uint256 minDeposit) internal pure returns (uint256) {
-        // Below minimum = no match
-        if (deposited < minDeposit) {
+        if (minDeposit == 0 || deposited < minDeposit) {
             return 0;
         }
-
-        // Tier 1: 1x deposit → 2x match
-        // E.g., 0.003 ETH deposit → 0.006 ETH match → 0.009 ETH total
+        // Tier 1: deposit <= 1x minimum -> 2x match
         if (deposited <= minDeposit) {
             return deposited * 2;
         }
-
-        // Tier 2: First 1x at 2x, second 1x at 1x
-        // E.g., 0.006 ETH deposit → 0.006 (first) + 0.003 (second) = 0.009 ETH match → 0.015 ETH total
+        // Tier 2: deposit <= 2x minimum -> first tier at 2x, remainder at 1x
         if (deposited <= minDeposit * 2) {
             uint256 firstTierMatch = minDeposit * 2;
             uint256 secondTierMatch = deposited - minDeposit;
             return firstTierMatch + secondTierMatch;
         }
-
-        // Tier 3: Self-sufficient, no match
-        // Organizations with >= 5x minimum deposit don't need solidarity support
+        // Tier 3: deposit < 5x minimum -> capped match from first two tiers
+        if (deposited < minDeposit * 5) {
+            uint256 firstTierMatch = minDeposit * 2;
+            uint256 secondTierMatch = minDeposit;
+            return firstTierMatch + secondTierMatch;
+        }
+        // Tier 4: >= 5x minimum -> self-sufficient, no match
         return 0;
     }
 
@@ -726,7 +730,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         // If distribution is paused, pay 100% from org deposits, still collect fee
         if (solidarity.distributionPaused) {
-            org.spent += uint128(actualGasCost);
+            org.spent += uint128(actualGasCost + solidarityFee);
             solidarity.balance += uint128(solidarityFee);
             emit SolidarityFeeCollected(orgId, solidarityFee);
             return;
@@ -794,8 +798,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             }
         }
 
-        // Update org spending
-        org.spent += uint128(fromDeposits);
+        // Update org spending (include solidarity fee so it is deducted from org balance)
+        org.spent += uint128(fromDeposits + solidarityFee);
         org.solidarityUsedThisPeriod += uint128(fromSolidarity);
 
         // Update solidarity fund
@@ -1521,13 +1525,14 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
                     // This offset is relative to the start of params (0x04)
                     let dataOffset := calldataload(add(callData.offset, 0x44))
 
-                    // Calculate where the actual bytes data starts:
-                    // 0x04 (params start) + dataOffset + 0x20 (skip length field)
-                    let dataStart := add(add(0x04, dataOffset), 0x20)
-
-                    // Only extract inner selector if data is within bounds
-                    if lt(dataStart, callData.length) {
-                        selector := calldataload(add(callData.offset, dataStart))
+                    // Only extract inner selector if dataOffset is the standard 0x60
+                    // (3rd dynamic param in ABI encoding). A non-standard offset could
+                    // allow an attacker to point at arbitrary calldata.
+                    if eq(dataOffset, 0x60) {
+                        let dataStart := add(add(0x04, dataOffset), 0x20)
+                        if lt(dataStart, callData.length) {
+                            selector := calldataload(add(callData.offset, dataStart))
+                        }
                     }
                 }
                 selector = bytes4(selector);
@@ -1558,10 +1563,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     function _validateFeeCaps(PackedUserOperation calldata userOp, bytes32 orgId) private view {
         FeeCaps storage caps = _getFeeCapsStorage()[orgId];
 
-        if (caps.maxFeePerGas > 0 && userOp.maxFeePerGas > caps.maxFeePerGas) {
+        (uint128 maxPriorityFeePerGas, uint128 maxFeePerGas) = UserOpLib.unpackGasFees(userOp.gasFees);
+        if (caps.maxFeePerGas > 0 && maxFeePerGas > caps.maxFeePerGas) {
             revert FeeTooHigh();
         }
-        if (caps.maxPriorityFeePerGas > 0 && userOp.maxPriorityFeePerGas > caps.maxPriorityFeePerGas) {
+        if (caps.maxPriorityFeePerGas > 0 && maxPriorityFeePerGas > caps.maxPriorityFeePerGas) {
             revert FeeTooHigh();
         }
 
@@ -1626,6 +1632,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         if (countAsCreation) {
             emit OnboardingAccountCreated(address(0), actualGasCost);
+        } else {
+            // Refund the daily counter slot for failed operations (incremented during validation for bundle safety)
+            OnboardingConfig storage onboarding = _getOnboardingStorage();
+            if (onboarding.attemptsToday > 0) {
+                onboarding.attemptsToday--;
+            }
         }
 
         // Deduct from solidarity fund (validated during _validateOnboardingEligibility)

@@ -237,8 +237,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
             callData: callData,
             accountGasLimits: UserOpLib.packAccountGasLimits(500000, 500000), // verification, call
             preVerificationGas: 100000,
-            maxFeePerGas: 10 gwei,
-            maxPriorityFeePerGas: 1 gwei,
+            gasFees: UserOpLib.packGasFees(1 gwei, 10 gwei),
             paymasterAndData: paymasterAndData,
             signature: signature
         });
@@ -525,8 +524,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
             callData: callData,
             accountGasLimits: UserOpLib.packAccountGasLimits(400000, 800000), // verification=400k (within 500k cap)
             preVerificationGas: 100000,
-            maxFeePerGas: 50 gwei,
-            maxPriorityFeePerGas: 5 gwei,
+            gasFees: UserOpLib.packGasFees(5 gwei, 50 gwei),
             paymasterAndData: paymasterAndData,
             signature: ""
         });
@@ -561,8 +559,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
             callData: callData,
             accountGasLimits: UserOpLib.packAccountGasLimits(400000, 800000), // verification=400k exceeds 300k cap
             preVerificationGas: 100000,
-            maxFeePerGas: 50 gwei,
-            maxPriorityFeePerGas: 5 gwei,
+            gasFees: UserOpLib.packGasFees(5 gwei, 50 gwei),
             paymasterAndData: paymasterAndData,
             signature: ""
         });

@@ -177,6 +177,42 @@ contract PaymentManagerMerkleTest is Test {
         paymentManager.createDistribution(address(0), 1 ether, keccak256("test"), block.number - 1);
     }
 
+    function test_RevertCreateDistribution_OverCommitment() public {
+        vm.roll(block.number + 1);
+
+        // Contract has 100 ETH. Create first distribution for 60 ETH.
+        vm.prank(executor);
+        paymentManager.createDistribution(address(0), 60 ether, keccak256("dist1"), block.number - 1);
+
+        // Try to create second distribution for 50 ETH — total committed would be 110 ETH > 100 ETH balance
+        vm.prank(executor);
+        vm.expectRevert(IPaymentManager.InsufficientFunds.selector);
+        paymentManager.createDistribution(address(0), 50 ether, keccak256("dist2"), block.number - 1);
+    }
+
+    function test_CreateDistribution_AfterFinalize_FreesCommitted() public {
+        vm.roll(block.number + 1);
+        uint256 checkpoint = block.number - 1;
+
+        // Create distribution for 60 ETH (balance=100, committed=60)
+        vm.prank(executor);
+        uint256 distId = paymentManager.createDistribution(address(0), 60 ether, keccak256("dist1"), checkpoint);
+
+        // Second dist for 50 ETH should fail (committed would be 110 > 100 balance)
+        vm.prank(executor);
+        vm.expectRevert(IPaymentManager.InsufficientFunds.selector);
+        paymentManager.createDistribution(address(0), 50 ether, keccak256("dist2"), checkpoint);
+
+        // Finalize first dist (returns 60 ETH unclaimed to executor, committed=0, balance=40)
+        vm.roll(block.number + 100);
+        vm.prank(executor);
+        paymentManager.finalizeDistribution(distId, 1);
+
+        // Now 40 ETH available with 0 committed — distribution for 40 ETH succeeds
+        vm.prank(executor);
+        paymentManager.createDistribution(address(0), 40 ether, keccak256("dist3"), block.number - 1);
+    }
+
     /*──────────────────────────────────────────────────────────────────────────
                             CLAIM DISTRIBUTION TESTS
     ──────────────────────────────────────────────────────────────────────────*/
