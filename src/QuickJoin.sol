@@ -11,9 +11,27 @@ import {
 /*───────────────────────── Interface minimal stubs ───────────────────────*/
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {HatManager} from "./libs/HatManager.sol";
+import {WebAuthnLib} from "./libs/WebAuthnLib.sol";
 
 interface IUniversalAccountRegistry {
     function getUsername(address account) external view returns (string memory);
+    function registerAccountBySig(
+        address user,
+        string calldata username,
+        uint256 deadline,
+        uint256 nonce,
+        bytes calldata signature
+    ) external;
+    function registerAccountByPasskeySig(
+        bytes32 credentialId,
+        bytes32 pubKeyX,
+        bytes32 pubKeyY,
+        uint256 salt,
+        string calldata username,
+        uint256 deadline,
+        uint256 nonce,
+        WebAuthnLib.WebAuthnAuth calldata auth
+    ) external;
 }
 
 interface IExecutorHatMinter {
@@ -77,6 +95,13 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     event QuickJoinedWithPasskey(address indexed account, bytes32 indexed credentialId, uint256[] hatIds);
     event QuickJoinedWithPasskeyByMaster(
         address indexed master, address indexed account, bytes32 indexed credentialId, uint256[] hatIds
+    );
+    event RegisterAndQuickJoined(address indexed user, string username, uint256[] hatIds);
+    event RegisterAndQuickJoinedWithPasskey(
+        address indexed account, bytes32 indexed credentialId, string username, uint256[] hatIds
+    );
+    event RegisterAndQuickJoinedWithPasskeyByMaster(
+        address indexed master, address indexed account, bytes32 indexed credentialId, string username, uint256[] hatIds
     );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -245,6 +270,119 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         }
 
         emit QuickJoinedWithPasskeyByMaster(_msgSender(), account, passkey.credentialId, l.memberHatIds);
+    }
+
+    /* ───────── Register + join paths ─────── */
+
+    /// @notice Register a username and join the org in one transaction (EOA users).
+    /// @dev The sponsor (msg.sender) pays gas; the user proves consent via EIP-712 signature.
+    /// @param user      The EOA address to register and onboard.
+    /// @param username  The desired username.
+    /// @param deadline  Signature expiration timestamp.
+    /// @param nonce     The user's current nonce on the registry.
+    /// @param signature The user's EIP-712 signature authorizing registration.
+    function registerAndQuickJoin(
+        address user,
+        string calldata username,
+        uint256 deadline,
+        uint256 nonce,
+        bytes calldata signature
+    ) external nonReentrant {
+        if (user == address(0)) revert ZeroUser();
+
+        Layout storage l = _layout();
+
+        // 1. Register the username via signature (reverts if sig invalid)
+        l.accountRegistry.registerAccountBySig(user, username, deadline, nonce, signature);
+
+        // 2. Mint member hats
+        if (l.memberHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(user, l.memberHatIds);
+        }
+
+        emit RegisterAndQuickJoined(user, username, l.memberHatIds);
+    }
+
+    /// @notice Create a passkey account, register a username, and join the org in one transaction.
+    /// @dev The sponsor pays gas; the user proves consent via WebAuthn passkey assertion.
+    ///      The account address is derived from the passkey enrollment data (never passed in).
+    /// @param passkey   Passkey enrollment data (credentialId, publicKeyX, publicKeyY, salt).
+    /// @param username  The desired username for the new passkey account.
+    /// @param deadline  Assertion expiration timestamp.
+    /// @param nonce     The account's current nonce on the registry.
+    /// @param auth      The WebAuthn assertion data proving passkey ownership.
+    /// @return account  The created/existing passkey account address.
+    function registerAndQuickJoinWithPasskey(
+        PasskeyEnrollment calldata passkey,
+        string calldata username,
+        uint256 deadline,
+        uint256 nonce,
+        WebAuthnLib.WebAuthnAuth calldata auth
+    ) external nonReentrant returns (address account) {
+        Layout storage l = _layout();
+        if (address(l.universalFactory) == address(0)) revert PasskeyFactoryNotSet();
+
+        // 1. Register the username via passkey sig (reverts if invalid)
+        l.accountRegistry
+            .registerAccountByPasskeySig(
+                passkey.credentialId,
+                passkey.publicKeyX,
+                passkey.publicKeyY,
+                passkey.salt,
+                username,
+                deadline,
+                nonce,
+                auth
+            );
+
+        // 2. Create PasskeyAccount (returns existing if already deployed)
+        account = l.universalFactory
+            .createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
+
+        // 3. Mint member hats
+        if (l.memberHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(account, l.memberHatIds);
+        }
+
+        emit RegisterAndQuickJoinedWithPasskey(account, passkey.credentialId, username, l.memberHatIds);
+    }
+
+    /// @notice Master-deploy path: create passkey account, register username, and join.
+    function registerAndQuickJoinWithPasskeyMasterDeploy(
+        PasskeyEnrollment calldata passkey,
+        string calldata username,
+        uint256 deadline,
+        uint256 nonce,
+        WebAuthnLib.WebAuthnAuth calldata auth
+    ) external onlyMasterDeploy nonReentrant returns (address account) {
+        Layout storage l = _layout();
+        if (address(l.universalFactory) == address(0)) revert PasskeyFactoryNotSet();
+
+        // 1. Register the username via passkey sig (reverts if invalid)
+        l.accountRegistry
+            .registerAccountByPasskeySig(
+                passkey.credentialId,
+                passkey.publicKeyX,
+                passkey.publicKeyY,
+                passkey.salt,
+                username,
+                deadline,
+                nonce,
+                auth
+            );
+
+        // 2. Create PasskeyAccount
+        account = l.universalFactory
+            .createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
+
+        // 3. Mint member hats
+        if (l.memberHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(account, l.memberHatIds);
+        }
+
+        emit RegisterAndQuickJoinedWithPasskeyByMaster(
+            _msgSender(), account, passkey.credentialId, username, l.memberHatIds
+        );
     }
 
     /* ───────── Master-deploy helper paths ─────── */
