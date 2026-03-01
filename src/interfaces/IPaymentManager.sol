@@ -140,6 +140,12 @@ interface IPaymentManager {
     error AlreadyFinalized();
 
     /**
+     * @notice Thrown when total claimed exceeds total distribution amount
+     * @dev Prevents malformed merkle trees from over-distributing funds
+     */
+    error OverClaimed();
+
+    /**
      * @notice Thrown when claim period has not expired
      * @dev Must wait minimum period before finalizing
      */

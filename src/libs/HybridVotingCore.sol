@@ -9,7 +9,7 @@ import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 library HybridVotingCore {
-    bytes32 private constant _STORAGE_SLOT = 0x7a3e8e3d8e9c8f7b6a5d4c3b2a1908070605040302010009080706050403020a;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.hybridvoting.v2.storage");
 
     event VoteCast(
         uint256 indexed id,
@@ -23,8 +23,9 @@ library HybridVotingCore {
     event ProposalExecuted(uint256 indexed id, uint256 indexed winningIdx, uint256 numCalls);
 
     function _layout() private pure returns (HybridVoting.Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 
@@ -137,6 +138,8 @@ library HybridVotingCore {
     function announceWinner(uint256 id) external returns (uint256 winner, bool valid) {
         HybridVoting.Layout storage l = _layout();
         HybridVoting.Proposal storage p = l._proposals[id];
+        if (p.executed) revert VotingErrors.AlreadyExecuted();
+        p.executed = true;
 
         // Check if any votes were cast
         bool hasVotes = false;
@@ -191,14 +194,14 @@ library HybridVotingCore {
         );
 
         IExecutor.Call[] storage batch = p.batches[winner];
-        bool executed = false;
+        bool didExecute = false;
         if (valid && batch.length > 0) {
             // No target validation needed - Executor has onlyExecutor permission on all org contracts
             // and handles the actual calls. HybridVoting just passes the batch through.
             l.executor.execute(id, batch);
-            executed = true;
+            didExecute = true;
             emit ProposalExecuted(id, winner, batch.length);
         }
-        emit Winner(id, winner, valid, executed, uint64(block.timestamp));
+        emit Winner(id, winner, valid, didExecute, uint64(block.timestamp));
     }
 }

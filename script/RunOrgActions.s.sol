@@ -334,19 +334,19 @@ contract RunOrgActions is Script {
         // Member 1 joins (will get MEMBER role - role index 0)
         console.log("\n-> Member 1 joining...");
         vm.broadcast(memberKeys.member1);
-        quickJoin.quickJoinNoUser("member1");
+        quickJoin.quickJoinNoUser();
         console.log("  [OK] Joined successfully");
 
         // Member 2 joins
         console.log("-> Member 2 joining...");
         vm.broadcast(memberKeys.member2);
-        quickJoin.quickJoinNoUser("member2");
+        quickJoin.quickJoinNoUser();
         console.log("  [OK] Joined successfully");
 
         // Coordinator joins
         console.log("-> Coordinator joining...");
         vm.broadcast(memberKeys.coordinator);
-        quickJoin.quickJoinNoUser("coordinator");
+        quickJoin.quickJoinNoUser();
         console.log("  [OK] Joined successfully");
 
         console.log("\n[OK] All Members Onboarded");

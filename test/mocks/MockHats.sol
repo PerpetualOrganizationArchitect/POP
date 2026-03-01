@@ -5,6 +5,7 @@ import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 
 contract MockHats is IHats {
     mapping(address => mapping(uint256 => bool)) public wearers;
+    mapping(address => mapping(uint256 => bool)) public eligibles;
     mapping(uint256 => bool) public activeHats;
 
     // IHatsIdUtilities implementations
@@ -99,6 +100,9 @@ contract MockHats is IHats {
 
     function mintHat(uint256 _hatId, address _wearer) external returns (bool success) {
         wearers[_wearer][_hatId] = true;
+        if (!activeHats[_hatId]) {
+            activeHats[_hatId] = true;
+        }
         return true;
     }
 
@@ -191,8 +195,15 @@ contract MockHats is IHats {
         return wearers[_wearer][_hatId];
     }
 
+    function setEligible(address _wearer, uint256 _hatId, bool _eligible) external {
+        eligibles[_wearer][_hatId] = _eligible;
+        if (!activeHats[_hatId]) {
+            activeHats[_hatId] = true;
+        }
+    }
+
     function isEligible(address _wearer, uint256 _hatId) external view returns (bool eligible) {
-        return wearers[_wearer][_hatId];
+        return wearers[_wearer][_hatId] || eligibles[_wearer][_hatId];
     }
 
     function getHatEligibilityModule(uint256 _hatId) external view returns (address eligibility) {

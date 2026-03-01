@@ -14,7 +14,6 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     error AccountExists();
     error AccountUnknown();
     error ArrayLenMismatch();
-
     /*─────────────────────────── Constants ─────────────────────────────*/
     uint256 private constant MAX_LEN = 64;
     address private constant BURN_ADDRESS = address(0xdead);
@@ -26,12 +25,12 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         mapping(bytes32 => address) ownerOfUsernameHash;
     }
 
-    // keccak256("poa.universalaccountregistry.storage") to unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x7930448747c45b59575e0d27c83e46a902e6071fea71aa7dda420fff16e39ee5;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.universalaccountregistry.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 
@@ -40,6 +39,11 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     event UsernameChanged(address indexed user, string newUsername);
     event UserDeleted(address indexed user, string oldUsername);
     event BatchRegistered(uint256 count);
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     /*────────────────────────── Initializer ────────────────────────────*/
     function initialize(address initialOwner) external initializer {
@@ -53,19 +57,10 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     }
 
     /**
-     * @notice Permission‑less QuickJoin path. Anyone can call but the
-     *         `newUser` must NOT already have a username and the handle
-     *         must still be free.
-     */
-    function registerAccountQuickJoin(string calldata username, address newUser) external {
-        _register(newUser, username);
-    }
-
-    /**
      * @notice Batch onboarding helper (gas‑friendlier for DAOs).
      * @dev Arrays must be equal length and ≤ 100 to stay within block gas.
      */
-    function registerBatch(address[] calldata users, string[] calldata names) external {
+    function registerBatch(address[] calldata users, string[] calldata names) external onlyOwner {
         uint256 len = users.length;
         if (len != names.length) revert ArrayLenMismatch();
         require(len <= 100, "batch>100");

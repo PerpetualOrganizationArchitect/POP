@@ -2,6 +2,6 @@ forge-std/=lib/forge-std/src/
 @openzeppelin/=lib/openzeppelin-contracts/
 @openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/
 @hats-protocol/=lib/hats-protocol/
-solady/=lib/hats-protocol/lib/solady/src/
+solady/=lib/solady/src/
 ERC1155/=lib/hats-protocol/lib/ERC1155/src/
 solbase/=lib/hats-protocol/lib/solbase/src/

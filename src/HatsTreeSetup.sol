@@ -5,7 +5,6 @@ import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {IEligibilityModule, IToggleModule} from "./interfaces/IHatsModules.sol";
 
 import {OrgRegistry} from "./OrgRegistry.sol";
-import {UniversalAccountRegistry} from "./UniversalAccountRegistry.sol";
 import {RoleConfigStructs} from "./libs/RoleConfigStructs.sol";
 
 /**
@@ -234,14 +233,6 @@ contract HatsTreeSetup {
             uint256[] memory hatIdsToMint = new uint256[](mintCount);
             address[] memory wearersToMint = new address[](mintCount);
             uint256 mintIndex = 0;
-
-            // Register deployer username once if needed
-            if (params.accountRegistry != address(0) && bytes(params.deployerUsername).length > 0) {
-                UniversalAccountRegistry registry = UniversalAccountRegistry(params.accountRegistry);
-                if (bytes(registry.getUsername(params.deployerAddress)).length == 0) {
-                    registry.registerAccountQuickJoin(params.deployerUsername, params.deployerAddress);
-                }
-            }
 
             for (uint256 i = 0; i < len; i++) {
                 RoleConfigStructs.RoleConfig memory role = params.roles[i];

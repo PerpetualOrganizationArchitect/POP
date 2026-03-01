@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.24;
 
-import {Test, console2} from "forge-std/Test.sol";
+import {Test, Vm, console2} from "forge-std/Test.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
 import {IPaymaster} from "../src/interfaces/IPaymaster.sol";
 import {IEntryPoint} from "../src/interfaces/IEntryPoint.sol";
 import {PackedUserOperation, UserOpLib} from "../src/interfaces/PackedUserOperation.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
+/// @dev Minimal contract used as a pre-deployed sender in onboarding rejection tests
+contract DummySender {
+    fallback() external payable {}
+}
 
 contract MockEntryPoint is IEntryPoint {
     mapping(address => uint256) private _deposits;
@@ -29,10 +34,29 @@ contract MockEntryPoint is IEntryPoint {
 
 contract MockHats is IHats {
     mapping(address => mapping(uint256 => bool)) private _wearers;
+    mapping(address => mapping(uint256 => bool)) private _eligibles;
+    mapping(uint256 => bool) private _activeHats;
+    mapping(uint256 => bool) private _hatExists;
 
     function mintHat(uint256 _hatId, address _wearer) external returns (bool success) {
         _wearers[_wearer][_hatId] = true;
+        if (!_hatExists[_hatId]) {
+            _hatExists[_hatId] = true;
+            _activeHats[_hatId] = true;
+        }
         return true;
+    }
+
+    function setEligible(address _wearer, uint256 _hatId, bool _eligible) external {
+        _eligibles[_wearer][_hatId] = _eligible;
+        if (!_hatExists[_hatId]) {
+            _hatExists[_hatId] = true;
+            _activeHats[_hatId] = true;
+        }
+    }
+
+    function setActive(uint256 _hatId, bool _active) external {
+        _activeHats[_hatId] = _active;
     }
 
     function isWearerOfHat(address _wearer, uint256 _hatId) external view returns (bool) {
@@ -68,12 +92,13 @@ contract MockHats is IHats {
         return true;
     }
 
-    function setHatStatus(uint256, bool) external pure returns (bool) {
+    function setHatStatus(uint256 _hatId, bool _active) external returns (bool) {
+        _activeHats[_hatId] = _active;
         return true;
     }
 
-    function checkHatStatus(uint256) external pure returns (bool) {
-        return true;
+    function checkHatStatus(uint256 _hatId) external view returns (bool) {
+        return _activeHats[_hatId];
     }
 
     function setHatWearerStatus(uint256, address, bool, bool) external pure returns (bool) {
@@ -94,12 +119,12 @@ contract MockHats is IHats {
     function requestLinkTopHatToTree(uint32, uint256) external {}
     function unlinkTopHatFromTree(uint32, address) external {}
 
-    function viewHat(uint256)
+    function viewHat(uint256 _hatId)
         external
-        pure
+        view
         returns (string memory, uint32, uint32, address, address, string memory, uint16, bool, bool)
     {
-        return ("", 0, 0, address(0), address(0), "", 0, false, true);
+        return ("", 0, 0, address(0), address(0), "", 0, false, _activeHats[_hatId]);
     }
     function changeHatDetails(uint256, string memory) external {}
     function approveLinkTopHatToTree(uint32, uint256, address, address, string calldata, string calldata) external {}
@@ -217,8 +242,8 @@ contract MockHats is IHats {
         return false;
     }
 
-    function isEligible(address, uint256) external pure returns (bool) {
-        return true;
+    function isEligible(address _wearer, uint256 _hatId) external view returns (bool) {
+        return _wearers[_wearer][_hatId] || _eligibles[_wearer][_hatId];
     }
 
     function isInGoodStanding(address, uint256) external pure returns (bool) {
@@ -287,10 +312,17 @@ contract PaymasterHubSolidarityTest is Test {
         vm.deal(user1, 100 ether);
         vm.deal(user2, 100 ether);
 
-        // Register orgs
+        // Register orgs (requires poaManager)
+        vm.startPrank(poaManager);
         hub.registerOrg(ORG_ALPHA, ADMIN_HAT, OPERATOR_HAT);
         hub.registerOrg(ORG_BETA, ADMIN_HAT, OPERATOR_HAT);
         hub.registerOrg(ORG_GAMMA, ADMIN_HAT, OPERATOR_HAT);
+        vm.stopPrank();
+
+        // Unpause distribution so existing tests work as before
+        // Pause-specific tests re-pause explicitly
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
     }
 
     // ============ Initialization Tests ============
@@ -316,9 +348,11 @@ contract PaymasterHubSolidarityTest is Test {
     function testOrgRegistration() public {
         bytes32 newOrgId = keccak256("NEW_ORG");
 
+        vm.startPrank(poaManager);
         vm.expectEmit(true, false, false, true);
         emit OrgRegistered(newOrgId, ADMIN_HAT, OPERATOR_HAT);
         hub.registerOrg(newOrgId, ADMIN_HAT, OPERATOR_HAT);
+        vm.stopPrank();
 
         PaymasterHub.OrgConfig memory config = hub.getOrgConfig(newOrgId);
         assertEq(config.adminHatId, ADMIN_HAT);
@@ -423,6 +457,22 @@ contract PaymasterHubSolidarityTest is Test {
 
         PaymasterHub.SolidarityFund memory solidarity = hub.getSolidarityFund();
         assertEq(solidarity.balance, donationAmount);
+    }
+
+    // ============ Overflow Protection Tests ============
+
+    function testDepositForOrgOverflowReverts() public {
+        vm.deal(user1, type(uint256).max);
+        vm.prank(user1);
+        vm.expectRevert(PaymasterHub.Overflow.selector);
+        hub.depositForOrg{value: uint256(type(uint128).max) + 1}(ORG_ALPHA);
+    }
+
+    function testDonateToSolidarityOverflowReverts() public {
+        vm.deal(user1, type(uint256).max);
+        vm.prank(user1);
+        vm.expectRevert(PaymasterHub.Overflow.selector);
+        hub.donateToSolidarity{value: uint256(type(uint128).max) + 1}();
     }
 
     // ============ Period Reset Tests ============
@@ -930,5 +980,744 @@ contract PaymasterHubSolidarityTest is Test {
         (,, bool requiresDeposit, uint256 solidarityLimit) = hub.getOrgGraceStatus(ORG_ALPHA);
         assertFalse(requiresDeposit);
         assertEq(solidarityLimit, 0.006 ether); // 2x match
+    }
+
+    // ============ Distribution Pause Tests ============
+
+    event SolidarityDistributionPaused();
+    event SolidarityDistributionUnpaused();
+
+    function testInitializedWithDistributionPaused() public {
+        // Deploy a fresh hub to test initialization state (setUp unpauses)
+        PaymasterHub freshImpl = new PaymasterHub();
+        bytes memory initData =
+            abi.encodeWithSelector(PaymasterHub.initialize.selector, address(entryPoint), address(hats), poaManager);
+        ERC1967Proxy freshProxy = new ERC1967Proxy(address(freshImpl), initData);
+        PaymasterHub freshHub = PaymasterHub(payable(address(freshProxy)));
+
+        PaymasterHub.SolidarityFund memory solidarity = freshHub.getSolidarityFund();
+        assertTrue(solidarity.distributionPaused);
+    }
+
+    function testPauseDistributionOnlyPoaManager() public {
+        vm.prank(orgAdmin);
+        vm.expectRevert(PaymasterHub.NotPoaManager.selector);
+        hub.pauseSolidarityDistribution();
+    }
+
+    function testUnpauseDistributionOnlyPoaManager() public {
+        vm.prank(orgAdmin);
+        vm.expectRevert(PaymasterHub.NotPoaManager.selector);
+        hub.unpauseSolidarityDistribution();
+    }
+
+    function testPauseEmitsEvent() public {
+        // setUp already unpaused, so we can test pausing
+        vm.prank(poaManager);
+        vm.expectEmit(false, false, false, true);
+        emit SolidarityDistributionPaused();
+        hub.pauseSolidarityDistribution();
+
+        PaymasterHub.SolidarityFund memory solidarity = hub.getSolidarityFund();
+        assertTrue(solidarity.distributionPaused);
+    }
+
+    function testUnpauseEmitsEvent() public {
+        // Pause first
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        vm.prank(poaManager);
+        vm.expectEmit(false, false, false, true);
+        emit SolidarityDistributionUnpaused();
+        hub.unpauseSolidarityDistribution();
+
+        PaymasterHub.SolidarityFund memory solidarity = hub.getSolidarityFund();
+        assertFalse(solidarity.distributionPaused);
+    }
+
+    function testPausedSolidarityFundStillAcceptsDeposits() public {
+        // Pause distribution
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // Org deposits should still work
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.01 ether}(ORG_ALPHA);
+
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(ORG_ALPHA);
+        assertEq(fin.deposited, 0.01 ether);
+    }
+
+    function testPausedSolidarityFundStillAcceptsDonations() public {
+        // Pause distribution
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // Direct donations should still work
+        vm.prank(user1);
+        hub.donateToSolidarity{value: 1 ether}();
+
+        PaymasterHub.SolidarityFund memory solidarity = hub.getSolidarityFund();
+        assertEq(solidarity.balance, 1 ether);
+    }
+
+    function testPauseUnpauseRoundtrip() public {
+        // Starts unpaused (setUp unpaused it)
+        PaymasterHub.SolidarityFund memory s1 = hub.getSolidarityFund();
+        assertFalse(s1.distributionPaused);
+
+        // Pause
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+        PaymasterHub.SolidarityFund memory s2 = hub.getSolidarityFund();
+        assertTrue(s2.distributionPaused);
+
+        // Unpause
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        PaymasterHub.SolidarityFund memory s3 = hub.getSolidarityFund();
+        assertFalse(s3.distributionPaused);
+    }
+
+    function testPausedFeeConfigStillAdjustable() public {
+        // Pause distribution
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // Can adjust fee percentage even when distribution is paused
+        vm.prank(poaManager);
+        hub.setSolidarityFee(200); // 2%
+
+        PaymasterHub.SolidarityFund memory solidarity = hub.getSolidarityFund();
+        assertEq(solidarity.feePercentageBps, 200);
+        assertTrue(solidarity.distributionPaused); // Still paused
+    }
+
+    function testPausedGraceConfigStillAdjustable() public {
+        // Pause distribution
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // Can adjust grace period config even when distribution is paused
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(120, 0.02 ether, 0.005 ether);
+
+        PaymasterHub.GracePeriodConfig memory grace = hub.getGracePeriodConfig();
+        assertEq(grace.initialGraceDays, 120);
+        assertEq(grace.maxSpendDuringGrace, 0.02 ether);
+        assertEq(grace.minDepositRequired, 0.005 ether);
+    }
+
+    // ============ Pause Idempotency Tests ============
+
+    function testDoublePauseIsNoOp() public {
+        // Pause first
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // Calling pause again should succeed but not emit event
+        vm.recordLogs();
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // Should have emitted zero events (no state change)
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 0);
+
+        // State unchanged
+        PaymasterHub.SolidarityFund memory s = hub.getSolidarityFund();
+        assertTrue(s.distributionPaused);
+    }
+
+    function testDoubleUnpauseIsNoOp() public {
+        // Already unpaused from setUp
+
+        // Calling unpause again should succeed but not emit event
+        vm.recordLogs();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 0);
+
+        PaymasterHub.SolidarityFund memory s = hub.getSolidarityFund();
+        assertFalse(s.distributionPaused);
+    }
+
+    // ============ getOrgGraceStatus When Paused Tests ============
+
+    function testGetOrgGraceStatus_PausedDuringGrace() public {
+        // Pause distribution
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // ORG_ALPHA was just registered, so it's in grace period
+        (bool inGrace, uint128 spendRemaining, bool requiresDeposit, uint256 solidarityLimit) =
+            hub.getOrgGraceStatus(ORG_ALPHA);
+
+        // inGrace still reflects the time-based status (useful info)
+        assertTrue(inGrace);
+        // But solidarity is unavailable
+        assertEq(spendRemaining, 0);
+        assertTrue(requiresDeposit);
+        assertEq(solidarityLimit, 0);
+    }
+
+    function testGetOrgGraceStatus_PausedPostGrace() public {
+        // Pause distribution
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        vm.warp(block.timestamp + 91 days);
+
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.003 ether}(ORG_ALPHA);
+
+        (bool inGrace, uint128 spendRemaining, bool requiresDeposit, uint256 solidarityLimit) =
+            hub.getOrgGraceStatus(ORG_ALPHA);
+
+        assertFalse(inGrace);
+        assertEq(spendRemaining, 0);
+        assertTrue(requiresDeposit);
+        assertEq(solidarityLimit, 0); // No match when paused
+    }
+
+    function testGetOrgGraceStatus_UnpausedShowsNormalValues() public view {
+        // setUp already unpaused, so this should show normal grace values
+        (bool inGrace, uint128 spendRemaining, bool requiresDeposit, uint256 solidarityLimit) =
+            hub.getOrgGraceStatus(ORG_ALPHA);
+
+        assertTrue(inGrace);
+        assertEq(spendRemaining, 0.01 ether); // Full grace spending available
+        assertFalse(requiresDeposit); // No deposit needed during grace
+        assertEq(solidarityLimit, 0.01 ether); // Grace limit
+    }
+
+    function testGetOrgGraceStatus_PauseThenUnpauseRestoresMatch() public {
+        vm.warp(block.timestamp + 91 days);
+
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.003 ether}(ORG_ALPHA);
+
+        // Pause — should show no match
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        (,,, uint256 limit1) = hub.getOrgGraceStatus(ORG_ALPHA);
+        assertEq(limit1, 0);
+
+        // Unpause — match restored
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+
+        (,,, uint256 limit2) = hub.getOrgGraceStatus(ORG_ALPHA);
+        assertEq(limit2, 0.006 ether); // 2x match restored
+    }
+
+    // ============ registerOrg Access Control Tests ============
+
+    function testRegisterOrgUnauthorizedReverts() public {
+        bytes32 newOrgId = keccak256("UNAUTHORIZED_ORG");
+
+        vm.prank(orgAdmin);
+        vm.expectRevert(PaymasterHub.NotPoaManager.selector);
+        hub.registerOrg(newOrgId, ADMIN_HAT, OPERATOR_HAT);
+    }
+
+    function testRegisterOrgRandomUserReverts() public {
+        bytes32 newOrgId = keccak256("RANDOM_ORG");
+
+        vm.prank(user1);
+        vm.expectRevert(PaymasterHub.NotPoaManager.selector);
+        hub.registerOrg(newOrgId, ADMIN_HAT, OPERATOR_HAT);
+    }
+
+    function testSetOrgRegistrar() public {
+        address registrar = address(0x99);
+
+        vm.prank(poaManager);
+        hub.setOrgRegistrar(registrar);
+
+        // Registrar can now register orgs
+        bytes32 newOrgId = keccak256("REGISTRAR_ORG");
+        vm.prank(registrar);
+        hub.registerOrg(newOrgId, ADMIN_HAT, OPERATOR_HAT);
+
+        PaymasterHub.OrgConfig memory config = hub.getOrgConfig(newOrgId);
+        assertEq(config.adminHatId, ADMIN_HAT);
+    }
+
+    function testSetOrgRegistrarUnauthorizedReverts() public {
+        vm.prank(orgAdmin);
+        vm.expectRevert(PaymasterHub.NotPoaManager.selector);
+        hub.setOrgRegistrar(address(0x99));
+    }
+
+    /*══════════════════════════════════════════════════════════════════
+                    GRACE PERIOD ZERO-DEPOSIT TESTS (Bug #1)
+    ══════════════════════════════════════════════════════════════════*/
+
+    function testGracePeriodZeroDepositOrgGraceStatus() public {
+        // A newly registered org with zero deposits should be in grace
+        (bool inGrace, uint128 spendRemaining,,) = hub.getOrgGraceStatus(ORG_ALPHA);
+        assertTrue(inGrace, "New org should be in grace period");
+
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(ORG_ALPHA);
+        assertEq(fin.deposited, 0, "New org should have zero deposits");
+        assertGt(spendRemaining, 0, "Should have spending allowance during grace");
+    }
+
+    function testPostGraceZeroDepositOrgNotInGrace() public {
+        // Warp past grace period (default 90 days)
+        vm.warp(block.timestamp + 91 days);
+
+        (bool inGrace,,,) = hub.getOrgGraceStatus(ORG_ALPHA);
+        assertFalse(inGrace, "Org should no longer be in grace after 91 days");
+
+        // Verify the org still has zero deposits
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(ORG_ALPHA);
+        assertEq(fin.deposited, 0, "Org should still have zero deposits");
+    }
+
+    function testGracePeriodWithDistributionPausedRequiresDeposit() public {
+        // Pause solidarity distribution
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // Even in grace period, paused distribution means org must cover from deposits
+        // The org has zero deposits, so any operation requiring balance should fail
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(ORG_ALPHA);
+        assertEq(fin.deposited, 0, "Org should have zero deposits");
+
+        PaymasterHub.SolidarityFund memory solidarity = hub.getSolidarityFund();
+        assertTrue(solidarity.distributionPaused, "Distribution should be paused");
+    }
+
+    function testGracePeriodPartialDepositAllowed() public {
+        // Org deposits a small amount during grace — should work fine
+        uint256 smallDeposit = 0.001 ether;
+        vm.prank(user1);
+        hub.depositForOrg{value: smallDeposit}(ORG_ALPHA);
+
+        (bool inGrace,,,) = hub.getOrgGraceStatus(ORG_ALPHA);
+        assertTrue(inGrace, "Org should still be in grace");
+
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(ORG_ALPHA);
+        assertEq(fin.deposited, smallDeposit, "Deposit should be recorded");
+    }
+
+    // ============ Security Regression Tests ============
+
+    uint8 constant PAYMASTER_DATA_VERSION = 1;
+    uint8 constant SUBJECT_TYPE_ACCOUNT = 0x00;
+    uint8 constant SUBJECT_TYPE_POA_ONBOARDING = 0x03;
+    uint32 constant RULE_ID_COARSE = 0x000000FF;
+    uint32 constant RULE_ID_GENERIC = 0;
+    uint256 constant MAX_COST = 100_000;
+
+    event OnboardingAccountCreated(address indexed account, uint256 gasCost);
+
+    function _buildPaymasterData(
+        bytes32 orgId,
+        uint8 subjectType,
+        bytes20 subjectId,
+        uint32 ruleId,
+        uint64 mailboxCommit8
+    ) internal view returns (bytes memory) {
+        return abi.encodePacked(
+            address(hub), PAYMASTER_DATA_VERSION, orgId, subjectType, subjectId, ruleId, mailboxCommit8
+        );
+    }
+
+    function _buildUserOp(address sender, bytes memory callData, bytes memory paymasterAndData)
+        internal
+        pure
+        returns (PackedUserOperation memory userOp)
+    {
+        userOp = PackedUserOperation({
+            sender: sender,
+            nonce: 0,
+            initCode: "",
+            callData: callData,
+            accountGasLimits: UserOpLib.packAccountGasLimits(100_000, 100_000),
+            preVerificationGas: 100_000,
+            gasFees: UserOpLib.packGasFees(1, 1),
+            paymasterAndData: paymasterAndData,
+            signature: ""
+        });
+    }
+
+    /// @notice Onboarding must reject when orgId is non-zero
+    function testOnboardingRejectsNonZeroOrgId() public {
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true);
+        bytes memory pmData =
+            _buildPaymasterData(ORG_ALPHA, SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp = _buildUserOp(address(0xdead), "", pmData);
+        userOp.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOnboardingRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Onboarding must reject when sender already has code deployed (not a creation)
+    function testOnboardingRejectsNonCreationUserOp() public {
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true);
+        address deployed = address(new DummySender());
+        bytes memory pmData =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp = _buildUserOp(deployed, "", pmData);
+        userOp.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOnboardingRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice A reverted onboarding op must NOT emit OnboardingAccountCreated
+    function testOnboardingRevertedOpDoesNotEmitCreationEvent() public {
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true);
+        address newAccount = address(0xbeef);
+        bytes memory pmData =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp = _buildUserOp(newAccount, "", pmData);
+        userOp.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+        vm.recordLogs();
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opReverted, context, 50_000);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 creationEventSig = keccak256("OnboardingAccountCreated(address,uint256)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(
+                logs[i].topics[0] != creationEventSig, "OnboardingAccountCreated should not be emitted on revert"
+            );
+        }
+    }
+
+    /// @notice Failed (reverted) onboarding ops must still consume a throttle attempt
+    function testOnboardingFailedOpsDoNotConsumeAttemptThrottle() public {
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 1, true);
+        address account1 = address(0xaa01);
+        bytes memory pmData1 =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp1 = _buildUserOp(account1, "", pmData1);
+        userOp1.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        (bytes memory context1,) = hub.validatePaymasterUserOp(userOp1, keccak256("hash1"), MAX_COST);
+        // Failed op — counter was incremented in validation but refunded in postOp
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opReverted, context1, 50_000);
+        // Second onboarding should succeed because the failed op's slot was refunded
+        address account2 = address(0xaa02);
+        bytes memory pmData2 =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp2 = _buildUserOp(account2, "", pmData2);
+        userOp2.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        (bytes memory context2,) = hub.validatePaymasterUserOp(userOp2, keccak256("hash2"), MAX_COST);
+        // Successful op — counter stays incremented (no refund)
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context2, 50_000);
+        // Third onboarding should now be blocked (limit of 1 reached)
+        address account3 = address(0xaa03);
+        bytes memory pmData3 =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp3 = _buildUserOp(account3, "", pmData3);
+        userOp3.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.OnboardingDailyLimitExceeded.selector);
+        hub.validatePaymasterUserOp(userOp3, keccak256("hash3"), MAX_COST);
+    }
+
+    /// @notice registerOrg must reject bytes32(0) as orgId
+    function testRegisterOrgRejectsZeroOrgId() public {
+        vm.prank(poaManager);
+        vm.expectRevert(PaymasterHub.InvalidOrgId.selector);
+        hub.registerOrg(bytes32(0), ADMIN_HAT, OPERATOR_HAT);
+    }
+
+    /// @notice Grace-period path must check solidarity fund liquidity before approving
+    function testGracePathChecksSolidarityLiquidity() public {
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(90, 100 ether, 0.003 ether);
+        hub.donateToSolidarity{value: 0.001 ether}();
+        bytes32 accountKey = keccak256(abi.encodePacked(SUBJECT_TYPE_ACCOUNT, bytes20(user1)));
+        vm.startPrank(orgAdmin);
+        hub.setBudget(ORG_ALPHA, accountKey, 10 ether, 1 days);
+        hub.setRule(ORG_ALPHA, address(0x9999), bytes4(0xdeadbeef), true, 0);
+        vm.stopPrank();
+        bytes memory innerCall = abi.encodeWithSelector(
+            bytes4(0xb61d27f6), address(0x9999), uint256(0), abi.encodeWithSelector(bytes4(0xdeadbeef))
+        );
+        bytes memory pmData =
+            _buildPaymasterData(ORG_ALPHA, SUBJECT_TYPE_ACCOUNT, bytes20(user1), RULE_ID_GENERIC, uint64(0));
+        PackedUserOperation memory userOp = _buildUserOp(user1, innerCall, pmData);
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InsufficientFunds.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), 2 ether);
+    }
+}
+
+/*══════════════════════════════════════════════════════════════════
+    Harness-based tests for _checkOrgBalance and _checkSolidarityAccess
+══════════════════════════════════════════════════════════════════*/
+
+contract PaymasterHubHarness is PaymasterHub {
+    function exposed_checkOrgBalance(bytes32 orgId, uint256 maxCost) external view {
+        _checkOrgBalance(orgId, maxCost);
+    }
+
+    function exposed_checkSolidarityAccess(bytes32 orgId, uint256 maxCost) external view {
+        _checkSolidarityAccess(orgId, maxCost);
+    }
+}
+
+contract PaymasterHubBalanceCheckTest is Test {
+    PaymasterHubHarness public hub;
+    MockEntryPoint public entryPoint;
+    MockHats public hats;
+
+    address public poaManager = address(0x1);
+    address public orgAdmin = address(0x2);
+    address public user1 = address(0x3);
+
+    uint256 constant ADMIN_HAT = 1;
+    uint256 constant OPERATOR_HAT = 2;
+
+    bytes32 constant ORG_A = keccak256("ORG_A");
+
+    function setUp() public {
+        entryPoint = new MockEntryPoint();
+        hats = new MockHats();
+
+        PaymasterHubHarness implementation = new PaymasterHubHarness();
+        bytes memory initData =
+            abi.encodeWithSelector(PaymasterHub.initialize.selector, address(entryPoint), address(hats), poaManager);
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
+        hub = PaymasterHubHarness(payable(address(proxy)));
+
+        hats.mintHat(ADMIN_HAT, orgAdmin);
+        hats.mintHat(OPERATOR_HAT, orgAdmin);
+
+        vm.deal(poaManager, 100 ether);
+        vm.deal(user1, 100 ether);
+
+        vm.startPrank(poaManager);
+        hub.registerOrg(ORG_A, ADMIN_HAT, OPERATOR_HAT);
+        hub.unpauseSolidarityDistribution();
+        vm.stopPrank();
+
+        // Fund solidarity so grace-period checks pass the balance requirement
+        hub.donateToSolidarity{value: 10 ether}();
+    }
+
+    /*──────────── _checkOrgBalance: grace period tests ────────────*/
+
+    function testCheckOrgBalance_ZeroDeposit_InGrace_Passes() public view {
+        // Core fix: zero-deposit org in grace period should NOT revert
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
+
+    function testCheckOrgBalance_ZeroDeposit_PostGrace_Reverts() public {
+        vm.warp(block.timestamp + 91 days);
+
+        vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
+
+    function testCheckOrgBalance_ZeroDeposit_InGrace_DistributionPaused_Reverts() public {
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // Even in grace, paused distribution means org must cover 100% from deposits
+        vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
+
+    function testCheckOrgBalance_SufficientDeposit_PassesImmediately() public {
+        vm.prank(user1);
+        hub.depositForOrg{value: 1 ether}(ORG_A);
+
+        // Deposit covers maxCost entirely — returns without hitting grace check
+        hub.exposed_checkOrgBalance(ORG_A, 0.5 ether);
+    }
+
+    function testCheckOrgBalance_ExactDeposit_Passes() public {
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.5 ether}(ORG_A);
+
+        hub.exposed_checkOrgBalance(ORG_A, 0.5 ether);
+    }
+
+    function testCheckOrgBalance_PartialDeposit_InGrace_Passes() public {
+        // Partial deposit (>0 but < maxCost) — hits partial coverage path
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.001 ether}(ORG_A);
+
+        hub.exposed_checkOrgBalance(ORG_A, 0.01 ether);
+    }
+
+    function testCheckOrgBalance_PartialDeposit_PostGrace_Passes() public {
+        // Partial deposit post-grace still passes (solidarity covers rest)
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.003 ether}(ORG_A);
+
+        vm.warp(block.timestamp + 91 days);
+
+        hub.exposed_checkOrgBalance(ORG_A, 0.005 ether);
+    }
+
+    function testCheckOrgBalance_ZeroMaxCost_Passes() public view {
+        // Edge case: zero maxCost always passes (depositAvailable >= 0)
+        hub.exposed_checkOrgBalance(ORG_A, 0);
+    }
+
+    function testFuzz_CheckOrgBalance_GracePeriod(uint128 deposit, uint128 maxCost, uint64 timeElapsed) public {
+        deposit = uint128(bound(deposit, 0, 10 ether));
+        maxCost = uint128(bound(maxCost, 1, 1 ether));
+        timeElapsed = uint64(bound(timeElapsed, 0, 180 days));
+
+        if (deposit > 0) {
+            vm.deal(user1, uint256(deposit));
+            vm.prank(user1);
+            hub.depositForOrg{value: deposit}(ORG_A);
+        }
+
+        vm.warp(block.timestamp + timeElapsed);
+
+        bool inGrace = timeElapsed < 90 days;
+        bool depositCovers = deposit >= maxCost;
+        bool hasDeposit = deposit > 0;
+
+        PaymasterHub.SolidarityFund memory solidarity = hub.getSolidarityFund();
+        bool paused = solidarity.distributionPaused;
+
+        if (paused) {
+            if (depositCovers) {
+                hub.exposed_checkOrgBalance(ORG_A, maxCost);
+            } else {
+                vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+                hub.exposed_checkOrgBalance(ORG_A, maxCost);
+            }
+        } else if (depositCovers) {
+            hub.exposed_checkOrgBalance(ORG_A, maxCost);
+        } else if (hasDeposit) {
+            // Partial coverage — passes (solidarity covers rest)
+            hub.exposed_checkOrgBalance(ORG_A, maxCost);
+        } else if (inGrace) {
+            // Zero deposit, in grace — the fix: should pass
+            hub.exposed_checkOrgBalance(ORG_A, maxCost);
+        } else {
+            // Zero deposit, post grace — should revert
+            vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+            hub.exposed_checkOrgBalance(ORG_A, maxCost);
+        }
+    }
+
+    /*──────────── _checkSolidarityAccess: comprehensive tests ────────────*/
+
+    function testCheckSolidarityAccess_InGrace_ZeroDeposit_Passes() public view {
+        // Grace period with zero deposit — only spending limit matters
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testCheckSolidarityAccess_InGrace_ExceedsMaxSpend_Reverts() public {
+        PaymasterHub.GracePeriodConfig memory grace = hub.getGracePeriodConfig();
+
+        vm.expectRevert(PaymasterHub.GracePeriodSpendLimitReached.selector);
+        hub.exposed_checkSolidarityAccess(ORG_A, grace.maxSpendDuringGrace + 1);
+    }
+
+    function testCheckSolidarityAccess_PostGrace_BelowMinDeposit_Reverts() public {
+        vm.warp(block.timestamp + 91 days);
+
+        // No deposit — below min required
+        vm.expectRevert(PaymasterHub.InsufficientDepositForSolidarity.selector);
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testCheckSolidarityAccess_PostGrace_WithMinDeposit_Passes() public {
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.003 ether}(ORG_A);
+
+        vm.warp(block.timestamp + 91 days);
+
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testCheckSolidarityAccess_Banned_Reverts() public {
+        vm.prank(poaManager);
+        hub.setBanFromSolidarity(ORG_A, true);
+
+        vm.expectRevert(PaymasterHub.OrgIsBanned.selector);
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testCheckSolidarityAccess_DistributionPaused_SkipsChecks() public {
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // When paused, _checkSolidarityAccess returns immediately (skips all checks)
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    /*──────────── Combined flow: both checks in sequence ────────────*/
+
+    function testBothChecks_ZeroDeposit_InGrace_BothPass() public view {
+        // Simulate the validatePaymasterUserOp call order
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testBothChecks_ZeroDeposit_PostGrace_BalanceReverts() public {
+        vm.warp(block.timestamp + 91 days);
+
+        // Balance check fails first (same order as validatePaymasterUserOp)
+        vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
+
+    function testBothChecks_WithDeposit_PostGrace_BothPass() public {
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.003 ether}(ORG_A);
+
+        vm.warp(block.timestamp + 91 days);
+
+        hub.exposed_checkOrgBalance(ORG_A, 0.005 ether);
+        hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+    }
+
+    function testBothChecks_GraceEdge_ExactlyAtExpiry() public {
+        PaymasterHub.GracePeriodConfig memory grace = hub.getGracePeriodConfig();
+        PaymasterHub.OrgConfig memory config = hub.getOrgConfig(ORG_A);
+
+        // Warp to exact expiry boundary
+        uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
+        vm.warp(graceEndTime);
+
+        // At exact boundary: block.timestamp == graceEndTime, NOT < graceEndTime
+        // So inInitialGrace is false — should revert
+        vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
+
+    function testBothChecks_GraceEdge_OneSecondBefore() public {
+        PaymasterHub.GracePeriodConfig memory grace = hub.getGracePeriodConfig();
+        PaymasterHub.OrgConfig memory config = hub.getOrgConfig(ORG_A);
+
+        uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
+        vm.warp(graceEndTime - 1);
+
+        // One second before expiry — still in grace
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
     }
 }

@@ -46,6 +46,7 @@ contract DirectDemocracyVoting is Initializable {
         uint256[] pollHatIds; // array of specific hat IDs for this poll
         bool restricted; // if true only allowedHats can vote
         mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
+        bool executed; // finalization guard
     }
 
     /* ─────────── ERC-7201 Storage ─────────── */
@@ -62,12 +63,12 @@ contract DirectDemocracyVoting is Initializable {
         uint256 _lock; // Inline reentrancy guard state
     }
 
-    // keccak256("poa.directdemocracy.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0x1da04eb4a741346cdb49b5da943a0c13e79399ef962f913efcd36d95ee6d7c38;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.directdemocracy.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 
@@ -125,7 +126,10 @@ contract DirectDemocracyVoting is Initializable {
     event QuorumPercentageSet(uint8 pct);
 
     /* ─────────── Initialiser ─────────── */
-    constructor() initializer {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(
         address hats_,
@@ -408,9 +412,13 @@ contract DirectDemocracyVoting is Initializable {
         whenNotPaused
         returns (uint256 winner, bool valid)
     {
-        (winner, valid) = _calcWinner(id);
         Layout storage l = _layout();
-        IExecutor.Call[] storage batch = l._proposals[id].batches[winner];
+        Proposal storage prop = l._proposals[id];
+        if (prop.executed) revert VotingErrors.AlreadyExecuted();
+        prop.executed = true;
+
+        (winner, valid) = _calcWinner(id);
+        IExecutor.Call[] storage batch = prop.batches[winner];
 
         if (valid && batch.length > 0) {
             uint256 len = batch.length;

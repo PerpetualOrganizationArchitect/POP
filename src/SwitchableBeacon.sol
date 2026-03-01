@@ -21,6 +21,9 @@ contract SwitchableBeacon is IBeacon {
     /// @notice Current owner of this beacon (typically the Executor or UpgradeAdmin)
     address public owner;
 
+    /// @notice The pending owner awaiting acceptance of ownership transfer
+    address public pendingOwner;
+
     /// @notice The global POA beacon to mirror when in Mirror mode
     address public mirrorBeacon;
 
@@ -34,6 +37,14 @@ contract SwitchableBeacon is IBeacon {
     /// @param previousOwner The address of the previous owner
     /// @param newOwner The address of the new owner
     event OwnerTransferred(address indexed previousOwner, address indexed newOwner);
+
+    /// @notice Emitted when a pending ownership transfer is started
+    /// @param pendingOwner The address of the pending new owner
+    event OwnershipTransferStarted(address indexed pendingOwner);
+
+    /// @notice Emitted when a pending ownership transfer is cancelled
+    /// @param cancelledOwner The address of the cancelled pending owner
+    event OwnershipTransferCancelled(address indexed cancelledOwner);
 
     /// @notice Emitted when the beacon mode changes
     /// @param mode The new mode (Mirror or Static)
@@ -61,6 +72,12 @@ contract SwitchableBeacon is IBeacon {
 
     /// @notice Thrown when an address is not a contract when it should be
     error NotContract();
+
+    /// @notice Thrown when there is no pending ownership transfer to cancel
+    error NoPendingTransfer();
+
+    /// @notice Thrown when the caller is not the pending owner
+    error NotPendingOwner();
 
     /// @notice Restricts function access to the owner only
     modifier onlyOwner() {
@@ -99,17 +116,39 @@ contract SwitchableBeacon is IBeacon {
     }
 
     /**
-     * @notice Transfers ownership of the beacon to a new address
-     * @param newOwner The address of the new owner
-     * @dev Only callable by the current owner
+     * @notice Initiates a two-step ownership transfer to a new address
+     * @param newOwner The address of the pending new owner
+     * @dev Only callable by the current owner. The new owner must call acceptOwnership() to complete the transfer.
      */
     function transferOwnership(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert ZeroAddress();
 
-        address previousOwner = owner;
-        owner = newOwner;
+        pendingOwner = newOwner;
 
-        emit OwnerTransferred(previousOwner, newOwner);
+        emit OwnershipTransferStarted(newOwner);
+    }
+
+    /**
+     * @notice Completes the ownership transfer
+     * @dev Only callable by the pending owner
+     */
+    function acceptOwnership() external {
+        if (msg.sender != pendingOwner) revert NotPendingOwner();
+
+        address previousOwner = owner;
+        owner = pendingOwner;
+        pendingOwner = address(0);
+
+        emit OwnerTransferred(previousOwner, msg.sender);
+    }
+
+    /// @notice Cancels a pending ownership transfer
+    /// @dev Only callable by the current owner
+    function cancelOwnershipTransfer() external onlyOwner {
+        if (pendingOwner == address(0)) revert NoPendingTransfer();
+        address cancelled = pendingOwner;
+        pendingOwner = address(0);
+        emit OwnershipTransferCancelled(cancelled);
     }
 
     /**

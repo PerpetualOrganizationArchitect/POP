@@ -2,13 +2,17 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "../src/ImplementationRegistry.sol";
 
 contract ImplementationRegistryTest is Test {
     ImplementationRegistry reg;
 
     function setUp() public {
-        reg = new ImplementationRegistry();
+        ImplementationRegistry _regImpl = new ImplementationRegistry();
+        UpgradeableBeacon _regBeacon = new UpgradeableBeacon(address(_regImpl), address(this));
+        reg = ImplementationRegistry(address(new BeaconProxy(address(_regBeacon), "")));
         reg.initialize(address(this));
     }
 

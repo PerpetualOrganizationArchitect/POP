@@ -52,12 +52,12 @@ contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyG
         uint256[] approverHatIds; // enumeration array for approver hats
     }
 
-    // keccak256("poa.participationtoken.storage") → unique, collision-free slot
-    bytes32 private constant _STORAGE_SLOT = 0xc49c4cc718f2f9e8d168c340989dd4f66bf6674fc7217665b075b167908f4ee1;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.participationtoken.storage");
 
     function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
         assembly {
-            s.slot := _STORAGE_SLOT
+            s.slot := slot
         }
     }
 
@@ -69,6 +69,11 @@ contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyG
     event RequestCancelled(uint256 indexed id, address indexed caller);
     event MemberHatSet(uint256 hat, bool allowed);
     event ApproverHatSet(uint256 hat, bool allowed);
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     /*─────────── Initialiser ──────*/
     function initialize(

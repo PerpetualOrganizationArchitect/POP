@@ -301,8 +301,8 @@ library VotingMath {
 
         if (hi == 0) return (win, false, hi, second);
 
-        // Quorum check: hi * 100 > totalWeight * quorumPct
-        bool quorumMet = (hi * 100 > totalWeight * quorumPct);
+        // Threshold check: hi * 100 >= totalWeight * quorumPct
+        bool quorumMet = (hi * 100 >= totalWeight * quorumPct);
         bool meetsMargin = requireStrictMajority ? (hi > second) : (hi >= second);
 
         ok = quorumMet && meetsMargin;

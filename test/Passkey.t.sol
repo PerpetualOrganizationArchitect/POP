@@ -156,9 +156,16 @@ contract PasskeyTest is Test {
         // Deploy mock executor
         mockExecutor = new MockExecutor();
 
-        // Deploy account registry
-        accountRegistry = new UniversalAccountRegistry();
-        accountRegistry.initialize(owner);
+        // Deploy account registry via beacon proxy (constructor has _disableInitializers)
+        UniversalAccountRegistry registryImpl = new UniversalAccountRegistry();
+        UpgradeableBeacon registryBeacon = new UpgradeableBeacon(address(registryImpl), owner);
+        accountRegistry = UniversalAccountRegistry(
+            address(
+                new BeaconProxy(
+                    address(registryBeacon), abi.encodeWithSelector(UniversalAccountRegistry.initialize.selector, owner)
+                )
+            )
+        );
 
         vm.stopPrank();
     }
@@ -686,27 +693,11 @@ contract PasskeyTest is Test {
             credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
         });
 
-        address account = qj.quickJoinWithPasskey("testuser", enrollment);
+        address account = qj.quickJoinWithPasskey(enrollment);
 
         // Verify account was created
         assertTrue(account != address(0));
         assertTrue(factory.isDeployedAccount(account));
-
-        // Verify username was registered
-        assertEq(accountRegistry.getUsername(account), "testuser");
-    }
-
-    function testQuickJoinWithPasskeyNoUsername() public {
-        QuickJoin qj = _setupQuickJoin();
-
-        vm.prank(user);
-
-        QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
-        });
-
-        vm.expectRevert(QuickJoin.NoUsername.selector);
-        qj.quickJoinWithPasskey("", enrollment);
     }
 
     function testQuickJoinWithPasskeyFactoryNotSet() public {
@@ -738,7 +729,7 @@ contract PasskeyTest is Test {
         });
 
         vm.expectRevert(QuickJoin.PasskeyFactoryNotSet.selector);
-        qj.quickJoinWithPasskey("testuser", enrollment);
+        qj.quickJoinWithPasskey(enrollment);
     }
 
     function testQuickJoinWithPasskeyMasterDeploy() public {
@@ -750,10 +741,10 @@ contract PasskeyTest is Test {
             credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
         });
 
-        address account = qj.quickJoinWithPasskeyMasterDeploy("masteruser", enrollment);
+        address account = qj.quickJoinWithPasskeyMasterDeploy(enrollment);
 
         assertTrue(account != address(0));
-        assertEq(accountRegistry.getUsername(account), "masteruser");
+        assertTrue(factory.isDeployedAccount(account));
     }
 
     function testQuickJoinWithPasskeyMasterDeployUnauthorized() public {
@@ -766,7 +757,7 @@ contract PasskeyTest is Test {
         });
 
         vm.expectRevert(QuickJoin.OnlyMasterDeploy.selector);
-        qj.quickJoinWithPasskeyMasterDeploy("attackeruser", enrollment);
+        qj.quickJoinWithPasskeyMasterDeploy(enrollment);
     }
 
     /*════════════════════════════════════════════════════════════════════
@@ -966,7 +957,7 @@ contract PasskeyTest is Test {
                     QUICKJOIN DUPLICATE ACCOUNT TESTS
     ════════════════════════════════════════════════════════════════════*/
 
-    function testQuickJoinWithPasskeyDuplicateReverts() public {
+    function testQuickJoinWithPasskeyDuplicateReturnsExisting() public {
         QuickJoin qj = _setupQuickJoin();
 
         // First user joins with passkey
@@ -974,28 +965,12 @@ contract PasskeyTest is Test {
         QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
             credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
         });
-        qj.quickJoinWithPasskey("firstuser", enrollment);
+        address first = qj.quickJoinWithPasskey(enrollment);
 
-        // Second user tries to join with same passkey (should revert)
+        // Second call with same passkey returns same account (factory returns existing)
         vm.prank(attacker);
-        vm.expectRevert(QuickJoin.AccountAlreadyRegistered.selector);
-        qj.quickJoinWithPasskey("seconduser", enrollment);
-    }
-
-    function testQuickJoinWithPasskeyMasterDeployDuplicateReverts() public {
-        QuickJoin qj = _setupQuickJoin();
-
-        // First enrollment
-        vm.prank(owner);
-        QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
-        });
-        qj.quickJoinWithPasskeyMasterDeploy("firstuser", enrollment);
-
-        // Second enrollment with same passkey (should revert)
-        vm.prank(owner);
-        vm.expectRevert(QuickJoin.AccountAlreadyRegistered.selector);
-        qj.quickJoinWithPasskeyMasterDeploy("seconduser", enrollment);
+        address second = qj.quickJoinWithPasskey(enrollment);
+        assertEq(first, second);
     }
 
     /*════════════════════════════════════════════════════════════════════
@@ -1060,5 +1035,111 @@ contract PasskeyTest is Test {
         assertTrue(P256Verifier.isValidSignature(r, s));
         assertFalse(P256Verifier.isValidSignature(bytes32(0), s));
         assertFalse(P256Verifier.isValidSignature(r, bytes32(0)));
+    }
+
+    /*════════════════════════════════════════════════════════════════════
+                    ZERO PUBKEY VALIDATION TESTS
+    ════════════════════════════════════════════════════════════════════*/
+
+    function testAddCredentialZeroPubKeyXReverts() public {
+        PasskeyAccount account = _createAccount();
+
+        vm.prank(address(account));
+        vm.expectRevert(IPasskeyAccount.InvalidSignature.selector);
+        account.addCredential(CREDENTIAL_ID_2, bytes32(0), PUB_KEY_Y);
+    }
+
+    function testAddCredentialZeroPubKeyYReverts() public {
+        PasskeyAccount account = _createAccount();
+
+        vm.prank(address(account));
+        vm.expectRevert(IPasskeyAccount.InvalidSignature.selector);
+        account.addCredential(CREDENTIAL_ID_2, PUB_KEY_X, bytes32(0));
+    }
+
+    function testInitiateRecoveryZeroPubKeyXReverts() public {
+        PasskeyAccount account = _createAccount();
+
+        vm.prank(guardian);
+        vm.expectRevert(IPasskeyAccount.InvalidSignature.selector);
+        account.initiateRecovery(keccak256("new_cred"), bytes32(0), PUB_KEY_Y);
+    }
+
+    function testInitiateRecoveryZeroPubKeyYReverts() public {
+        PasskeyAccount account = _createAccount();
+
+        vm.prank(guardian);
+        vm.expectRevert(IPasskeyAccount.InvalidSignature.selector);
+        account.initiateRecovery(keccak256("new_cred"), PUB_KEY_X, bytes32(0));
+    }
+
+    /*════════════════════════════════════════════════════════════════════
+                RECOVERY EDGE CASE & CREDENTIAL INTEGRITY TESTS
+    ════════════════════════════════════════════════════════════════════*/
+
+    function testCompleteCancelledRecovery_Reverts() public {
+        PasskeyAccount account = _createAccount();
+
+        bytes32 recoveryCredId = keccak256("cancelled_cred");
+        vm.prank(guardian);
+        account.initiateRecovery(recoveryCredId, keccak256("x"), keccak256("y"));
+
+        bytes32 recoveryId = keccak256(abi.encodePacked(recoveryCredId, block.timestamp, guardian));
+
+        // Cancel the recovery
+        vm.prank(guardian);
+        account.cancelRecovery(recoveryId);
+
+        // Warp past delay
+        vm.warp(block.timestamp + 7 days + 1);
+
+        // Attempt to complete cancelled recovery
+        vm.expectRevert(IPasskeyAccount.RecoveryNotPending.selector);
+        account.completeRecovery(recoveryId);
+    }
+
+    function testRecoveryNonExistentRecoveryId_Reverts() public {
+        PasskeyAccount account = _createAccount();
+
+        bytes32 fakeRecoveryId = keccak256("nonexistent");
+        vm.expectRevert(IPasskeyAccount.RecoveryNotPending.selector);
+        account.completeRecovery(fakeRecoveryId);
+    }
+
+    function testInitiateRecoveryForExistingCredential_Reverts() public {
+        PasskeyAccount account = _createAccount();
+
+        // Try to initiate recovery for credential that already exists (the one created with the account)
+        vm.prank(guardian);
+        vm.expectRevert(IPasskeyAccount.CredentialExists.selector);
+        account.initiateRecovery(CREDENTIAL_ID, keccak256("new_x"), keccak256("new_y"));
+    }
+
+    function testRecoveryCredentialArrayIntegrity() public {
+        PasskeyAccount account = _createAccount();
+
+        // Recover a credential
+        bytes32 recoveryCredId = keccak256("integrity_check");
+        vm.prank(guardian);
+        account.initiateRecovery(recoveryCredId, keccak256("ix"), keccak256("iy"));
+        bytes32 recoveryId = keccak256(abi.encodePacked(recoveryCredId, block.timestamp, guardian));
+
+        vm.warp(block.timestamp + 7 days + 1);
+        account.completeRecovery(recoveryId);
+
+        // Verify array has both entries (original deactivated + new active)
+        bytes32[] memory credIds = account.getCredentialIds();
+        assertEq(credIds.length, 2);
+
+        // Each credential ID should be unique
+        assertTrue(credIds[0] != credIds[1], "Credential IDs must be unique");
+
+        // Original credential should be deactivated
+        IPasskeyAccount.PasskeyCredential memory origCred = account.getCredential(CREDENTIAL_ID);
+        assertFalse(origCred.active, "Original credential should be deactivated after recovery");
+
+        // Recovery credential should be active
+        IPasskeyAccount.PasskeyCredential memory recoveryCred = account.getCredential(recoveryCredId);
+        assertTrue(recoveryCred.active, "Recovery credential should be active");
     }
 }

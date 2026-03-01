@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "../src/Executor.sol";
 import "./mocks/MockHats.sol";
 
@@ -22,7 +24,9 @@ contract ExecutorTest is Test {
 
     function setUp() public {
         hats = new MockHats();
-        exec = new Executor();
+        Executor impl = new Executor();
+        UpgradeableBeacon beacon = new UpgradeableBeacon(address(impl), address(this));
+        exec = Executor(payable(address(new BeaconProxy(address(beacon), ""))));
         exec.initialize(owner, address(hats));
         target = new Target();
         exec.setCaller(caller);
@@ -69,5 +73,71 @@ contract ExecutorTest is Test {
         vm.prank(minter);
         vm.expectRevert(Executor.UnauthorizedCaller.selector);
         exec.mintHatsForUser(user, hatIds);
+    }
+
+    function testSetCallerUnauthorizedReverts() public {
+        address random = address(0x99);
+        vm.prank(random);
+        vm.expectRevert(Executor.UnauthorizedCaller.selector);
+        exec.setCaller(address(0x5));
+    }
+
+    function testSetCallerZeroAddressReverts() public {
+        vm.expectRevert(Executor.ZeroAddress.selector);
+        exec.setCaller(address(0));
+    }
+
+    function testAllowedCallerCanSetNewCaller() public {
+        address newCaller = address(0x5);
+        vm.prank(caller);
+        exec.proposeCaller(newCaller);
+
+        vm.warp(block.timestamp + 2 days);
+
+        vm.prank(caller);
+        exec.acceptCaller();
+        assertEq(exec.allowedCaller(), newCaller);
+    }
+
+    function testProposeCallerUnauthorizedReverts() public {
+        address random = address(0x99);
+        vm.prank(random);
+        vm.expectRevert(Executor.UnauthorizedCaller.selector);
+        exec.proposeCaller(address(0x5));
+    }
+
+    function testAcceptCallerBeforeTimelockReverts() public {
+        vm.prank(caller);
+        exec.proposeCaller(address(0x5));
+
+        // Try to accept immediately (before 2-day delay)
+        vm.prank(caller);
+        vm.expectRevert(Executor.TimelockNotExpired.selector);
+        exec.acceptCaller();
+    }
+
+    function testCancelCallerChange() public {
+        address newCaller = address(0x5);
+        vm.prank(caller);
+        exec.proposeCaller(newCaller);
+
+        // Cancel the change
+        vm.prank(caller);
+        exec.cancelCallerChange();
+
+        // Warp past delay and try to accept — should fail (pending cleared)
+        vm.warp(block.timestamp + 2 days);
+        vm.prank(caller);
+        vm.expectRevert(Executor.ZeroAddress.selector);
+        exec.acceptCaller();
+
+        // Caller should be unchanged
+        assertEq(exec.allowedCaller(), caller);
+    }
+
+    function testProposeCallerZeroAddressReverts() public {
+        vm.prank(caller);
+        vm.expectRevert(Executor.ZeroAddress.selector);
+        exec.proposeCaller(address(0));
     }
 }
