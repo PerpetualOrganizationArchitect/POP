@@ -1107,4 +1107,74 @@ contract PasskeyTest is Test {
         vm.expectRevert(IPasskeyAccount.InvalidSignature.selector);
         account.initiateRecovery(keccak256("new_cred"), PUB_KEY_X, bytes32(0));
     }
+
+    /*════════════════════════════════════════════════════════════════════
+                RECOVERY EDGE CASE & CREDENTIAL INTEGRITY TESTS
+    ════════════════════════════════════════════════════════════════════*/
+
+    function testCompleteCancelledRecovery_Reverts() public {
+        PasskeyAccount account = _createAccount();
+
+        bytes32 recoveryCredId = keccak256("cancelled_cred");
+        vm.prank(guardian);
+        account.initiateRecovery(recoveryCredId, keccak256("x"), keccak256("y"));
+
+        bytes32 recoveryId = keccak256(abi.encodePacked(recoveryCredId, block.timestamp, guardian));
+
+        // Cancel the recovery
+        vm.prank(guardian);
+        account.cancelRecovery(recoveryId);
+
+        // Warp past delay
+        vm.warp(block.timestamp + 7 days + 1);
+
+        // Attempt to complete cancelled recovery
+        vm.expectRevert(IPasskeyAccount.RecoveryNotPending.selector);
+        account.completeRecovery(recoveryId);
+    }
+
+    function testRecoveryNonExistentRecoveryId_Reverts() public {
+        PasskeyAccount account = _createAccount();
+
+        bytes32 fakeRecoveryId = keccak256("nonexistent");
+        vm.expectRevert(IPasskeyAccount.RecoveryNotPending.selector);
+        account.completeRecovery(fakeRecoveryId);
+    }
+
+    function testInitiateRecoveryForExistingCredential_Reverts() public {
+        PasskeyAccount account = _createAccount();
+
+        // Try to initiate recovery for credential that already exists (the one created with the account)
+        vm.prank(guardian);
+        vm.expectRevert(IPasskeyAccount.CredentialExists.selector);
+        account.initiateRecovery(CREDENTIAL_ID, keccak256("new_x"), keccak256("new_y"));
+    }
+
+    function testRecoveryCredentialArrayIntegrity() public {
+        PasskeyAccount account = _createAccount();
+
+        // Recover a credential
+        bytes32 recoveryCredId = keccak256("integrity_check");
+        vm.prank(guardian);
+        account.initiateRecovery(recoveryCredId, keccak256("ix"), keccak256("iy"));
+        bytes32 recoveryId = keccak256(abi.encodePacked(recoveryCredId, block.timestamp, guardian));
+
+        vm.warp(block.timestamp + 7 days + 1);
+        account.completeRecovery(recoveryId);
+
+        // Verify array has both entries (original deactivated + new active)
+        bytes32[] memory credIds = account.getCredentialIds();
+        assertEq(credIds.length, 2);
+
+        // Each credential ID should be unique
+        assertTrue(credIds[0] != credIds[1], "Credential IDs must be unique");
+
+        // Original credential should be deactivated
+        IPasskeyAccount.PasskeyCredential memory origCred = account.getCredential(CREDENTIAL_ID);
+        assertFalse(origCred.active, "Original credential should be deactivated after recovery");
+
+        // Recovery credential should be active
+        IPasskeyAccount.PasskeyCredential memory recoveryCred = account.getCredential(recoveryCredId);
+        assertTrue(recoveryCred.active, "Recovery credential should be active");
+    }
 }
