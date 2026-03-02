@@ -174,6 +174,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -414,6 +415,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -473,6 +475,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -809,6 +812,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -940,6 +944,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _buildBootstrapWithTasks()
@@ -1025,6 +1030,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -1067,6 +1073,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -1152,6 +1159,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -1424,6 +1432,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -1640,6 +1649,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -1804,6 +1814,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -1942,6 +1953,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: new address[](0),
             roles: emptyRoles,
             roleAssignments: _buildDefaultRoleAssignments(),
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -2219,6 +2231,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -2326,6 +2339,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -2494,6 +2508,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -3479,6 +3494,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: roles,
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -3581,6 +3597,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
             bootstrap: _emptyBootstrap()
@@ -3644,6 +3661,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
             bootstrap: _emptyBootstrap()
@@ -3709,6 +3727,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: ddTargets,
             roles: _buildSimpleRoleConfigs(names, images, voting),
             roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
             bootstrap: _emptyBootstrap()
@@ -4143,6 +4162,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: new address[](0),
             roles: _buildSimpleRoleConfigs(names, images, canVote),
             roleAssignments: _buildDefaultRoleAssignments(),
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -4187,6 +4207,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: new address[](0),
             roles: _buildSimpleRoleConfigs(names, images, canVote),
             roleAssignments: _buildDefaultRoleAssignments(),
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -4242,6 +4263,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             ddInitialTargets: new address[](0),
             roles: _buildSimpleRoleConfigs(names, images, canVote),
             roleAssignments: _buildDefaultRoleAssignments(),
+            metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap()
@@ -4253,5 +4275,209 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Original username should be preserved, not overwritten
         string memory registered = UniversalAccountRegistry(accountRegProxy).getUsername(deployerSigner);
         assertEq(registered, username, "Original username should be preserved when deployer is already registered");
+    }
+
+    /*──────────────────────────────────────────────────────────────────────────
+     *  Metadata Admin Role Index Tests
+     *────────────────────────────────────────────────────────────────────────*/
+
+    /// @dev Deploy with metadataAdminRoleIndex pointing to role 0 →
+    ///      role 0's hat becomes the metadata admin hat.
+    function testMetadataAdminExplicitRole0() public {
+        bytes32 orgId = keccak256("META-ADMIN-ROLE0-ORG");
+
+        vm.startPrank(orgOwner);
+
+        string[] memory names = new string[](2);
+        names[0] = "MEMBER";
+        names[1] = "ADMIN";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://member";
+        images[1] = "ipfs://admin";
+        bool[] memory canVote = new bool[](2);
+        canVote[0] = true;
+        canVote[1] = true;
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "MetaAdminRole0 DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: _buildLegacyClasses(50, 50, false, 4 ether),
+            ddInitialTargets: new address[](0),
+            roles: _buildSimpleRoleConfigs(names, images, canVote),
+            roleAssignments: _buildDefaultRoleAssignments(),
+            metadataAdminRoleIndex: 0, // Explicitly set role 0
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
+        });
+
+        deployer.deployFullOrg(params);
+        vm.stopPrank();
+
+        // Verify role 0's hat was set as metadata admin
+        uint256 role0Hat = orgRegistry.getRoleHat(orgId, 0);
+        uint256 metaAdminHat = orgRegistry.getOrgMetadataAdminHat(orgId);
+        assertEq(metaAdminHat, role0Hat, "Metadata admin hat should be role 0's hat");
+        assertTrue(metaAdminHat != 0, "Metadata admin hat should be non-zero");
+    }
+
+    /// @dev Deploy with metadataAdminRoleIndex pointing to role 1 →
+    ///      role 1's hat becomes the metadata admin hat.
+    function testMetadataAdminExplicitRole1() public {
+        bytes32 orgId = keccak256("META-ADMIN-ROLE1-ORG");
+
+        vm.startPrank(orgOwner);
+
+        string[] memory names = new string[](2);
+        names[0] = "MEMBER";
+        names[1] = "ADMIN";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://member";
+        images[1] = "ipfs://admin";
+        bool[] memory canVote = new bool[](2);
+        canVote[0] = true;
+        canVote[1] = true;
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "MetaAdminRole1 DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: _buildLegacyClasses(50, 50, false, 4 ether),
+            ddInitialTargets: new address[](0),
+            roles: _buildSimpleRoleConfigs(names, images, canVote),
+            roleAssignments: _buildDefaultRoleAssignments(),
+            metadataAdminRoleIndex: 1, // Explicitly set role 1
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
+        });
+
+        deployer.deployFullOrg(params);
+        vm.stopPrank();
+
+        // Verify role 1's hat was set as metadata admin
+        uint256 role1Hat = orgRegistry.getRoleHat(orgId, 1);
+        uint256 metaAdminHat = orgRegistry.getOrgMetadataAdminHat(orgId);
+        assertEq(metaAdminHat, role1Hat, "Metadata admin hat should be role 1's hat");
+        assertTrue(metaAdminHat != 0, "Metadata admin hat should be non-zero");
+
+        // Also verify it's NOT role 0's hat (they should differ)
+        uint256 role0Hat = orgRegistry.getRoleHat(orgId, 0);
+        assertTrue(metaAdminHat != role0Hat, "Metadata admin hat should differ from role 0's hat");
+    }
+
+    /// @dev Deploy with metadataAdminRoleIndex = type(uint256).max (skip) →
+    ///      no metadata admin hat set, topHat fallback applies.
+    function testMetadataAdminSkipped() public {
+        bytes32 orgId = keccak256("META-ADMIN-SKIP-ORG");
+
+        vm.startPrank(orgOwner);
+
+        string[] memory names = new string[](2);
+        names[0] = "MEMBER";
+        names[1] = "ADMIN";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://member";
+        images[1] = "ipfs://admin";
+        bool[] memory canVote = new bool[](2);
+        canVote[0] = true;
+        canVote[1] = true;
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "MetaAdminSkip DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: _buildLegacyClasses(50, 50, false, 4 ether),
+            ddInitialTargets: new address[](0),
+            roles: _buildSimpleRoleConfigs(names, images, canVote),
+            roleAssignments: _buildDefaultRoleAssignments(),
+            metadataAdminRoleIndex: type(uint256).max, // Skip
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
+        });
+
+        deployer.deployFullOrg(params);
+        vm.stopPrank();
+
+        // metadataAdminHatOf should be 0 (not set) → topHat fallback in OrgRegistry
+        uint256 metaAdminHat = orgRegistry.getOrgMetadataAdminHat(orgId);
+        assertEq(metaAdminHat, 0, "Metadata admin hat should be zero when skipped (topHat fallback)");
+    }
+
+    /// @dev Deploy with out-of-bounds metadataAdminRoleIndex (not max, but still >= roles.length) →
+    ///      silently skipped, same as max.
+    function testMetadataAdminOutOfBoundsIndex() public {
+        bytes32 orgId = keccak256("META-ADMIN-OOB-ORG");
+
+        vm.startPrank(orgOwner);
+
+        string[] memory names = new string[](2);
+        names[0] = "MEMBER";
+        names[1] = "ADMIN";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://member";
+        images[1] = "ipfs://admin";
+        bool[] memory canVote = new bool[](2);
+        canVote[0] = true;
+        canVote[1] = true;
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "MetaAdminOOB DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: _buildLegacyClasses(50, 50, false, 4 ether),
+            ddInitialTargets: new address[](0),
+            roles: _buildSimpleRoleConfigs(names, images, canVote),
+            roleAssignments: _buildDefaultRoleAssignments(),
+            metadataAdminRoleIndex: 999, // Out of bounds but not max
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
+        });
+
+        deployer.deployFullOrg(params); // Should NOT revert
+        vm.stopPrank();
+
+        // Same behavior as skip — no metadata admin hat set
+        uint256 metaAdminHat = orgRegistry.getOrgMetadataAdminHat(orgId);
+        assertEq(metaAdminHat, 0, "Metadata admin hat should be zero for out-of-bounds index");
     }
 }
