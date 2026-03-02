@@ -33,6 +33,9 @@ interface IHatsTreeSetup {
         address accountRegistry;
         string orgName;
         string deployerUsername;
+        uint256 regDeadline;
+        uint256 regNonce;
+        bytes regSignature;
         RoleConfigStructs.RoleConfig[] roles;
     }
 
@@ -72,6 +75,9 @@ contract GovernanceFactory {
         address accountRegistry; // UniversalAccountRegistry for username registration
         address participationToken; // Token for HybridVoting
         string deployerUsername; // Optional username for deployer (empty string = skip registration)
+        uint256 regDeadline; // EIP-712 signature deadline (0 = skip registration)
+        uint256 regNonce; // User's current nonce on the registry
+        bytes regSignature; // User's EIP-712 ECDSA signature for username registration
         bool autoUpgrade;
         uint8 hybridQuorumPct; // Quorum for HybridVoting
         uint8 ddQuorumPct; // Quorum for DirectDemocracyVoting
@@ -165,6 +171,9 @@ contract GovernanceFactory {
                 accountRegistry: params.accountRegistry,
                 orgName: params.orgName,
                 deployerUsername: params.deployerUsername,
+                regDeadline: params.regDeadline,
+                regNonce: params.regNonce,
+                regSignature: params.regSignature,
                 roles: params.roles
             });
 

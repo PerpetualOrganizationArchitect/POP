@@ -224,6 +224,9 @@ contract OrgDeployer is Initializable {
         address registryAddr;
         address deployerAddress; // Address to receive ADMIN hat
         string deployerUsername; // Optional username for deployer (empty string = skip registration)
+        uint256 regDeadline; // EIP-712 signature deadline (0 = skip registration)
+        uint256 regNonce; // User's current nonce on the registry
+        bytes regSignature; // User's EIP-712 ECDSA signature for username registration
         bool autoUpgrade;
         uint8 hybridQuorumPct;
         uint8 ddQuorumPct;
@@ -597,6 +600,9 @@ contract OrgDeployer is Initializable {
         govParams.accountRegistry = params.registryAddr; // UniversalAccountRegistry for username registration
         govParams.participationToken = address(0);
         govParams.deployerUsername = params.deployerUsername; // Optional username (empty = skip)
+        govParams.regDeadline = params.regDeadline;
+        govParams.regNonce = params.regNonce;
+        govParams.regSignature = params.regSignature;
         govParams.autoUpgrade = params.autoUpgrade;
         govParams.hybridQuorumPct = params.hybridQuorumPct;
         govParams.ddQuorumPct = params.ddQuorumPct;
