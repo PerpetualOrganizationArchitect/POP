@@ -224,6 +224,9 @@ contract OrgDeployer is Initializable {
         address registryAddr;
         address deployerAddress; // Address to receive ADMIN hat
         string deployerUsername; // Optional username for deployer (empty string = skip registration)
+        uint256 regDeadline; // EIP-712 signature deadline (0 = skip registration)
+        uint256 regNonce; // User's current nonce on the registry
+        bytes regSignature; // User's EIP-712 ECDSA signature for username registration
         bool autoUpgrade;
         uint8 hybridQuorumPct;
         uint8 ddQuorumPct;
@@ -336,6 +339,20 @@ contract OrgDeployer is Initializable {
 
         /* 4. Register Hats tree in OrgRegistry */
         l.orgRegistry.registerHatsTree(params.orgId, gov.topHatId, gov.roleHatIds);
+
+        /* 4b. Set deployer's role hat as metadata admin */
+        {
+            uint256 metadataAdminHat = 0;
+            for (uint256 i = 0; i < params.roles.length; i++) {
+                if (params.roles[i].canVote && params.roles[i].distribution.mintToDeployer) {
+                    metadataAdminHat = gov.roleHatIds[i];
+                    break;
+                }
+            }
+            if (metadataAdminHat != 0) {
+                l.orgRegistry.setOrgMetadataAdminHat(params.orgId, metadataAdminHat);
+            }
+        }
 
         /* 5. Register org with shared PaymasterHub */
         IPaymasterHub(l.paymasterHub).registerOrg(params.orgId, gov.topHatId, 0);
@@ -583,6 +600,9 @@ contract OrgDeployer is Initializable {
         govParams.accountRegistry = params.registryAddr; // UniversalAccountRegistry for username registration
         govParams.participationToken = address(0);
         govParams.deployerUsername = params.deployerUsername; // Optional username (empty = skip)
+        govParams.regDeadline = params.regDeadline;
+        govParams.regNonce = params.regNonce;
+        govParams.regSignature = params.regSignature;
         govParams.autoUpgrade = params.autoUpgrade;
         govParams.hybridQuorumPct = params.hybridQuorumPct;
         govParams.ddQuorumPct = params.ddQuorumPct;

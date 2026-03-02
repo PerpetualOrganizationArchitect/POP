@@ -475,6 +475,8 @@ contract DeployOrg is Script {
         params.registryAddr = globalAccountRegistry;
         params.deployerAddress = deployerAddress; // Address to receive ADMIN hat
         params.deployerUsername = vm.envOr("DEPLOYER_USERNAME", string("")); // Optional username (empty = skip)
+        // Note: regDeadline/regNonce/regSignature left as default (0/"") = skip sig-based registration
+        // The frontend should provide these when deployerUsername is non-empty
         params.autoUpgrade = config.autoUpgrade;
         params.hybridQuorumPct = config.quorum.hybrid;
         params.ddQuorumPct = config.quorum.directDemocracy;
