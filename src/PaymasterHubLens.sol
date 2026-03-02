@@ -211,22 +211,26 @@ contract PaymasterHubLens {
         pure
         returns (uint8 version, uint8 subjectType, bytes20 subjectId, uint32 ruleId, uint64 mailboxCommit8)
     {
-        if (paymasterAndData.length < 86) revert InvalidPaymasterData();
+        // ERC-4337 v0.7 packed format (must match PaymasterHub._decodePaymasterData):
+        // [paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(20) | ruleId(4) | mailboxCommit(8)]
+        // = 118 bytes total. Custom data starts at offset 52.
+        if (paymasterAndData.length < 118) revert InvalidPaymasterData();
 
         // Skip first 52 bytes (paymaster address + v0.7 gas limits) and decode the rest
+        // orgId at [53:85] is skipped (not needed by Lens)
         version = uint8(paymasterAndData[52]);
-        subjectType = uint8(paymasterAndData[53]);
+        subjectType = uint8(paymasterAndData[85]);
 
-        // Extract bytes20 subjectId from bytes 54-73
+        // Extract bytes20 subjectId from bytes 86-105
         assembly {
-            subjectId := calldataload(add(paymasterAndData.offset, 54))
+            subjectId := calldataload(add(paymasterAndData.offset, 86))
         }
 
-        // Extract ruleId from bytes 74-77
-        ruleId = uint32(bytes4(paymasterAndData[74:78]));
+        // Extract ruleId from bytes 106-109
+        ruleId = uint32(bytes4(paymasterAndData[106:110]));
 
-        // Extract mailboxCommit8 from bytes 78-85
-        mailboxCommit8 = uint64(bytes8(paymasterAndData[78:86]));
+        // Extract mailboxCommit8 from bytes 110-117
+        mailboxCommit8 = uint64(bytes8(paymasterAndData[110:118]));
     }
 
     function _extractTargetSelector(PackedUserOperation calldata userOp, uint32 ruleId)
