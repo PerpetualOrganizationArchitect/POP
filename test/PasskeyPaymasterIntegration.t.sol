@@ -197,9 +197,11 @@ contract PasskeyPaymasterIntegrationTest is Test {
         uint32 ruleId,
         uint64 mailboxCommit8
     ) internal view returns (bytes memory) {
-        // Format: paymaster(20) | version(1) | orgId(32) | subjectType(1) | subjectId(20) | ruleId(4) | mailboxCommit(8) = 86 bytes
+        // ERC-4337 v0.7 format: paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(20) | ruleId(4) | mailboxCommit(8) = 118 bytes
         return abi.encodePacked(
             address(hub), // 20 bytes
+            uint128(200_000), // paymasterVerificationGasLimit - 16 bytes
+            uint128(100_000), // paymasterPostOpGasLimit - 16 bytes
             PAYMASTER_DATA_VERSION, // 1 byte
             orgId, // 32 bytes
             subjectType, // 1 byte
@@ -666,8 +668,8 @@ contract PasskeyPaymasterIntegrationTest is Test {
         bytes memory paymasterAndData =
             _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
 
-        // Should be exactly 86 bytes
-        assertEq(paymasterAndData.length, 86, "paymasterAndData should be 86 bytes");
+        // Should be exactly 118 bytes (86 + 32 for v0.7 gas limits)
+        assertEq(paymasterAndData.length, 118, "paymasterAndData should be 118 bytes");
 
         // Verify structure using assembly to extract values from memory
         address paymaster;
@@ -677,10 +679,10 @@ contract PasskeyPaymasterIntegrationTest is Test {
         assembly {
             // Skip length prefix (32 bytes), then read 20 bytes for paymaster
             paymaster := shr(96, mload(add(paymasterAndData, 32)))
-            // Version is at offset 20
-            version := shr(248, mload(add(paymasterAndData, 52)))
-            // OrgId is at offset 21-52
-            orgId := mload(add(paymasterAndData, 53))
+            // Version is at offset 52 (after paymaster + v0.7 gas limits)
+            version := shr(248, mload(add(paymasterAndData, 84)))
+            // OrgId is at offset 53-84
+            orgId := mload(add(paymasterAndData, 85))
         }
 
         assertEq(paymaster, address(hub), "Paymaster address mismatch");

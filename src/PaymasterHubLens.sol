@@ -211,22 +211,22 @@ contract PaymasterHubLens {
         pure
         returns (uint8 version, uint8 subjectType, bytes20 subjectId, uint32 ruleId, uint64 mailboxCommit8)
     {
-        if (paymasterAndData.length < 54) revert InvalidPaymasterData();
+        if (paymasterAndData.length < 86) revert InvalidPaymasterData();
 
-        // Skip first 20 bytes (paymaster address) and decode the rest
-        version = uint8(paymasterAndData[20]);
-        subjectType = uint8(paymasterAndData[21]);
+        // Skip first 52 bytes (paymaster address + v0.7 gas limits) and decode the rest
+        version = uint8(paymasterAndData[52]);
+        subjectType = uint8(paymasterAndData[53]);
 
-        // Extract bytes20 subjectId from bytes 22-41
+        // Extract bytes20 subjectId from bytes 54-73
         assembly {
-            subjectId := calldataload(add(paymasterAndData.offset, 22))
+            subjectId := calldataload(add(paymasterAndData.offset, 54))
         }
 
-        // Extract ruleId from bytes 42-45
-        ruleId = uint32(bytes4(paymasterAndData[42:46]));
+        // Extract ruleId from bytes 74-77
+        ruleId = uint32(bytes4(paymasterAndData[74:78]));
 
-        // Extract mailboxCommit8 from bytes 46-53
-        mailboxCommit8 = uint64(bytes8(paymasterAndData[46:54]));
+        // Extract mailboxCommit8 from bytes 78-85
+        mailboxCommit8 = uint64(bytes8(paymasterAndData[78:86]));
     }
 
     function _extractTargetSelector(PackedUserOperation calldata userOp, uint32 ruleId)
