@@ -879,8 +879,7 @@ contract RunOrgActions is Script {
         params.metadataHash = bytes32(0); // No metadata hash for demo
         params.registryAddr = globalAccountRegistry;
         params.deployerAddress = deployerAddress; // Address to receive ADMIN hat
-        params.deployerUsername = "admin"; // Deployer gets "admin" username for demo
-        // Note: regDeadline/regNonce/regSignature left as default (0/"") = skip sig-based registration
+        params.deployerUsername = ""; // Registration requires EIP-712 signature (regSignature) from frontend
         params.autoUpgrade = config.autoUpgrade;
         params.hybridQuorumPct = config.quorum.hybrid;
         params.ddQuorumPct = config.quorum.directDemocracy;

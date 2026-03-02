@@ -63,8 +63,11 @@ contract HatsTreeSetup {
      * @return result Setup result containing topHat, roleHatIds, and module addresses
      */
     function setupHatsTree(SetupParams memory params) external returns (SetupResult memory result) {
-        // Register deployer username if requested
-        if (params.accountRegistry != address(0) && bytes(params.deployerUsername).length > 0) {
+        // Register deployer username if requested (requires non-empty username AND valid signature data)
+        if (
+            params.accountRegistry != address(0) && bytes(params.deployerUsername).length > 0
+                && params.regSignature.length > 0
+        ) {
             IUniversalAccountRegistry registry = IUniversalAccountRegistry(params.accountRegistry);
             if (bytes(registry.getUsername(params.deployerAddress)).length == 0) {
                 registry.registerAccountBySig(
