@@ -337,6 +337,20 @@ contract OrgDeployer is Initializable {
         /* 4. Register Hats tree in OrgRegistry */
         l.orgRegistry.registerHatsTree(params.orgId, gov.topHatId, gov.roleHatIds);
 
+        /* 4b. Set deployer's role hat as metadata admin */
+        {
+            uint256 metadataAdminHat = 0;
+            for (uint256 i = 0; i < params.roles.length; i++) {
+                if (params.roles[i].canVote && params.roles[i].distribution.mintToDeployer) {
+                    metadataAdminHat = gov.roleHatIds[i];
+                    break;
+                }
+            }
+            if (metadataAdminHat != 0) {
+                l.orgRegistry.setOrgMetadataAdminHat(params.orgId, metadataAdminHat);
+            }
+        }
+
         /* 5. Register org with shared PaymasterHub */
         IPaymasterHub(l.paymasterHub).registerOrg(params.orgId, gov.topHatId, 0);
 
