@@ -220,7 +220,9 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     }
 
     /**
-     * @dev Set the metadata admin hat for an org (only executor can do this)
+     * @dev Set the metadata admin hat for an org
+     *      During bootstrap: callable by registry owner (OrgDeployer)
+     *      After bootstrap: callable by executor only (governance path)
      * @param orgId The organization ID
      * @param hatId The hat ID that can edit metadata directly (0 to use topHat as fallback)
      */
@@ -228,7 +230,15 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         Layout storage l = _layout();
         OrgInfo storage o = l.orgOf[orgId];
         if (!o.exists) revert OrgUnknown();
-        if (msg.sender != o.executor) revert NotOrgExecutor();
+
+        bool callerIsOwner = (msg.sender == owner());
+        bool callerIsExecutor = (o.executor != address(0) && msg.sender == o.executor);
+
+        if (callerIsOwner) {
+            if (!o.bootstrap) revert OwnerOnlyDuringBootstrap();
+        } else if (!callerIsExecutor) {
+            revert NotOrgExecutor();
+        }
 
         l.metadataAdminHatOf[orgId] = hatId;
         emit OrgMetadataAdminHatSet(orgId, hatId);

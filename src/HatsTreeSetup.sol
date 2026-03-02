@@ -7,6 +7,17 @@ import {IEligibilityModule, IToggleModule} from "./interfaces/IHatsModules.sol";
 import {OrgRegistry} from "./OrgRegistry.sol";
 import {RoleConfigStructs} from "./libs/RoleConfigStructs.sol";
 
+interface IUniversalAccountRegistry {
+    function getUsername(address account) external view returns (string memory);
+    function registerAccountBySig(
+        address user,
+        string calldata username,
+        uint256 deadline,
+        uint256 nonce,
+        bytes calldata signature
+    ) external;
+}
+
 /**
  * @title HatsTreeSetup
  * @notice Temporary contract for setting up Hats Protocol trees
@@ -38,6 +49,9 @@ contract HatsTreeSetup {
         address accountRegistry; // UniversalAccountRegistry for username registration
         string orgName;
         string deployerUsername; // Optional username for deployer (empty string = skip registration)
+        uint256 regDeadline; // EIP-712 signature deadline (0 = skip registration)
+        uint256 regNonce; // User's current nonce on the registry
+        bytes regSignature; // User's EIP-712 ECDSA signature for username registration
         RoleConfigStructs.RoleConfig[] roles; // Complete role configuration
     }
 
@@ -49,6 +63,23 @@ contract HatsTreeSetup {
      * @return result Setup result containing topHat, roleHatIds, and module addresses
      */
     function setupHatsTree(SetupParams memory params) external returns (SetupResult memory result) {
+        // Register deployer username if requested (requires non-empty username AND valid signature data)
+        if (
+            params.accountRegistry != address(0) && bytes(params.deployerUsername).length > 0
+                && params.regSignature.length > 0
+        ) {
+            IUniversalAccountRegistry registry = IUniversalAccountRegistry(params.accountRegistry);
+            if (bytes(registry.getUsername(params.deployerAddress)).length == 0) {
+                registry.registerAccountBySig(
+                    params.deployerAddress,
+                    params.deployerUsername,
+                    params.regDeadline,
+                    params.regNonce,
+                    params.regSignature
+                );
+            }
+        }
+
         result.eligibilityModule = params.eligibilityModule;
         result.toggleModule = params.toggleModule;
 
