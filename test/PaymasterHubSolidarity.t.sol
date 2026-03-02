@@ -1327,7 +1327,15 @@ contract PaymasterHubSolidarityTest is Test {
     ) internal view returns (bytes memory) {
         // ERC-4337 v0.7 format: paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(20) | ruleId(4) | mailboxCommit(8) = 118 bytes
         return abi.encodePacked(
-            address(hub), uint128(200_000), uint128(100_000), PAYMASTER_DATA_VERSION, orgId, subjectType, subjectId, ruleId, mailboxCommit8
+            address(hub),
+            uint128(200_000),
+            uint128(100_000),
+            PAYMASTER_DATA_VERSION,
+            orgId,
+            subjectType,
+            subjectId,
+            ruleId,
+            mailboxCommit8
         );
     }
 
