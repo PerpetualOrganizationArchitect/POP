@@ -997,6 +997,7 @@ contract RunOrgActionsAdvanced is Script {
         params.registryAddr = globalAccountRegistry;
         params.deployerAddress = deployerAddress; // Address to receive ADMIN hat
         params.deployerUsername = "admin"; // Deployer gets "admin" username for demo
+        // Note: regDeadline/regNonce/regSignature left as default (0/"") = skip sig-based registration
         params.autoUpgrade = config.autoUpgrade;
         params.hybridQuorumPct = config.quorum.hybrid;
         params.ddQuorumPct = config.quorum.directDemocracy;

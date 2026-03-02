@@ -286,6 +286,7 @@ contract DeployHomeChain is DeployHelper {
         params.registryAddr = infra.globalAccountRegistry;
         params.deployerAddress = deployer;
         params.deployerUsername = "";
+        // regDeadline/regNonce/regSignature left as default (0/"") = skip registration
         params.autoUpgrade = true;
         params.hybridQuorumPct = 50;
         params.ddQuorumPct = 50;

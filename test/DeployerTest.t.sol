@@ -164,6 +164,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -401,6 +404,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -457,6 +463,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -790,6 +799,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -918,6 +930,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1000,6 +1015,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1039,6 +1057,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1121,6 +1142,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1390,6 +1414,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1603,6 +1630,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1764,6 +1794,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -1899,6 +1932,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -2173,6 +2209,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -2277,6 +2316,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -2442,6 +2484,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -3424,6 +3469,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -3523,6 +3571,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: address(this),
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -3583,6 +3634,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: address(this),
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -3645,6 +3699,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             registryAddr: accountRegProxy,
             deployerAddress: address(this),
             deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
@@ -4016,5 +4073,185 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         _assertVouchStatus(
             setup.eligibilityModule, candidate, setup.defaultRoleHat, 1, false, "After cross-day revocation"
         );
+    }
+
+    /*════════════════════════════════════════════════════════════════════
+     *  DEPLOYER USERNAME REGISTRATION TESTS
+     *════════════════════════════════════════════════════════════════════*/
+
+    // EIP-712 constants matching UniversalAccountRegistry
+    bytes32 private constant _REG_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant _REG_NAME_HASH = keccak256("UniversalAccountRegistry");
+    bytes32 private constant _REG_VERSION_HASH = keccak256("1");
+    bytes32 private constant _REG_REGISTER_TYPEHASH =
+        keccak256("RegisterAccount(address user,string username,uint256 nonce,uint256 deadline)");
+
+    uint256 private constant DEPLOYER_PK = 0xA11CE;
+
+    function _signRegistration(
+        uint256 privateKey,
+        address account,
+        string memory username,
+        uint256 nonce,
+        uint256 deadline
+    ) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(
+            abi.encode(_REG_REGISTER_TYPEHASH, account, keccak256(bytes(username)), nonce, deadline)
+        );
+        bytes32 domainSep = keccak256(
+            abi.encode(_REG_DOMAIN_TYPEHASH, _REG_NAME_HASH, _REG_VERSION_HASH, block.chainid, accountRegProxy)
+        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSep, structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function testDeployerUsernameRegistration() public {
+        address deployerSigner = vm.addr(DEPLOYER_PK);
+        bytes32 orgId = keccak256("USERNAME-REG-ORG");
+        string memory username = "deployer-user";
+        uint256 deadline = block.timestamp + 1 hours;
+        uint256 nonce = 0;
+
+        bytes memory sig = _signRegistration(DEPLOYER_PK, deployerSigner, username, nonce, deadline);
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory canVote = new bool[](2);
+        canVote[0] = true;
+        canVote[1] = true;
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "Username Test DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: deployerSigner,
+            deployerUsername: username,
+            regDeadline: deadline,
+            regNonce: nonce,
+            regSignature: sig,
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: _buildLegacyClasses(50, 50, false, 4 ether),
+            ddInitialTargets: new address[](0),
+            roles: _buildSimpleRoleConfigs(names, images, canVote),
+            roleAssignments: _buildDefaultRoleAssignments(),
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
+        });
+
+        vm.prank(deployerSigner);
+        deployer.deployFullOrg(params);
+
+        // Verify the deployer's username was registered
+        string memory registered = UniversalAccountRegistry(accountRegProxy).getUsername(deployerSigner);
+        assertEq(registered, username, "Deployer username should be registered during org deploy");
+    }
+
+    function testDeployerUsernameSkippedWhenEmpty() public {
+        // This verifies the common case: empty username + zero sig fields = no revert
+        bytes32 orgId = keccak256("EMPTY-USERNAME-ORG");
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory canVote = new bool[](2);
+        canVote[0] = true;
+        canVote[1] = true;
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "No Username DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: _buildLegacyClasses(50, 50, false, 4 ether),
+            ddInitialTargets: new address[](0),
+            roles: _buildSimpleRoleConfigs(names, images, canVote),
+            roleAssignments: _buildDefaultRoleAssignments(),
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
+        });
+
+        vm.prank(orgOwner);
+        deployer.deployFullOrg(params); // Should not revert
+
+        // No username should be registered
+        string memory registered = UniversalAccountRegistry(accountRegProxy).getUsername(orgOwner);
+        assertEq(bytes(registered).length, 0, "No username should be registered when deployerUsername is empty");
+    }
+
+    function testDeployerUsernameSkippedWhenAlreadyRegistered() public {
+        address deployerSigner = vm.addr(DEPLOYER_PK);
+        string memory username = "already-registered";
+
+        // Pre-register the deployer directly
+        vm.prank(deployerSigner);
+        UniversalAccountRegistry(accountRegProxy).registerAccount(username);
+
+        // Now deploy org with a different username — should skip registration (not revert)
+        bytes32 orgId = keccak256("ALREADY-REG-ORG");
+        string memory newUsername = "new-name";
+        uint256 deadline = block.timestamp + 1 hours;
+        uint256 nonce = 0;
+        bytes memory sig = _signRegistration(DEPLOYER_PK, deployerSigner, newUsername, nonce, deadline);
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default-role-image";
+        images[1] = "ipfs://executive-role-image";
+        bool[] memory canVote = new bool[](2);
+        canVote[0] = true;
+        canVote[1] = true;
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "Already Registered DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: deployerSigner,
+            deployerUsername: newUsername,
+            regDeadline: deadline,
+            regNonce: nonce,
+            regSignature: sig,
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: _buildLegacyClasses(50, 50, false, 4 ether),
+            ddInitialTargets: new address[](0),
+            roles: _buildSimpleRoleConfigs(names, images, canVote),
+            roleAssignments: _buildDefaultRoleAssignments(),
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap()
+        });
+
+        vm.prank(deployerSigner);
+        deployer.deployFullOrg(params); // Should not revert
+
+        // Original username should be preserved, not overwritten
+        string memory registered = UniversalAccountRegistry(accountRegProxy).getUsername(deployerSigner);
+        assertEq(registered, username, "Original username should be preserved when deployer is already registered");
     }
 }
