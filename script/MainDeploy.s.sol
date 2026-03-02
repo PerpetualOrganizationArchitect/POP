@@ -252,14 +252,13 @@ contract DeployHomeChain is DeployHelper {
         console.log("UniversalPasskeyFactory:", infra.universalPasskeyFactory);
 
         // Register infrastructure for subgraph indexing
-        address passkeyFactoryBeacon = pm.getBeaconById(keccak256("PasskeyAccountFactory"));
         pm.registerInfrastructure(
             infra.orgDeployer,
             infra.orgRegistry,
             infra.implRegistry,
             infra.paymasterHub,
             infra.globalAccountRegistry,
-            passkeyFactoryBeacon
+            infra.universalPasskeyFactory
         );
 
         console.log("--- Infrastructure Complete ---");
