@@ -236,9 +236,8 @@ contract DeployInfrastructure is Script {
         console.log("UniversalPasskeyFactory set on OrgDeployer");
 
         // Emit InfrastructureDeployed event for subgraph dynamic discovery
-        address passkeyFactoryBeacon = pm.getBeaconById(keccak256("PasskeyAccountFactory"));
         pm.registerInfrastructure(
-            orgDeployer, orgRegistry, implRegistry, paymasterHub, globalAccountRegistry, passkeyFactoryBeacon
+            orgDeployer, orgRegistry, implRegistry, paymasterHub, globalAccountRegistry, universalPasskeyFactory
         );
         console.log("\n--- Infrastructure Registered (for subgraph indexing) ---");
     }
