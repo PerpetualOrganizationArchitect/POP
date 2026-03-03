@@ -177,7 +177,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -256,6 +257,20 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
     }
 
     /// @dev Helper to build empty bootstrap config
+    function _defaultPaymasterConfig() internal pure returns (OrgDeployer.PaymasterConfig memory) {
+        return OrgDeployer.PaymasterConfig({
+            operatorRoleIndex: type(uint256).max,
+            autoWhitelistContracts: false,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            defaultBudgetCapPerEpoch: 0,
+            defaultBudgetEpochLen: 0
+        });
+    }
+
     function _emptyBootstrap() internal pure returns (OrgDeployer.BootstrapConfig memory) {
         ITaskManagerBootstrap.BootstrapProjectConfig[] memory projects =
             new ITaskManagerBootstrap.BootstrapProjectConfig[](0);
@@ -418,7 +433,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -478,7 +494,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -815,7 +832,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -947,7 +965,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _buildBootstrapWithTasks()
+            bootstrap: _buildBootstrapWithTasks(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1033,7 +1052,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         deployer.deployFullOrg(params);
@@ -1076,7 +1096,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1162,7 +1183,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1435,7 +1457,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1652,7 +1675,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1817,7 +1841,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1956,7 +1981,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         vm.expectRevert(OrgDeployer.InvalidRoleConfiguration.selector);
@@ -2234,7 +2260,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2342,7 +2369,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2511,7 +2539,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -3497,7 +3526,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         // Record logs to verify HatCreatedWithEligibility events were emitted
@@ -3600,7 +3630,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -3664,7 +3695,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -3730,7 +3762,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -4165,7 +4198,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         vm.prank(deployerSigner);
@@ -4210,7 +4244,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         vm.prank(orgOwner);
@@ -4266,7 +4301,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max,
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         vm.prank(deployerSigner);
@@ -4318,7 +4354,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: 0, // Explicitly set role 0
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         deployer.deployFullOrg(params);
@@ -4368,7 +4405,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: 1, // Explicitly set role 1
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         deployer.deployFullOrg(params);
@@ -4422,7 +4460,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: type(uint256).max, // Skip
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         deployer.deployFullOrg(params);
@@ -4470,7 +4509,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataAdminRoleIndex: 999, // Out of bounds but not max
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
-            bootstrap: _emptyBootstrap()
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
         });
 
         deployer.deployFullOrg(params); // Should NOT revert
@@ -4479,5 +4519,1078 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Same behavior as skip — no metadata admin hat set
         uint256 metaAdminHat = orgRegistry.getOrgMetadataAdminHat(orgId);
         assertEq(metaAdminHat, 0, "Metadata admin hat should be zero for out-of-bounds index");
+    }
+
+    /*════════════════  PAYMASTER FUNDING & CONFIG TESTS  ════════════════*/
+
+    function testDeployFullOrgWithPaymasterFunding() public {
+        bytes32 orgId = keccak256("PAYMASTER-FUNDED-ORG");
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "";
+        images[1] = "";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "Funded DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
+        });
+
+        vm.deal(orgOwner, 1 ether);
+        vm.prank(orgOwner);
+        deployer.deployFullOrg{value: 0.1 ether}(params);
+
+        // Verify org was registered with PaymasterHub
+        PaymasterHub.OrgConfig memory orgConfig = paymasterHub.getOrgConfig(orgId);
+        assertTrue(orgConfig.adminHatId != 0, "Org should be registered with PaymasterHub");
+
+        // Verify deposit was credited
+        PaymasterHub.OrgFinancials memory financials = paymasterHub.getOrgFinancials(orgId);
+        assertEq(financials.deposited, 0.1 ether, "Org should have 0.1 ETH deposited");
+        assertEq(financials.totalDeposited, 0.1 ether, "Total deposited should be 0.1 ETH");
+    }
+
+    function testDeployFullOrgWithPaymasterAutoWhitelist() public {
+        bytes32 orgId = keccak256("WHITELIST-ORG");
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "";
+        images[1] = "";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.PaymasterConfig memory pmConfig = OrgDeployer.PaymasterConfig({
+            operatorRoleIndex: 1, // EXECUTIVE role
+            autoWhitelistContracts: true,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            defaultBudgetCapPerEpoch: 0,
+            defaultBudgetEpochLen: 0
+        });
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "Whitelist DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: pmConfig
+        });
+
+        vm.deal(orgOwner, 1 ether);
+        vm.prank(orgOwner);
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg{value: 0.05 ether}(params);
+
+        // Verify operator hat was set (role 1 = EXECUTIVE)
+        PaymasterHub.OrgConfig memory orgConfig = paymasterHub.getOrgConfig(orgId);
+        assertTrue(orgConfig.operatorHatId != 0, "Operator hat should be set");
+
+        // Verify auto-whitelisted rules exist for deployed contracts
+        PaymasterHub.Rule memory rule;
+
+        // Check QuickJoin quickJoinNoUser() is whitelisted
+        rule = paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinNoUser()")));
+        assertTrue(rule.allowed, "QuickJoin quickJoinNoUser should be whitelisted");
+
+        // Check TaskManager claimTask(uint256) is whitelisted
+        rule = paymasterHub.getRule(orgId, result.taskManager, bytes4(keccak256("claimTask(uint256)")));
+        assertTrue(rule.allowed, "TaskManager claimTask should be whitelisted");
+
+        // Check HybridVoting vote is whitelisted
+        bytes4 voteSel = bytes4(keccak256("vote(uint256,uint8[],uint8[])"));
+        rule = paymasterHub.getRule(orgId, result.hybridVoting, voteSel);
+        assertTrue(rule.allowed, "HybridVoting vote should be whitelisted");
+
+        // Check DDVoting vote is whitelisted
+        rule = paymasterHub.getRule(orgId, result.directDemocracyVoting, voteSel);
+        assertTrue(rule.allowed, "DDVoting vote should be whitelisted");
+
+        // Check PaymentManager optOut is whitelisted
+        rule = paymasterHub.getRule(orgId, result.paymentManager, bytes4(keccak256("optOut(bool)")));
+        assertTrue(rule.allowed, "PaymentManager optOut should be whitelisted");
+
+        // Check EducationHub completeModule is whitelisted
+        rule = paymasterHub.getRule(orgId, result.educationHub, bytes4(keccak256("completeModule(uint256,uint8)")));
+        assertTrue(rule.allowed, "EducationHub completeModule should be whitelisted");
+
+        // Verify deposit was also credited
+        PaymasterHub.OrgFinancials memory financials = paymasterHub.getOrgFinancials(orgId);
+        assertEq(financials.deposited, 0.05 ether, "Org should have 0.05 ETH deposited");
+    }
+
+    function testDeployFullOrgWithPaymasterFeeCaps() public {
+        bytes32 orgId = keccak256("FEECAPS-ORG");
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "";
+        images[1] = "";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.PaymasterConfig memory pmConfig = OrgDeployer.PaymasterConfig({
+            operatorRoleIndex: type(uint256).max, // skip, topHat only
+            autoWhitelistContracts: false,
+            maxFeePerGas: 100 gwei,
+            maxPriorityFeePerGas: 2 gwei,
+            maxCallGas: 500_000,
+            maxVerificationGas: 200_000,
+            maxPreVerificationGas: 100_000,
+            defaultBudgetCapPerEpoch: 0,
+            defaultBudgetEpochLen: 0
+        });
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "FeeCaps DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: pmConfig
+        });
+
+        vm.prank(orgOwner);
+        deployer.deployFullOrg(params);
+
+        // Verify fee caps were set
+        PaymasterHub.FeeCaps memory feeCaps = paymasterHub.getFeeCaps(orgId);
+        assertEq(feeCaps.maxFeePerGas, 100 gwei, "maxFeePerGas should be 100 gwei");
+        assertEq(feeCaps.maxPriorityFeePerGas, 2 gwei, "maxPriorityFeePerGas should be 2 gwei");
+        assertEq(feeCaps.maxCallGas, 500_000, "maxCallGas should be 500k");
+        assertEq(feeCaps.maxVerificationGas, 200_000, "maxVerificationGas should be 200k");
+        assertEq(feeCaps.maxPreVerificationGas, 100_000, "maxPreVerificationGas should be 100k");
+    }
+
+    function testDeployFullOrgPaymasterBackwardsCompat() public {
+        // Default config (all zeros) with no msg.value should work identically to before
+        bytes32 orgId = keccak256("COMPAT-ORG");
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "";
+        images[1] = "";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "Compat DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
+        });
+
+        vm.prank(orgOwner);
+        deployer.deployFullOrg(params); // No msg.value, should use simple registerOrg path
+
+        // Verify org is registered
+        PaymasterHub.OrgConfig memory orgConfig = paymasterHub.getOrgConfig(orgId);
+        assertTrue(orgConfig.adminHatId != 0, "Org should be registered with PaymasterHub");
+
+        // Verify no deposits
+        PaymasterHub.OrgFinancials memory financials = paymasterHub.getOrgFinancials(orgId);
+        assertEq(financials.deposited, 0, "No deposit should be recorded");
+
+        // Verify operator hat is 0 (skipped)
+        assertEq(orgConfig.operatorHatId, 0, "Operator hat should be 0 when skipped");
+    }
+
+    function testDeployFullOrgPaymasterOperatorOnly() public {
+        // Setting operator role without other config should use simple registerOrg path
+        bytes32 orgId = keccak256("OPERATOR-ONLY-ORG");
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "";
+        images[1] = "";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        // Only set operator role, nothing else
+        OrgDeployer.PaymasterConfig memory pmConfig = OrgDeployer.PaymasterConfig({
+            operatorRoleIndex: 1, // EXECUTIVE
+            autoWhitelistContracts: false,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            defaultBudgetCapPerEpoch: 0,
+            defaultBudgetEpochLen: 0
+        });
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "Operator Only DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: pmConfig
+        });
+
+        vm.prank(orgOwner);
+        deployer.deployFullOrg(params); // No ETH, no fee caps, no whitelist → registerOrg path
+
+        // Verify operator hat is set via the simple registerOrg path
+        PaymasterHub.OrgConfig memory orgConfig = paymasterHub.getOrgConfig(orgId);
+        assertTrue(orgConfig.adminHatId != 0, "Org should be registered");
+        assertTrue(orgConfig.operatorHatId != 0, "Operator hat should be set even via registerOrg path");
+
+        // Verify no fee caps (should be default zeros)
+        PaymasterHub.FeeCaps memory feeCaps = paymasterHub.getFeeCaps(orgId);
+        assertEq(feeCaps.maxFeePerGas, 0, "No fee caps should be set");
+    }
+
+    function testDeployFullOrgAutoWhitelistNoEducation() public {
+        // Auto-whitelist with education disabled should produce 23 rules (not 24)
+        bytes32 orgId = keccak256("NO-EDU-WHITELIST-ORG");
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "";
+        images[1] = "";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.PaymasterConfig memory pmConfig = OrgDeployer.PaymasterConfig({
+            operatorRoleIndex: type(uint256).max,
+            autoWhitelistContracts: true,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            defaultBudgetCapPerEpoch: 0,
+            defaultBudgetEpochLen: 0
+        });
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "No Edu Whitelist DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: pmConfig
+        });
+
+        vm.prank(orgOwner);
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
+
+        // Core contract rules should still be set
+        PaymasterHub.Rule memory rule;
+
+        rule = paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinNoUser()")));
+        assertTrue(rule.allowed, "QuickJoin should be whitelisted");
+
+        rule = paymasterHub.getRule(orgId, result.taskManager, bytes4(keccak256("claimTask(uint256)")));
+        assertTrue(rule.allowed, "TaskManager should be whitelisted");
+
+        rule = paymasterHub.getRule(orgId, result.hybridVoting, bytes4(keccak256("vote(uint256,uint8[],uint8[])")));
+        assertTrue(rule.allowed, "HybridVoting should be whitelisted");
+
+        // EducationHub should NOT be whitelisted (disabled)
+        // educationHub address is zero when disabled, so checking rule on address(0) is meaningless
+        // Instead, verify the org was registered successfully
+        PaymasterHub.OrgConfig memory orgConfig = paymasterHub.getOrgConfig(orgId);
+        assertTrue(orgConfig.adminHatId != 0, "Org should be registered");
+    }
+
+    function testDeployFullOrgPaymasterFullConfig() public {
+        // All paymaster options together: funding + fee caps + auto-whitelist + operator hat
+        bytes32 orgId = keccak256("FULL-CONFIG-ORG");
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "";
+        images[1] = "";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.PaymasterConfig memory pmConfig = OrgDeployer.PaymasterConfig({
+            operatorRoleIndex: 1, // EXECUTIVE
+            autoWhitelistContracts: true,
+            maxFeePerGas: 50 gwei,
+            maxPriorityFeePerGas: 1 gwei,
+            maxCallGas: 300_000,
+            maxVerificationGas: 150_000,
+            maxPreVerificationGas: 50_000,
+            defaultBudgetCapPerEpoch: 0,
+            defaultBudgetEpochLen: 0
+        });
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "Full Config DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: pmConfig
+        });
+
+        vm.deal(orgOwner, 1 ether);
+        vm.prank(orgOwner);
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg{value: 0.2 ether}(params);
+
+        // 1. Verify operator hat
+        PaymasterHub.OrgConfig memory orgConfig = paymasterHub.getOrgConfig(orgId);
+        assertTrue(orgConfig.operatorHatId != 0, "Operator hat should be set");
+
+        // 2. Verify fee caps
+        PaymasterHub.FeeCaps memory feeCaps = paymasterHub.getFeeCaps(orgId);
+        assertEq(feeCaps.maxFeePerGas, 50 gwei);
+        assertEq(feeCaps.maxPriorityFeePerGas, 1 gwei);
+        assertEq(feeCaps.maxCallGas, 300_000);
+
+        // 3. Verify auto-whitelist (spot check)
+        PaymasterHub.Rule memory rule =
+            paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinNoUser()")));
+        assertTrue(rule.allowed, "QuickJoin should be whitelisted");
+
+        rule = paymasterHub.getRule(orgId, result.taskManager, bytes4(keccak256("submitTask(uint256,bytes32)")));
+        assertTrue(rule.allowed, "TaskManager submitTask should be whitelisted");
+
+        // 4. Verify deposit
+        PaymasterHub.OrgFinancials memory financials = paymasterHub.getOrgFinancials(orgId);
+        assertEq(financials.deposited, 0.2 ether, "Deposit should be 0.2 ETH");
+    }
+
+    function testPaymasterSelectorAccuracy() public {
+        // Verify ALL computed selectors match actual contract function selectors
+        // This catches selector string typos in _buildDefaultPaymasterRules
+
+        // ── QuickJoin (5) ──
+        assertEq(
+            bytes4(keccak256("quickJoinNoUser()")),
+            QuickJoin.quickJoinNoUser.selector,
+            "quickJoinNoUser selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("quickJoinWithUser()")),
+            QuickJoin.quickJoinWithUser.selector,
+            "quickJoinWithUser selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("quickJoinWithPasskey((bytes32,bytes32,bytes32,uint256))")),
+            QuickJoin.quickJoinWithPasskey.selector,
+            "quickJoinWithPasskey selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("registerAndQuickJoin(address,string,uint256,uint256,bytes)")),
+            QuickJoin.registerAndQuickJoin.selector,
+            "registerAndQuickJoin selector mismatch"
+        );
+        assertEq(
+            bytes4(
+                keccak256(
+                    "registerAndQuickJoinWithPasskey((bytes32,bytes32,bytes32,uint256),string,uint256,uint256,(bytes,bytes,uint256,uint256,bytes32,bytes32))"
+                )
+            ),
+            QuickJoin.registerAndQuickJoinWithPasskey.selector,
+            "registerAndQuickJoinWithPasskey selector mismatch"
+        );
+
+        // ── TaskManager (9) ──
+        assertEq(
+            bytes4(keccak256("createTask(uint256,bytes,bytes32,bytes32,address,uint256,bool)")),
+            TaskManager.createTask.selector,
+            "createTask selector mismatch"
+        );
+        assertEq(bytes4(keccak256("claimTask(uint256)")), TaskManager.claimTask.selector, "claimTask selector mismatch");
+        assertEq(
+            bytes4(keccak256("submitTask(uint256,bytes32)")),
+            TaskManager.submitTask.selector,
+            "submitTask selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("completeTask(uint256)")),
+            TaskManager.completeTask.selector,
+            "completeTask selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("applyForTask(uint256,bytes32)")),
+            TaskManager.applyForTask.selector,
+            "applyForTask selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("approveApplication(uint256,address)")),
+            TaskManager.approveApplication.selector,
+            "approveApplication selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("assignTask(uint256,address)")),
+            TaskManager.assignTask.selector,
+            "assignTask selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("rejectTask(uint256,bytes32)")),
+            TaskManager.rejectTask.selector,
+            "rejectTask selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("cancelTask(uint256)")), TaskManager.cancelTask.selector, "cancelTask selector mismatch"
+        );
+
+        // ── HybridVoting (3) ──
+        assertEq(
+            bytes4(keccak256("vote(uint256,uint8[],uint8[])")),
+            HybridVoting.vote.selector,
+            "HybridVoting vote selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("announceWinner(uint256)")),
+            HybridVoting.announceWinner.selector,
+            "HybridVoting announceWinner selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("createProposal(bytes,bytes32,uint32,uint8,(address,uint256,bytes)[][],uint256[])")),
+            HybridVoting.createProposal.selector,
+            "HybridVoting createProposal selector mismatch"
+        );
+
+        // ── DirectDemocracyVoting (3) ──
+        assertEq(
+            bytes4(keccak256("vote(uint256,uint8[],uint8[])")),
+            DirectDemocracyVoting.vote.selector,
+            "DDVoting vote selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("announceWinner(uint256)")),
+            DirectDemocracyVoting.announceWinner.selector,
+            "DDVoting announceWinner selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("createProposal(bytes,bytes32,uint32,uint8,(address,uint256,bytes)[][],uint256[])")),
+            DirectDemocracyVoting.createProposal.selector,
+            "DDVoting createProposal selector mismatch"
+        );
+
+        // ── PaymentManager (3) ──
+        assertEq(
+            bytes4(keccak256("claimDistribution(uint256,uint256,bytes32[])")),
+            PaymentManager.claimDistribution.selector,
+            "claimDistribution selector mismatch"
+        );
+        assertEq(
+            bytes4(keccak256("claimMultiple(uint256[],uint256[],bytes32[][])")),
+            PaymentManager.claimMultiple.selector,
+            "claimMultiple selector mismatch"
+        );
+        assertEq(bytes4(keccak256("optOut(bool)")), PaymentManager.optOut.selector, "optOut selector mismatch");
+
+        // ── EducationHub (1) ──
+        assertEq(
+            bytes4(keccak256("completeModule(uint256,uint8)")),
+            EducationHub.completeModule.selector,
+            "completeModule selector mismatch"
+        );
+    }
+
+    function testDeployFullOrgWithBudgets() public {
+        bytes32 orgId = keccak256("BUDGET-ORG");
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "";
+        images[1] = "";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.PaymasterConfig memory pmConfig = OrgDeployer.PaymasterConfig({
+            operatorRoleIndex: 1,
+            autoWhitelistContracts: false,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            defaultBudgetCapPerEpoch: 0.1 ether,
+            defaultBudgetEpochLen: 1 days
+        });
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "Budget DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: pmConfig
+        });
+
+        vm.deal(orgOwner, 1 ether);
+        vm.prank(orgOwner);
+        deployer.deployFullOrg{value: 0.05 ether}(params);
+
+        // Verify budget set for each role hat (2 roles)
+        for (uint256 i = 0; i < 2; i++) {
+            uint256 hatId = orgRegistry.getRoleHat(orgId, i);
+            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(hatId))));
+            PaymasterHub.Budget memory budget = paymasterHub.getBudget(orgId, subjectKey);
+            assertEq(budget.capPerEpoch, 0.1 ether, "Budget cap should match");
+            assertEq(budget.epochLen, 1 days, "Epoch length should match");
+            assertTrue(budget.epochStart > 0, "Epoch start should be initialized");
+        }
+
+        // Verify deposit was also credited
+        PaymasterHub.OrgFinancials memory financials = paymasterHub.getOrgFinancials(orgId);
+        assertEq(financials.deposited, 0.05 ether, "Org should have 0.05 ETH deposited");
+    }
+
+    function testDeployFullOrgBudgetsWithFullConfig() public {
+        bytes32 orgId = keccak256("BUDGET-FULL-ORG");
+
+        string[] memory names = new string[](3);
+        names[0] = "MEMBER";
+        names[1] = "MODERATOR";
+        names[2] = "ADMIN";
+        string[] memory images = new string[](3);
+        images[0] = "";
+        images[1] = "";
+        images[2] = "";
+        bool[] memory voting = new bool[](3);
+        voting[0] = true;
+        voting[1] = true;
+        voting[2] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.PaymasterConfig memory pmConfig = OrgDeployer.PaymasterConfig({
+            operatorRoleIndex: 2, // ADMIN role
+            autoWhitelistContracts: true,
+            maxFeePerGas: 100 gwei,
+            maxPriorityFeePerGas: 2 gwei,
+            maxCallGas: 500_000,
+            maxVerificationGas: 200_000,
+            maxPreVerificationGas: 100_000,
+            defaultBudgetCapPerEpoch: 0.5 ether,
+            defaultBudgetEpochLen: 7 days
+        });
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "Budget Full DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: pmConfig
+        });
+
+        vm.deal(orgOwner, 1 ether);
+        vm.prank(orgOwner);
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg{value: 0.1 ether}(params);
+
+        // Verify budgets for all 3 role hats
+        for (uint256 i = 0; i < 3; i++) {
+            uint256 hatId = orgRegistry.getRoleHat(orgId, i);
+            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(hatId))));
+            PaymasterHub.Budget memory budget = paymasterHub.getBudget(orgId, subjectKey);
+            assertEq(budget.capPerEpoch, 0.5 ether, "Budget cap should match for each role");
+            assertEq(budget.epochLen, 7 days, "Epoch length should be 7 days for each role");
+        }
+
+        // Verify fee caps also set
+        PaymasterHub.FeeCaps memory feeCaps = paymasterHub.getFeeCaps(orgId);
+        assertEq(feeCaps.maxFeePerGas, 100 gwei, "maxFeePerGas should be set");
+
+        // Verify whitelist rules also set
+        PaymasterHub.Rule memory rule =
+            paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinNoUser()")));
+        assertTrue(rule.allowed, "QuickJoin should be whitelisted");
+
+        // Verify deposit
+        PaymasterHub.OrgFinancials memory financials = paymasterHub.getOrgFinancials(orgId);
+        assertEq(financials.deposited, 0.1 ether, "Should have 0.1 ETH deposited");
+    }
+
+    function testDeployFullOrgNoBudgetsBackwardsCompat() public {
+        // Ensure zero budget config doesn't create any budgets
+        bytes32 orgId = keccak256("NO-BUDGET-ORG");
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "";
+        images[1] = "";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "No Budget DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
+        });
+
+        vm.prank(orgOwner);
+        deployer.deployFullOrg(params);
+
+        // Verify no budgets set (2 roles)
+        for (uint256 i = 0; i < 2; i++) {
+            uint256 hatId = orgRegistry.getRoleHat(orgId, i);
+            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(hatId))));
+            PaymasterHub.Budget memory budget = paymasterHub.getBudget(orgId, subjectKey);
+            assertEq(budget.capPerEpoch, 0, "Budget cap should be 0");
+            assertEq(budget.epochLen, 0, "Epoch length should be 0");
+        }
+    }
+
+    function testDeployFullOrgBudgetOnlyConfig() public {
+        // Budget is the ONLY config — no fee caps, no whitelist, no ETH
+        // This tests the hasBudgets-alone path triggering registerAndConfigureOrg
+        bytes32 orgId = keccak256("BUDGET-ONLY-ORG");
+
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "";
+        images[1] = "";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.PaymasterConfig memory pmConfig = OrgDeployer.PaymasterConfig({
+            operatorRoleIndex: type(uint256).max,
+            autoWhitelistContracts: false,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            defaultBudgetCapPerEpoch: 0.05 ether,
+            defaultBudgetEpochLen: 12 hours
+        });
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "Budget Only DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: pmConfig
+        });
+
+        // No ETH sent — budgets are the only config
+        vm.prank(orgOwner);
+        deployer.deployFullOrg(params);
+
+        // Verify budgets set for each role hat
+        for (uint256 i = 0; i < 2; i++) {
+            uint256 hatId = orgRegistry.getRoleHat(orgId, i);
+            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(hatId))));
+            PaymasterHub.Budget memory budget = paymasterHub.getBudget(orgId, subjectKey);
+            assertEq(budget.capPerEpoch, 0.05 ether, "Budget cap should match");
+            assertEq(budget.epochLen, 12 hours, "Epoch length should be 12 hours");
+            assertTrue(budget.epochStart > 0, "Epoch start should be initialized");
+        }
+
+        // Verify no deposit
+        PaymasterHub.OrgFinancials memory financials = paymasterHub.getOrgFinancials(orgId);
+        assertEq(financials.deposited, 0, "Should have no deposit");
+
+        // Verify no whitelist rules
+        PaymasterHub.Rule memory rule = paymasterHub.getRule(orgId, address(1), bytes4(keccak256("quickJoinNoUser()")));
+        assertFalse(rule.allowed, "No rules should be set");
+    }
+
+    function testRegisterAndConfigureOrgBudgetEpochTooLong() public {
+        // Epoch > MAX_EPOCH_LENGTH (365 days) should revert
+        bytes32 orgId = keccak256("BUDGET-LONG-EPOCH-ORG");
+
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(123))));
+        uint128[] memory caps = new uint128[](1);
+        caps[0] = 0.1 ether;
+        uint32[] memory epochLens = new uint32[](1);
+        epochLens[0] = 366 days; // Above MAX_EPOCH_LENGTH (365 days)
+
+        PaymasterHub.DeployConfig memory config = PaymasterHub.DeployConfig({
+            operatorHatId: 0,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            ruleTargets: new address[](0),
+            ruleSelectors: new bytes4[](0),
+            ruleAllowed: new bool[](0),
+            ruleMaxCallGasHints: new uint32[](0),
+            budgetSubjectKeys: keys,
+            budgetCapsPerEpoch: caps,
+            budgetEpochLens: epochLens
+        });
+
+        vm.prank(address(poaManager));
+        vm.expectRevert(abi.encodeWithSignature("InvalidEpochLength()"));
+        paymasterHub.registerAndConfigureOrg(orgId, 1, config);
+    }
+
+    function testRegisterAndConfigureOrgBudgetArrayMismatch() public {
+        // Mismatched budget array lengths should revert
+        bytes32 orgId = keccak256("BUDGET-MISMATCH-ORG");
+
+        bytes32[] memory keys = new bytes32[](2);
+        keys[0] = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(123))));
+        keys[1] = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(456))));
+        uint128[] memory caps = new uint128[](1); // Length mismatch!
+        caps[0] = 0.1 ether;
+        uint32[] memory epochLens = new uint32[](2);
+        epochLens[0] = 1 days;
+        epochLens[1] = 1 days;
+
+        PaymasterHub.DeployConfig memory config = PaymasterHub.DeployConfig({
+            operatorHatId: 0,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            ruleTargets: new address[](0),
+            ruleSelectors: new bytes4[](0),
+            ruleAllowed: new bool[](0),
+            ruleMaxCallGasHints: new uint32[](0),
+            budgetSubjectKeys: keys,
+            budgetCapsPerEpoch: caps,
+            budgetEpochLens: epochLens
+        });
+
+        vm.prank(address(poaManager));
+        vm.expectRevert(abi.encodeWithSignature("ArrayLengthMismatch()"));
+        paymasterHub.registerAndConfigureOrg(orgId, 1, config);
+    }
+
+    function testRegisterAndConfigureOrgBudgetInvalidEpoch() public {
+        // Invalid epoch length should revert
+        bytes32 orgId = keccak256("BUDGET-EPOCH-ORG");
+
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(123))));
+        uint128[] memory caps = new uint128[](1);
+        caps[0] = 0.1 ether;
+        uint32[] memory epochLens = new uint32[](1);
+        epochLens[0] = 30 minutes; // Below MIN_EPOCH_LENGTH (1 hour)
+
+        PaymasterHub.DeployConfig memory config = PaymasterHub.DeployConfig({
+            operatorHatId: 0,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            ruleTargets: new address[](0),
+            ruleSelectors: new bytes4[](0),
+            ruleAllowed: new bool[](0),
+            ruleMaxCallGasHints: new uint32[](0),
+            budgetSubjectKeys: keys,
+            budgetCapsPerEpoch: caps,
+            budgetEpochLens: epochLens
+        });
+
+        vm.prank(address(poaManager));
+        vm.expectRevert(abi.encodeWithSignature("InvalidEpochLength()"));
+        paymasterHub.registerAndConfigureOrg(orgId, 1, config);
+    }
+
+    function testRegisterAndConfigureOrgUnauthorized() public {
+        // Non-registrar cannot call registerAndConfigureOrg directly
+        bytes32 orgId = keccak256("UNAUTH-ORG");
+
+        PaymasterHub.DeployConfig memory config = PaymasterHub.DeployConfig({
+            operatorHatId: 0,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            ruleTargets: new address[](0),
+            ruleSelectors: new bytes4[](0),
+            ruleAllowed: new bool[](0),
+            ruleMaxCallGasHints: new uint32[](0),
+            budgetSubjectKeys: new bytes32[](0),
+            budgetCapsPerEpoch: new uint128[](0),
+            budgetEpochLens: new uint32[](0)
+        });
+
+        // Random address should be rejected
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(abi.encodeWithSignature("NotPoaManager()"));
+        paymasterHub.registerAndConfigureOrg(orgId, 1, config);
+    }
+
+    function testRegisterAndConfigureOrgRuleArrayMismatch() public {
+        // Mismatched rule array lengths should revert
+        bytes32 orgId = keccak256("MISMATCH-ORG");
+
+        address[] memory targets = new address[](2);
+        targets[0] = address(1);
+        targets[1] = address(2);
+        bytes4[] memory sels = new bytes4[](1); // Length mismatch!
+        sels[0] = bytes4(0x12345678);
+
+        PaymasterHub.DeployConfig memory config = PaymasterHub.DeployConfig({
+            operatorHatId: 0,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            ruleTargets: targets,
+            ruleSelectors: sels,
+            ruleAllowed: new bool[](2),
+            ruleMaxCallGasHints: new uint32[](2),
+            budgetSubjectKeys: new bytes32[](0),
+            budgetCapsPerEpoch: new uint128[](0),
+            budgetEpochLens: new uint32[](0)
+        });
+
+        // Call as poaManager (authorized)
+        vm.prank(address(poaManager));
+        vm.expectRevert(abi.encodeWithSignature("ArrayLengthMismatch()"));
+        paymasterHub.registerAndConfigureOrg(orgId, 1, config);
     }
 }
