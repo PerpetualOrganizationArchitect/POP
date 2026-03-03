@@ -234,6 +234,7 @@ contract OrgDeployer is Initializable {
         address[] ddInitialTargets;
         RoleConfigStructs.RoleConfig[] roles; // Complete role configuration (replaces roleNames, roleImages, roleCanVote)
         RoleAssignments roleAssignments;
+        uint256 metadataAdminRoleIndex; // Explicit role index whose hat gets metadata-admin; type(uint256).max = skip (topHat fallback)
         bool passkeyEnabled; // Whether passkey support is enabled (uses universal factory)
         ModulesFactory.EducationHubConfig educationHubConfig; // EducationHub deployment configuration
         BootstrapConfig bootstrap; // Optional: initial projects and tasks to create
@@ -340,18 +341,9 @@ contract OrgDeployer is Initializable {
         /* 4. Register Hats tree in OrgRegistry */
         l.orgRegistry.registerHatsTree(params.orgId, gov.topHatId, gov.roleHatIds);
 
-        /* 4b. Set deployer's role hat as metadata admin */
-        {
-            uint256 metadataAdminHat = 0;
-            for (uint256 i = 0; i < params.roles.length; i++) {
-                if (params.roles[i].canVote && params.roles[i].distribution.mintToDeployer) {
-                    metadataAdminHat = gov.roleHatIds[i];
-                    break;
-                }
-            }
-            if (metadataAdminHat != 0) {
-                l.orgRegistry.setOrgMetadataAdminHat(params.orgId, metadataAdminHat);
-            }
+        /* 4b. Set metadata admin hat (explicit role index; type(uint256).max = skip → topHat fallback) */
+        if (params.metadataAdminRoleIndex < params.roles.length) {
+            l.orgRegistry.setOrgMetadataAdminHat(params.orgId, gov.roleHatIds[params.metadataAdminRoleIndex]);
         }
 
         /* 5. Register org with shared PaymasterHub */
