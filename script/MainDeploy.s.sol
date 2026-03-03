@@ -376,6 +376,7 @@ contract DeployHomeChain is DeployHelper {
 
         // --- Other Config ---
         params.ddInitialTargets = new address[](0);
+        params.metadataAdminRoleIndex = type(uint256).max; // Skip — topHat fallback
         params.educationHubConfig = ModulesFactory.EducationHubConfig({enabled: true});
         params.passkeyEnabled = false;
         // bootstrap is left default (empty)

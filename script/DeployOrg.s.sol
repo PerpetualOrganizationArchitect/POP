@@ -551,6 +551,9 @@ contract DeployOrg is Script {
             ddCreatorRolesBitmap: _roleArrayToBitmap(config.roleAssignments.ddCreatorRoles)
         });
 
+        // Metadata admin role index (type(uint256).max = skip, use topHat fallback)
+        params.metadataAdminRoleIndex = type(uint256).max;
+
         // Build education hub config
         params.educationHubConfig = ModulesFactory.EducationHubConfig({enabled: config.withEducationHub});
 

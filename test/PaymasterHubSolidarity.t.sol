@@ -1371,9 +1371,15 @@ contract PaymasterHubSolidarityTest is Test {
         hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
     }
 
-    /// @notice Onboarding must reject when sender already has code deployed (not a creation)
-    function testOnboardingRejectsNonCreationUserOp() public {
+    /// @notice In ERC-4337 v0.7, the EntryPoint deploys the account before calling
+    /// validatePaymasterUserOp, so the sender will always have code. The EntryPoint
+    /// itself reverts with AA10 if initCode targets an already-constructed sender.
+    /// We verify that the paymaster does NOT revert for a deployed sender (it delegates
+    /// that check to the EntryPoint).
+    function testOnboardingAllowsDeployedSender() public {
         hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
         vm.prank(poaManager);
         hub.setOnboardingConfig(uint128(MAX_COST), 10, true);
         address deployed = address(new DummySender());
@@ -1382,13 +1388,15 @@ contract PaymasterHubSolidarityTest is Test {
         PackedUserOperation memory userOp = _buildUserOp(deployed, "", pmData);
         userOp.initCode = hex"01";
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.InvalidOnboardingRequest.selector);
+        // Should succeed (not revert) — the EntryPoint handles the AA10 check
         hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
     }
 
     /// @notice A reverted onboarding op must NOT emit OnboardingAccountCreated
     function testOnboardingRevertedOpDoesNotEmitCreationEvent() public {
         hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
         vm.prank(poaManager);
         hub.setOnboardingConfig(uint128(MAX_COST), 10, true);
         address newAccount = address(0xbeef);
@@ -1413,6 +1421,8 @@ contract PaymasterHubSolidarityTest is Test {
     /// @notice Failed (reverted) onboarding ops must still consume a throttle attempt
     function testOnboardingFailedOpsDoNotConsumeAttemptThrottle() public {
         hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
         vm.prank(poaManager);
         hub.setOnboardingConfig(uint128(MAX_COST), 1, true);
         address account1 = address(0xaa01);

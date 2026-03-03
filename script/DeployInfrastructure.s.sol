@@ -172,6 +172,11 @@ contract DeployInfrastructure is Script {
         PaymasterHub(payable(paymasterHub)).donateToSolidarity{value: INITIAL_SOLIDARITY_FUND}();
         console.log("Solidarity Fund seeded with:", INITIAL_SOLIDARITY_FUND);
 
+        // Unpause solidarity distribution so onboarding can use the fund
+        // (initialize() sets distributionPaused=true for collection-only mode)
+        PoaManager(poaManager).adminCall(paymasterHub, abi.encodeWithSignature("unpauseSolidarityDistribution()"));
+        console.log("Solidarity distribution unpaused for onboarding");
+
         // Deploy OrgDeployer proxy (universalPasskeyFactory set later after deployment)
         address deployerBeacon = PoaManager(poaManager).getBeaconById(keccak256("OrgDeployer"));
         bytes memory deployerInit = abi.encodeWithSignature(
