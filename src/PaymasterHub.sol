@@ -290,6 +290,31 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         emit PaymasterInitialized(_entryPoint, _hats, _poaManager);
     }
 
+    // ============ Deploy Config Struct ============
+
+    /**
+     * @notice Configuration passed by OrgDeployer during org creation
+     * @dev Allows initial paymaster setup in the same transaction as org deployment
+     */
+    struct DeployConfig {
+        uint256 operatorHatId;
+        // Fee caps (all zeros = skip)
+        uint256 maxFeePerGas;
+        uint256 maxPriorityFeePerGas;
+        uint32 maxCallGas;
+        uint32 maxVerificationGas;
+        uint32 maxPreVerificationGas;
+        // Rules batch (empty arrays = skip)
+        address[] ruleTargets;
+        bytes4[] ruleSelectors;
+        bool[] ruleAllowed;
+        uint32[] ruleMaxCallGasHints;
+        // Budgets batch (empty arrays = skip)
+        bytes32[] budgetSubjectKeys;
+        uint128[] budgetCapsPerEpoch;
+        uint32[] budgetEpochLens;
+    }
+
     // ============ Org Registration ============
 
     /**
@@ -300,8 +325,117 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param operatorHatId Optional hat ID for operators (0 if none)
      */
     function registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId) external {
+        _onlyRegistrar();
+        _registerOrg(orgId, adminHatId, operatorHatId);
+    }
+
+    /**
+     * @notice Register and configure an org with paymaster in one call
+     * @dev Called by OrgDeployer to register, configure rules/fee caps, and optionally deposit ETH
+     * @param orgId Unique organization identifier
+     * @param adminHatId Hat ID for org admin (topHat)
+     * @param config Initial paymaster configuration (operator hat, fee caps, rules)
+     */
+    function registerAndConfigureOrg(bytes32 orgId, uint256 adminHatId, DeployConfig calldata config) external payable {
+        _onlyRegistrar();
+        _registerOrg(orgId, adminHatId, config.operatorHatId);
+
+        // Set fee caps if any non-zero
+        if (
+            config.maxFeePerGas != 0 || config.maxPriorityFeePerGas != 0 || config.maxCallGas != 0
+                || config.maxVerificationGas != 0 || config.maxPreVerificationGas != 0
+        ) {
+            FeeCaps storage feeCaps = _getFeeCapsStorage()[orgId];
+            feeCaps.maxFeePerGas = config.maxFeePerGas;
+            feeCaps.maxPriorityFeePerGas = config.maxPriorityFeePerGas;
+            feeCaps.maxCallGas = config.maxCallGas;
+            feeCaps.maxVerificationGas = config.maxVerificationGas;
+            feeCaps.maxPreVerificationGas = config.maxPreVerificationGas;
+
+            emit FeeCapsSet(
+                orgId,
+                config.maxFeePerGas,
+                config.maxPriorityFeePerGas,
+                config.maxCallGas,
+                config.maxVerificationGas,
+                config.maxPreVerificationGas
+            );
+        }
+
+        // Set rules if arrays provided
+        if (config.ruleTargets.length > 0) {
+            uint256 length = config.ruleTargets.length;
+            if (
+                length != config.ruleSelectors.length || length != config.ruleAllowed.length
+                    || length != config.ruleMaxCallGasHints.length
+            ) {
+                revert ArrayLengthMismatch();
+            }
+
+            mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
+
+            for (uint256 i; i < length;) {
+                if (config.ruleTargets[i] == address(0)) revert ZeroAddress();
+
+                rules[config.ruleTargets[i]][config.ruleSelectors[i]] =
+                    Rule({allowed: config.ruleAllowed[i], maxCallGasHint: config.ruleMaxCallGasHints[i]});
+
+                emit RuleSet(
+                    orgId,
+                    config.ruleTargets[i],
+                    config.ruleSelectors[i],
+                    config.ruleAllowed[i],
+                    config.ruleMaxCallGasHints[i]
+                );
+
+                unchecked {
+                    ++i;
+                }
+            }
+        }
+
+        // Set budgets if arrays provided
+        if (config.budgetSubjectKeys.length > 0) {
+            uint256 budgetLen = config.budgetSubjectKeys.length;
+            if (budgetLen != config.budgetCapsPerEpoch.length || budgetLen != config.budgetEpochLens.length) {
+                revert ArrayLengthMismatch();
+            }
+
+            mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
+
+            for (uint256 j; j < budgetLen;) {
+                uint32 epochLen = config.budgetEpochLens[j];
+                if (epochLen < MIN_EPOCH_LENGTH || epochLen > MAX_EPOCH_LENGTH) {
+                    revert InvalidEpochLength();
+                }
+
+                Budget storage budget = budgets[config.budgetSubjectKeys[j]];
+                budget.capPerEpoch = config.budgetCapsPerEpoch[j];
+                budget.epochLen = epochLen;
+                budget.epochStart = uint32(block.timestamp);
+
+                emit BudgetSet(
+                    orgId, config.budgetSubjectKeys[j], config.budgetCapsPerEpoch[j], epochLen, uint32(block.timestamp)
+                );
+
+                unchecked {
+                    ++j;
+                }
+            }
+        }
+
+        // Deposit ETH if sent
+        if (msg.value > 0) {
+            _depositForOrg(orgId, msg.value);
+        }
+    }
+
+    function _onlyRegistrar() internal view {
         MainStorage storage main = _getMainStorage();
         if (msg.sender != main.poaManager && msg.sender != main.orgRegistrar) revert NotPoaManager();
+    }
+
+    function _registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId) internal {
         if (orgId == bytes32(0)) revert InvalidOrgId();
         if (adminHatId == 0) revert ZeroAddress();
 
@@ -442,12 +576,20 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     function depositForOrg(bytes32 orgId) external payable {
         if (msg.value == 0) revert ZeroAddress();
 
-        mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
+        // Verify org exists
+        if (_getOrgsStorage()[orgId].adminHatId == 0) revert OrgNotRegistered();
+
+        _depositForOrg(orgId, msg.value);
+    }
+
+    /**
+     * @dev Internal deposit logic shared by depositForOrg and registerAndConfigureOrg
+     * @param orgId The organization to deposit for
+     * @param amount Amount of ETH to deposit (must equal msg.value available)
+     */
+    function _depositForOrg(bytes32 orgId, uint256 amount) internal {
         mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
         GracePeriodConfig storage grace = _getGracePeriodStorage();
-
-        // Verify org exists
-        if (orgs[orgId].adminHatId == 0) revert OrgNotRegistered();
 
         OrgFinancials storage org = financials[orgId];
 
@@ -461,7 +603,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         // Trigger 2: Crossing minimum threshold
         bool wasBelowMinimum = org.deposited < grace.minDepositRequired;
-        bool willBeAboveMinimum = org.deposited + msg.value >= grace.minDepositRequired;
+        bool willBeAboveMinimum = org.deposited + amount >= grace.minDepositRequired;
         if (wasBelowMinimum && willBeAboveMinimum) {
             shouldResetPeriod = true;
         }
@@ -470,11 +612,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         bool wasUnfunded = org.deposited == 0;
 
         // Safe cast check
-        if (msg.value > type(uint128).max) revert Overflow();
+        if (amount > type(uint128).max) revert Overflow();
 
         // Update org financials
-        org.deposited += uint128(msg.value);
-        org.totalDeposited += uint128(msg.value);
+        org.deposited += uint128(amount);
+        org.totalDeposited += uint128(amount);
 
         // Reset period when triggered
         if (shouldResetPeriod) {
@@ -486,15 +628,15 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
 
         // Update active org count if this is first deposit
-        if (wasUnfunded && msg.value > 0) {
+        if (wasUnfunded && amount > 0) {
             SolidarityFund storage solidarity = _getSolidarityStorage();
             solidarity.numActiveOrgs++;
         }
 
         // Deposit to EntryPoint
-        IEntryPoint(_getMainStorage().entryPoint).depositTo{value: msg.value}(address(this));
+        IEntryPoint(_getMainStorage().entryPoint).depositTo{value: amount}(address(this));
 
-        emit OrgDepositReceived(orgId, msg.sender, msg.value);
+        emit OrgDepositReceived(orgId, msg.sender, amount);
     }
 
     /**

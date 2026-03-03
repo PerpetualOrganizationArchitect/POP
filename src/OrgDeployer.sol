@@ -41,7 +41,25 @@ interface IExecutorAdmin {
 }
 
 interface IPaymasterHub {
+    struct DeployConfig {
+        uint256 operatorHatId;
+        uint256 maxFeePerGas;
+        uint256 maxPriorityFeePerGas;
+        uint32 maxCallGas;
+        uint32 maxVerificationGas;
+        uint32 maxPreVerificationGas;
+        address[] ruleTargets;
+        bytes4[] ruleSelectors;
+        bool[] ruleAllowed;
+        uint32[] ruleMaxCallGasHints;
+        bytes32[] budgetSubjectKeys;
+        uint128[] budgetCapsPerEpoch;
+        uint32[] budgetEpochLens;
+    }
+
     function registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId) external;
+    function registerAndConfigureOrg(bytes32 orgId, uint256 adminHatId, DeployConfig calldata config) external payable;
+    function depositForOrg(bytes32 orgId) external payable;
 }
 
 interface ITaskManagerBootstrap {
@@ -217,6 +235,19 @@ contract OrgDeployer is Initializable {
         ITaskManagerBootstrap.BootstrapTaskConfig[] tasks;
     }
 
+    struct PaymasterConfig {
+        uint256 operatorRoleIndex; // Role index for paymaster operator hat; type(uint256).max = skip (topHat-only)
+        bool autoWhitelistContracts; // If true, auto-whitelist deployed org contracts
+        uint256 maxFeePerGas;
+        uint256 maxPriorityFeePerGas;
+        uint32 maxCallGas;
+        uint32 maxVerificationGas;
+        uint32 maxPreVerificationGas;
+        // Budget config (all zeros = skip)
+        uint128 defaultBudgetCapPerEpoch; // Default spending cap per epoch for each role hat (0 = no budget)
+        uint32 defaultBudgetEpochLen; // Default epoch length in seconds for each role hat (0 = no budget)
+    }
+
     struct DeploymentParams {
         bytes32 orgId;
         string orgName;
@@ -238,6 +269,7 @@ contract OrgDeployer is Initializable {
         bool passkeyEnabled; // Whether passkey support is enabled (uses universal factory)
         ModulesFactory.EducationHubConfig educationHubConfig; // EducationHub deployment configuration
         BootstrapConfig bootstrap; // Optional: initial projects and tasks to create
+        PaymasterConfig paymasterConfig; // Optional: paymaster configuration (funding via msg.value)
     }
 
     /*════════════════  VALIDATION  ════════════════*/
@@ -291,7 +323,7 @@ contract OrgDeployer is Initializable {
 
     /*════════════════  MAIN DEPLOYMENT FUNCTION  ════════════════*/
 
-    function deployFullOrg(DeploymentParams calldata params) external returns (DeploymentResult memory result) {
+    function deployFullOrg(DeploymentParams calldata params) external payable returns (DeploymentResult memory result) {
         // Manual reentrancy guard
         Layout storage l = _layout();
         if (l._status == 2) revert Reentrant();
@@ -346,10 +378,7 @@ contract OrgDeployer is Initializable {
             l.orgRegistry.setOrgMetadataAdminHat(params.orgId, gov.roleHatIds[params.metadataAdminRoleIndex]);
         }
 
-        /* 5. Register org with shared PaymasterHub */
-        IPaymasterHub(l.paymasterHub).registerOrg(params.orgId, gov.topHatId, 0);
-
-        /* 6. Deploy Access Infrastructure (QuickJoin, Token) */
+        /* 5. Deploy Access Infrastructure (QuickJoin, Token) */
         AccessFactory.AccessResult memory access;
         {
             AccessFactory.RoleAssignments memory accessRoles = AccessFactory.RoleAssignments({
@@ -417,6 +446,9 @@ contract OrgDeployer is Initializable {
         /* 7. Deploy Voting Mechanisms (HybridVoting, DirectDemocracyVoting) */
         (result.hybridVoting, result.directDemocracyVoting) =
             _deployVotingMechanisms(params, result.executor, result.participationToken, gov.roleHatIds);
+
+        /* 7b. Register and configure org with PaymasterHub (after all modules deployed) */
+        _configurePaymaster(l, params, result, gov.topHatId, gov.roleHatIds);
 
         /* 8. Wire up cross-module connections */
         IParticipationToken(result.participationToken).setTaskManager(result.taskManager);
@@ -745,5 +777,227 @@ contract OrgDeployer is Initializable {
             hatIds[i] = roleHatIds[roleIndices[i]];
         }
         return hatIds;
+    }
+
+    /*══════════════  PAYMASTER CONFIGURATION  ═════════════=*/
+
+    /**
+     * @notice Register and optionally configure the org's PaymasterHub entry
+     * @dev Moved after all modules deployed so we know contract addresses for auto-whitelisting
+     */
+    function _configurePaymaster(
+        Layout storage l,
+        DeploymentParams calldata params,
+        DeploymentResult memory result,
+        uint256 topHatId,
+        uint256[] memory roleHatIds
+    ) internal {
+        PaymasterConfig calldata pmCfg = params.paymasterConfig;
+
+        // Resolve operator hat from role index (type(uint256).max = skip → operatorHatId stays 0)
+        uint256 operatorHatId = 0;
+        if (pmCfg.operatorRoleIndex < params.roles.length) {
+            operatorHatId = roleHatIds[pmCfg.operatorRoleIndex];
+        }
+
+        bool hasFeeCaps = pmCfg.maxFeePerGas != 0 || pmCfg.maxPriorityFeePerGas != 0 || pmCfg.maxCallGas != 0
+            || pmCfg.maxVerificationGas != 0 || pmCfg.maxPreVerificationGas != 0;
+        bool hasBudgets = pmCfg.defaultBudgetCapPerEpoch != 0 && pmCfg.defaultBudgetEpochLen != 0;
+        bool hasConfig = hasFeeCaps || pmCfg.autoWhitelistContracts || hasBudgets || msg.value > 0;
+
+        if (hasConfig) {
+            // Build rules for auto-whitelisting deployed contracts
+            (address[] memory targets, bytes4[] memory selectors, bool[] memory allowed, uint32[] memory gasHints) = pmCfg.autoWhitelistContracts
+                ? _buildDefaultPaymasterRules(result, params.educationHubConfig.enabled)
+                : (new address[](0), new bytes4[](0), new bool[](0), new uint32[](0));
+
+            // Build per-role-hat budgets if configured
+            (bytes32[] memory budgetKeys, uint128[] memory budgetCaps, uint32[] memory budgetEpochLens) = hasBudgets
+                ? _buildDefaultBudgets(roleHatIds, pmCfg.defaultBudgetCapPerEpoch, pmCfg.defaultBudgetEpochLen)
+                : (new bytes32[](0), new uint128[](0), new uint32[](0));
+
+            IPaymasterHub.DeployConfig memory config = IPaymasterHub.DeployConfig({
+                operatorHatId: operatorHatId,
+                maxFeePerGas: pmCfg.maxFeePerGas,
+                maxPriorityFeePerGas: pmCfg.maxPriorityFeePerGas,
+                maxCallGas: pmCfg.maxCallGas,
+                maxVerificationGas: pmCfg.maxVerificationGas,
+                maxPreVerificationGas: pmCfg.maxPreVerificationGas,
+                ruleTargets: targets,
+                ruleSelectors: selectors,
+                ruleAllowed: allowed,
+                ruleMaxCallGasHints: gasHints,
+                budgetSubjectKeys: budgetKeys,
+                budgetCapsPerEpoch: budgetCaps,
+                budgetEpochLens: budgetEpochLens
+            });
+
+            IPaymasterHub(l.paymasterHub).registerAndConfigureOrg{value: msg.value}(params.orgId, topHatId, config);
+        } else {
+            // Simple registration only (backwards compatible)
+            IPaymasterHub(l.paymasterHub).registerOrg(params.orgId, topHatId, operatorHatId);
+        }
+    }
+
+    /**
+     * @notice Build default paymaster whitelist rules for deployed org contracts
+     * @dev Whitelists common user-facing functions on QuickJoin, TaskManager, Voting, etc.
+     */
+    function _buildDefaultPaymasterRules(DeploymentResult memory result, bool educationEnabled)
+        internal
+        pure
+        returns (address[] memory targets, bytes4[] memory selectors, bool[] memory allowed, uint32[] memory gasHints)
+    {
+        // Count: QuickJoin(5) + TaskManager(9) + HybridVoting(3) + DDVoting(3) + PaymentManager(3) + EducationHub(0 or 1)
+        uint256 count = 23;
+        if (educationEnabled) count += 1;
+
+        targets = new address[](count);
+        selectors = new bytes4[](count);
+        allowed = new bool[](count);
+        gasHints = new uint32[](count);
+
+        uint256 i = 0;
+
+        // ── QuickJoin ──
+        targets[i] = result.quickJoin;
+        selectors[i] = bytes4(keccak256("quickJoinNoUser()"));
+        i++;
+
+        targets[i] = result.quickJoin;
+        selectors[i] = bytes4(keccak256("quickJoinWithUser()"));
+        i++;
+
+        targets[i] = result.quickJoin;
+        selectors[i] = bytes4(keccak256("quickJoinWithPasskey((bytes32,bytes32,bytes32,uint256))"));
+        i++;
+
+        targets[i] = result.quickJoin;
+        selectors[i] = bytes4(keccak256("registerAndQuickJoin(address,string,uint256,uint256,bytes)"));
+        i++;
+
+        targets[i] = result.quickJoin;
+        selectors[i] = bytes4(
+            keccak256(
+                "registerAndQuickJoinWithPasskey((bytes32,bytes32,bytes32,uint256),string,uint256,uint256,(bytes,bytes,uint256,uint256,bytes32,bytes32))"
+            )
+        );
+        i++;
+
+        // ── TaskManager ──
+        targets[i] = result.taskManager;
+        selectors[i] = bytes4(keccak256("createTask(uint256,bytes,bytes32,bytes32,address,uint256,bool)"));
+        i++;
+
+        targets[i] = result.taskManager;
+        selectors[i] = bytes4(keccak256("claimTask(uint256)"));
+        i++;
+
+        targets[i] = result.taskManager;
+        selectors[i] = bytes4(keccak256("submitTask(uint256,bytes32)"));
+        i++;
+
+        targets[i] = result.taskManager;
+        selectors[i] = bytes4(keccak256("completeTask(uint256)"));
+        i++;
+
+        targets[i] = result.taskManager;
+        selectors[i] = bytes4(keccak256("applyForTask(uint256,bytes32)"));
+        i++;
+
+        targets[i] = result.taskManager;
+        selectors[i] = bytes4(keccak256("approveApplication(uint256,address)"));
+        i++;
+
+        targets[i] = result.taskManager;
+        selectors[i] = bytes4(keccak256("assignTask(uint256,address)"));
+        i++;
+
+        targets[i] = result.taskManager;
+        selectors[i] = bytes4(keccak256("rejectTask(uint256,bytes32)"));
+        i++;
+
+        targets[i] = result.taskManager;
+        selectors[i] = bytes4(keccak256("cancelTask(uint256)"));
+        i++;
+
+        // ── HybridVoting ──
+        targets[i] = result.hybridVoting;
+        selectors[i] = bytes4(keccak256("vote(uint256,uint8[],uint8[])"));
+        i++;
+
+        targets[i] = result.hybridVoting;
+        selectors[i] = bytes4(keccak256("announceWinner(uint256)"));
+        i++;
+
+        targets[i] = result.hybridVoting;
+        selectors[i] =
+            bytes4(keccak256("createProposal(bytes,bytes32,uint32,uint8,(address,uint256,bytes)[][],uint256[])"));
+        i++;
+
+        // ── DirectDemocracyVoting ──
+        targets[i] = result.directDemocracyVoting;
+        selectors[i] = bytes4(keccak256("vote(uint256,uint8[],uint8[])"));
+        i++;
+
+        targets[i] = result.directDemocracyVoting;
+        selectors[i] = bytes4(keccak256("announceWinner(uint256)"));
+        i++;
+
+        targets[i] = result.directDemocracyVoting;
+        selectors[i] =
+            bytes4(keccak256("createProposal(bytes,bytes32,uint32,uint8,(address,uint256,bytes)[][],uint256[])"));
+        i++;
+
+        // ── PaymentManager ──
+        targets[i] = result.paymentManager;
+        selectors[i] = bytes4(keccak256("claimDistribution(uint256,uint256,bytes32[])"));
+        i++;
+
+        targets[i] = result.paymentManager;
+        selectors[i] = bytes4(keccak256("claimMultiple(uint256[],uint256[],bytes32[][])"));
+        i++;
+
+        targets[i] = result.paymentManager;
+        selectors[i] = bytes4(keccak256("optOut(bool)"));
+        i++;
+
+        // ── EducationHub (conditional) ──
+        if (educationEnabled) {
+            targets[i] = result.educationHub;
+            selectors[i] = bytes4(keccak256("completeModule(uint256,uint8)"));
+            i++;
+        }
+
+        // Set all rules to allowed with 0 gas hint (use default)
+        for (uint256 j = 0; j < count; j++) {
+            allowed[j] = true;
+            // gasHints[j] already 0
+        }
+    }
+
+    /**
+     * @notice Build default per-role-hat budget entries
+     * @dev Creates a budget for each role hat using SUBJECT_TYPE_HAT (0x01)
+     * @param roleHatIds Array of hat IDs for each role
+     * @param capPerEpoch Default spending cap per epoch for each hat
+     * @param epochLen Default epoch length in seconds
+     */
+    function _buildDefaultBudgets(uint256[] memory roleHatIds, uint128 capPerEpoch, uint32 epochLen)
+        internal
+        pure
+        returns (bytes32[] memory subjectKeys, uint128[] memory caps, uint32[] memory epochLens)
+    {
+        uint256 count = roleHatIds.length;
+        subjectKeys = new bytes32[](count);
+        caps = new uint128[](count);
+        epochLens = new uint32[](count);
+
+        for (uint256 i = 0; i < count; i++) {
+            // SUBJECT_TYPE_HAT = 0x01, subjectId = bytes20(uint160(hatId))
+            subjectKeys[i] = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(roleHatIds[i]))));
+            caps[i] = capPerEpoch;
+            epochLens[i] = epochLen;
+        }
     }
 }
