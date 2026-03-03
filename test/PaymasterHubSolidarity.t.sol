@@ -1361,7 +1361,7 @@ contract PaymasterHubSolidarityTest is Test {
     function testOnboardingRejectsNonZeroOrgId() public {
         hub.donateToSolidarity{value: 1 ether}();
         vm.prank(poaManager);
-        hub.setOnboardingConfig(uint128(MAX_COST), 10, true);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true, address(0));
         bytes memory pmData =
             _buildPaymasterData(ORG_ALPHA, SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
         PackedUserOperation memory userOp = _buildUserOp(address(0xdead), "", pmData);
@@ -1381,7 +1381,7 @@ contract PaymasterHubSolidarityTest is Test {
         vm.prank(poaManager);
         hub.unpauseSolidarityDistribution();
         vm.prank(poaManager);
-        hub.setOnboardingConfig(uint128(MAX_COST), 10, true);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true, address(0));
         address deployed = address(new DummySender());
         bytes memory pmData =
             _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
@@ -1398,7 +1398,7 @@ contract PaymasterHubSolidarityTest is Test {
         vm.prank(poaManager);
         hub.unpauseSolidarityDistribution();
         vm.prank(poaManager);
-        hub.setOnboardingConfig(uint128(MAX_COST), 10, true);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true, address(0));
         address newAccount = address(0xbeef);
         bytes memory pmData =
             _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
@@ -1424,7 +1424,7 @@ contract PaymasterHubSolidarityTest is Test {
         vm.prank(poaManager);
         hub.unpauseSolidarityDistribution();
         vm.prank(poaManager);
-        hub.setOnboardingConfig(uint128(MAX_COST), 1, true);
+        hub.setOnboardingConfig(uint128(MAX_COST), 1, true, address(0));
         address account1 = address(0xaa01);
         bytes memory pmData1 =
             _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
@@ -1455,6 +1455,89 @@ contract PaymasterHubSolidarityTest is Test {
         vm.prank(address(entryPoint));
         vm.expectRevert(PaymasterHub.OnboardingDailyLimitExceeded.selector);
         hub.validatePaymasterUserOp(userOp3, keccak256("hash3"), MAX_COST);
+    }
+
+    /// @notice Onboarding accepts valid registerAccount callData
+    function testOnboardingAcceptsRegisterAccountCallData() public {
+        address registry = address(0xCC);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true, registry);
+        address deployed = address(new DummySender());
+        bytes memory pmData =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        // Build execute(registryAddress, 0, registerAccount("alice"))
+        bytes memory innerData = abi.encodeWithSelector(bytes4(0xbff6de20), "alice");
+        bytes memory execCallData = abi.encodeWithSelector(bytes4(0xb61d27f6), registry, uint256(0), innerData);
+        PackedUserOperation memory userOp = _buildUserOp(deployed, execCallData, pmData);
+        userOp.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        // Should succeed — valid registerAccount callData
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Onboarding rejects callData targeting non-registry address
+    function testOnboardingRejectsNonRegistryTarget() public {
+        address registry = address(0xCC);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true, registry);
+        address deployed = address(new DummySender());
+        bytes memory pmData =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        // Build execute(wrongTarget, 0, registerAccount("alice"))
+        bytes memory innerData = abi.encodeWithSelector(bytes4(0xbff6de20), "alice");
+        bytes memory execCallData = abi.encodeWithSelector(bytes4(0xb61d27f6), address(0xBAD), uint256(0), innerData);
+        PackedUserOperation memory userOp = _buildUserOp(deployed, execCallData, pmData);
+        userOp.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOnboardingRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Onboarding rejects callData with non-registerAccount inner selector
+    function testOnboardingRejectsNonRegisterAccountSelector() public {
+        address registry = address(0xCC);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true, registry);
+        address deployed = address(new DummySender());
+        bytes memory pmData =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        // Build execute(registry, 0, someOtherFunction("data"))
+        bytes memory innerData = abi.encodeWithSelector(bytes4(0xdeadbeef), "alice");
+        bytes memory execCallData = abi.encodeWithSelector(bytes4(0xb61d27f6), registry, uint256(0), innerData);
+        PackedUserOperation memory userOp = _buildUserOp(deployed, execCallData, pmData);
+        userOp.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOnboardingRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Onboarding rejects callData that is not execute()
+    function testOnboardingRejectsNonExecuteOuterSelector() public {
+        address registry = address(0xCC);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true, registry);
+        address deployed = address(new DummySender());
+        bytes memory pmData =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+        // Build arbitrary callData (not execute())
+        bytes memory badCallData = abi.encodeWithSelector(bytes4(0x12345678), address(0), uint256(0));
+        PackedUserOperation memory userOp = _buildUserOp(deployed, badCallData, pmData);
+        userOp.initCode = hex"01";
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOnboardingRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
     }
 
     /// @notice registerOrg must reject bytes32(0) as orgId
