@@ -107,7 +107,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     event SolidarityDonationReceived(address indexed from, uint256 amount);
     event GracePeriodConfigUpdated(uint32 initialGraceDays, uint128 maxSpendDuringGrace, uint128 minDepositRequired);
     event OrgBannedFromSolidarity(bytes32 indexed orgId, bool banned);
-    event OnboardingConfigUpdated(uint128 maxGasPerCreation, uint128 dailyCreationLimit, bool enabled, address accountRegistry);
+    event OnboardingConfigUpdated(
+        uint128 maxGasPerCreation, uint128 dailyCreationLimit, bool enabled, address accountRegistry
+    );
     event OnboardingAccountCreated(address indexed account, uint256 gasCost);
     event SolidarityDistributionPaused();
     event SolidarityDistributionUnpaused();
