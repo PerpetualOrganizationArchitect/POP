@@ -276,9 +276,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         grace.maxSpendDuringGrace = 0.01 ether; // ~$30 worth of gas (~3000 tx on cheap L2s)
         grace.minDepositRequired = 0.003 ether; // ~$10 minimum deposit
 
-        // Initialize onboarding config (enabled, ~200k gas per creation, 1000 accounts/day)
+        // Initialize onboarding config (enabled, max cost per creation, 1000 accounts/day)
+        // NOTE: maxGasPerCreation is compared against maxCost (in wei) from the EntryPoint,
+        // so the value must be denominated in wei, not gas units.
         OnboardingConfig storage onboarding = _getOnboardingStorage();
-        onboarding.maxGasPerCreation = 200000; // ~200k gas for account creation
+        onboarding.maxGasPerCreation = 0.01 ether; // ~$30 worth of gas at typical L1 prices
         onboarding.dailyCreationLimit = 1000; // 1000 accounts per day
         onboarding.enabled = true;
 
@@ -633,7 +635,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param context Context from validatePaymasterUserOp
      * @param actualGasCost Actual gas cost to be reimbursed
      */
-    function postOp(IPaymaster.PostOpMode mode, bytes calldata context, uint256 actualGasCost)
+    function postOp(
+        IPaymaster.PostOpMode mode,
+        bytes calldata context,
+        uint256 actualGasCost,
+        uint256 /* actualUserOpFeePerGas */
+    )
         external
         override
         onlyEntryPoint
@@ -1109,7 +1116,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     /**
      * @notice Configure POA onboarding for account creation from solidarity fund
      * @dev Only PoaManager can modify onboarding parameters
-     * @param _maxGasPerCreation Maximum gas allowed per account creation (~200k)
+     * @param _maxGasPerCreation Maximum cost in wei allowed per account creation
      * @param _dailyCreationLimit Maximum accounts that can be created per day globally
      * @param _enabled Whether onboarding sponsorship is active
      */

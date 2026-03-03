@@ -14,5 +14,6 @@ interface IPaymaster {
         external
         returns (bytes memory context, uint256 validationData);
 
-    function postOp(PostOpMode mode, bytes calldata context, uint256 actualGasCost) external;
+    function postOp(PostOpMode mode, bytes calldata context, uint256 actualGasCost, uint256 actualUserOpFeePerGas)
+        external;
 }
