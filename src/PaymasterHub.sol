@@ -107,7 +107,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     event SolidarityDonationReceived(address indexed from, uint256 amount);
     event GracePeriodConfigUpdated(uint32 initialGraceDays, uint128 maxSpendDuringGrace, uint128 minDepositRequired);
     event OrgBannedFromSolidarity(bytes32 indexed orgId, bool banned);
-    event OnboardingConfigUpdated(uint128 maxGasPerCreation, uint128 dailyCreationLimit, bool enabled);
+    event OnboardingConfigUpdated(uint128 maxGasPerCreation, uint128 dailyCreationLimit, bool enabled, address accountRegistry);
     event OnboardingAccountCreated(address indexed account, uint256 gasCost);
     event SolidarityDistributionPaused();
     event SolidarityDistributionUnpaused();
@@ -181,6 +181,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         uint128 attemptsToday; // Validation attempts in current day window
         uint32 currentDay; // Day tracker (timestamp / 1 days)
         bool enabled; // Whether onboarding sponsorship is active
+        address accountRegistry; // UniversalAccountRegistry — only allowed callData target during onboarding
     }
 
     struct FeeCaps {
@@ -1119,16 +1120,23 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param _maxGasPerCreation Maximum cost in wei allowed per account creation
      * @param _dailyCreationLimit Maximum accounts that can be created per day globally
      * @param _enabled Whether onboarding sponsorship is active
+     * @param _accountRegistry UniversalAccountRegistry address (only allowed callData target)
      */
-    function setOnboardingConfig(uint128 _maxGasPerCreation, uint128 _dailyCreationLimit, bool _enabled) external {
+    function setOnboardingConfig(
+        uint128 _maxGasPerCreation,
+        uint128 _dailyCreationLimit,
+        bool _enabled,
+        address _accountRegistry
+    ) external {
         if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
 
         OnboardingConfig storage onboarding = _getOnboardingStorage();
         onboarding.maxGasPerCreation = _maxGasPerCreation;
         onboarding.dailyCreationLimit = _dailyCreationLimit;
         onboarding.enabled = _enabled;
+        onboarding.accountRegistry = _accountRegistry;
 
-        emit OnboardingConfigUpdated(_maxGasPerCreation, _dailyCreationLimit, _enabled);
+        emit OnboardingConfigUpdated(_maxGasPerCreation, _dailyCreationLimit, _enabled, _accountRegistry);
     }
 
     // ============ Mailbox Function ============
@@ -1472,7 +1480,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // BEFORE calling validatePaymasterUserOp(), so the account already has code by the
         // time this runs. The EntryPoint itself reverts with AA10 if initCode is provided
         // for an already-constructed sender.
-        if (userOp.callData.length != 0) revert InvalidOnboardingRequest();
+        // Allow empty callData (bare deploy) or execute(registryAddress, 0, registerAccount(...))
+        if (userOp.callData.length != 0) {
+            _validateOnboardingCallData(userOp.callData, onboarding.accountRegistry);
+        }
 
         // Onboarding is paid from solidarity fund, so block when distribution is paused
         SolidarityFund storage solidarity = _getSolidarityStorage();
@@ -1497,6 +1508,40 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         // Subject key for onboarding is based on the account address (natural nonce)
         subjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_POA_ONBOARDING, bytes20(account)));
+    }
+
+    /// @dev Validates that onboarding callData is execute(registryAddress, 0, registerAccount(...)).
+    ///      Reuses the same ABI layout parsing as _extractTargetSelector.
+    function _validateOnboardingCallData(bytes calldata callData, address registry) private pure {
+        if (registry == address(0)) revert InvalidOnboardingRequest();
+        if (callData.length < 4) revert InvalidOnboardingRequest();
+
+        // Must be execute(address,uint256,bytes) = 0xb61d27f6
+        bytes4 outerSelector = bytes4(callData[0:4]);
+        if (outerSelector != bytes4(0xb61d27f6)) revert InvalidOnboardingRequest();
+        if (callData.length < 0x64) revert InvalidOnboardingRequest();
+
+        address target;
+        uint256 value;
+        bytes4 innerSelector;
+        assembly {
+            target := calldataload(add(callData.offset, 0x04))
+            value := calldataload(add(callData.offset, 0x24))
+            // Read inner bytes data (offset at 0x44, must be standard 0x60)
+            let dataOffset := calldataload(add(callData.offset, 0x44))
+            if eq(dataOffset, 0x60) {
+                let dataStart := add(add(0x04, dataOffset), 0x20)
+                if lt(dataStart, callData.length) {
+                    innerSelector := calldataload(add(callData.offset, dataStart))
+                }
+            }
+        }
+        innerSelector = bytes4(innerSelector);
+
+        // Must target the registry with zero value and registerAccount(string) = 0xbff6de20
+        if (target != registry) revert InvalidOnboardingRequest();
+        if (value != 0) revert InvalidOnboardingRequest();
+        if (innerSelector != bytes4(0xbff6de20)) revert InvalidOnboardingRequest();
     }
 
     function _validateRules(PackedUserOperation calldata userOp, uint32 ruleId, bytes32 orgId) private view {
