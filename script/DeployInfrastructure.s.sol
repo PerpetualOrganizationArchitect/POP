@@ -177,6 +177,16 @@ contract DeployInfrastructure is Script {
         PoaManager(poaManager).adminCall(paymasterHub, abi.encodeWithSignature("unpauseSolidarityDistribution()"));
         console.log("Solidarity distribution unpaused for onboarding");
 
+        // Override default maxGasPerCreation (compared against maxCost in wei, not gas units)
+        PoaManager(poaManager)
+            .adminCall(
+                paymasterHub,
+                abi.encodeWithSignature(
+                    "setOnboardingConfig(uint128,uint128,bool)", uint128(0.01 ether), uint128(1000), true
+                )
+            );
+        console.log("Onboarding config set: maxCost=0.01 ETH, dailyLimit=1000");
+
         // Deploy OrgDeployer proxy (universalPasskeyFactory set later after deployment)
         address deployerBeacon = PoaManager(poaManager).getBeaconById(keccak256("OrgDeployer"));
         bytes memory deployerInit = abi.encodeWithSignature(
