@@ -960,6 +960,18 @@ contract RunOrgActions is Script {
         // Build bootstrap config for initial projects/tasks
         params.bootstrap = _buildBootstrapConfig(config.bootstrap);
 
+        params.paymasterConfig = OrgDeployer.PaymasterConfig({
+            operatorRoleIndex: type(uint256).max,
+            autoWhitelistContracts: false,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            defaultBudgetCapPerEpoch: 0,
+            defaultBudgetEpochLen: 0
+        });
+
         return params;
     }
 

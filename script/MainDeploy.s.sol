@@ -380,6 +380,7 @@ contract DeployHomeChain is DeployHelper {
         params.educationHubConfig = ModulesFactory.EducationHubConfig({enabled: true});
         params.passkeyEnabled = false;
         // bootstrap is left default (empty)
+        params.paymasterConfig.operatorRoleIndex = type(uint256).max; // skip operator, topHat-only
 
         console.log("\nDeploying governance org: Poa");
 
