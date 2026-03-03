@@ -1460,7 +1460,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         // Onboarding must only sponsor account creation, not arbitrary operations.
         if (userOp.initCode.length == 0) revert InvalidOnboardingRequest();
-        if (account.code.length != 0) revert InvalidOnboardingRequest();
+        // NOTE: We intentionally do NOT check `account.code.length != 0` here.
+        // In ERC-4337 v0.7, the EntryPoint deploys the account via _createSenderIfNeeded()
+        // BEFORE calling validatePaymasterUserOp(), so the account already has code by the
+        // time this runs. The EntryPoint itself reverts with AA10 if initCode is provided
+        // for an already-constructed sender.
         if (userOp.callData.length != 0) revert InvalidOnboardingRequest();
 
         // Onboarding is paid from solidarity fund, so block when distribution is paused
