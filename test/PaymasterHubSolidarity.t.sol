@@ -1408,7 +1408,7 @@ contract PaymasterHubSolidarityTest is Test {
         (bytes memory context,) = hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
         vm.recordLogs();
         vm.prank(address(entryPoint));
-        hub.postOp(IPaymaster.PostOpMode.opReverted, context, 50_000);
+        hub.postOp(IPaymaster.PostOpMode.opReverted, context, 50_000, 1);
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bytes32 creationEventSig = keccak256("OnboardingAccountCreated(address,uint256)");
         for (uint256 i = 0; i < logs.length; i++) {
@@ -1434,7 +1434,7 @@ contract PaymasterHubSolidarityTest is Test {
         (bytes memory context1,) = hub.validatePaymasterUserOp(userOp1, keccak256("hash1"), MAX_COST);
         // Failed op — counter was incremented in validation but refunded in postOp
         vm.prank(address(entryPoint));
-        hub.postOp(IPaymaster.PostOpMode.opReverted, context1, 50_000);
+        hub.postOp(IPaymaster.PostOpMode.opReverted, context1, 50_000, 1);
         // Second onboarding should succeed because the failed op's slot was refunded
         address account2 = address(0xaa02);
         bytes memory pmData2 =
@@ -1445,7 +1445,7 @@ contract PaymasterHubSolidarityTest is Test {
         (bytes memory context2,) = hub.validatePaymasterUserOp(userOp2, keccak256("hash2"), MAX_COST);
         // Successful op — counter stays incremented (no refund)
         vm.prank(address(entryPoint));
-        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context2, 50_000);
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context2, 50_000, 1);
         // Third onboarding should now be blocked (limit of 1 reached)
         address account3 = address(0xaa03);
         bytes memory pmData3 =
