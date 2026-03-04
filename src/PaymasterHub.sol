@@ -1689,6 +1689,20 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     }
 
     function _validateRules(PackedUserOperation calldata userOp, uint32 ruleId, bytes32 orgId) private view {
+        bytes calldata callData = userOp.callData;
+        if (callData.length < 4) revert InvalidPaymasterData();
+
+        // For RULE_ID_GENERIC, executeBatch needs per-inner-call validation
+        if (ruleId == RULE_ID_GENERIC) {
+            bytes4 outerSelector = bytes4(callData[0:4]);
+            // executeBatch(address[],uint256[],bytes[]) or executeBatch(address[],bytes[])
+            if (outerSelector == bytes4(0x47e1da2a) || outerSelector == bytes4(0x18dfb3c7)) {
+                _validateBatchRules(callData, outerSelector, orgId);
+                return;
+            }
+        }
+
+        // Single-call path (existing logic)
         (address target, bytes4 selector) = _extractTargetSelector(userOp, ruleId);
 
         mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
@@ -1700,6 +1714,49 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         if (rule.maxCallGasHint > 0) {
             (, uint128 callGasLimit) = UserOpLib.unpackAccountGasLimits(userOp.accountGasLimits);
             if (callGasLimit > rule.maxCallGasHint) revert GasTooHigh();
+        }
+    }
+
+    /// @dev Validates that every inner call in an executeBatch is allowed by org rules.
+    ///      Decodes the batch targets and datas, then checks each (target, selector) pair.
+    ///      Gas hints are not checked per-call (total callGasLimit still applies via FeeCaps).
+    ///      Inner calls with < 4 bytes of data use selector bytes4(0) (treated as raw ETH transfer / fallback).
+    function _validateBatchRules(bytes calldata callData, bytes4 outerSelector, bytes32 orgId) private view {
+        mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
+
+        if (outerSelector == bytes4(0x47e1da2a)) {
+            // executeBatch(address[],uint256[],bytes[]) — PasskeyAccount pattern
+            (address[] memory targets,, bytes[] memory datas) =
+                abi.decode(callData[4:], (address[], uint256[], bytes[]));
+            if (targets.length != datas.length) revert ArrayLengthMismatch();
+            for (uint256 i = 0; i < targets.length;) {
+                bytes4 innerSelector;
+                if (datas[i].length >= 4) {
+                    bytes memory d = datas[i];
+                    assembly { innerSelector := mload(add(d, 0x20)) }
+                }
+                Rule storage rule = rules[targets[i]][innerSelector];
+                if (!rule.allowed) revert RuleDenied(targets[i], innerSelector);
+                unchecked {
+                    ++i;
+                }
+            }
+        } else {
+            // executeBatch(address[],bytes[]) — SimpleAccount pattern (0x18dfb3c7)
+            (address[] memory targets, bytes[] memory datas) = abi.decode(callData[4:], (address[], bytes[]));
+            if (targets.length != datas.length) revert ArrayLengthMismatch();
+            for (uint256 i = 0; i < targets.length;) {
+                bytes4 innerSelector;
+                if (datas[i].length >= 4) {
+                    bytes memory d = datas[i];
+                    assembly { innerSelector := mload(add(d, 0x20)) }
+                }
+                Rule storage rule = rules[targets[i]][innerSelector];
+                if (!rule.allowed) revert RuleDenied(targets[i], innerSelector);
+                unchecked {
+                    ++i;
+                }
+            }
         }
     }
 
@@ -1739,14 +1796,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
                 }
                 selector = bytes4(selector);
             }
-            // Check for executeBatch(address[],bytes[]) - 0x18dfb3c7 (SimpleAccount pattern)
-            else if (selector == 0x18dfb3c7) {
-                target = userOp.sender;
-            }
-            // Check for executeBatch(address[],uint256[],bytes[]) - 0x47e1da2a (PasskeyAccount pattern)
-            else if (selector == 0x47e1da2a) {
-                target = userOp.sender;
-            } else {
+            // For RULE_ID_GENERIC, executeBatch selectors (0x47e1da2a, 0x18dfb3c7) are
+            // intercepted by _validateRules → _validateBatchRules before reaching here.
+            // Any other outer selector (including non-execute custom functions) falls through.
+            else {
                 target = userOp.sender;
             }
         } else if (ruleId == RULE_ID_EXECUTOR) {
