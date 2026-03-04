@@ -336,19 +336,20 @@ contract PasskeyPaymasterIntegrationTest is Test {
     }
 
     /*══════════════════════════════════════════════════════════════════════
-                    EXECUTEBATCH() COMPATIBILITY TESTS
+                    EXECUTEBATCH() INNER-CALL RULE VALIDATION TESTS
     ══════════════════════════════════════════════════════════════════════*/
 
-    function testExecuteBatch_PasskeyAccountSelector_Recognized() public {
+    function testExecuteBatch_AllInnerCallsWhitelisted_Succeeds() public {
         PasskeyAccount account = _createPasskeyAccount();
         _setupDefaultBudget(address(account));
 
-        // For batch operations, PaymasterHub validates at account level
-        // So we need to allow the executeBatch selector on the account itself
-        vm.prank(orgAdmin);
-        hub.setRule(ORG_ID, address(account), EXECUTE_BATCH_SELECTOR, true, 0);
+        // Whitelist each inner target/selector individually
+        vm.startPrank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomethingElse.selector, true, 0);
+        vm.stopPrank();
 
-        // Build executeBatch calldata
+        // Build executeBatch with 2 inner calls
         address[] memory targets = new address[](2);
         targets[0] = address(mockTarget);
         targets[1] = address(mockTarget);
@@ -367,19 +368,18 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
-        // Should succeed because we whitelisted the executeBatch selector
         vm.prank(address(entryPoint));
         (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
 
-        assertEq(validationData, 0, "executeBatch should be allowed");
+        assertEq(validationData, 0, "executeBatch with all whitelisted inner calls should pass");
         assertTrue(context.length > 0);
     }
 
-    function testExecuteBatch_PasskeyAccountSelector_Denied() public {
+    function testExecuteBatch_NoRulesSet_DeniesFirstInnerCall() public {
         PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
 
-        // Don't set any rules - executeBatch should be denied
-
+        // Don't set any rules — first inner call should be denied
         address[] memory targets = new address[](1);
         targets[0] = address(mockTarget);
 
@@ -397,37 +397,97 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         vm.prank(address(entryPoint));
         vm.expectRevert(
-            abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(account), EXECUTE_BATCH_SELECTOR)
+            abi.encodeWithSelector(
+                PaymasterHub.RuleDenied.selector, address(mockTarget), MockTarget.doSomething.selector
+            )
         );
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
     }
 
-    function testExecuteBatch_SelectorCorrectlyExtracted() public {
+    function testExecuteBatch_InnerSelectorsCorrectlyExtracted() public {
         PasskeyAccount account = _createPasskeyAccount();
         _setupDefaultBudget(address(account));
 
-        // Verify that 0x47e1da2a (PasskeyAccount executeBatch) is correctly recognized
-        // by allowing it and confirming validation passes
-
+        // Only whitelist doSomething, NOT doSomethingElse
         vm.prank(orgAdmin);
-        hub.setRule(ORG_ID, address(account), bytes4(0x47e1da2a), true, 0);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
-        address[] memory targets = new address[](1);
+        // Build batch with both calls — second should be denied
+        address[] memory targets = new address[](2);
         targets[0] = address(mockTarget);
+        targets[1] = address(mockTarget);
 
-        uint256[] memory values = new uint256[](1);
+        uint256[] memory values = new uint256[](2);
         values[0] = 0;
+        values[1] = 0;
 
-        bytes[] memory datas = new bytes[](1);
-        datas[0] = "";
+        bytes[] memory datas = new bytes[](2);
+        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        datas[1] = abi.encodeWithSelector(MockTarget.doSomethingElse.selector);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
 
-        // Verify the selector in calldata is what we expect
-        bytes4 extractedSelector = bytes4(callData[0]) | (bytes4(callData[1]) >> 8) | (bytes4(callData[2]) >> 16)
-            | (bytes4(callData[3]) >> 24);
-        assertEq(extractedSelector, bytes4(0x47e1da2a), "Selector should be PasskeyAccount executeBatch");
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
+        vm.prank(address(entryPoint));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PaymasterHub.RuleDenied.selector, address(mockTarget), MockTarget.doSomethingElse.selector
+            )
+        );
+        hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+    }
+
+    function testExecuteBatch_OneInnerCallDenied_RevertsPrecise() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        MockTarget target2 = new MockTarget();
+
+        // Whitelist target1.doSomething and target2.doSomethingElse
+        vm.startPrank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+        hub.setRule(ORG_ID, address(target2), MockTarget.doSomethingElse.selector, true, 0);
+        vm.stopPrank();
+
+        // Batch calls target2.doSomething (NOT whitelisted — only doSomethingElse is)
+        address[] memory targets = new address[](2);
+        targets[0] = address(mockTarget);
+        targets[1] = address(target2);
+
+        uint256[] memory values = new uint256[](2);
+        values[0] = 0;
+        values[1] = 0;
+
+        bytes[] memory datas = new bytes[](2);
+        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        datas[1] = abi.encodeWithSelector(MockTarget.doSomething.selector); // Wrong selector for target2
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(
+            abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(target2), MockTarget.doSomething.selector)
+        );
+        hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+    }
+
+    function testExecuteBatch_EmptyBatch_Succeeds() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // Empty batch — no inner calls to deny
+        address[] memory targets = new address[](0);
+        uint256[] memory values = new uint256[](0);
+        bytes[] memory datas = new bytes[](0);
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
         bytes memory paymasterAndData =
             _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
 
@@ -436,7 +496,549 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
 
-        assertEq(validationData, 0, "Should pass with correct selector whitelisted");
+        assertEq(validationData, 0, "Empty batch should pass");
+        assertTrue(context.length > 0);
+    }
+
+    function testExecuteBatch_SingleInnerCall_MatchesExecuteBehavior() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // Whitelist the inner call
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        // Single inner call in batch — should work same as execute()
+        address[] memory targets = new address[](1);
+        targets[0] = address(mockTarget);
+
+        uint256[] memory values = new uint256[](1);
+        values[0] = 0;
+
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+
+        assertEq(validationData, 0, "Single-call batch should match execute behavior");
+        assertTrue(context.length > 0);
+    }
+
+    function testExecuteBatch_OnboardingSelectors_RegisterAndJoinAndClaim() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // Deploy mock org contracts
+        MockRegistry mockRegistry = new MockRegistry();
+        MockQuickJoin mockQuickJoin = new MockQuickJoin();
+        MockEligibility mockEligibility = new MockEligibility();
+
+        // Whitelist all 3 onboarding selectors
+        vm.startPrank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockRegistry), MockRegistry.registerAccount.selector, true, 0);
+        hub.setRule(ORG_ID, address(mockQuickJoin), MockQuickJoin.quickJoinNoUser.selector, true, 0);
+        hub.setRule(ORG_ID, address(mockEligibility), MockEligibility.claimVouchedHat.selector, true, 0);
+        vm.stopPrank();
+
+        // Build the exact same batch as PasskeyOnboardingService.deployWithExistingCredential
+        address[] memory targets = new address[](3);
+        targets[0] = address(mockRegistry);
+        targets[1] = address(mockQuickJoin);
+        targets[2] = address(mockEligibility);
+
+        uint256[] memory values = new uint256[](3);
+        values[0] = 0;
+        values[1] = 0;
+        values[2] = 0;
+
+        bytes[] memory datas = new bytes[](3);
+        datas[0] = abi.encodeWithSelector(MockRegistry.registerAccount.selector, "testuser");
+        datas[1] = abi.encodeWithSelector(MockQuickJoin.quickJoinNoUser.selector);
+        datas[2] = abi.encodeWithSelector(MockEligibility.claimVouchedHat.selector, uint256(42));
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+
+        assertEq(validationData, 0, "Onboarding batch (register + join + claim) should pass");
+        assertTrue(context.length > 0);
+    }
+
+    function testExecuteBatch_OnboardingSelectors_MissingClaimRule_Denied() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        MockRegistry mockRegistry = new MockRegistry();
+        MockQuickJoin mockQuickJoin = new MockQuickJoin();
+        MockEligibility mockEligibility = new MockEligibility();
+
+        // Whitelist register and join, but NOT claimVouchedHat
+        vm.startPrank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockRegistry), MockRegistry.registerAccount.selector, true, 0);
+        hub.setRule(ORG_ID, address(mockQuickJoin), MockQuickJoin.quickJoinNoUser.selector, true, 0);
+        // Deliberately NOT whitelisting claimVouchedHat
+        vm.stopPrank();
+
+        address[] memory targets = new address[](3);
+        targets[0] = address(mockRegistry);
+        targets[1] = address(mockQuickJoin);
+        targets[2] = address(mockEligibility);
+
+        uint256[] memory values = new uint256[](3);
+        bytes[] memory datas = new bytes[](3);
+        datas[0] = abi.encodeWithSelector(MockRegistry.registerAccount.selector, "testuser");
+        datas[1] = abi.encodeWithSelector(MockQuickJoin.quickJoinNoUser.selector);
+        datas[2] = abi.encodeWithSelector(MockEligibility.claimVouchedHat.selector, uint256(42));
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PaymasterHub.RuleDenied.selector, address(mockEligibility), MockEligibility.claimVouchedHat.selector
+            )
+        );
+        hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+    }
+
+    function testExecuteBatch_MixedTargets_AllWhitelisted() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        MockTarget target2 = new MockTarget();
+        MockTarget target3 = new MockTarget();
+
+        // Whitelist all 3 different targets with different selectors
+        vm.startPrank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+        hub.setRule(ORG_ID, address(target2), MockTarget.doSomethingElse.selector, true, 0);
+        hub.setRule(ORG_ID, address(target3), MockTarget.doWithValue.selector, true, 0);
+        vm.stopPrank();
+
+        address[] memory targets = new address[](3);
+        targets[0] = address(mockTarget);
+        targets[1] = address(target2);
+        targets[2] = address(target3);
+
+        uint256[] memory values = new uint256[](3);
+        bytes[] memory datas = new bytes[](3);
+        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        datas[1] = abi.encodeWithSelector(MockTarget.doSomethingElse.selector);
+        datas[2] = abi.encodeWithSelector(MockTarget.doWithValue.selector);
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+
+        assertEq(validationData, 0, "All whitelisted mixed targets should pass");
+        assertTrue(context.length > 0);
+    }
+
+    function testExecuteBatch_MixedTargets_SecondDenied() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        MockTarget target2 = new MockTarget();
+
+        // Only whitelist first target, NOT second
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        address[] memory targets = new address[](2);
+        targets[0] = address(mockTarget);
+        targets[1] = address(target2);
+
+        uint256[] memory values = new uint256[](2);
+        bytes[] memory datas = new bytes[](2);
+        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        datas[1] = abi.encodeWithSelector(MockTarget.doSomethingElse.selector);
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PaymasterHub.RuleDenied.selector, address(target2), MockTarget.doSomethingElse.selector
+            )
+        );
+        hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+    }
+
+    function testExecuteBatch_SimpleAccountPattern_Recognized() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // Whitelist the inner call
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        // Build SimpleAccount executeBatch(address[],bytes[]) with selector 0x18dfb3c7
+        address[] memory targets = new address[](1);
+        targets[0] = address(mockTarget);
+
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+
+        bytes memory callData = abi.encodeWithSelector(SIMPLE_EXECUTE_BATCH_SELECTOR, targets, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+
+        assertEq(validationData, 0, "SimpleAccount executeBatch should validate inner calls");
+        assertTrue(context.length > 0);
+    }
+
+    function testExecuteBatch_SimpleAccountPattern_Denied() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // No rule set — inner call should be denied
+        address[] memory targets = new address[](1);
+        targets[0] = address(mockTarget);
+
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+
+        bytes memory callData = abi.encodeWithSelector(SIMPLE_EXECUTE_BATCH_SELECTOR, targets, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PaymasterHub.RuleDenied.selector, address(mockTarget), MockTarget.doSomething.selector
+            )
+        );
+        hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+    }
+
+    function testExecuteBatch_InnerCallEmptyData_UsesZeroSelector() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // Inner call with empty bytes — selector defaults to bytes4(0)
+        address[] memory targets = new address[](1);
+        targets[0] = address(mockTarget);
+
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = ""; // Empty calldata — raw transfer / fallback
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Should be denied: (mockTarget, bytes4(0)) is not whitelisted
+        vm.prank(address(entryPoint));
+        vm.expectRevert(abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(mockTarget), bytes4(0)));
+        hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+    }
+
+    function testExecuteBatch_InnerCallShortData_UsesZeroSelector() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // Inner call with < 4 bytes — selector defaults to bytes4(0)
+        address[] memory targets = new address[](1);
+        targets[0] = address(mockTarget);
+
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = hex"aabb"; // Only 2 bytes
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(mockTarget), bytes4(0)));
+        hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+    }
+
+    function testExecuteBatch_EmptyDataWhitelisted_Passes() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // Whitelist bytes4(0) for mockTarget — allowing raw transfer / fallback
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), bytes4(0), true, 0);
+
+        address[] memory targets = new address[](1);
+        targets[0] = address(mockTarget);
+
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = ""; // Empty calldata
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+
+        assertEq(validationData, 0, "Empty data should pass when bytes4(0) is whitelisted");
+        assertTrue(context.length > 0);
+    }
+
+    function testExecuteBatch_NestedBatchInsideBatch_DeniedUnlessWhitelisted() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // Only whitelist the benign inner call, NOT executeBatch on the account itself
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        // Construct a nested executeBatch as inner calldata targeting the account
+        address[] memory innerTargets = new address[](1);
+        innerTargets[0] = address(mockTarget);
+        uint256[] memory innerValues = new uint256[](1);
+        bytes[] memory innerDatas = new bytes[](1);
+        innerDatas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory nestedBatchCalldata =
+            abi.encodeWithSelector(EXECUTE_BATCH_SELECTOR, innerTargets, innerValues, innerDatas);
+
+        // Outer batch: one call targets the account itself with executeBatch
+        address[] memory targets = new address[](1);
+        targets[0] = address(account); // Self-call
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = nestedBatchCalldata; // executeBatch as inner call
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Should be denied: (account, executeBatch_selector) is not whitelisted
+        vm.prank(address(entryPoint));
+        vm.expectRevert(
+            abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(account), EXECUTE_BATCH_SELECTOR)
+        );
+        hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+    }
+
+    function testExecuteBatch_NestedExecuteInsideBatch_DeniedUnlessWhitelisted() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // Whitelist benign call, NOT execute() on the account itself
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        // Inner call: execute(address,uint256,bytes) targeting account itself
+        bytes memory innerExecuteCalldata = abi.encodeWithSelector(
+            EXECUTE_SELECTOR, address(mockTarget), uint256(0), abi.encodeWithSelector(MockTarget.doSomething.selector)
+        );
+
+        address[] memory targets = new address[](1);
+        targets[0] = address(account); // Self-call via execute()
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = innerExecuteCalldata;
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Should be denied: (account, execute_selector) is not whitelisted
+        vm.prank(address(entryPoint));
+        vm.expectRevert(abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(account), EXECUTE_SELECTOR));
+        hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+    }
+
+    function testExecuteBatch_CoarseMode_DeniedWhenAccountRuleNotSet() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // Whitelist inner calls for GENERIC mode, but NOT the account-level executeBatch
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        address[] memory targets = new address[](1);
+        targets[0] = address(mockTarget);
+
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        // Use COARSE mode — needs (account, executeBatch) rule, not inner rules
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_COARSE, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(
+            abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(account), EXECUTE_BATCH_SELECTOR)
+        );
+        hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+    }
+
+    function testExecuteBatch_MaxCallGasHint_IgnoredInBatchPath() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // Set rule with a restrictive gas hint (50k)
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 50000);
+
+        address[] memory targets = new address[](1);
+        targets[0] = address(mockTarget);
+
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        // UserOp has callGasLimit=500000 (from _createUserOp), which exceeds the 50k hint
+        // In single execute() path this would revert with GasTooHigh, but batch ignores gas hints
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+
+        // Passes: batch path intentionally skips per-call gas hint checks
+        assertEq(validationData, 0, "Batch path should ignore maxCallGasHint");
+        assertTrue(context.length > 0);
+    }
+
+    function testExecuteBatch_CoarseMode_StillUsesAccountLevel() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // With RULE_ID_COARSE, executeBatch should still use (sender, executeBatch) — old behavior
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(account), EXECUTE_BATCH_SELECTOR, true, 0);
+
+        address[] memory targets = new address[](1);
+        targets[0] = address(mockTarget);
+
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_COARSE, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+
+        assertEq(validationData, 0, "COARSE mode should still use account-level validation for batch");
+        assertTrue(context.length > 0);
+    }
+
+    function testExecuteBatch_ExecutorMode_StillUsesAccountLevel() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        // With RULE_ID_EXECUTOR, executeBatch should still use (sender, executeBatch)
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(account), EXECUTE_BATCH_SELECTOR, true, 0);
+
+        address[] memory targets = new address[](1);
+        targets[0] = address(mockTarget);
+
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_EXECUTOR, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+
+        assertEq(validationData, 0, "EXECUTOR mode should still use account-level validation for batch");
+        assertTrue(context.length > 0);
+    }
+
+    function testExecuteBatch_OrgOperationSelectors_VouchAndVote() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        MockEligibility mockEligibility = new MockEligibility();
+        MockVoting mockVoting = new MockVoting();
+        MockTaskManager mockTaskManager = new MockTaskManager();
+
+        // Whitelist common org member operations
+        vm.startPrank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockEligibility), MockEligibility.vouchFor.selector, true, 0);
+        hub.setRule(ORG_ID, address(mockVoting), MockVoting.vote.selector, true, 0);
+        hub.setRule(ORG_ID, address(mockTaskManager), MockTaskManager.claimTask.selector, true, 0);
+        vm.stopPrank();
+
+        address[] memory targets = new address[](3);
+        targets[0] = address(mockEligibility);
+        targets[1] = address(mockVoting);
+        targets[2] = address(mockTaskManager);
+
+        uint256[] memory values = new uint256[](3);
+        bytes[] memory datas = new bytes[](3);
+        datas[0] = abi.encodeWithSelector(MockEligibility.vouchFor.selector, address(0xBEEF), uint256(42));
+        datas[1] = abi.encodeWithSelector(MockVoting.vote.selector, uint256(1), uint8(0));
+        datas[2] = abi.encodeWithSelector(MockTaskManager.claimTask.selector, uint256(7));
+
+        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
+        bytes memory paymasterAndData =
+            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
+
+        assertEq(validationData, 0, "Batch of org operations should pass when all whitelisted");
         assertTrue(context.length > 0);
     }
 
@@ -1150,4 +1752,30 @@ contract MockTarget {
         value += msg.value;
         return true;
     }
+}
+
+/// @notice Mock org contracts for testing onboarding and org operation batch selectors
+contract MockRegistry {
+    function registerAccount(string calldata) external {}
+}
+
+contract MockQuickJoin {
+    function quickJoinNoUser() external {}
+    function quickJoinWithUser() external {}
+}
+
+contract MockEligibility {
+    function claimVouchedHat(uint256) external {}
+    function vouchFor(address, uint256) external {}
+}
+
+contract MockVoting {
+    function vote(uint256, uint8) external {}
+    function createProposal(bytes calldata, bytes32, uint32, uint8) external {}
+}
+
+contract MockTaskManager {
+    function claimTask(uint256) external {}
+    function submitTask(uint256, bytes32) external {}
+    function applyForTask(uint256, bytes32) external {}
 }
