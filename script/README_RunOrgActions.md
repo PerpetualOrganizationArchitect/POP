@@ -120,7 +120,7 @@ forge script script/RunOrgActions.s.sol:RunOrgActions \
 
 1. **Generate ephemeral test accounts** using `makeAddrAndKey()` (no keys stored!)
 2. **Fund accounts**: Deployer sends 0.01 ETH to each for gas
-3. **Join organization**: All accounts call `QuickJoin.quickJoinNoUser()` → receive MEMBER hat
+3. **Join organization**: All accounts call `QuickJoin.quickJoinWithUser()` → receive MEMBER hat
 
 **Why this works:**
 - QuickJoin grants MEMBER role (index 0) to everyone

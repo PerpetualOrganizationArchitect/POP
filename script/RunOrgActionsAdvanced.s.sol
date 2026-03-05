@@ -13,6 +13,7 @@ import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {Executor, IExecutor} from "../src/Executor.sol";
 import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
 import {OrgRegistry} from "../src/OrgRegistry.sol";
+import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
 import {IEligibilityModule} from "../src/interfaces/IHatsModules.sol";
 import {ModuleTypes} from "../src/libs/ModuleTypes.sol";
 import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
@@ -340,24 +341,29 @@ contract RunOrgActionsAdvanced is Script {
         console.log("  [OK] Each account funded with", gasAllowance / 1e18, "ETH");
 
         QuickJoin quickJoin = QuickJoin(org.quickJoin);
+        UniversalAccountRegistry registry = UniversalAccountRegistry(address(quickJoin.accountRegistry()));
 
-        // Member 1 joins (registers username only, no hats - vouching required for MEMBER hat)
-        console.log("\n-> Member 1 joining (username only, no hats)...");
+        // Register usernames then join (no hats - vouching required for MEMBER hat)
+        console.log("\n-> Member 1 registering & joining (no hats)...");
         vm.broadcast(memberKeys.member1);
-        quickJoin.quickJoinNoUser();
-        console.log("  [OK] Registered username");
+        registry.registerAccount("member1");
+        vm.broadcast(memberKeys.member1);
+        quickJoin.quickJoinWithUser();
+        console.log("  [OK] Joined org");
 
-        // Member 2 joins
-        console.log("-> Member 2 joining (username only, no hats)...");
+        console.log("-> Member 2 registering & joining (no hats)...");
         vm.broadcast(memberKeys.member2);
-        quickJoin.quickJoinNoUser();
-        console.log("  [OK] Registered username");
+        registry.registerAccount("member2");
+        vm.broadcast(memberKeys.member2);
+        quickJoin.quickJoinWithUser();
+        console.log("  [OK] Joined org");
 
-        // Coordinator joins
-        console.log("-> Coordinator joining (username only, no hats)...");
+        console.log("-> Coordinator registering & joining (no hats)...");
         vm.broadcast(memberKeys.coordinator);
-        quickJoin.quickJoinNoUser();
-        console.log("  [OK] Registered username");
+        registry.registerAccount("coordinator");
+        vm.broadcast(memberKeys.coordinator);
+        quickJoin.quickJoinWithUser();
+        console.log("  [OK] Joined org");
 
         console.log("\n[OK] All Members Registered");
         console.log("  (Note: No hats minted yet - vouching required for MEMBER and COORDINATOR hats)");

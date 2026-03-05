@@ -13,6 +13,7 @@ import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {Executor, IExecutor} from "../src/Executor.sol";
 import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
 import {OrgRegistry} from "../src/OrgRegistry.sol";
+import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
 import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
 import {ModulesFactory} from "../src/factories/ModulesFactory.sol";
 
@@ -330,23 +331,28 @@ contract RunOrgActions is Script {
         console.log("  [OK] Each account funded with", gasAllowance / 1e18, "ETH");
 
         QuickJoin quickJoin = QuickJoin(org.quickJoin);
+        UniversalAccountRegistry registry = UniversalAccountRegistry(address(quickJoin.accountRegistry()));
 
-        // Member 1 joins (will get MEMBER role - role index 0)
-        console.log("\n-> Member 1 joining...");
+        // Register usernames then join
+        console.log("\n-> Member 1 registering & joining...");
         vm.broadcast(memberKeys.member1);
-        quickJoin.quickJoinNoUser();
+        registry.registerAccount("member1");
+        vm.broadcast(memberKeys.member1);
+        quickJoin.quickJoinWithUser();
         console.log("  [OK] Joined successfully");
 
-        // Member 2 joins
-        console.log("-> Member 2 joining...");
+        console.log("-> Member 2 registering & joining...");
         vm.broadcast(memberKeys.member2);
-        quickJoin.quickJoinNoUser();
+        registry.registerAccount("member2");
+        vm.broadcast(memberKeys.member2);
+        quickJoin.quickJoinWithUser();
         console.log("  [OK] Joined successfully");
 
-        // Coordinator joins
-        console.log("-> Coordinator joining...");
+        console.log("-> Coordinator registering & joining...");
         vm.broadcast(memberKeys.coordinator);
-        quickJoin.quickJoinNoUser();
+        registry.registerAccount("coordinator");
+        vm.broadcast(memberKeys.coordinator);
+        quickJoin.quickJoinWithUser();
         console.log("  [OK] Joined successfully");
 
         console.log("\n[OK] All Members Onboarded");
