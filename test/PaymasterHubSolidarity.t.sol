@@ -1321,11 +1321,11 @@ contract PaymasterHubSolidarityTest is Test {
     function _buildPaymasterData(
         bytes32 orgId,
         uint8 subjectType,
-        bytes20 subjectId,
+        bytes32 subjectId,
         uint32 ruleId,
         uint64 mailboxCommit8
     ) internal view returns (bytes memory) {
-        // ERC-4337 v0.7 format: paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(20) | ruleId(4) | mailboxCommit(8) = 118 bytes
+        // ERC-4337 v0.7 format: paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(32) | ruleId(4) | mailboxCommit(8) = 130 bytes
         return abi.encodePacked(
             address(hub),
             uint128(200_000),
@@ -1363,7 +1363,7 @@ contract PaymasterHubSolidarityTest is Test {
         vm.prank(poaManager);
         hub.setOnboardingConfig(uint128(MAX_COST), 10, true, address(0));
         bytes memory pmData =
-            _buildPaymasterData(ORG_ALPHA, SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+            _buildPaymasterData(ORG_ALPHA, SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC, uint64(0));
         PackedUserOperation memory userOp = _buildUserOp(address(0xdead), "", pmData);
         userOp.initCode = hex"01";
         vm.prank(address(entryPoint));
@@ -1384,7 +1384,7 @@ contract PaymasterHubSolidarityTest is Test {
         hub.setOnboardingConfig(uint128(MAX_COST), 10, true, address(0));
         address deployed = address(new DummySender());
         bytes memory pmData =
-            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC, uint64(0));
         PackedUserOperation memory userOp = _buildUserOp(deployed, "", pmData);
         userOp.initCode = hex"01";
         vm.prank(address(entryPoint));
@@ -1401,7 +1401,7 @@ contract PaymasterHubSolidarityTest is Test {
         hub.setOnboardingConfig(uint128(MAX_COST), 10, true, address(0));
         address newAccount = address(0xbeef);
         bytes memory pmData =
-            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC, uint64(0));
         PackedUserOperation memory userOp = _buildUserOp(newAccount, "", pmData);
         userOp.initCode = hex"01";
         vm.prank(address(entryPoint));
@@ -1427,7 +1427,7 @@ contract PaymasterHubSolidarityTest is Test {
         hub.setOnboardingConfig(uint128(MAX_COST), 1, true, address(0));
         address account1 = address(0xaa01);
         bytes memory pmData1 =
-            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC, uint64(0));
         PackedUserOperation memory userOp1 = _buildUserOp(account1, "", pmData1);
         userOp1.initCode = hex"01";
         vm.prank(address(entryPoint));
@@ -1438,7 +1438,7 @@ contract PaymasterHubSolidarityTest is Test {
         // Second onboarding should succeed because the failed op's slot was refunded
         address account2 = address(0xaa02);
         bytes memory pmData2 =
-            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC, uint64(0));
         PackedUserOperation memory userOp2 = _buildUserOp(account2, "", pmData2);
         userOp2.initCode = hex"01";
         vm.prank(address(entryPoint));
@@ -1449,7 +1449,7 @@ contract PaymasterHubSolidarityTest is Test {
         // Third onboarding should now be blocked (limit of 1 reached)
         address account3 = address(0xaa03);
         bytes memory pmData3 =
-            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC, uint64(0));
         PackedUserOperation memory userOp3 = _buildUserOp(account3, "", pmData3);
         userOp3.initCode = hex"01";
         vm.prank(address(entryPoint));
@@ -1467,7 +1467,7 @@ contract PaymasterHubSolidarityTest is Test {
         hub.setOnboardingConfig(uint128(MAX_COST), 10, true, registry);
         address deployed = address(new DummySender());
         bytes memory pmData =
-            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC, uint64(0));
         // Build execute(registryAddress, 0, registerAccount("alice"))
         bytes memory innerData = abi.encodeWithSelector(bytes4(0xbff6de20), "alice");
         bytes memory execCallData = abi.encodeWithSelector(bytes4(0xb61d27f6), registry, uint256(0), innerData);
@@ -1488,7 +1488,7 @@ contract PaymasterHubSolidarityTest is Test {
         hub.setOnboardingConfig(uint128(MAX_COST), 10, true, registry);
         address deployed = address(new DummySender());
         bytes memory pmData =
-            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC, uint64(0));
         // Build execute(wrongTarget, 0, registerAccount("alice"))
         bytes memory innerData = abi.encodeWithSelector(bytes4(0xbff6de20), "alice");
         bytes memory execCallData = abi.encodeWithSelector(bytes4(0xb61d27f6), address(0xBAD), uint256(0), innerData);
@@ -1509,7 +1509,7 @@ contract PaymasterHubSolidarityTest is Test {
         hub.setOnboardingConfig(uint128(MAX_COST), 10, true, registry);
         address deployed = address(new DummySender());
         bytes memory pmData =
-            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC, uint64(0));
         // Build execute(registry, 0, someOtherFunction("data"))
         bytes memory innerData = abi.encodeWithSelector(bytes4(0xdeadbeef), "alice");
         bytes memory execCallData = abi.encodeWithSelector(bytes4(0xb61d27f6), registry, uint256(0), innerData);
@@ -1530,7 +1530,7 @@ contract PaymasterHubSolidarityTest is Test {
         hub.setOnboardingConfig(uint128(MAX_COST), 10, true, registry);
         address deployed = address(new DummySender());
         bytes memory pmData =
-            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes20(0), RULE_ID_GENERIC, uint64(0));
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC, uint64(0));
         // Build arbitrary callData (not execute())
         bytes memory badCallData = abi.encodeWithSelector(bytes4(0x12345678), address(0), uint256(0));
         PackedUserOperation memory userOp = _buildUserOp(deployed, badCallData, pmData);
@@ -1552,7 +1552,7 @@ contract PaymasterHubSolidarityTest is Test {
         vm.prank(poaManager);
         hub.setGracePeriodConfig(90, 100 ether, 0.003 ether);
         hub.donateToSolidarity{value: 0.001 ether}();
-        bytes32 accountKey = keccak256(abi.encodePacked(SUBJECT_TYPE_ACCOUNT, bytes20(user1)));
+        bytes32 accountKey = keccak256(abi.encodePacked(SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(user1)))));
         vm.startPrank(orgAdmin);
         hub.setBudget(ORG_ALPHA, accountKey, 10 ether, 1 days);
         hub.setRule(ORG_ALPHA, address(0x9999), bytes4(0xdeadbeef), true, 0);
@@ -1560,8 +1560,9 @@ contract PaymasterHubSolidarityTest is Test {
         bytes memory innerCall = abi.encodeWithSelector(
             bytes4(0xb61d27f6), address(0x9999), uint256(0), abi.encodeWithSelector(bytes4(0xdeadbeef))
         );
-        bytes memory pmData =
-            _buildPaymasterData(ORG_ALPHA, SUBJECT_TYPE_ACCOUNT, bytes20(user1), RULE_ID_GENERIC, uint64(0));
+        bytes memory pmData = _buildPaymasterData(
+            ORG_ALPHA, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(user1))), RULE_ID_GENERIC, uint64(0)
+        );
         PackedUserOperation memory userOp = _buildUserOp(user1, innerCall, pmData);
         vm.prank(address(entryPoint));
         vm.expectRevert(PaymasterHub.InsufficientFunds.selector);
