@@ -254,6 +254,10 @@ contract DeployInfrastructure is Script {
             );
         console.log("UniversalPasskeyFactory set on OrgDeployer");
 
+        // Wire up universal factory to GlobalAccountRegistry (owner = deployer EOA)
+        UniversalAccountRegistry(globalAccountRegistry).setPasskeyFactory(universalPasskeyFactory);
+        console.log("UniversalPasskeyFactory set on GlobalAccountRegistry");
+
         // Emit InfrastructureDeployed event for subgraph dynamic discovery
         pm.registerInfrastructure(
             orgDeployer, orgRegistry, implRegistry, paymasterHub, globalAccountRegistry, universalPasskeyFactory

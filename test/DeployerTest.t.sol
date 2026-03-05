@@ -40,6 +40,7 @@ import {SwitchableBeacon} from "../src/SwitchableBeacon.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
+import {PackedUserOperation, UserOpLib} from "../src/interfaces/PackedUserOperation.sol";
 
 // Define events for testing
 interface IEligibilityModuleEvents {
@@ -5583,5 +5584,159 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.prank(address(poaManager));
         vm.expectRevert(abi.encodeWithSignature("ArrayLengthMismatch()"));
         paymasterHub.registerAndConfigureOrg(orgId, 1, config);
+    }
+
+    /*══════════════════════════════════════════════════════════════════════════
+     *  INTEGRATION: Deploy org → validate onboarding batch UserOp
+     *  Mirrors the frontend flow: executeBatch(registerAndQuickJoinWithPasskey,
+     *  claimVouchedHat) sponsored via SUBJECT_TYPE_HAT on org budget.
+     *══════════════════════════════════════════════════════════════════════════*/
+    function testOnboardingBatchValidation_RegisterAndClaimHat() public {
+        bytes32 orgId = keccak256("ONBOARDING-INTEGRATION-ORG");
+
+        // ── 1. Deploy org with autoWhitelist + funding ──
+        string[] memory names = new string[](2);
+        names[0] = "MEMBER";
+        names[1] = "EXECUTIVE";
+        string[] memory images = new string[](2);
+        images[0] = "";
+        images[1] = "";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.PaymasterConfig memory pmConfig = OrgDeployer.PaymasterConfig({
+            operatorRoleIndex: 1,
+            autoWhitelistContracts: true,
+            maxFeePerGas: 0,
+            maxPriorityFeePerGas: 0,
+            maxCallGas: 0,
+            maxVerificationGas: 0,
+            maxPreVerificationGas: 0,
+            defaultBudgetCapPerEpoch: 1 ether,
+            defaultBudgetEpochLen: 1 days
+        });
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: orgId,
+            orgName: "Onboarding Integration DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridQuorumPct: 50,
+            ddQuorumPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: pmConfig
+        });
+
+        vm.deal(orgOwner, 1 ether);
+        vm.prank(orgOwner);
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg{value: 0.5 ether}(params);
+
+        // ── 2. Retrieve role hat from OrgRegistry ──
+        uint256 memberHatId = orgRegistry.getRoleHat(orgId, 0); // MEMBER role = index 0
+        assertTrue(memberHatId != 0, "member hat should exist");
+
+        // Verify autowhitelist rules are in place
+        bytes4 rqjpSel = bytes4(
+            keccak256(
+                "registerAndQuickJoinWithPasskey((bytes32,bytes32,bytes32,uint256),string,uint256,uint256,(bytes,bytes,uint256,uint256,bytes32,bytes32))"
+            )
+        );
+        PaymasterHub.Rule memory rule = paymasterHub.getRule(orgId, result.quickJoin, rqjpSel);
+        assertTrue(rule.allowed, "registerAndQuickJoinWithPasskey should be whitelisted");
+
+        bytes4 cvhSel = bytes4(keccak256("claimVouchedHat(uint256)"));
+        rule = paymasterHub.getRule(orgId, result.eligibilityModule, cvhSel);
+        assertTrue(rule.allowed, "claimVouchedHat should be whitelisted");
+
+        // ── 3. Build executeBatch callData ──
+        address[] memory targets = new address[](2);
+        uint256[] memory values = new uint256[](2);
+        bytes[] memory datas = new bytes[](2);
+
+        targets[0] = result.quickJoin;
+        values[0] = 0;
+        // Encode registerAndQuickJoinWithPasskey with dummy args (only selector matters for rule validation)
+        datas[0] = abi.encodeWithSelector(
+            rqjpSel,
+            bytes32(0),
+            bytes32(0),
+            bytes32(0),
+            uint256(0),
+            "alice",
+            uint256(0),
+            uint256(0),
+            "",
+            "",
+            uint256(0),
+            uint256(0),
+            bytes32(0),
+            bytes32(0)
+        );
+
+        targets[1] = result.eligibilityModule;
+        values[1] = 0;
+        datas[1] = abi.encodeWithSelector(cvhSel, memberHatId);
+
+        bytes memory batchCallData = abi.encodeWithSelector(bytes4(0x47e1da2a), targets, values, datas);
+
+        // ── 4. Build paymasterAndData (SUBJECT_TYPE_HAT) ──
+        uint8 version = 1;
+        uint8 subjectTypeHat = 0x01;
+        bytes32 subjectId = bytes32(memberHatId);
+        uint32 ruleIdGeneric = 0;
+        uint64 mailboxCommit8 = 0;
+
+        bytes memory paymasterAndData = abi.encodePacked(
+            address(paymasterHub),
+            uint128(200_000), // paymasterVerificationGasLimit
+            uint128(100_000), // paymasterPostOpGasLimit
+            version,
+            orgId,
+            subjectTypeHat,
+            subjectId,
+            ruleIdGeneric,
+            mailboxCommit8
+        );
+
+        // ── 5. Build PackedUserOperation ──
+        address newAccountSender = address(0xBEEF1234);
+        PackedUserOperation memory userOp = PackedUserOperation({
+            sender: newAccountSender,
+            nonce: 0,
+            initCode: hex"01", // non-empty to simulate account creation
+            callData: batchCallData,
+            accountGasLimits: UserOpLib.packAccountGasLimits(500_000, 500_000),
+            preVerificationGas: 100_000,
+            gasFees: UserOpLib.packGasFees(1, 1),
+            paymasterAndData: paymasterAndData,
+            signature: ""
+        });
+
+        // ── 6. Validate ──
+        uint256 maxCost = 100_000;
+        vm.prank(ENTRY_POINT_V07);
+        (bytes memory context, uint256 validationData) =
+            paymasterHub.validatePaymasterUserOp(userOp, keccak256("test-op-hash"), maxCost);
+
+        assertEq(validationData, 0, "validation should succeed with no signature failure");
+        assertTrue(context.length > 0, "context should be populated");
     }
 }
