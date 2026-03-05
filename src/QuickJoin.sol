@@ -186,7 +186,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         emit ExecutorUpdated(newExec);
     }
 
-    function setUniversalFactory(address factory) external onlyExecutor {
+    function setUniversalFactory(address factory) external onlyMasterDeploy {
         _layout().universalFactory = IUniversalPasskeyAccountFactory(factory);
         emit UniversalFactoryUpdated(factory);
     }
