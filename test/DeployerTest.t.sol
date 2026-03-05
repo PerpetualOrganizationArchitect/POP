@@ -41,6 +41,9 @@ import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
 import {PackedUserOperation, UserOpLib} from "../src/interfaces/PackedUserOperation.sol";
+import {PasskeyAccount} from "../src/PasskeyAccount.sol";
+import {PasskeyAccountFactory} from "../src/PasskeyAccountFactory.sol";
+import {WebAuthnLib} from "../src/libs/WebAuthnLib.sol";
 
 // Define events for testing
 interface IEligibilityModuleEvents {
@@ -97,11 +100,13 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
     AccessFactory accessFactory;
     ModulesFactory modulesFactory;
     PaymasterHub paymasterHub;
+    PasskeyAccountFactory universalPasskeyFactory;
 
     /*–––– addresses ––––*/
     address public constant poaAdmin = address(1);
     address public constant ENTRY_POINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     address public constant orgOwner = address(2);
+    address public constant POA_GUARDIAN = address(0x600D);
     address public constant voter1 = address(3);
     address public constant voter2 = address(4);
     address public constant SEPOLIA_HATS = 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137;
@@ -790,6 +795,33 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Create a proxy using the beacon with proper initialization data
         bytes memory accRegInit = abi.encodeWithSignature("initialize(address)", poaAdmin);
         accountRegProxy = address(new BeaconProxy(accRegBeacon, accRegInit));
+
+        /*–– passkey infrastructure (mirrors DeployInfrastructure.s.sol) ––*/
+        PasskeyAccount passkeyAccountImpl = new PasskeyAccount();
+        PasskeyAccountFactory passkeyFactoryImpl = new PasskeyAccountFactory();
+        poaManager.addContractType("PasskeyAccount", address(passkeyAccountImpl));
+        poaManager.addContractType("PasskeyAccountFactory", address(passkeyFactoryImpl));
+
+        address passkeyAccountBeacon = poaManager.getBeaconById(keccak256("PasskeyAccount"));
+        address passkeyFactoryBeacon = poaManager.getBeaconById(keccak256("PasskeyAccountFactory"));
+        bytes memory passkeyFactoryInit = abi.encodeWithSignature(
+            "initialize(address,address,address,uint48)",
+            address(poaManager),
+            passkeyAccountBeacon,
+            POA_GUARDIAN,
+            uint48(7 days)
+        );
+        universalPasskeyFactory =
+            PasskeyAccountFactory(address(new BeaconProxy(passkeyFactoryBeacon, passkeyFactoryInit)));
+
+        // Wire factory to OrgDeployer (requires msg.sender == poaManager)
+        poaManager.adminCall(
+            address(deployer),
+            abi.encodeWithSignature("setUniversalPasskeyFactory(address)", address(universalPasskeyFactory))
+        );
+
+        // Wire factory to GlobalAccountRegistry (owner = poaAdmin)
+        UniversalAccountRegistry(accountRegProxy).setPasskeyFactory(address(universalPasskeyFactory));
 
         vm.stopPrank();
     }
@@ -5587,14 +5619,18 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
     }
 
     /*══════════════════════════════════════════════════════════════════════════
-     *  INTEGRATION: Deploy org → validate onboarding batch UserOp
-     *  Mirrors the frontend flow: executeBatch(registerAndQuickJoinWithPasskey,
-     *  claimVouchedHat) sponsored via SUBJECT_TYPE_HAT on org budget.
+     *  INTEGRATION: Full passkey-enabled org deployment + onboarding
+     *  Tests the complete real-world flow:
+     *   1. Deploy org with passkeyEnabled=true (mirrors frontend)
+     *   2. Verify factory wiring on QuickJoin + AccountRegistry
+     *   3. Call registerAndQuickJoinWithPasskey and verify it gets past
+     *      PasskeyFactoryNotSet (fails later on signature, which is expected)
+     *   4. Validate paymaster batch UserOp with the onboarding call
      *══════════════════════════════════════════════════════════════════════════*/
-    function testOnboardingBatchValidation_RegisterAndClaimHat() public {
-        bytes32 orgId = keccak256("ONBOARDING-INTEGRATION-ORG");
 
-        // ── 1. Deploy org with autoWhitelist + funding ──
+    function _deployPasskeyOrg() internal returns (OrgDeployer.DeploymentResult memory result, bytes32 orgId) {
+        orgId = keccak256("PASSKEY-INTEGRATION-ORG");
+
         string[] memory names = new string[](2);
         names[0] = "MEMBER";
         names[1] = "EXECUTIVE";
@@ -5604,10 +5640,6 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         bool[] memory voting = new bool[](2);
         voting[0] = true;
         voting[1] = true;
-
-        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
-        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
-        address[] memory ddTargets = new address[](0);
 
         OrgDeployer.PaymasterConfig memory pmConfig = OrgDeployer.PaymasterConfig({
             operatorRoleIndex: 1,
@@ -5623,7 +5655,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
             orgId: orgId,
-            orgName: "Onboarding Integration DAO",
+            orgName: "Passkey Integration DAO",
             metadataHash: bytes32(0),
             registryAddr: accountRegProxy,
             deployerAddress: orgOwner,
@@ -5634,12 +5666,12 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             autoUpgrade: true,
             hybridQuorumPct: 50,
             ddQuorumPct: 50,
-            hybridClasses: classes,
-            ddInitialTargets: ddTargets,
+            hybridClasses: _buildLegacyClasses(50, 50, false, 4 ether),
+            ddInitialTargets: new address[](0),
             roles: _buildSimpleRoleConfigs(names, images, voting),
-            roleAssignments: roleAssignments,
+            roleAssignments: _buildDefaultRoleAssignments(),
             metadataAdminRoleIndex: type(uint256).max,
-            passkeyEnabled: false,
+            passkeyEnabled: true,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
             paymasterConfig: pmConfig
@@ -5647,13 +5679,85 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         vm.deal(orgOwner, 1 ether);
         vm.prank(orgOwner);
-        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg{value: 0.5 ether}(params);
+        result = deployer.deployFullOrg{value: 0.5 ether}(params);
+    }
 
-        // ── 2. Retrieve role hat from OrgRegistry ──
-        uint256 memberHatId = orgRegistry.getRoleHat(orgId, 0); // MEMBER role = index 0
+    /// @notice Deploying an org with passkeyEnabled=true must succeed and wire factories
+    function testPasskeyOrgDeployment_FactoriesWired() public {
+        (OrgDeployer.DeploymentResult memory result,) = _deployPasskeyOrg();
+
+        // QuickJoin must have universalFactory set
+        address qjFactory = address(QuickJoin(result.quickJoin).universalFactory());
+        assertTrue(qjFactory != address(0), "QuickJoin.universalFactory should be set");
+        assertEq(qjFactory, address(universalPasskeyFactory), "QuickJoin factory should match deployed factory");
+
+        // GlobalAccountRegistry must have passkeyFactory set
+        address regFactory = UniversalAccountRegistry(accountRegProxy).passkeyFactory();
+        assertTrue(regFactory != address(0), "Registry.passkeyFactory should be set");
+        assertEq(regFactory, address(universalPasskeyFactory), "Registry factory should match deployed factory");
+    }
+
+    /// @notice registerAndQuickJoinWithPasskey must NOT revert with PasskeyFactoryNotSet
+    function testPasskeyOnboarding_NoPasskeyFactoryNotSet() public {
+        (OrgDeployer.DeploymentResult memory result,) = _deployPasskeyOrg();
+
+        // Build a registerAndQuickJoinWithPasskey call with dummy passkey data.
+        // It will revert (bad signature), but must NOT revert with PasskeyFactoryNotSet.
+        QuickJoin.PasskeyEnrollment memory passkey = QuickJoin.PasskeyEnrollment({
+            credentialId: keccak256("test-credential"),
+            publicKeyX: bytes32(uint256(0x1234)),
+            publicKeyY: bytes32(uint256(0x5678)),
+            salt: 0
+        });
+
+        WebAuthnLib.WebAuthnAuth memory auth = WebAuthnLib.WebAuthnAuth({
+            authenticatorData: hex"00",
+            clientDataJSON: hex"00",
+            challengeIndex: 0,
+            typeIndex: 0,
+            r: bytes32(uint256(1)),
+            s: bytes32(uint256(2))
+        });
+
+        // The call should fail — but with InvalidSigner or InvalidNonce, NOT PasskeyFactoryNotSet
+        bytes memory callData = abi.encodeWithSelector(
+            QuickJoin.registerAndQuickJoinWithPasskey.selector,
+            passkey,
+            "testuser",
+            block.timestamp + 1 hours, // valid deadline
+            uint256(0), // nonce
+            auth
+        );
+
+        // Call QuickJoin and capture the revert
+        (bool success, bytes memory returnData) = result.quickJoin.call(callData);
+        assertFalse(success, "Should revert (bad signature)");
+
+        // Extract the error selector from the revert data
+        bytes4 errorSelector;
+        if (returnData.length >= 4) {
+            errorSelector = bytes4(returnData);
+        }
+
+        // Must NOT be PasskeyFactoryNotSet (0xc832858d)
+        assertTrue(
+            errorSelector != QuickJoin.PasskeyFactoryNotSet.selector,
+            "Must not revert with PasskeyFactoryNotSet - factory wiring is broken"
+        );
+        assertTrue(
+            errorSelector != UniversalAccountRegistry.PasskeyFactoryNotSet.selector,
+            "Must not revert with PasskeyFactoryNotSet from registry - passkeyFactory not set"
+        );
+    }
+
+    /// @notice Paymaster validates batch UserOp with passkey onboarding + claimVouchedHat
+    function testPasskeyOnboarding_PaymasterBatchValidation() public {
+        (OrgDeployer.DeploymentResult memory result, bytes32 orgId) = _deployPasskeyOrg();
+
+        uint256 memberHatId = orgRegistry.getRoleHat(orgId, 0);
         assertTrue(memberHatId != 0, "member hat should exist");
 
-        // Verify autowhitelist rules are in place
+        // Verify autowhitelist rules
         bytes4 rqjpSel = bytes4(
             keccak256(
                 "registerAndQuickJoinWithPasskey((bytes32,bytes32,bytes32,uint256),string,uint256,uint256,(bytes,bytes,uint256,uint256,bytes32,bytes32))"
@@ -5666,14 +5770,13 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         rule = paymasterHub.getRule(orgId, result.eligibilityModule, cvhSel);
         assertTrue(rule.allowed, "claimVouchedHat should be whitelisted");
 
-        // ── 3. Build executeBatch callData ──
+        // Build executeBatch callData
         address[] memory targets = new address[](2);
         uint256[] memory values = new uint256[](2);
         bytes[] memory datas = new bytes[](2);
 
         targets[0] = result.quickJoin;
         values[0] = 0;
-        // Encode registerAndQuickJoinWithPasskey with dummy args (only selector matters for rule validation)
         datas[0] = abi.encodeWithSelector(
             rqjpSel,
             bytes32(0),
@@ -5697,31 +5800,24 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         bytes memory batchCallData = abi.encodeWithSelector(bytes4(0x47e1da2a), targets, values, datas);
 
-        // ── 4. Build paymasterAndData (SUBJECT_TYPE_HAT) ──
-        uint8 version = 1;
-        uint8 subjectTypeHat = 0x01;
-        bytes32 subjectId = bytes32(memberHatId);
-        uint32 ruleIdGeneric = 0;
-        uint64 mailboxCommit8 = 0;
-
+        // Build paymasterAndData (SUBJECT_TYPE_HAT)
         bytes memory paymasterAndData = abi.encodePacked(
             address(paymasterHub),
-            uint128(200_000), // paymasterVerificationGasLimit
-            uint128(100_000), // paymasterPostOpGasLimit
-            version,
+            uint128(200_000),
+            uint128(100_000),
+            uint8(1), // version
             orgId,
-            subjectTypeHat,
-            subjectId,
-            ruleIdGeneric,
-            mailboxCommit8
+            uint8(0x01), // SUBJECT_TYPE_HAT
+            bytes32(memberHatId),
+            uint32(0), // ruleIdGeneric
+            uint64(0) // mailboxCommit8
         );
 
-        // ── 5. Build PackedUserOperation ──
-        address newAccountSender = address(0xBEEF1234);
+        // Build PackedUserOperation
         PackedUserOperation memory userOp = PackedUserOperation({
-            sender: newAccountSender,
+            sender: address(0xBEEF1234),
             nonce: 0,
-            initCode: hex"01", // non-empty to simulate account creation
+            initCode: hex"01",
             callData: batchCallData,
             accountGasLimits: UserOpLib.packAccountGasLimits(500_000, 500_000),
             preVerificationGas: 100_000,
@@ -5730,13 +5826,12 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             signature: ""
         });
 
-        // ── 6. Validate ──
-        uint256 maxCost = 100_000;
+        // Validate paymaster
         vm.prank(ENTRY_POINT_V07);
         (bytes memory context, uint256 validationData) =
-            paymasterHub.validatePaymasterUserOp(userOp, keccak256("test-op-hash"), maxCost);
+            paymasterHub.validatePaymasterUserOp(userOp, keccak256("test-op-hash"), 100_000);
 
-        assertEq(validationData, 0, "validation should succeed with no signature failure");
+        assertEq(validationData, 0, "validation should succeed");
         assertTrue(context.length > 0, "context should be populated");
     }
 }
