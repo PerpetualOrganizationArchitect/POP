@@ -185,7 +185,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
     function _setupDefaultBudget(address account) internal {
         // Set a generous default budget for the account
-        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes20(account)));
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(account)))));
         vm.prank(orgAdmin);
         hub.setBudget(ORG_ID, subjectKey, 1 ether, 1 days);
     }
@@ -193,11 +193,11 @@ contract PasskeyPaymasterIntegrationTest is Test {
     function _buildPaymasterData(
         bytes32 orgId,
         uint8 subjectType,
-        bytes20 subjectId,
+        bytes32 subjectId,
         uint32 ruleId,
         uint64 mailboxCommit8
     ) internal view returns (bytes memory) {
-        // ERC-4337 v0.7 format: paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(20) | ruleId(4) | mailboxCommit(8) = 118 bytes
+        // ERC-4337 v0.7 format: paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(32) | ruleId(4) | mailboxCommit(8) = 130 bytes
         return abi.encodePacked(
             address(hub), // 20 bytes
             uint128(200_000), // paymasterVerificationGasLimit - 16 bytes
@@ -205,7 +205,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
             PAYMASTER_DATA_VERSION, // 1 byte
             orgId, // 32 bytes
             subjectType, // 1 byte
-            subjectId, // 20 bytes
+            subjectId, // 32 bytes
             ruleId, // 4 bytes
             mailboxCommit8 // 8 bytes
         );
@@ -260,8 +260,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Build UserOperation with execute() calling mockTarget.doSomething()
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -282,8 +283,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Build UserOperation
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -312,8 +314,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Build UserOp calling target1 - should succeed
         bytes memory innerCall1 = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData1 = _buildExecuteCalldata(address(target1), 0, innerCall1);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp1 = _createUserOp(address(account), callData1, paymasterAndData, "");
 
@@ -363,8 +366,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[1] = abi.encodeWithSelector(MockTarget.doSomethingElse.selector);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -390,8 +394,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -426,8 +431,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[1] = abi.encodeWithSelector(MockTarget.doSomethingElse.selector);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -466,8 +472,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[1] = abi.encodeWithSelector(MockTarget.doSomething.selector); // Wrong selector for target2
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -488,8 +495,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         bytes[] memory datas = new bytes[](0);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -519,8 +527,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -564,8 +573,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[2] = abi.encodeWithSelector(MockEligibility.claimVouchedHat.selector, uint256(42));
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -603,8 +613,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[2] = abi.encodeWithSelector(MockEligibility.claimVouchedHat.selector, uint256(42));
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -643,8 +654,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[2] = abi.encodeWithSelector(MockTarget.doWithValue.selector);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -675,8 +687,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[1] = abi.encodeWithSelector(MockTarget.doSomethingElse.selector);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -705,8 +718,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
 
         bytes memory callData = abi.encodeWithSelector(SIMPLE_EXECUTE_BATCH_SELECTOR, targets, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -729,8 +743,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
 
         bytes memory callData = abi.encodeWithSelector(SIMPLE_EXECUTE_BATCH_SELECTOR, targets, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -756,8 +771,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = ""; // Empty calldata — raw transfer / fallback
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -780,8 +796,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = hex"aabb"; // Only 2 bytes
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -806,8 +823,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = ""; // Empty calldata
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -843,8 +861,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = nestedBatchCalldata; // executeBatch as inner call
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -876,8 +895,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = innerExecuteCalldata;
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -904,8 +924,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
         // Use COARSE mode — needs (account, executeBatch) rule, not inner rules
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_COARSE, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_COARSE, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -932,8 +953,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         // UserOp has callGasLimit=500000 (from _createUserOp), which exceeds the 50k hint
         // In single execute() path this would revert with GasTooHigh, but batch ignores gas hints
@@ -963,8 +985,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_COARSE, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_COARSE, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -991,8 +1014,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_EXECUTOR, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_EXECUTOR, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -1030,8 +1054,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[2] = abi.encodeWithSelector(MockTaskManager.claimTask.selector, uint256(7));
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -1056,8 +1081,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -1079,8 +1105,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Inner call is to an unauthorized target, but COARSE mode ignores it
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_COARSE, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_COARSE, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -1117,8 +1144,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         // UserOp with gas limits within caps
         PackedUserOperation memory userOp = PackedUserOperation({
@@ -1152,8 +1180,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         // UserOp with verification gas exceeding cap (400k > 300k)
         PackedUserOperation memory userOp = PackedUserOperation({
@@ -1181,7 +1210,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PasskeyAccount account = _createPasskeyAccount();
 
         // Set budget for this specific account
-        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes20(address(account))));
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
         vm.prank(orgAdmin);
         hub.setBudget(ORG_ID, subjectKey, 0.01 ether, 1 days);
 
@@ -1191,8 +1220,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -1207,7 +1237,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PasskeyAccount account = _createPasskeyAccount();
 
         // Set small budget
-        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes20(address(account))));
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
         vm.prank(orgAdmin);
         hub.setBudget(ORG_ID, subjectKey, 0.001 ether, 1 days);
 
@@ -1216,8 +1246,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -1241,8 +1272,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
@@ -1267,11 +1299,12 @@ contract PasskeyPaymasterIntegrationTest is Test {
     function testPaymasterAndData_CorrectFormat() public {
         PasskeyAccount account = _createPasskeyAccount();
 
-        bytes memory paymasterAndData =
-            _buildPaymasterData(ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes20(address(account)), RULE_ID_GENERIC, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC, 0
+        );
 
-        // Should be exactly 118 bytes (86 + 32 for v0.7 gas limits)
-        assertEq(paymasterAndData.length, 118, "paymasterAndData should be 118 bytes");
+        // Should be exactly 130 bytes (86 + 32 subjectId + 12 ruleId/mailbox for v0.7 gas limits)
+        assertEq(paymasterAndData.length, 130, "paymasterAndData should be 130 bytes");
 
         // Verify structure using assembly to extract values from memory
         address paymaster;
@@ -1321,7 +1354,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         MockHatsIntegration(address(hats)).setEligible(eligibleUser, USER_HAT, true);
 
         // Setup budget for hat-based subject
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
+        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes32(USER_HAT)));
         vm.prank(orgAdmin);
         hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
 
@@ -1332,7 +1365,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Build UserOp with SUBJECT_TYPE_HAT
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes32(USER_HAT), 0, 0);
 
         PackedUserOperation memory userOp = _createUserOp(eligibleUser, callData, paymasterAndData, "");
 
@@ -1351,7 +1384,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         // Do NOT set eligible — user is neither wearing nor eligible
 
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
+        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes32(USER_HAT)));
         vm.prank(orgAdmin);
         hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
 
@@ -1360,7 +1393,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes32(USER_HAT), 0, 0);
 
         PackedUserOperation memory userOp = _createUserOp(ineligibleUser, callData, paymasterAndData, "");
 
@@ -1372,7 +1405,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
     /// @notice Test that an existing hat wearer still passes SUBJECT_TYPE_HAT validation
     function testHat_ExistingWearer_Succeeds() public {
         // `user` already wears USER_HAT from setUp (mintHat sets both wearer and active)
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
+        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes32(USER_HAT)));
         vm.prank(orgAdmin);
         hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
 
@@ -1381,7 +1414,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes32(USER_HAT), 0, 0);
 
         PackedUserOperation memory userOp = _createUserOp(user, callData, paymasterAndData, "");
 
@@ -1403,7 +1436,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Deactivate the hat
         MockHatsIntegration(address(hats)).setActive(USER_HAT, false);
 
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
+        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes32(USER_HAT)));
         vm.prank(orgAdmin);
         hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
 
@@ -1412,7 +1445,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes32(USER_HAT), 0, 0);
 
         PackedUserOperation memory userOp = _createUserOp(eligibleUser, callData, paymasterAndData, "");
 
@@ -1427,7 +1460,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Deactivate the hat
         MockHatsIntegration(address(hats)).setActive(USER_HAT, false);
 
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
+        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes32(USER_HAT)));
         vm.prank(orgAdmin);
         hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
 
@@ -1436,7 +1469,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes32(USER_HAT), 0, 0);
 
         PackedUserOperation memory userOp = _createUserOp(user, callData, paymasterAndData, "");
 
@@ -1454,7 +1487,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         MockHatsIntegration(address(hats)).setActive(USER_HAT, false);
         MockHatsIntegration(address(hats)).setActive(USER_HAT, true);
 
-        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT))));
+        bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes32(USER_HAT)));
         vm.prank(orgAdmin);
         hub.setBudget(ORG_ID, hatSubjectKey, 1 ether, 1 days);
 
@@ -1463,7 +1496,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
         bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
-        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes20(uint160(USER_HAT)), 0, 0);
+        bytes memory paymasterAndData = _buildPaymasterData(ORG_ID, SUBJECT_TYPE_HAT, bytes32(USER_HAT), 0, 0);
 
         PackedUserOperation memory userOp = _createUserOp(eligibleUser, callData, paymasterAndData, "");
 
