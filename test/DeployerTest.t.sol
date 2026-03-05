@@ -852,10 +852,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Version getters removed - contracts are upgradeable via beacon pattern
 
         /*—————————————————— quick smoke test: join + vote —————————————————*/
-        vm.prank(voter1);
-        QuickJoin(quickJoinProxy).quickJoinNoUser();
-        vm.prank(voter2);
-        QuickJoin(quickJoinProxy).quickJoinNoUser();
+        vm.prank(executorProxy);
+        QuickJoin(quickJoinProxy).quickJoinNoUserMasterDeploy(voter1);
+        vm.prank(executorProxy);
+        QuickJoin(quickJoinProxy).quickJoinNoUserMasterDeploy(voter2);
 
         // Give voter1 the EXECUTIVE role hat for creating proposals
         // (voter1 already has DEFAULT hat from QuickJoin, but needs EXECUTIVE for creating)
@@ -4642,9 +4642,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Verify auto-whitelisted rules exist for deployed contracts
         PaymasterHub.Rule memory rule;
 
-        // Check QuickJoin quickJoinNoUser() is whitelisted
-        rule = paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinNoUser()")));
-        assertTrue(rule.allowed, "QuickJoin quickJoinNoUser should be whitelisted");
+        // Check QuickJoin quickJoinWithUser() is whitelisted
+        rule = paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinWithUser()")));
+        assertTrue(rule.allowed, "QuickJoin quickJoinWithUser should be whitelisted");
 
         // Check TaskManager claimTask(uint256) is whitelisted
         rule = paymasterHub.getRule(orgId, result.taskManager, bytes4(keccak256("claimTask(uint256)")));
@@ -4922,7 +4922,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Core contract rules should still be set
         PaymasterHub.Rule memory rule;
 
-        rule = paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinNoUser()")));
+        rule = paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinWithUser()")));
         assertTrue(rule.allowed, "QuickJoin should be whitelisted");
 
         rule = paymasterHub.getRule(orgId, result.taskManager, bytes4(keccak256("claimTask(uint256)")));
@@ -5008,7 +5008,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // 3. Verify auto-whitelist (spot check)
         PaymasterHub.Rule memory rule =
-            paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinNoUser()")));
+            paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinWithUser()")));
         assertTrue(rule.allowed, "QuickJoin should be whitelisted");
 
         rule = paymasterHub.getRule(orgId, result.taskManager, bytes4(keccak256("submitTask(uint256,bytes32)")));
@@ -5023,21 +5023,11 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Verify ALL computed selectors match actual contract function selectors
         // This catches selector string typos in _buildDefaultPaymasterRules
 
-        // ── QuickJoin (5) ──
-        assertEq(
-            bytes4(keccak256("quickJoinNoUser()")),
-            QuickJoin.quickJoinNoUser.selector,
-            "quickJoinNoUser selector mismatch"
-        );
+        // ── QuickJoin (3) ──
         assertEq(
             bytes4(keccak256("quickJoinWithUser()")),
             QuickJoin.quickJoinWithUser.selector,
             "quickJoinWithUser selector mismatch"
-        );
-        assertEq(
-            bytes4(keccak256("quickJoinWithPasskey((bytes32,bytes32,bytes32,uint256))")),
-            QuickJoin.quickJoinWithPasskey.selector,
-            "quickJoinWithPasskey selector mismatch"
         );
         assertEq(
             bytes4(keccak256("registerAndQuickJoin(address,string,uint256,uint256,bytes)")),
@@ -5297,7 +5287,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         // Verify whitelist rules also set
         PaymasterHub.Rule memory rule =
-            paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinNoUser()")));
+            paymasterHub.getRule(orgId, result.quickJoin, bytes4(keccak256("quickJoinWithUser()")));
         assertTrue(rule.allowed, "QuickJoin should be whitelisted");
 
         // Verify deposit
@@ -5434,7 +5424,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         assertEq(financials.deposited, 0, "Should have no deposit");
 
         // Verify no whitelist rules
-        PaymasterHub.Rule memory rule = paymasterHub.getRule(orgId, address(1), bytes4(keccak256("quickJoinNoUser()")));
+        PaymasterHub.Rule memory rule =
+            paymasterHub.getRule(orgId, address(1), bytes4(keccak256("quickJoinWithUser()")));
         assertFalse(rule.allowed, "No rules should be set");
     }
 

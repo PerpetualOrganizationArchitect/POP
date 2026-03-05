@@ -167,21 +167,6 @@ contract QuickJoinTest is Test {
         qj.setExecutor(address(0));
     }
 
-    function testQuickJoinNoUserMints() public {
-        vm.prank(user1);
-        qj.quickJoinNoUser();
-        assertTrue(mockExecutor.hats().isWearerOfHat(user1, DEFAULT_HAT_ID));
-    }
-
-    function testQuickJoinNoUserEmitsEvent() public {
-        vm.prank(user1);
-        vm.expectEmit(true, true, true, true);
-        uint256[] memory expectedHats = new uint256[](1);
-        expectedHats[0] = DEFAULT_HAT_ID;
-        emit QuickJoined(user1, expectedHats);
-        qj.quickJoinNoUser();
-    }
-
     function testQuickJoinWithUser() public {
         registry.setUsername(user1, "bob");
         vm.prank(user1);
