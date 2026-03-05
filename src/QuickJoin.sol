@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// solhint-disable-next-line compiler-version
 pragma solidity ^0.8.21;
 
 /*────────────────────────── OpenZeppelin v5.3 Upgradeables ────────────────────*/
