@@ -674,7 +674,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         returns (bytes memory context, uint256 validationData)
     {
         // Decode and validate paymasterAndData
-        (uint8 version, bytes32 orgId, uint8 subjectType, bytes20 subjectId, uint32 ruleId, uint64 mailboxCommit8) =
+        (uint8 version, bytes32 orgId, uint8 subjectType, bytes32 subjectId, uint32 ruleId, uint64 mailboxCommit8) =
             _decodePaymasterData(userOp.paymasterAndData);
 
         if (version != PAYMASTER_DATA_VERSION) revert InvalidVersion();
@@ -688,7 +688,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Handle POA onboarding separately (no org required)
         if (isOnboarding) {
             // Global-only onboarding path: never org-scoped billing.
-            if (orgId != bytes32(0) || subjectId != bytes20(0) || ruleId != RULE_ID_GENERIC) {
+            if (orgId != bytes32(0) || subjectId != bytes32(0) || ruleId != RULE_ID_GENERIC) {
                 revert InvalidOnboardingRequest();
             }
 
@@ -1548,43 +1548,43 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             uint8 version,
             bytes32 orgId,
             uint8 subjectType,
-            bytes20 subjectId,
+            bytes32 subjectId,
             uint32 ruleId,
             uint64 mailboxCommit8
         )
     {
         // ERC-4337 v0.7 packed format:
-        // [paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(20) | ruleId(4) | mailboxCommit(8)]
-        // = 118 bytes total. Custom data starts at offset 52.
-        if (paymasterAndData.length < 118) revert InvalidPaymasterData();
+        // [paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(32) | ruleId(4) | mailboxCommit(8)]
+        // = 130 bytes total. Custom data starts at offset 52.
+        if (paymasterAndData.length < 130) revert InvalidPaymasterData();
 
         // Skip first 52 bytes (paymaster address + v0.7 gas limits) and decode the rest
         version = uint8(paymasterAndData[52]);
         orgId = bytes32(paymasterAndData[53:85]);
         subjectType = uint8(paymasterAndData[85]);
 
-        // Extract bytes20 subjectId from bytes 86-105
+        // Extract bytes32 subjectId from bytes 86-117
         assembly {
             subjectId := calldataload(add(paymasterAndData.offset, 86))
         }
 
-        // Extract ruleId from bytes 106-109
-        ruleId = uint32(bytes4(paymasterAndData[106:110]));
+        // Extract ruleId from bytes 118-121
+        ruleId = uint32(bytes4(paymasterAndData[118:122]));
 
-        // Extract mailboxCommit8 from bytes 110-117
-        mailboxCommit8 = uint64(bytes8(paymasterAndData[110:118]));
+        // Extract mailboxCommit8 from bytes 122-129
+        mailboxCommit8 = uint64(bytes8(paymasterAndData[122:130]));
     }
 
-    function _validateSubjectEligibility(address sender, uint8 subjectType, bytes20 subjectId)
+    function _validateSubjectEligibility(address sender, uint8 subjectType, bytes32 subjectId)
         private
         view
         returns (bytes32 subjectKey)
     {
         if (subjectType == SUBJECT_TYPE_ACCOUNT) {
-            if (address(subjectId) != sender) revert Ineligible();
+            if (address(uint160(uint256(subjectId))) != sender) revert Ineligible();
             subjectKey = keccak256(abi.encodePacked(subjectType, subjectId));
         } else if (subjectType == SUBJECT_TYPE_HAT) {
-            uint256 hatId = uint256(uint160(subjectId));
+            uint256 hatId = uint256(subjectId);
             IHats hatsContract = IHats(_getMainStorage().hats);
             if (!hatsContract.isEligible(sender, hatId)) {
                 revert Ineligible();

@@ -5200,7 +5200,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Verify budget set for each role hat (2 roles)
         for (uint256 i = 0; i < 2; i++) {
             uint256 hatId = orgRegistry.getRoleHat(orgId, i);
-            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(hatId))));
+            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes32(hatId)));
             PaymasterHub.Budget memory budget = paymasterHub.getBudget(orgId, subjectKey);
             assertEq(budget.capPerEpoch, 0.1 ether, "Budget cap should match");
             assertEq(budget.epochLen, 1 days, "Epoch length should match");
@@ -5275,7 +5275,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Verify budgets for all 3 role hats
         for (uint256 i = 0; i < 3; i++) {
             uint256 hatId = orgRegistry.getRoleHat(orgId, i);
-            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(hatId))));
+            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes32(hatId)));
             PaymasterHub.Budget memory budget = paymasterHub.getBudget(orgId, subjectKey);
             assertEq(budget.capPerEpoch, 0.5 ether, "Budget cap should match for each role");
             assertEq(budget.epochLen, 7 days, "Epoch length should be 7 days for each role");
@@ -5343,7 +5343,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Verify no budgets set (2 roles)
         for (uint256 i = 0; i < 2; i++) {
             uint256 hatId = orgRegistry.getRoleHat(orgId, i);
-            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(hatId))));
+            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes32(hatId)));
             PaymasterHub.Budget memory budget = paymasterHub.getBudget(orgId, subjectKey);
             assertEq(budget.capPerEpoch, 0, "Budget cap should be 0");
             assertEq(budget.epochLen, 0, "Epoch length should be 0");
@@ -5412,7 +5412,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Verify budgets set for each role hat
         for (uint256 i = 0; i < 2; i++) {
             uint256 hatId = orgRegistry.getRoleHat(orgId, i);
-            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(hatId))));
+            bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0x01), bytes32(hatId)));
             PaymasterHub.Budget memory budget = paymasterHub.getBudget(orgId, subjectKey);
             assertEq(budget.capPerEpoch, 0.05 ether, "Budget cap should match");
             assertEq(budget.epochLen, 12 hours, "Epoch length should be 12 hours");
@@ -5434,7 +5434,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         bytes32 orgId = keccak256("BUDGET-LONG-EPOCH-ORG");
 
         bytes32[] memory keys = new bytes32[](1);
-        keys[0] = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(123))));
+        keys[0] = keccak256(abi.encodePacked(uint8(0x01), bytes32(uint256(123))));
         uint128[] memory caps = new uint128[](1);
         caps[0] = 0.1 ether;
         uint32[] memory epochLens = new uint32[](1);
@@ -5466,8 +5466,8 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         bytes32 orgId = keccak256("BUDGET-MISMATCH-ORG");
 
         bytes32[] memory keys = new bytes32[](2);
-        keys[0] = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(123))));
-        keys[1] = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(456))));
+        keys[0] = keccak256(abi.encodePacked(uint8(0x01), bytes32(uint256(123))));
+        keys[1] = keccak256(abi.encodePacked(uint8(0x01), bytes32(uint256(456))));
         uint128[] memory caps = new uint128[](1); // Length mismatch!
         caps[0] = 0.1 ether;
         uint32[] memory epochLens = new uint32[](2);
@@ -5500,7 +5500,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         bytes32 orgId = keccak256("BUDGET-EPOCH-ORG");
 
         bytes32[] memory keys = new bytes32[](1);
-        keys[0] = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(123))));
+        keys[0] = keccak256(abi.encodePacked(uint8(0x01), bytes32(uint256(123))));
         uint128[] memory caps = new uint128[](1);
         caps[0] = 0.1 ether;
         uint32[] memory epochLens = new uint32[](1);

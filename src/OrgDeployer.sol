@@ -1014,8 +1014,8 @@ contract OrgDeployer is Initializable {
         epochLens = new uint32[](count);
 
         for (uint256 i = 0; i < count; i++) {
-            // SUBJECT_TYPE_HAT = 0x01, subjectId = bytes20(uint160(hatId))
-            subjectKeys[i] = keccak256(abi.encodePacked(uint8(0x01), bytes20(uint160(roleHatIds[i]))));
+            // SUBJECT_TYPE_HAT = 0x01, subjectId = bytes32(hatId)
+            subjectKeys[i] = keccak256(abi.encodePacked(uint8(0x01), bytes32(roleHatIds[i])));
             caps[i] = capPerEpoch;
             epochLens[i] = epochLen;
         }
