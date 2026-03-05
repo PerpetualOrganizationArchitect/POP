@@ -543,7 +543,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Whitelist all 3 onboarding selectors
         vm.startPrank(orgAdmin);
         hub.setRule(ORG_ID, address(mockRegistry), MockRegistry.registerAccount.selector, true, 0);
-        hub.setRule(ORG_ID, address(mockQuickJoin), MockQuickJoin.quickJoinNoUser.selector, true, 0);
+        hub.setRule(ORG_ID, address(mockQuickJoin), MockQuickJoin.quickJoinWithUser.selector, true, 0);
         hub.setRule(ORG_ID, address(mockEligibility), MockEligibility.claimVouchedHat.selector, true, 0);
         vm.stopPrank();
 
@@ -560,7 +560,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         bytes[] memory datas = new bytes[](3);
         datas[0] = abi.encodeWithSelector(MockRegistry.registerAccount.selector, "testuser");
-        datas[1] = abi.encodeWithSelector(MockQuickJoin.quickJoinNoUser.selector);
+        datas[1] = abi.encodeWithSelector(MockQuickJoin.quickJoinWithUser.selector);
         datas[2] = abi.encodeWithSelector(MockEligibility.claimVouchedHat.selector, uint256(42));
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
@@ -587,7 +587,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Whitelist register and join, but NOT claimVouchedHat
         vm.startPrank(orgAdmin);
         hub.setRule(ORG_ID, address(mockRegistry), MockRegistry.registerAccount.selector, true, 0);
-        hub.setRule(ORG_ID, address(mockQuickJoin), MockQuickJoin.quickJoinNoUser.selector, true, 0);
+        hub.setRule(ORG_ID, address(mockQuickJoin), MockQuickJoin.quickJoinWithUser.selector, true, 0);
         // Deliberately NOT whitelisting claimVouchedHat
         vm.stopPrank();
 
@@ -599,7 +599,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         uint256[] memory values = new uint256[](3);
         bytes[] memory datas = new bytes[](3);
         datas[0] = abi.encodeWithSelector(MockRegistry.registerAccount.selector, "testuser");
-        datas[1] = abi.encodeWithSelector(MockQuickJoin.quickJoinNoUser.selector);
+        datas[1] = abi.encodeWithSelector(MockQuickJoin.quickJoinWithUser.selector);
         datas[2] = abi.encodeWithSelector(MockEligibility.claimVouchedHat.selector, uint256(42));
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
@@ -1760,7 +1760,6 @@ contract MockRegistry {
 }
 
 contract MockQuickJoin {
-    function quickJoinNoUser() external {}
     function quickJoinWithUser() external {}
 }
 

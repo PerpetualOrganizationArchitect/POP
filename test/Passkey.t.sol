@@ -684,54 +684,6 @@ contract PasskeyTest is Test {
         return quickJoin;
     }
 
-    function testQuickJoinWithPasskey() public {
-        QuickJoin qj = _setupQuickJoin();
-
-        vm.prank(user);
-
-        QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
-        });
-
-        address account = qj.quickJoinWithPasskey(enrollment);
-
-        // Verify account was created
-        assertTrue(account != address(0));
-        assertTrue(factory.isDeployedAccount(account));
-    }
-
-    function testQuickJoinWithPasskeyFactoryNotSet() public {
-        vm.startPrank(owner);
-
-        // Deploy fresh QuickJoin without factory set
-        QuickJoin impl = new QuickJoin();
-        UpgradeableBeacon beacon = new UpgradeableBeacon(address(impl), owner);
-
-        uint256[] memory memberHatIds = new uint256[](0);
-
-        bytes memory qjInitData = abi.encodeWithSelector(
-            QuickJoin.initialize.selector,
-            owner, // executor
-            address(hats),
-            address(accountRegistry),
-            owner, // master deploy
-            memberHatIds
-        );
-
-        QuickJoin qj = QuickJoin(address(new BeaconProxy(address(beacon), qjInitData)));
-
-        vm.stopPrank();
-
-        vm.prank(user);
-
-        QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
-        });
-
-        vm.expectRevert(QuickJoin.PasskeyFactoryNotSet.selector);
-        qj.quickJoinWithPasskey(enrollment);
-    }
-
     function testQuickJoinWithPasskeyMasterDeploy() public {
         QuickJoin qj = _setupQuickJoin();
 
@@ -956,22 +908,6 @@ contract PasskeyTest is Test {
     /*════════════════════════════════════════════════════════════════════
                     QUICKJOIN DUPLICATE ACCOUNT TESTS
     ════════════════════════════════════════════════════════════════════*/
-
-    function testQuickJoinWithPasskeyDuplicateReturnsExisting() public {
-        QuickJoin qj = _setupQuickJoin();
-
-        // First user joins with passkey
-        vm.prank(user);
-        QuickJoin.PasskeyEnrollment memory enrollment = QuickJoin.PasskeyEnrollment({
-            credentialId: CREDENTIAL_ID, publicKeyX: PUB_KEY_X, publicKeyY: PUB_KEY_Y, salt: 0
-        });
-        address first = qj.quickJoinWithPasskey(enrollment);
-
-        // Second call with same passkey returns same account (factory returns existing)
-        vm.prank(attacker);
-        address second = qj.quickJoinWithPasskey(enrollment);
-        assertEq(first, second);
-    }
 
     /*════════════════════════════════════════════════════════════════════
                     STORAGE SLOT VERIFICATION TESTS

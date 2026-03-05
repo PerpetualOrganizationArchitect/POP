@@ -216,6 +216,7 @@ contract OrgDeployer is Initializable {
         address taskManager;
         address educationHub;
         address paymentManager;
+        address eligibilityModule;
     }
 
     struct RoleAssignments {
@@ -363,6 +364,7 @@ contract OrgDeployer is Initializable {
         /* 2. Deploy Governance Infrastructure (Executor, Hats modules, Hats tree) */
         GovernanceFactory.GovernanceResult memory gov = _deployGovernanceInfrastructure(params);
         result.executor = gov.executor;
+        result.eligibilityModule = gov.eligibilityModule;
 
         /* 2b. Accept executor beacon ownership (two-step transfer initiated by GovernanceFactory) */
         IExecutorAdmin(result.executor).acceptBeaconOwnership(gov.execBeacon);
@@ -848,8 +850,8 @@ contract OrgDeployer is Initializable {
         pure
         returns (address[] memory targets, bytes4[] memory selectors, bool[] memory allowed, uint32[] memory gasHints)
     {
-        // Count: QuickJoin(5) + TaskManager(9) + HybridVoting(3) + DDVoting(3) + PaymentManager(3) + EducationHub(0 or 1)
-        uint256 count = 23;
+        // Count: QuickJoin(3) + TaskManager(10) + HybridVoting(3) + DDVoting(3) + PaymentManager(3) + EligibilityModule(5) + EducationHub(0 or 1)
+        uint256 count = 27;
         if (educationEnabled) count += 1;
 
         targets = new address[](count);
@@ -861,15 +863,7 @@ contract OrgDeployer is Initializable {
 
         // ── QuickJoin ──
         targets[i] = result.quickJoin;
-        selectors[i] = bytes4(keccak256("quickJoinNoUser()"));
-        i++;
-
-        targets[i] = result.quickJoin;
         selectors[i] = bytes4(keccak256("quickJoinWithUser()"));
-        i++;
-
-        targets[i] = result.quickJoin;
-        selectors[i] = bytes4(keccak256("quickJoinWithPasskey((bytes32,bytes32,bytes32,uint256))"));
         i++;
 
         targets[i] = result.quickJoin;
@@ -921,6 +915,11 @@ contract OrgDeployer is Initializable {
         selectors[i] = bytes4(keccak256("cancelTask(uint256)"));
         i++;
 
+        targets[i] = result.taskManager;
+        selectors[i] =
+            bytes4(keccak256("createAndAssignTask(uint256,bytes,bytes32,bytes32,address,address,uint256,bool)"));
+        i++;
+
         // ── HybridVoting ──
         targets[i] = result.hybridVoting;
         selectors[i] = bytes4(keccak256("vote(uint256,uint8[],uint8[])"));
@@ -960,6 +959,27 @@ contract OrgDeployer is Initializable {
 
         targets[i] = result.paymentManager;
         selectors[i] = bytes4(keccak256("optOut(bool)"));
+        i++;
+
+        // ── EligibilityModule ──
+        targets[i] = result.eligibilityModule;
+        selectors[i] = bytes4(keccak256("claimVouchedHat(uint256)"));
+        i++;
+
+        targets[i] = result.eligibilityModule;
+        selectors[i] = bytes4(keccak256("vouchFor(address,uint256)"));
+        i++;
+
+        targets[i] = result.eligibilityModule;
+        selectors[i] = bytes4(keccak256("revokeVouch(address,uint256)"));
+        i++;
+
+        targets[i] = result.eligibilityModule;
+        selectors[i] = bytes4(keccak256("applyForRole(uint256,bytes32)"));
+        i++;
+
+        targets[i] = result.eligibilityModule;
+        selectors[i] = bytes4(keccak256("withdrawApplication(uint256)"));
         i++;
 
         // ── EducationHub (conditional) ──

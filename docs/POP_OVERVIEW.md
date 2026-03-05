@@ -366,11 +366,14 @@ After deployment, the Executor's ownership is **immediately renounced**. No indi
 Frictionless onboarding.
 
 ```solidity
-// New user with username
-function quickJoinNoUser(string calldata username) external;
-
 // User already has username from another POP org
 function quickJoinWithUser() external;
+
+// Register username and join with passkey in one call
+function registerAndQuickJoinWithPasskey(...) external returns (address account);
+
+// Register username and join with EOA in one call
+function registerAndQuickJoin(address user, string calldata username, ...) external;
 ```
 
 1. User calls QuickJoin

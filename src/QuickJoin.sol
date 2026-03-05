@@ -92,7 +92,6 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     event QuickJoined(address indexed user, uint256[] hatIds);
     event QuickJoinedByMaster(address indexed master, address indexed user, uint256[] hatIds);
     event UniversalFactoryUpdated(address indexed universalFactory);
-    event QuickJoinedWithPasskey(address indexed account, bytes32 indexed credentialId, uint256[] hatIds);
     event QuickJoinedWithPasskeyByMaster(
         address indexed master, address indexed account, bytes32 indexed credentialId, uint256[] hatIds
     );
@@ -208,12 +207,7 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
 
     /* ───────── Public user paths ─────── */
 
-    /// 1) caller joins org (username registration handled separately by the user)
-    function quickJoinNoUser() external {
-        _quickJoin(_msgSender());
-    }
-
-    /// 2) caller already registered a username elsewhere
+    /// caller already registered a username elsewhere
     function quickJoinWithUser() external nonReentrant {
         Layout storage l = _layout();
         string memory existing = l.accountRegistry.getUsername(_msgSender());
@@ -228,25 +222,6 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     }
 
     /* ───────── Passkey join paths ─────── */
-
-    /// @notice Join org with a new passkey account
-    /// @param passkey Passkey enrollment data
-    /// @return account The created passkey account address
-    function quickJoinWithPasskey(PasskeyEnrollment calldata passkey) external nonReentrant returns (address account) {
-        Layout storage l = _layout();
-        if (address(l.universalFactory) == address(0)) revert PasskeyFactoryNotSet();
-
-        // 1. Create PasskeyAccount via universal factory (returns existing if already deployed)
-        account = l.universalFactory
-            .createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
-
-        // 2. Mint member hats to the account
-        if (l.memberHatIds.length > 0) {
-            IExecutorHatMinter(l.executor).mintHatsForUser(account, l.memberHatIds);
-        }
-
-        emit QuickJoinedWithPasskey(account, passkey.credentialId, l.memberHatIds);
-    }
 
     /// @notice Master-deploy path for passkey onboarding
     /// @param passkey Passkey enrollment data
