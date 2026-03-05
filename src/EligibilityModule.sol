@@ -802,8 +802,8 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         (bool eligible, bool standing) = this.getWearerStatus(msg.sender, hatId);
         require(eligible && standing, "Not eligible to claim hat");
 
-        // Check if already wearing the hat
-        require(!l.hats.isWearerOfHat(msg.sender, hatId), "Already wearing hat");
+        // Already wearing — no-op (idempotent for batch compatibility)
+        if (l.hats.isWearerOfHat(msg.sender, hatId)) return;
 
         // State change BEFORE external call (CEI pattern)
         delete l.roleApplications[hatId][msg.sender];

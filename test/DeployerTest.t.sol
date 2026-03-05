@@ -5750,6 +5750,49 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         );
     }
 
+    /// @notice claimVouchedHat should be idempotent - no revert when already wearing hat
+    function testClaimVouchedHat_Idempotent() public {
+        TestOrgSetup memory setup = _createTestOrg("Idempotent Claim Test DAO");
+        address user = address(0xCAFE);
+
+        // defaultRoleHat has defaultEligible=true, so any user can claim it
+        // First claim should succeed
+        vm.prank(user);
+        EligibilityModule(setup.eligibilityModule).claimVouchedHat(setup.defaultRoleHat);
+        _assertWearingHat(user, setup.defaultRoleHat, true, "after first claim");
+
+        // Second claim should be a no-op (not revert)
+        vm.prank(user);
+        EligibilityModule(setup.eligibilityModule).claimVouchedHat(setup.defaultRoleHat);
+        _assertWearingHat(user, setup.defaultRoleHat, true, "after second claim");
+    }
+
+    /// @notice Simulates the frontend batch: QuickJoin mints hat, then claimVouchedHat for same hat
+    function testQuickJoinThenClaimVouchedHat_NoConflict() public {
+        TestOrgSetup memory setup = _createTestOrg("Batch Compatibility Test DAO");
+        address user = address(0xBEEF);
+
+        // Get the hats that QuickJoin mints to new members
+        uint256[] memory memberHats = QuickJoin(setup.qj).memberHatIds();
+        assertTrue(memberHats.length > 0, "QuickJoin should have member hats");
+
+        // Simulate what registerAndQuickJoinWithPasskey does internally:
+        // QuickJoin calls executor.mintHatsForUser(user, memberHatIds)
+        vm.prank(setup.qj);
+        Executor(payable(setup.exec)).mintHatsForUser(user, memberHats);
+
+        // Verify user got the hat from QuickJoin
+        _assertWearingHat(user, memberHats[0], true, "after QuickJoin mint");
+
+        // Now simulate the second call in the frontend's executeBatch:
+        // claimVouchedHat for the same hat - should be a no-op, not revert
+        vm.prank(user);
+        EligibilityModule(setup.eligibilityModule).claimVouchedHat(memberHats[0]);
+
+        // User should still wear the hat
+        _assertWearingHat(user, memberHats[0], true, "after claimVouchedHat no-op");
+    }
+
     /// @notice Paymaster validates batch UserOp with passkey onboarding + claimVouchedHat
     function testPasskeyOnboarding_PaymasterBatchValidation() public {
         (OrgDeployer.DeploymentResult memory result, bytes32 orgId) = _deployPasskeyOrg();
