@@ -14,6 +14,7 @@ import {PoaManager} from "../src/PoaManager.sol";
 import {OrgRegistry} from "../src/OrgRegistry.sol";
 import {OrgDeployer, ITaskManagerBootstrap} from "../src/OrgDeployer.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
+import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
 
 // Factories
 import {GovernanceFactory} from "../src/factories/GovernanceFactory.sol";
@@ -249,6 +250,8 @@ contract DeployHomeChain is DeployHelper {
                 infra.orgDeployer,
                 abi.encodeWithSignature("setUniversalPasskeyFactory(address)", infra.universalPasskeyFactory)
             );
+        // Wire up universal factory to GlobalAccountRegistry (owner = deployer)
+        UniversalAccountRegistry(infra.globalAccountRegistry).setPasskeyFactory(infra.universalPasskeyFactory);
         console.log("UniversalPasskeyFactory:", infra.universalPasskeyFactory);
 
         // Register infrastructure for subgraph indexing
