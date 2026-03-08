@@ -32,7 +32,7 @@ The `org-config-governance-demo.json` defines a 4-role organization:
 
 - **Hybrid Voting**: 60% Direct Democracy / 40% Token-Weighted
 - **Quadratic Voting**: Enabled for token class
-- **Quorum**: 50% for HybridVoting, 60% for DirectDemocracy
+- **Threshold**: 50% for HybridVoting, 60% for DirectDemocracy
 
 ## Prerequisites
 
@@ -175,7 +175,7 @@ The script uses Foundry's JSON parsing capabilities:
 
 ```solidity
 vm.parseJsonString(configJson, ".orgId")
-vm.parseJsonUint(configJson, ".quorum.hybrid")
+vm.parseJsonUint(configJson, ".threshold.hybrid")
 vm.parseJson(configJson, ".roleAssignments.quickJoinRoles")
 ```
 

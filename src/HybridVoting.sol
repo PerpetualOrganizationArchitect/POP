@@ -53,6 +53,7 @@ contract HybridVoting is Initializable {
         mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
         ClassConfig[] classesSnapshot; // Snapshot the class config to freeze semantics for this proposal
         bool executed; // finalization guard
+        uint32 voterCount; // number of voters who cast a vote
     }
 
     /* ─────── ERC-7201 Storage ─────── */
@@ -63,13 +64,14 @@ contract HybridVoting is Initializable {
         IExecutor executor;
         mapping(address => bool) allowedTarget; // execution allow‑list
         uint256[] creatorHatIds; // enumeration array for creator hats
-        uint8 quorumPct; // 1‑100
+        uint8 thresholdPct; // 1‑100  (min % of support for winning option)
         ClassConfig[] classes; // global N-class configuration
         /* Vote Bookkeeping */
         Proposal[] _proposals;
         /* Inline State */
         bool _paused; // Inline pausable state
         uint256 _lock; // Inline reentrancy guard state
+        uint32 quorum; // minimum number of voters required (0 = disabled)
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.hybridvoting.v2.storage");
@@ -114,7 +116,8 @@ contract HybridVoting is Initializable {
     event HatSet(HatType hatType, uint256 hat, bool allowed);
     event TargetAllowed(address target, bool allowed);
     event ExecutorUpdated(address newExec);
-    event QuorumSet(uint8 pct);
+    event ThresholdPctSet(uint8 pct);
+    event QuorumSet(uint32 quorum);
 
     /* ─────── Initialiser ─────── */
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -127,14 +130,14 @@ contract HybridVoting is Initializable {
         address executor_,
         uint256[] calldata initialCreatorHats,
         address[] calldata initialTargets,
-        uint8 quorum_,
+        uint8 thresholdPct_,
         ClassConfig[] calldata initialClasses
     ) external initializer {
         if (hats_ == address(0) || executor_ == address(0)) {
             revert VotingErrors.ZeroAddress();
         }
 
-        VotingMath.validateQuorum(quorum_);
+        VotingMath.validateThreshold(thresholdPct_);
 
         Layout storage l = _layout();
         l.hats = IHats(hats_);
@@ -142,8 +145,8 @@ contract HybridVoting is Initializable {
         l._paused = false; // Initialize paused state
         l._lock = 0; // Initialize reentrancy guard state
 
-        l.quorumPct = quorum_;
-        emit QuorumSet(quorum_);
+        l.thresholdPct = thresholdPct_;
+        emit ThresholdPctSet(thresholdPct_);
 
         // Initialize creator hats and targets
         _initializeCreatorHats(initialCreatorHats);
@@ -221,19 +224,20 @@ contract HybridVoting is Initializable {
 
     /* ─────── Configuration Setters ─────── */
     enum ConfigKey {
-        QUORUM,
+        THRESHOLD,
         TARGET_ALLOWED,
-        EXECUTOR
+        EXECUTOR,
+        QUORUM
     }
 
     function setConfig(ConfigKey key, bytes calldata value) external onlyExecutor {
         Layout storage l = _layout();
 
-        if (key == ConfigKey.QUORUM) {
+        if (key == ConfigKey.THRESHOLD) {
             uint8 q = abi.decode(value, (uint8));
-            VotingMath.validateQuorum(q);
-            l.quorumPct = q;
-            emit QuorumSet(q);
+            VotingMath.validateThreshold(q);
+            l.thresholdPct = q;
+            emit ThresholdPctSet(q);
         } else if (key == ConfigKey.TARGET_ALLOWED) {
             (address target, bool allowed) = abi.decode(value, (address, bool));
             l.allowedTarget[target] = allowed;
@@ -243,6 +247,10 @@ contract HybridVoting is Initializable {
             if (newExecutor == address(0)) revert VotingErrors.ZeroAddress();
             l.executor = IExecutor(newExecutor);
             emit ExecutorUpdated(newExecutor);
+        } else if (key == ConfigKey.QUORUM) {
+            uint32 q = abi.decode(value, (uint32));
+            l.quorum = q;
+            emit QuorumSet(q);
         }
     }
 
@@ -311,8 +319,12 @@ contract HybridVoting is Initializable {
         return _layout()._proposals.length;
     }
 
-    function quorumPct() external view returns (uint8) {
-        return _layout().quorumPct;
+    function thresholdPct() external view returns (uint8) {
+        return _layout().thresholdPct;
+    }
+
+    function quorum() external view returns (uint32) {
+        return _layout().quorum;
     }
 
     function isTargetAllowed(address target) external view returns (bool) {

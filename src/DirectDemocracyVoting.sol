@@ -26,10 +26,11 @@ contract DirectDemocracyVoting is Initializable {
     }
 
     enum ConfigKey {
-        QUORUM,
+        THRESHOLD,
         EXECUTOR,
         TARGET_ALLOWED,
-        HAT_ALLOWED
+        HAT_ALLOWED,
+        QUORUM
     }
 
     /* ─────────── Data Structures ─────────── */
@@ -57,10 +58,11 @@ contract DirectDemocracyVoting is Initializable {
         mapping(address => bool) allowedTarget; // execution allow‑list
         uint256[] votingHatIds; // Array of voting hat IDs
         uint256[] creatorHatIds; // Array of creator hat IDs
-        uint8 quorumPercentage; // 1‑100
+        uint8 thresholdPct; // 1‑100  (min % of support for winning option)
         Proposal[] _proposals;
         bool _paused; // Inline pausable state
         uint256 _lock; // Inline reentrancy guard state
+        uint32 quorum; // minimum number of voters required (0 = disabled)
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.directdemocracy.storage");
@@ -123,7 +125,8 @@ contract DirectDemocracyVoting is Initializable {
     event ExecutorUpdated(address newExecutor);
     event TargetAllowed(address target, bool allowed);
     event ProposalCleaned(uint256 id, uint256 cleaned);
-    event QuorumPercentageSet(uint8 pct);
+    event ThresholdPctSet(uint8 pct);
+    event QuorumSet(uint32 quorum);
 
     /* ─────────── Initialiser ─────────── */
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -137,20 +140,20 @@ contract DirectDemocracyVoting is Initializable {
         uint256[] calldata initialHats,
         uint256[] calldata initialCreatorHats,
         address[] calldata initialTargets,
-        uint8 quorumPct
+        uint8 thresholdPct_
     ) external initializer {
         if (hats_ == address(0) || executor_ == address(0)) {
             revert VotingErrors.ZeroAddress();
         }
-        VotingMath.validateQuorum(quorumPct);
+        VotingMath.validateThreshold(thresholdPct_);
 
         Layout storage l = _layout();
         l.hats = IHats(hats_);
         l.executor = IExecutor(executor_);
-        l.quorumPercentage = quorumPct;
+        l.thresholdPct = thresholdPct_;
         l._paused = false; // Initialize paused state
         l._lock = 0; // Initialize reentrancy guard state
-        emit QuorumPercentageSet(quorumPct);
+        emit ThresholdPctSet(thresholdPct_);
 
         uint256 len = initialHats.length;
         for (uint256 i; i < len;) {
@@ -192,11 +195,11 @@ contract DirectDemocracyVoting is Initializable {
 
     function setConfig(ConfigKey key, bytes calldata value) external onlyExecutor {
         Layout storage l = _layout();
-        if (key == ConfigKey.QUORUM) {
+        if (key == ConfigKey.THRESHOLD) {
             uint8 q = abi.decode(value, (uint8));
-            VotingMath.validateQuorum(q);
-            l.quorumPercentage = q;
-            emit QuorumPercentageSet(q);
+            VotingMath.validateThreshold(q);
+            l.thresholdPct = q;
+            emit ThresholdPctSet(q);
         } else if (key == ConfigKey.EXECUTOR) {
             address newExecutor = abi.decode(value, (address));
             if (newExecutor == address(0)) revert VotingErrors.ZeroAddress();
@@ -214,6 +217,10 @@ contract DirectDemocracyVoting is Initializable {
                 HatManager.setHatInArray(l.creatorHatIds, hat, allowed);
             }
             emit HatSet(hatType, hat, allowed);
+        } else if (key == ConfigKey.QUORUM) {
+            uint32 q = abi.decode(value, (uint32));
+            l.quorum = q;
+            emit QuorumSet(q);
         }
     }
 
@@ -434,32 +441,15 @@ contract DirectDemocracyVoting is Initializable {
         emit Winner(id, winner, valid);
     }
 
-    /* ─────────── Cleanup ─────────── */
-    // function cleanupProposal(uint256 id, address[] calldata voters) external exists(id) isExpired(id) {
-    //     Layout storage l = _layout();
-    //     Proposal storage p = l._proposals[id];
-    //     require(p.batches.length > 0 || voters.length > 0, "nothing");
-    //     uint256 cleaned;
-    //     uint256 len = voters.length;
-    //     for (uint256 i; i < len && i < 4_000;) {
-    //         if (p.hasVoted[voters[i]]) {
-    //             delete p.hasVoted[voters[i]];
-    //             unchecked {
-    //                 ++cleaned;
-    //             }
-    //         }
-    //         unchecked {
-    //             ++i;
-    //         }
-    //     }
-    //     if (cleaned == 0 && p.batches.length > 0) delete p.batches;
-    //     emit ProposalCleaned(id, cleaned);
-    // }
-
     /* ─────────── View helpers ─────────── */
     function _calcWinner(uint256 id) internal view returns (uint256 win, bool ok) {
         Layout storage l = _layout();
         Proposal storage p = l._proposals[id];
+
+        // Check quorum: minimum number of voters required
+        if (l.quorum > 0 && p.totalWeight / 100 < l.quorum) {
+            return (0, false);
+        }
 
         // Build option scores array for VoteCalc
         uint256 len = p.options.length;
@@ -475,7 +465,7 @@ contract DirectDemocracyVoting is Initializable {
         (win, ok,,) = VotingMath.pickWinnerMajority(
             optionScores,
             p.totalWeight,
-            l.quorumPercentage,
+            l.thresholdPct,
             true // requireStrictMajority
         );
     }
@@ -485,8 +475,12 @@ contract DirectDemocracyVoting is Initializable {
         return _layout()._proposals.length;
     }
 
-    function quorumPercentage() external view returns (uint8) {
-        return _layout().quorumPercentage;
+    function thresholdPct() external view returns (uint8) {
+        return _layout().thresholdPct;
+    }
+
+    function quorum() external view returns (uint32) {
+        return _layout().quorum;
     }
 
     function isTargetAllowed(address target) external view returns (bool) {

@@ -260,8 +260,8 @@ contract OrgDeployer is Initializable {
         uint256 regNonce; // User's current nonce on the registry
         bytes regSignature; // User's EIP-712 ECDSA signature for username registration
         bool autoUpgrade;
-        uint8 hybridQuorumPct;
-        uint8 ddQuorumPct;
+        uint8 hybridThresholdPct;
+        uint8 ddThresholdPct;
         IHybridVotingInit.ClassConfig[] hybridClasses;
         address[] ddInitialTargets;
         RoleConfigStructs.RoleConfig[] roles; // Complete role configuration (replaces roleNames, roleImages, roleCanVote)
@@ -630,8 +630,8 @@ contract OrgDeployer is Initializable {
         govParams.regNonce = params.regNonce;
         govParams.regSignature = params.regSignature;
         govParams.autoUpgrade = params.autoUpgrade;
-        govParams.hybridQuorumPct = params.hybridQuorumPct;
-        govParams.ddQuorumPct = params.ddQuorumPct;
+        govParams.hybridThresholdPct = params.hybridThresholdPct;
+        govParams.ddThresholdPct = params.ddThresholdPct;
         govParams.hybridClasses = params.hybridClasses;
         govParams.hybridProposalCreatorRolesBitmap = params.roleAssignments.hybridProposalCreatorRolesBitmap;
         govParams.ddVotingRolesBitmap = params.roleAssignments.ddVotingRolesBitmap;
@@ -665,8 +665,8 @@ contract OrgDeployer is Initializable {
         votingParams.deployerAddress = params.deployerAddress;
         votingParams.participationToken = participationToken;
         votingParams.autoUpgrade = params.autoUpgrade;
-        votingParams.hybridQuorumPct = params.hybridQuorumPct;
-        votingParams.ddQuorumPct = params.ddQuorumPct;
+        votingParams.hybridThresholdPct = params.hybridThresholdPct;
+        votingParams.ddThresholdPct = params.ddThresholdPct;
         votingParams.hybridClasses = params.hybridClasses;
         votingParams.hybridProposalCreatorRolesBitmap = params.roleAssignments.hybridProposalCreatorRolesBitmap;
         votingParams.ddVotingRolesBitmap = params.roleAssignments.ddVotingRolesBitmap;

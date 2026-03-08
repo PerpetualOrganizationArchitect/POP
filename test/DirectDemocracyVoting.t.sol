@@ -86,13 +86,13 @@ contract DDVotingTest is Test {
         new ERC1967Proxy(address(impl), data);
     }
 
-    function testInitializeBadQuorum() public {
+    function testInitializeBadThreshold() public {
         DirectDemocracyVoting impl = new DirectDemocracyVoting();
         bytes memory data = abi.encodeCall(
             DirectDemocracyVoting.initialize,
             (address(hats), address(exec), new uint256[](0), new uint256[](0), new address[](0), 0)
         );
-        vm.expectRevert(VotingMath.InvalidQuorum.selector);
+        vm.expectRevert(VotingMath.InvalidThreshold.selector);
         new ERC1967Proxy(address(impl), data);
     }
 
@@ -209,21 +209,21 @@ contract DDVotingTest is Test {
         assertTrue(dd.isTargetAllowed(tgt));
     }
 
-    function testSetQuorum() public {
+    function testSetThreshold() public {
         vm.prank(address(exec));
-        dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(80));
-        assertEq(dd.quorumPercentage(), 80);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.THRESHOLD, abi.encode(80));
+        assertEq(dd.thresholdPct(), 80);
     }
 
-    function testSetQuorumBad() public {
+    function testSetThresholdBad() public {
         vm.prank(address(exec));
-        vm.expectRevert(VotingMath.InvalidQuorum.selector);
-        dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(0));
+        vm.expectRevert(VotingMath.InvalidThreshold.selector);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.THRESHOLD, abi.encode(0));
     }
 
-    function testSetQuorumUnauthorized() public {
+    function testSetThresholdUnauthorized() public {
         vm.expectRevert(VotingErrors.Unauthorized.selector);
-        dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(80));
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.THRESHOLD, abi.encode(80));
     }
 
     function testCreateProposalBasic() public {
@@ -611,6 +611,129 @@ contract DDVotingTest is Test {
         assertEq(hats.balanceOf(alice, managerHatId), 1, "Alice should have manager hat");
         assertEq(hats.balanceOf(bob, executiveHatId), 0, "Bob should not have executive hat");
         assertEq(hats.balanceOf(bob, managerHatId), 0, "Bob should not have manager hat");
+    }
+
+    /*////////////////////////////////////////////////////////////
+                            QUORUM TESTS
+    ////////////////////////////////////////////////////////////*/
+
+    function testSetQuorum() public {
+        assertEq(dd.quorum(), 0, "Default quorum should be 0");
+        vm.prank(address(exec));
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(uint32(5)));
+        assertEq(dd.quorum(), 5, "Quorum should be 5");
+    }
+
+    function testSetQuorumEmitsEvent() public {
+        vm.prank(address(exec));
+        vm.expectEmit(true, true, true, true);
+        emit DirectDemocracyVoting.QuorumSet(uint32(5));
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(uint32(5)));
+    }
+
+    function testSetQuorumUnauthorized() public {
+        vm.expectRevert(VotingErrors.Unauthorized.selector);
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(uint32(5)));
+    }
+
+    function testQuorumNotMet() public {
+        // Set quorum to 3 voters
+        vm.prank(address(exec));
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(uint32(3)));
+
+        // Create proposal and have only 1 voter vote
+        uint256 id = _createSimple(2);
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 0;
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+        vm.prank(voter);
+        dd.vote(id, idx, w);
+
+        // Announce winner - should be invalid due to quorum not met
+        vm.warp(block.timestamp + 11 minutes);
+        (uint256 winner, bool valid) = dd.announceWinner(id);
+        assertFalse(valid, "Should be invalid when quorum not met");
+        assertEq(winner, 0, "Winner should be 0 when quorum not met");
+    }
+
+    function testQuorumMet() public {
+        // Set quorum to 2 voters
+        vm.prank(address(exec));
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(uint32(2)));
+
+        // Create proposal and have 2 voters vote
+        uint256 id = _createSimple(2);
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 0;
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+
+        vm.prank(creator);
+        dd.vote(id, idx, w);
+        vm.prank(voter);
+        dd.vote(id, idx, w);
+
+        // Announce winner - should be valid since quorum met
+        vm.warp(block.timestamp + 11 minutes);
+        (uint256 winner, bool valid) = dd.announceWinner(id);
+        assertTrue(valid, "Should be valid when quorum met");
+        assertEq(winner, 0, "Option 0 should win");
+    }
+
+    function testQuorumDisabledByDefault() public {
+        // Default quorum is 0, so even 1 voter should work
+        uint256 id = _createSimple(2);
+        uint8[] memory idx = new uint8[](1);
+        idx[0] = 0;
+        uint8[] memory w = new uint8[](1);
+        w[0] = 100;
+        vm.prank(voter);
+        dd.vote(id, idx, w);
+
+        vm.warp(block.timestamp + 11 minutes);
+        (uint256 winner, bool valid) = dd.announceWinner(id);
+        assertTrue(valid, "Should be valid with quorum disabled (0)");
+    }
+
+    function testQuorumPassesButThresholdFails() public {
+        // Set quorum=1 and threshold=100%
+        vm.prank(address(exec));
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(uint32(1)));
+        vm.prank(address(exec));
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.THRESHOLD, abi.encode(uint8(100)));
+
+        // Create 2-option proposal, split vote 50/50 between 2 voters
+        uint256 id = _createSimple(2);
+        uint8[] memory idx0 = new uint8[](1);
+        idx0[0] = 0;
+        uint8[] memory w0 = new uint8[](1);
+        w0[0] = 100;
+        vm.prank(creator);
+        dd.vote(id, idx0, w0);
+
+        uint8[] memory idx1 = new uint8[](1);
+        idx1[0] = 1;
+        uint8[] memory w1 = new uint8[](1);
+        w1[0] = 100;
+        vm.prank(voter);
+        dd.vote(id, idx1, w1);
+
+        vm.warp(block.timestamp + 11 minutes);
+        (uint256 winner, bool valid) = dd.announceWinner(id);
+        // Quorum met (2 >= 1) but threshold not met (50% < 100%)
+        assertFalse(valid, "Should fail threshold even though quorum met");
+    }
+
+    function testQuorumCanBeSetToZeroToDisable() public {
+        // Set quorum to 10, then back to 0
+        vm.prank(address(exec));
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(uint32(10)));
+        assertEq(dd.quorum(), 10);
+
+        vm.prank(address(exec));
+        dd.setConfig(DirectDemocracyVoting.ConfigKey.QUORUM, abi.encode(uint32(0)));
+        assertEq(dd.quorum(), 0, "Quorum should be disabled after setting to 0");
     }
 
     /*////////////////////////////////////////////////////////////

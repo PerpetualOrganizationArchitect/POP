@@ -76,7 +76,7 @@ Create a JSON configuration file for your organization. See example configs:
   "orgId": "unique-org-identifier",
   "orgName": "Organization Display Name",
   "autoUpgrade": true,
-  "quorum": {
+  "threshold": {
     "hybrid": 50,
     "directDemocracy": 50
   },

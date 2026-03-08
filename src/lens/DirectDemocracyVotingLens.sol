@@ -37,11 +37,12 @@ contract DirectDemocracyVotingLens {
     function getGovernanceConfig(DirectDemocracyVoting voting)
         external
         view
-        returns (address executor, address hats, uint8 quorumPercentage, uint256 proposalCount)
+        returns (address executor, address hats, uint8 thresholdPct, uint32 quorum, uint256 proposalCount)
     {
         executor = voting.executor();
         hats = voting.hats();
-        quorumPercentage = voting.quorumPercentage();
+        thresholdPct = voting.thresholdPct();
+        quorum = voting.quorum();
         proposalCount = voting.proposalsCount();
     }
 }

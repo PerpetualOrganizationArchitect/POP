@@ -61,7 +61,7 @@ contract RunOrgActionsAdvanced is Script {
         string orgId;
         string orgName;
         bool autoUpgrade;
-        QuorumConfig quorum;
+        ThresholdConfig threshold;
         RoleConfig[] roles;
         VotingClassConfig[] votingClasses;
         RoleAssignmentsConfig roleAssignments;
@@ -71,7 +71,7 @@ contract RunOrgActionsAdvanced is Script {
         BootstrapConfigJson bootstrap; // Optional: initial projects and tasks
     }
 
-    struct QuorumConfig {
+    struct ThresholdConfig {
         uint8 hybrid;
         uint8 directDemocracy;
     }
@@ -717,7 +717,7 @@ contract RunOrgActionsAdvanced is Script {
 
         console.log("  [OK] Winner Announced");
         console.log("  Winning Option:", winningOption);
-        console.log("  Is Valid (quorum met):", isValid);
+        console.log("  Is Valid (threshold met):", isValid);
 
         console.log("\n[OK] Governance Demonstration Complete - Full Cycle!");
         console.log("  Proposal Created: 1");
@@ -745,9 +745,9 @@ contract RunOrgActionsAdvanced is Script {
             config.withEducationHub = true; // Default to enabled for backward compatibility
         }
 
-        // Parse quorum
-        config.quorum.hybrid = uint8(vm.parseJsonUint(configJson, ".quorum.hybrid"));
-        config.quorum.directDemocracy = uint8(vm.parseJsonUint(configJson, ".quorum.directDemocracy"));
+        // Parse threshold
+        config.threshold.hybrid = uint8(vm.parseJsonUint(configJson, ".threshold.hybrid"));
+        config.threshold.directDemocracy = uint8(vm.parseJsonUint(configJson, ".threshold.directDemocracy"));
 
         // Parse roles array
         uint256 rolesLength = 0;
@@ -1004,8 +1004,8 @@ contract RunOrgActionsAdvanced is Script {
         params.deployerAddress = deployerAddress; // Address to receive ADMIN hat
         params.deployerUsername = ""; // Registration requires EIP-712 signature (regSignature) from frontend
         params.autoUpgrade = config.autoUpgrade;
-        params.hybridQuorumPct = config.quorum.hybrid;
-        params.ddQuorumPct = config.quorum.directDemocracy;
+        params.hybridThresholdPct = config.threshold.hybrid;
+        params.ddThresholdPct = config.threshold.directDemocracy;
         params.ddInitialTargets = config.ddInitialTargets;
 
         // Build role configs

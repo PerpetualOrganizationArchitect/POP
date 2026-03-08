@@ -97,6 +97,9 @@ library HybridVotingCore {
         }
 
         p.hasVoted[voter] = true;
+        unchecked {
+            p.voterCount++;
+        }
         emit VoteCast(id, voter, idxs, weights, classRawPowers, uint64(block.timestamp));
     }
 
@@ -158,6 +161,12 @@ library HybridVotingCore {
             return (0, false);
         }
 
+        // Check quorum: minimum number of voters required
+        if (l.quorum > 0 && p.voterCount < l.quorum) {
+            emit Winner(id, 0, false, false, uint64(block.timestamp));
+            return (0, false);
+        }
+
         // Build matrix for N-class winner calculation
         uint256 numOptions = p.options.length;
         uint256 numClasses = p.classesSnapshot.length;
@@ -189,7 +198,7 @@ library HybridVotingCore {
             perOptionPerClassRaw,
             p.classTotalsRaw,
             slices,
-            l.quorumPct,
+            l.thresholdPct,
             true // strict majority required
         );
 

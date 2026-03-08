@@ -79,8 +79,8 @@ contract GovernanceFactory {
         uint256 regNonce; // User's current nonce on the registry
         bytes regSignature; // User's EIP-712 ECDSA signature for username registration
         bool autoUpgrade;
-        uint8 hybridQuorumPct; // Quorum for HybridVoting
-        uint8 ddQuorumPct; // Quorum for DirectDemocracyVoting
+        uint8 hybridThresholdPct; // Support threshold for HybridVoting
+        uint8 ddThresholdPct; // Support threshold for DirectDemocracyVoting
         IHybridVotingInit.ClassConfig[] hybridClasses; // Voting class configuration
         uint256 hybridProposalCreatorRolesBitmap; // Bit N set = Role N can create proposals
         uint256 ddVotingRolesBitmap; // Bit N set = Role N can vote in polls
@@ -265,7 +265,7 @@ contract GovernanceFactory {
             });
 
             hybridVoting = ModuleDeploymentLib.deployHybridVoting(
-                config, executor, creatorHats, params.hybridQuorumPct, finalClasses, hybridBeacon
+                config, executor, creatorHats, params.hybridThresholdPct, finalClasses, hybridBeacon
             );
         }
 
@@ -295,7 +295,7 @@ contract GovernanceFactory {
             });
 
             directDemocracyVoting = ModuleDeploymentLib.deployDirectDemocracyVoting(
-                config, executor, votingHats, creatorHats, params.ddInitialTargets, params.ddQuorumPct, ddBeacon
+                config, executor, votingHats, creatorHats, params.ddInitialTargets, params.ddThresholdPct, ddBeacon
             );
         }
 

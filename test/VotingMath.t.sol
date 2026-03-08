@@ -210,45 +210,45 @@ contract VotingMathTest is Test {
         scores[2] = 20;
 
         uint256 totalWeight = 100;
-        uint8 quorumPct = 40;
+        uint8 thresholdPct = 40;
 
         (uint256 win, bool ok, uint256 hi, uint256 second) =
-            VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, true);
+            VotingMath.pickWinnerMajority(scores, totalWeight, thresholdPct, true);
 
         assertEq(win, 1, "Option 1 should win");
-        assertTrue(ok, "Should meet quorum");
+        assertTrue(ok, "Should meet threshold");
         assertEq(hi, 50, "Highest score should be 50");
         assertEq(second, 30, "Second highest should be 30");
     }
 
-    function testPickWinnerMajority_QuorumNotMet() public {
+    function testPickWinnerMajority_ThresholdNotMet() public {
         uint256[] memory scores = new uint256[](3);
         scores[0] = 10;
         scores[1] = 20;
         scores[2] = 15;
 
         uint256 totalWeight = 100;
-        uint8 quorumPct = 25; // Requires > 25% of total weight
+        uint8 thresholdPct = 25; // Requires > 25% of total weight
 
-        (uint256 win, bool ok,,) = VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, true);
+        (uint256 win, bool ok,,) = VotingMath.pickWinnerMajority(scores, totalWeight, thresholdPct, true);
 
         assertEq(win, 1, "Option 1 should be winner candidate");
-        assertFalse(ok, "Should not meet quorum (20 * 100 = 2000, not >= 2500)");
+        assertFalse(ok, "Should not meet threshold (20 * 100 = 2000, not >= 2500)");
     }
 
-    function testPickWinnerMajority_ExactQuorumPasses() public {
+    function testPickWinnerMajority_ExactThresholdPasses() public {
         uint256[] memory scores = new uint256[](3);
         scores[0] = 10;
         scores[1] = 25; // Exactly 25% of 100
         scores[2] = 15;
 
         uint256 totalWeight = 100;
-        uint8 quorumPct = 25; // Requires >= 25% of total weight
+        uint8 thresholdPct = 25; // Requires >= 25% of total weight
 
-        (uint256 win, bool ok,,) = VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, false);
+        (uint256 win, bool ok,,) = VotingMath.pickWinnerMajority(scores, totalWeight, thresholdPct, false);
 
         assertEq(win, 1, "Option 1 should be winner");
-        assertTrue(ok, "Should meet quorum (25 * 100 = 2500, >= 2500)");
+        assertTrue(ok, "Should meet threshold (25 * 100 = 2500, >= 2500)");
     }
 
     function testPickWinnerMajority_TieWithStrictRequirement() public {
@@ -257,9 +257,9 @@ contract VotingMathTest is Test {
         scores[1] = 50;
 
         uint256 totalWeight = 100;
-        uint8 quorumPct = 40;
+        uint8 thresholdPct = 40;
 
-        (uint256 win, bool ok,,) = VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, true);
+        (uint256 win, bool ok,,) = VotingMath.pickWinnerMajority(scores, totalWeight, thresholdPct, true);
 
         assertFalse(ok, "Should not be valid with tie and strict requirement");
     }
@@ -270,9 +270,9 @@ contract VotingMathTest is Test {
         scores[1] = 50;
 
         uint256 totalWeight = 100;
-        uint8 quorumPct = 40;
+        uint8 thresholdPct = 40;
 
-        (uint256 win, bool ok,,) = VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, false);
+        (uint256 win, bool ok,,) = VotingMath.pickWinnerMajority(scores, totalWeight, thresholdPct, false);
 
         assertTrue(ok, "Should be valid with tie when not strict");
         assertEq(win, 0, "First option should win in tie");
@@ -293,17 +293,17 @@ contract VotingMathTest is Test {
         uint256 ddTotalRaw = 100;
         uint256 ptTotalRaw = 6000;
         uint8 ddSharePct = 50; // 50/50 split
-        uint8 quorumPct = 30; // Lowered quorum to 30% so 35% passes
+        uint8 thresholdPct = 30; // Lowered threshold to 30% so 35% passes
 
         (uint256 win, bool ok, uint256 hi, uint256 second) =
-            VotingMath.pickWinnerTwoSlice(ddRaw, ptRaw, ddTotalRaw, ptTotalRaw, ddSharePct, quorumPct);
+            VotingMath.pickWinnerTwoSlice(ddRaw, ptRaw, ddTotalRaw, ptTotalRaw, ddSharePct, thresholdPct);
 
         // DD scaled: [15, 25, 10] (out of 50)
         // PT scaled: [16.67, 8.33, 25] (out of 50)
         // Total: [31.67, 33.33, 35]
 
         assertEq(win, 2, "Option 2 should win");
-        assertTrue(ok, "Should meet quorum (35% > 30%)");
+        assertTrue(ok, "Should meet threshold (35% > 30%)");
     }
 
     function testPickWinnerTwoSlice_ZeroTotals() public {
@@ -396,8 +396,8 @@ contract VotingMathTest is Test {
         VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: numOptions}));
     }
 
-    function testFuzz_PickWinnerMajority(uint256[5] memory rawScores, uint8 quorumPct, bool strictMajority) public {
-        vm.assume(quorumPct > 0 && quorumPct <= 100);
+    function testFuzz_PickWinnerMajority(uint256[5] memory rawScores, uint8 thresholdPct, bool strictMajority) public {
+        vm.assume(thresholdPct > 0 && thresholdPct <= 100);
 
         uint256[] memory scores = new uint256[](5);
         uint256 totalWeight;
@@ -410,7 +410,7 @@ contract VotingMathTest is Test {
         if (totalWeight == 0) totalWeight = 1; // Avoid division by zero
 
         (uint256 win, bool ok, uint256 hi, uint256 second) =
-            VotingMath.pickWinnerMajority(scores, totalWeight, quorumPct, strictMajority);
+            VotingMath.pickWinnerMajority(scores, totalWeight, thresholdPct, strictMajority);
 
         // Verify winner has highest score
         if (hi > 0) {
@@ -429,9 +429,9 @@ contract VotingMathTest is Test {
             assertTrue(foundSecond || second == hi, "Second should be a valid score");
         }
 
-        // Verify quorum logic
+        // Verify threshold logic
         if (ok) {
-            assertTrue(hi * 100 > totalWeight * quorumPct, "Should meet quorum threshold");
+            assertTrue(hi * 100 > totalWeight * thresholdPct, "Should meet threshold");
             if (strictMajority) {
                 assertTrue(hi > second, "Should have strict majority");
             } else {

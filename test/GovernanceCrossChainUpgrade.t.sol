@@ -198,7 +198,7 @@ contract GovernanceCrossChainUpgradeTest is Test {
         uint256[] memory hatIds = new uint256[](0);
         hv.createProposal(bytes("Upgrade Widget to v2"), bytes32(0), 15, 2, batches, hatIds);
 
-        // 2. Vote YES (alice + carol = 100% quorum, all YES)
+        // 2. Vote YES (alice + carol = 100% threshold, all YES)
         uint8[] memory yesIdx = new uint8[](1);
         yesIdx[0] = 0;
         uint8[] memory weight = new uint8[](1);
@@ -214,7 +214,7 @@ contract GovernanceCrossChainUpgradeTest is Test {
         vm.prank(alice);
         (uint256 winner, bool valid) = hv.announceWinner(0);
 
-        assertTrue(valid, "quorum should be met");
+        assertTrue(valid, "threshold should be met");
         assertEq(winner, 0, "YES should win");
 
         // 4. Verify: home chain beacon upgraded to V2
