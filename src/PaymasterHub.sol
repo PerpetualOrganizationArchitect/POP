@@ -41,7 +41,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     error InvalidPaymasterData();
     error ZeroAddress();
     error InvalidEpochLength();
-    error InvalidBountyConfig();
     error ContractNotDeployed();
     error ArrayLengthMismatch();
     error OrgNotRegistered();
@@ -71,8 +70,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
     uint32 private constant MIN_EPOCH_LENGTH = 1 hours;
     uint32 private constant MAX_EPOCH_LENGTH = 365 days;
-    uint256 private constant MAX_BOUNTY_PCT_BP = 10000; // 100%
-
     // ============ Events ============
     event PaymasterInitialized(address indexed entryPoint, address indexed hats, address indexed poaManager);
     event OrgRegistered(bytes32 indexed orgId, uint256 adminHatId, uint256 operatorHatId);
@@ -92,15 +89,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     event OperatorHatSet(bytes32 indexed orgId, uint256 operatorHatId);
     event DepositIncrease(uint256 amount, uint256 newDeposit);
     event DepositWithdraw(address indexed to, uint256 amount);
-    event BountyConfig(bytes32 indexed orgId, bool enabled, uint96 maxPerOp, uint16 pctBpCap);
-    event BountyFunded(uint256 amount, uint256 newBalance);
-    event BountySweep(address indexed to, uint256 amount);
-    event BountyPaid(bytes32 indexed userOpHash, address indexed to, uint256 amount);
-    event BountyPayFailed(bytes32 indexed userOpHash, address indexed to, uint256 amount);
     event UsageIncreased(
         bytes32 indexed orgId, bytes32 subjectKey, uint256 delta, uint128 usedInEpoch, uint32 epochStart
     );
-    event UserOpPosted(bytes32 indexed opHash, address indexed postedBy);
     event EmergencyWithdraw(address indexed to, uint256 amount);
     event OrgDepositReceived(bytes32 indexed orgId, address indexed from, uint256 amount);
     event SolidarityFeeCollected(bytes32 indexed orgId, uint256 amount);
@@ -206,13 +197,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         uint32 epochStart;
     }
 
-    struct Bounty {
-        bool enabled;
-        uint96 maxBountyWeiPerOp;
-        uint16 pctBpCap;
-        uint144 totalPaid;
-    }
-
     // ============ ERC-7201 Storage Locations ============
     bytes32 private constant ORGS_STORAGE_LOCATION =
         keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.orgs")) - 1));
@@ -222,8 +206,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.rules")) - 1));
     bytes32 private constant BUDGETS_STORAGE_LOCATION =
         keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.budgets")) - 1));
-    bytes32 private constant BOUNTY_STORAGE_LOCATION =
-        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.bounty")) - 1));
     bytes32 private constant FINANCIALS_STORAGE_LOCATION =
         keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.financials")) - 1));
     bytes32 private constant SOLIDARITY_STORAGE_LOCATION =
@@ -674,7 +656,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         returns (bytes memory context, uint256 validationData)
     {
         // Decode and validate paymasterAndData
-        (uint8 version, bytes32 orgId, uint8 subjectType, bytes32 subjectId, uint32 ruleId, uint64 mailboxCommit8) =
+        (uint8 version, bytes32 orgId, uint8 subjectType, bytes32 subjectId, uint32 ruleId) =
             _decodePaymasterData(userOp.paymasterAndData);
 
         if (version != PAYMASTER_DATA_VERSION) revert InvalidVersion();
@@ -725,9 +707,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
 
         // Prepare context for postOp
-        context = abi.encode(
-            isOnboarding, contextOrgId, subjectKey, currentEpochStart, userOpHash, mailboxCommit8, uint160(tx.origin)
-        );
+        context = abi.encode(isOnboarding, contextOrgId, subjectKey, currentEpochStart);
 
         // Return 0 for no signature failure and no time restrictions
         validationData = 0;
@@ -791,15 +771,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         onlyEntryPoint
         nonReentrant
     {
-        (
-            bool isOnboarding,
-            bytes32 orgId,
-            bytes32 subjectKey,
-            uint32 epochStart,
-            bytes32 userOpHash,
-            uint64 mailboxCommit8,
-            address bundlerOrigin
-        ) = abi.decode(context, (bool, bytes32, bytes32, uint32, bytes32, uint64, address));
+        (bool isOnboarding, bytes32 orgId, bytes32 subjectKey, uint32 epochStart) =
+            abi.decode(context, (bool, bytes32, bytes32, uint32));
 
         // Onboarding uses a dedicated context flag (not orgId sentinel).
         if (isOnboarding) {
@@ -811,13 +784,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             // Update per-subject budget usage (existing functionality)
             _updateUsage(orgId, subjectKey, epochStart, actualGasCost);
 
-            // Update per-org financial tracking and collect solidarity fee (new)
+            // Update per-org financial tracking and collect solidarity fee
             _updateOrgFinancials(orgId, actualGasCost);
-
-            // Process bounty only on successful execution
-            if (mode == IPaymaster.PostOpMode.opSucceeded && mailboxCommit8 != 0) {
-                _processBounty(orgId, userOpHash, bundlerOrigin, actualGasCost);
-            }
         }
     }
 
@@ -1103,23 +1071,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     }
 
     /**
-     * @notice Configure bounty parameters for an org
-     */
-    function setBounty(bytes32 orgId, bool enabled, uint96 maxBountyWeiPerOp, uint16 pctBpCap)
-        external
-        onlyOrgAdmin(orgId)
-    {
-        if (pctBpCap > MAX_BOUNTY_PCT_BP) revert InvalidBountyConfig();
-
-        Bounty storage bounty = _getBountyStorage()[orgId];
-        bounty.enabled = enabled;
-        bounty.maxBountyWeiPerOp = maxBountyWeiPerOp;
-        bounty.pctBpCap = pctBpCap;
-
-        emit BountyConfig(orgId, enabled, maxBountyWeiPerOp, pctBpCap);
-    }
-
-    /**
      * @notice Deposit funds to EntryPoint for gas reimbursement (shared pool)
      * @dev Any org operator can deposit to shared pool
      */
@@ -1138,22 +1089,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     function withdrawFromEntryPoint(address payable to, uint256 amount) external {
         // TODO: Add global admin mechanism or require multi-org consensus
         // For now, disabled to protect shared pool
-        revert NotAdmin();
-    }
-
-    /**
-     * @notice Fund bounty pool (contract balance)
-     */
-    function fundBounty() external payable {
-        emit BountyFunded(msg.value, address(this).balance);
-    }
-
-    /**
-     * @notice Withdraw from bounty pool
-     * @dev Bounties are shared across all orgs, requires careful governance
-     */
-    function sweepBounty(address payable to, uint256 amount) external {
-        // TODO: Add global admin mechanism
         revert NotAdmin();
     }
 
@@ -1283,18 +1218,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         emit OnboardingConfigUpdated(_maxGasPerCreation, _dailyCreationLimit, _enabled, _accountRegistry);
     }
 
-    // ============ Mailbox Function ============
-
-    /**
-     * @notice Post a UserOperation to the on-chain mailbox
-     * @param packedUserOp The packed user operation data
-     * @return opHash Hash of the posted operation
-     */
-    function postUserOp(bytes calldata packedUserOp) external returns (bytes32 opHash) {
-        opHash = keccak256(packedUserOp);
-        emit UserOpPosted(opHash, msg.sender);
-    }
-
     // ============ Storage Getters (for Lens) ============
 
     /**
@@ -1333,15 +1256,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      */
     function getFeeCaps(bytes32 orgId) external view returns (FeeCaps memory) {
         return _getFeeCapsStorage()[orgId];
-    }
-
-    /**
-     * @notice Get the bounty configuration for an org
-     * @param orgId Organization identifier
-     * @return The Bounty struct
-     */
-    function getBountyConfig(bytes32 orgId) external view returns (Bounty memory) {
-        return _getBountyStorage()[orgId];
     }
 
     /**
@@ -1464,13 +1378,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
     }
 
-    function _getBountyStorage() private pure returns (mapping(bytes32 => Bounty) storage $) {
-        bytes32 slot = BOUNTY_STORAGE_LOCATION;
-        assembly {
-            $.slot := slot
-        }
-    }
-
     function _getFinancialsStorage() private pure returns (mapping(bytes32 => OrgFinancials) storage $) {
         bytes32 slot = FINANCIALS_STORAGE_LOCATION;
         assembly {
@@ -1544,19 +1451,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     function _decodePaymasterData(bytes calldata paymasterAndData)
         private
         pure
-        returns (
-            uint8 version,
-            bytes32 orgId,
-            uint8 subjectType,
-            bytes32 subjectId,
-            uint32 ruleId,
-            uint64 mailboxCommit8
-        )
+        returns (uint8 version, bytes32 orgId, uint8 subjectType, bytes32 subjectId, uint32 ruleId)
     {
         // ERC-4337 v0.7 packed format:
-        // [paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(32) | ruleId(4) | mailboxCommit(8)]
-        // = 130 bytes total. Custom data starts at offset 52.
-        if (paymasterAndData.length < 130) revert InvalidPaymasterData();
+        // [paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(32) | ruleId(4)]
+        // = 122 bytes total. Custom data starts at offset 52.
+        if (paymasterAndData.length < 122) revert InvalidPaymasterData();
 
         // Skip first 52 bytes (paymaster address + v0.7 gas limits) and decode the rest
         version = uint8(paymasterAndData[52]);
@@ -1570,9 +1470,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         // Extract ruleId from bytes 118-121
         ruleId = uint32(bytes4(paymasterAndData[118:122]));
-
-        // Extract mailboxCommit8 from bytes 122-129
-        mailboxCommit8 = uint64(bytes8(paymasterAndData[122:130]));
     }
 
     function _validateSubjectEligibility(address sender, uint8 subjectType, bytes32 subjectId)
@@ -1898,41 +1795,5 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Deduct from solidarity fund (validated during _validateOnboardingEligibility)
         if (solidarity.balance < actualGasCost) revert InsufficientFunds();
         solidarity.balance -= uint128(actualGasCost);
-    }
-
-    function _processBounty(bytes32 orgId, bytes32 userOpHash, address bundlerOrigin, uint256 actualGasCost) private {
-        Bounty storage bounty = _getBountyStorage()[orgId];
-
-        if (!bounty.enabled) return;
-
-        // Calculate tip amount
-        uint256 tip = bounty.maxBountyWeiPerOp;
-        if (bounty.pctBpCap > 0) {
-            uint256 pctTip = (actualGasCost * bounty.pctBpCap) / 10000;
-            if (pctTip < tip) {
-                tip = pctTip;
-            }
-        }
-
-        // Ensure we have sufficient balance
-        if (tip > address(this).balance) {
-            tip = address(this).balance;
-        }
-
-        if (tip > 0) {
-            (bool success,) = bundlerOrigin.call{value: tip, gas: 30000}("");
-
-            if (success) {
-                bounty.totalPaid += uint144(tip);
-                emit BountyPaid(userOpHash, bundlerOrigin, tip);
-            } else {
-                emit BountyPayFailed(userOpHash, bundlerOrigin, tip);
-            }
-        }
-    }
-
-    // ============ Receive Function ============
-    receive() external payable {
-        emit BountyFunded(msg.value, address(this).balance);
     }
 }

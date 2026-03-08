@@ -38,20 +38,12 @@ struct Budget {
     uint32 epochStart;
 }
 
-struct Bounty {
-    bool enabled;
-    uint96 maxBountyWeiPerOp;
-    uint16 pctBpCap;
-    uint144 totalPaid;
-}
-
 // Interface for PaymasterHub Storage Getters
 interface IPaymasterHubStorage {
     function getConfig() external view returns (Config memory);
     function getBudget(bytes32 key) external view returns (Budget memory);
     function getRule(address target, bytes4 selector) external view returns (Rule memory);
     function getFeeCaps() external view returns (FeeCaps memory);
-    function getBountyConfig() external view returns (Bounty memory);
     function ENTRY_POINT() external view returns (address);
 }
 
@@ -134,17 +126,9 @@ contract PaymasterHubLens {
         return hub.getFeeCaps();
     }
 
-    function bountyInfo() external view returns (Bounty memory) {
-        return hub.getBountyConfig();
-    }
-
     function entryPointDeposit() external view returns (uint256) {
         address entryPoint = hub.ENTRY_POINT();
         return IEntryPoint(entryPoint).balanceOf(address(hub));
-    }
-
-    function bountyBalance() external view returns (uint256) {
-        return address(hub).balance;
     }
 
     /**
@@ -160,7 +144,7 @@ contract PaymasterHubLens {
         if (cfg.paused) return (false, "Paused");
 
         // Decode paymasterAndData
-        (uint8 version, uint8 subjectType, bytes32 subjectId, uint32 ruleId,) =
+        (uint8 version, uint8 subjectType, bytes32 subjectId, uint32 ruleId) =
             _decodePaymasterData(userOp.paymasterAndData);
 
         if (version != PAYMASTER_DATA_VERSION) return (false, "InvalidVersion");
@@ -209,12 +193,12 @@ contract PaymasterHubLens {
     function _decodePaymasterData(bytes calldata paymasterAndData)
         private
         pure
-        returns (uint8 version, uint8 subjectType, bytes32 subjectId, uint32 ruleId, uint64 mailboxCommit8)
+        returns (uint8 version, uint8 subjectType, bytes32 subjectId, uint32 ruleId)
     {
         // ERC-4337 v0.7 packed format (must match PaymasterHub._decodePaymasterData):
-        // [paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(32) | ruleId(4) | mailboxCommit(8)]
-        // = 130 bytes total. Custom data starts at offset 52.
-        if (paymasterAndData.length < 130) revert InvalidPaymasterData();
+        // [paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(32) | ruleId(4)]
+        // = 122 bytes total. Custom data starts at offset 52.
+        if (paymasterAndData.length < 122) revert InvalidPaymasterData();
 
         // Skip first 52 bytes (paymaster address + v0.7 gas limits) and decode the rest
         // orgId at [53:85] is skipped (not needed by Lens)
@@ -228,9 +212,6 @@ contract PaymasterHubLens {
 
         // Extract ruleId from bytes 118-121
         ruleId = uint32(bytes4(paymasterAndData[118:122]));
-
-        // Extract mailboxCommit8 from bytes 122-129
-        mailboxCommit8 = uint64(bytes8(paymasterAndData[122:130]));
     }
 
     function _extractTargetSelector(PackedUserOperation calldata userOp, uint32 ruleId)
