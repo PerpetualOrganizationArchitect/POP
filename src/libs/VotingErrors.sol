@@ -22,6 +22,7 @@ library VotingErrors {
     error TargetSelf();
     error InvalidTarget();
     error EmptyBatch();
+    error InvalidThreshold();
     error InvalidQuorum();
     error Paused();
     error Overflow();

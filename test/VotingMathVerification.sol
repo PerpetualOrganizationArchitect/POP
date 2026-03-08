@@ -91,7 +91,7 @@ contract VotingMathVerification {
         (uint256 win, bool ok, uint256 hi, uint256 second) = VotingMath.pickWinnerMajority(scores, 100, 40, true);
 
         require(win == 1, "Winner should be option 1");
-        require(ok == true, "Should meet quorum");
+        require(ok == true, "Should meet threshold");
         require(hi == 50, "Highest should be 50");
         require(second == 30, "Second should be 30");
 
@@ -114,7 +114,7 @@ contract VotingMathVerification {
         (uint256 win, bool ok,,) = VotingMath.pickWinnerTwoSlice(ddRaw, ptRaw, 100, 6000, 50, 30);
 
         require(win == 2, "Winner should be option 2");
-        require(ok == true, "Should meet quorum");
+        require(ok == true, "Should meet threshold");
 
         return true;
     }
