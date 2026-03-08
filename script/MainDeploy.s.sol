@@ -28,6 +28,8 @@ import {PoaManagerHub} from "../src/crosschain/PoaManagerHub.sol";
 import {PoaManagerSatellite} from "../src/crosschain/PoaManagerSatellite.sol";
 import {NameRegistryHub} from "../src/crosschain/NameRegistryHub.sol";
 import {RegistryRelay} from "../src/crosschain/RegistryRelay.sol";
+import {NameClaimAdapter} from "../src/crosschain/NameClaimAdapter.sol";
+import {SatelliteOnboardingHelper} from "../src/crosschain/SatelliteOnboardingHelper.sol";
 
 // Config structs
 import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
@@ -496,6 +498,10 @@ contract DeployHomeChain is DeployHelper {
  *     --rpc-url $SATELLITE_RPC --broadcast --slow
  */
 contract DeploySatellite is DeployHelper {
+    address public constant HATS_PROTOCOL = 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137;
+    address public constant ENTRY_POINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
+    address public constant POA_GUARDIAN = address(0);
+    uint256 public constant INITIAL_SOLIDARITY_FUND = 0.1 ether;
     bytes32 public constant DD_SALT = keccak256("POA_DETERMINISTIC_DEPLOYER_V1");
 
     function run() public {
@@ -533,6 +539,7 @@ contract DeploySatellite is DeployHelper {
         reg.transferOwnership(address(pm));
 
         // 3. Deploy implementations via DD and register all contract types
+        //    (includes NameClaimAdapter + SatelliteOnboardingHelper)
         _deployAndRegisterTypesDD(pm, dd);
 
         // 4. Deploy PoaManagerSatellite via BeaconProxy
@@ -553,7 +560,92 @@ contract DeploySatellite is DeployHelper {
         RegistryRelay registryRelay = RegistryRelay(address(new BeaconProxy(relayBeacon, relayInit)));
         console.log("RegistryRelay:", address(registryRelay));
 
-        // 5. Transfer PoaManager ownership to Satellite (after all types registered)
+        // 5. Deploy satellite org infrastructure
+        //    NameClaimAdapter bridges OrgRegistry's sync interface to RegistryRelay's async cache
+        address adapterBeacon = pm.getBeaconById(keccak256("NameClaimAdapter"));
+        bytes memory adapterInit = abi.encodeCall(NameClaimAdapter.initialize, (deployer, address(registryRelay)));
+        NameClaimAdapter nameClaimAdapter = NameClaimAdapter(address(new BeaconProxy(adapterBeacon, adapterInit)));
+        console.log("NameClaimAdapter:", address(nameClaimAdapter));
+
+        // 5b. Deploy OrgRegistry + OrgDeployer for satellite org creation
+        address orgRegBeacon = pm.getBeaconById(keccak256("OrgRegistry"));
+        bytes memory orgRegInit = abi.encodeWithSignature("initialize(address,address)", deployer, HATS_PROTOCOL);
+        OrgRegistry satOrgRegistry = OrgRegistry(address(new BeaconProxy(orgRegBeacon, orgRegInit)));
+
+        // Wire OrgRegistry to NameClaimAdapter (instead of NameRegistryHub)
+        satOrgRegistry.setNameRegistryHub(address(nameClaimAdapter));
+        nameClaimAdapter.setAuthorizedCaller(address(satOrgRegistry), true);
+        console.log("OrgRegistry:", address(satOrgRegistry));
+
+        // 5c. Deploy factories (stateless)
+        address govFactory = address(new GovernanceFactory());
+        address accFactory = address(new AccessFactory());
+        address modFactory = address(new ModulesFactory());
+        address hatsSetup = address(new HatsTreeSetup());
+        console.log("Factories deployed");
+
+        // 5d. Deploy PaymasterHub for satellite
+        address paymasterHubImpl = address(new PaymasterHub());
+        pm.addContractType("PaymasterHub", paymasterHubImpl);
+        address paymasterHubBeacon = pm.getBeaconById(keccak256("PaymasterHub"));
+        bytes memory paymasterHubInit =
+            abi.encodeWithSignature("initialize(address,address,address)", ENTRY_POINT_V07, HATS_PROTOCOL, address(pm));
+        address satPaymasterHub = address(new BeaconProxy(paymasterHubBeacon, paymasterHubInit));
+        PaymasterHub(payable(satPaymasterHub)).donateToSolidarity{value: INITIAL_SOLIDARITY_FUND}();
+        console.log("PaymasterHub:", satPaymasterHub);
+        console.log("Solidarity Fund seeded with:", INITIAL_SOLIDARITY_FUND);
+
+        // 5e. Deploy OrgDeployer
+        address deployerBeacon = pm.getBeaconById(keccak256("OrgDeployer"));
+        bytes memory orgDeployerInit = abi.encodeWithSignature(
+            "initialize(address,address,address,address,address,address,address,address)",
+            govFactory,
+            accFactory,
+            modFactory,
+            address(pm),
+            address(satOrgRegistry),
+            HATS_PROTOCOL,
+            hatsSetup,
+            satPaymasterHub
+        );
+        address satOrgDeployer = address(new BeaconProxy(deployerBeacon, orgDeployerInit));
+        console.log("OrgDeployer:", satOrgDeployer);
+
+        // Transfer OrgRegistry ownership to OrgDeployer
+        satOrgRegistry.transferOwnership(satOrgDeployer);
+
+        // Authorize OrgDeployer on PaymasterHub
+        PoaManager(address(pm))
+            .adminCall(satPaymasterHub, abi.encodeWithSignature("setOrgRegistrar(address)", satOrgDeployer));
+
+        // Deploy universal PasskeyAccountFactory
+        address passkeyAccountBeacon = pm.getBeaconById(keccak256("PasskeyAccount"));
+        address passkeyFactoryBeaconAddr = pm.getBeaconById(keccak256("PasskeyAccountFactory"));
+        bytes memory passkeyFactoryInit = abi.encodeWithSignature(
+            "initialize(address,address,address,uint48)",
+            address(pm),
+            passkeyAccountBeacon,
+            POA_GUARDIAN,
+            uint48(7 days)
+        );
+        address satPasskeyFactory = address(new BeaconProxy(passkeyFactoryBeaconAddr, passkeyFactoryInit));
+        PoaManager(address(pm))
+            .adminCall(
+                satOrgDeployer, abi.encodeWithSignature("setUniversalPasskeyFactory(address)", satPasskeyFactory)
+            );
+        console.log("UniversalPasskeyFactory:", satPasskeyFactory);
+
+        // Register infrastructure for subgraph indexing
+        pm.registerInfrastructure(
+            satOrgDeployer,
+            address(satOrgRegistry),
+            address(reg),
+            satPaymasterHub,
+            address(registryRelay), // RegistryRelay serves as the satellite's account registry
+            satPasskeyFactory
+        );
+
+        // 6. Transfer PoaManager ownership to Satellite (after all types registered)
         pm.transferOwnership(address(satellite));
 
         vm.stopBroadcast();
@@ -575,6 +667,10 @@ contract DeploySatellite is DeployHelper {
         vm.serializeUint(satObj, "domain", uint256(satDomain));
         vm.serializeAddress(satObj, "satellite", address(satellite));
         vm.serializeAddress(satObj, "registryRelay", address(registryRelay));
+        vm.serializeAddress(satObj, "nameClaimAdapter", address(nameClaimAdapter));
+        vm.serializeAddress(satObj, "orgRegistry", address(satOrgRegistry));
+        vm.serializeAddress(satObj, "orgDeployer", satOrgDeployer);
+        vm.serializeAddress(satObj, "paymasterHub", satPaymasterHub);
         vm.serializeAddress(satObj, "poaManager", address(pm));
         string memory satJson = vm.serializeAddress(satObj, "implRegistry", address(reg));
         string memory filename = string.concat("script/satellite-state-", vm.toString(uint256(satDomain)), ".json");

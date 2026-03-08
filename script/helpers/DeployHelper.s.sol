@@ -19,6 +19,10 @@ import {ToggleModule} from "../../src/ToggleModule.sol";
 import {PasskeyAccount} from "../../src/PasskeyAccount.sol";
 import {PasskeyAccountFactory} from "../../src/PasskeyAccountFactory.sol";
 
+// Cross-chain satellite contracts
+import {NameClaimAdapter} from "../../src/crosschain/NameClaimAdapter.sol";
+import {SatelliteOnboardingHelper} from "../../src/crosschain/SatelliteOnboardingHelper.sol";
+
 import {PoaManager} from "../../src/PoaManager.sol";
 import {DeterministicDeployer} from "../../src/crosschain/DeterministicDeployer.sol";
 
@@ -42,7 +46,7 @@ abstract contract DeployHelper is Script {
     ///         OrgDeployer, PaymasterHub) are handled separately because they
     ///         require special initialization (beacon proxies, ownership, etc.).
     function _contractTypes() internal pure returns (ContractType[] memory types) {
-        types = new ContractType[](13);
+        types = new ContractType[](15);
         types[0] = ContractType("HybridVoting", type(HybridVoting).creationCode);
         types[1] = ContractType("DirectDemocracyVoting", type(DirectDemocracyVoting).creationCode);
         types[2] = ContractType("Executor", type(Executor).creationCode);
@@ -56,6 +60,8 @@ abstract contract DeployHelper is Script {
         types[10] = ContractType("ToggleModule", type(ToggleModule).creationCode);
         types[11] = ContractType("PasskeyAccount", type(PasskeyAccount).creationCode);
         types[12] = ContractType("PasskeyAccountFactory", type(PasskeyAccountFactory).creationCode);
+        types[13] = ContractType("NameClaimAdapter", type(NameClaimAdapter).creationCode);
+        types[14] = ContractType("SatelliteOnboardingHelper", type(SatelliteOnboardingHelper).creationCode);
     }
 
     /// @notice Deploy all application types directly and register on PoaManager (home chain).

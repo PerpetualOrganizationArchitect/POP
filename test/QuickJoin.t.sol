@@ -322,4 +322,49 @@ contract QuickJoinTest is Test {
     }
 
     event RegisterAndQuickJoined(address indexed user, string username, uint256[] hatIds);
+
+    /* ═══════════════════ quickJoinForUser tests ═══════════════════ */
+
+    function testQuickJoinForUserByMasterDeploy() public {
+        registry.setUsername(user1, "bob");
+        vm.prank(master);
+        qj.quickJoinForUser(user1);
+        assertTrue(mockExecutor.hats().isWearerOfHat(user1, DEFAULT_HAT_ID));
+    }
+
+    function testQuickJoinForUserByExecutor() public {
+        registry.setUsername(user1, "bob");
+        vm.prank(address(mockExecutor));
+        qj.quickJoinForUser(user1);
+        assertTrue(mockExecutor.hats().isWearerOfHat(user1, DEFAULT_HAT_ID));
+    }
+
+    function testQuickJoinForUserEmitsEvent() public {
+        registry.setUsername(user1, "bob");
+        vm.prank(master);
+        vm.expectEmit(true, true, true, true);
+        uint256[] memory expectedHats = new uint256[](1);
+        expectedHats[0] = DEFAULT_HAT_ID;
+        emit QuickJoined(user1, expectedHats);
+        qj.quickJoinForUser(user1);
+    }
+
+    function testQuickJoinForUserRevertsUnauthorized() public {
+        registry.setUsername(user1, "bob");
+        vm.prank(user1);
+        vm.expectRevert(QuickJoin.OnlyMasterDeploy.selector);
+        qj.quickJoinForUser(user1);
+    }
+
+    function testQuickJoinForUserRevertsNoUsername() public {
+        vm.prank(master);
+        vm.expectRevert(QuickJoin.NoUsername.selector);
+        qj.quickJoinForUser(user1);
+    }
+
+    function testQuickJoinForUserRevertsZeroUser() public {
+        vm.prank(master);
+        vm.expectRevert(QuickJoin.ZeroUser.selector);
+        qj.quickJoinForUser(address(0));
+    }
 }
