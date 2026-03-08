@@ -3,12 +3,14 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
 import "forge-std/console.sol";
+import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {PoaManager} from "../src/PoaManager.sol";
 import {PoaManagerHub} from "../src/crosschain/PoaManagerHub.sol";
 
 /**
  * @title DeployHub
- * @notice Deploys PoaManagerHub on the home chain and transfers PoaManager ownership to it.
+ * @notice Deploys PoaManagerHub on the home chain via BeaconProxy and transfers
+ *         PoaManager ownership to it.
  * @dev    Requires existing infrastructure (PoaManager) and a Hyperlane Mailbox address.
  *
  * Usage:
@@ -21,20 +23,28 @@ contract DeployHub is Script {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
         address poaManagerAddr = vm.envAddress("POAMANAGER");
         address mailboxAddr = vm.envAddress("MAILBOX");
+        address deployer = vm.addr(deployerKey);
 
         console.log("\n=== Deploying PoaManagerHub ===");
-        console.log("Deployer:", vm.addr(deployerKey));
+        console.log("Deployer:", deployer);
         console.log("PoaManager:", poaManagerAddr);
         console.log("Mailbox:", mailboxAddr);
 
         vm.startBroadcast(deployerKey);
 
-        // 1. Deploy Hub
-        PoaManagerHub hub = new PoaManagerHub(poaManagerAddr, mailboxAddr);
+        // 1. Deploy PoaManagerHub implementation and register type
+        PoaManager pm = PoaManager(poaManagerAddr);
+        address hubImpl = address(new PoaManagerHub());
+        pm.addContractType("PoaManagerHub", hubImpl);
+
+        // 2. Deploy PoaManagerHub behind BeaconProxy
+        address hubBeacon = pm.getBeaconById(keccak256("PoaManagerHub"));
+        bytes memory hubInit = abi.encodeCall(PoaManagerHub.initialize, (deployer, poaManagerAddr, mailboxAddr));
+        PoaManagerHub hub = PoaManagerHub(payable(address(new BeaconProxy(hubBeacon, hubInit))));
         console.log("PoaManagerHub deployed:", address(hub));
 
-        // 2. Transfer PoaManager ownership to Hub
-        PoaManager(poaManagerAddr).transferOwnership(address(hub));
+        // 3. Transfer PoaManager ownership to Hub
+        pm.transferOwnership(address(hub));
         console.log("PoaManager ownership transferred to Hub");
 
         vm.stopBroadcast();

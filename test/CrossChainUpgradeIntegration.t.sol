@@ -43,17 +43,17 @@ contract CrossChainUpgradeIntegrationTest is Test {
 
         // ── Home Chain ──
         homePm = _deployPoaManager();
-        hub = new PoaManagerHub(address(homePm), address(mailbox));
+        hub = _deployHub(homePm, address(mailbox));
         homePm.transferOwnership(address(hub));
 
         // ── Satellite 1 ──
         sat1Pm = _deployPoaManager();
-        satellite1 = new PoaManagerSatellite(address(sat1Pm), address(mailbox), 1, address(hub));
+        satellite1 = _deploySatellite(sat1Pm, address(mailbox), 1, address(hub));
         sat1Pm.transferOwnership(address(satellite1));
 
         // ── Satellite 2 ──
         sat2Pm = _deployPoaManager();
-        satellite2 = new PoaManagerSatellite(address(sat2Pm), address(mailbox), 1, address(hub));
+        satellite2 = _deploySatellite(sat2Pm, address(mailbox), 1, address(hub));
         sat2Pm.transferOwnership(address(satellite2));
 
         // Register satellites in Hub
@@ -77,6 +77,25 @@ contract CrossChainUpgradeIntegrationTest is Test {
         PoaManager pm = new PoaManager(address(reg));
         reg.transferOwnership(address(pm));
         return pm;
+    }
+
+    function _deployHub(PoaManager pm, address _mailbox) internal returns (PoaManagerHub) {
+        PoaManagerHub impl = new PoaManagerHub();
+        UpgradeableBeacon beacon = new UpgradeableBeacon(address(impl), address(this));
+        bytes memory init = abi.encodeCall(PoaManagerHub.initialize, (address(this), address(pm), _mailbox));
+        return PoaManagerHub(payable(address(new BeaconProxy(address(beacon), init))));
+    }
+
+    function _deploySatellite(PoaManager pm, address _mailbox, uint32 _hubDomain, address _hubAddress)
+        internal
+        returns (PoaManagerSatellite)
+    {
+        PoaManagerSatellite impl = new PoaManagerSatellite();
+        UpgradeableBeacon beacon = new UpgradeableBeacon(address(impl), address(this));
+        bytes memory init = abi.encodeCall(
+            PoaManagerSatellite.initialize, (address(this), address(pm), _mailbox, _hubDomain, _hubAddress)
+        );
+        return PoaManagerSatellite(payable(address(new BeaconProxy(address(beacon), init))));
     }
 
     // ══════════════════════════════════════════════════════════
@@ -257,7 +276,7 @@ contract CrossChainUpgradeIntegrationTest is Test {
     function testDynamicSatelliteRegistration() public {
         // Deploy a third satellite
         PoaManager sat3Pm = _deployPoaManager();
-        PoaManagerSatellite satellite3 = new PoaManagerSatellite(address(sat3Pm), address(mailbox), 1, address(hub));
+        PoaManagerSatellite satellite3 = _deploySatellite(sat3Pm, address(mailbox), 1, address(hub));
         sat3Pm.transferOwnership(address(satellite3));
         satellite3.addContractType("TestType", address(implV1));
 

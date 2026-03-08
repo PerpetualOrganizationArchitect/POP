@@ -74,15 +74,26 @@ contract TestnetE2ESatellite is Script {
         }
         pm.addContractType("HybridVoting", hvImpl);
 
-        // 4. Deploy PoaManagerSatellite
-        PoaManagerSatellite satellite = new PoaManagerSatellite(address(pm), mailboxAddr, hubDomain, hubAddress);
+        // 4. Deploy PoaManagerSatellite via BeaconProxy
+        address satImpl = address(new PoaManagerSatellite());
+        pm.addContractType("PoaManagerSatellite", satImpl);
+        address satBeacon = pm.getBeaconById(keccak256("PoaManagerSatellite"));
+        bytes memory satInit = abi.encodeCall(
+            PoaManagerSatellite.initialize, (vm.addr(deployerKey), address(pm), mailboxAddr, hubDomain, hubAddress)
+        );
+        PoaManagerSatellite satellite = PoaManagerSatellite(payable(address(new BeaconProxy(satBeacon, satInit))));
         console.log("PoaManagerSatellite:", address(satellite));
 
-        // 5. Deploy RegistryRelay (points to NameRegistryHub on home chain)
-        RegistryRelay relay = new RegistryRelay(mailboxAddr, hubDomain, nameHubAddress);
+        // 5. Deploy RegistryRelay via BeaconProxy (points to NameRegistryHub on home chain)
+        address relayImpl = address(new RegistryRelay());
+        pm.addContractType("RegistryRelay", relayImpl);
+        address relayBeacon = pm.getBeaconById(keccak256("RegistryRelay"));
+        bytes memory relayInit =
+            abi.encodeCall(RegistryRelay.initialize, (vm.addr(deployerKey), mailboxAddr, hubDomain, nameHubAddress));
+        RegistryRelay relay = RegistryRelay(address(new BeaconProxy(relayBeacon, relayInit)));
         console.log("RegistryRelay:", address(relay));
 
-        // 6. Transfer PoaManager ownership to Satellite
+        // 6. Transfer PoaManager ownership to Satellite (after all types registered)
         pm.transferOwnership(address(satellite));
         console.log("PoaManager ownership transferred to Satellite");
 

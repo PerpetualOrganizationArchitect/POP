@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {NameRegistryHub} from "../src/crosschain/NameRegistryHub.sol";
 import {RegistryRelay} from "../src/crosschain/RegistryRelay.sol";
 import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
@@ -50,8 +51,12 @@ contract CrossChainNameRegistryTest is Test {
         // Deploy home-chain mailbox (storing, no auto-delivery)
         homeMailbox = new StoringMailbox(HOME_DOMAIN);
 
-        // Deploy hub
-        hub = new NameRegistryHub(address(uar), address(homeMailbox));
+        // Deploy hub behind beacon proxy (upgradeable pattern)
+        NameRegistryHub hubImpl = new NameRegistryHub();
+        UpgradeableBeacon hubBeacon = new UpgradeableBeacon(address(hubImpl), address(this));
+        bytes memory hubInit =
+            abi.encodeCall(NameRegistryHub.initialize, (address(this), address(uar), address(homeMailbox)));
+        hub = NameRegistryHub(payable(address(new BeaconProxy(address(hubBeacon), hubInit))));
 
         // Wire UAR to hub
         uar.setNameRegistryHub(address(hub));
@@ -60,9 +65,17 @@ contract CrossChainNameRegistryTest is Test {
         satMailboxA = new StoringMailbox(SAT_DOMAIN_A);
         satMailboxB = new StoringMailbox(SAT_DOMAIN_B);
 
-        // Deploy relays
-        relayA = new RegistryRelay(address(satMailboxA), HOME_DOMAIN, address(hub));
-        relayB = new RegistryRelay(address(satMailboxB), HOME_DOMAIN, address(hub));
+        // Deploy relays behind shared beacon proxy (upgradeable pattern)
+        RegistryRelay relayImpl = new RegistryRelay();
+        UpgradeableBeacon relayBeacon = new UpgradeableBeacon(address(relayImpl), address(this));
+
+        bytes memory relayInitA =
+            abi.encodeCall(RegistryRelay.initialize, (address(this), address(satMailboxA), HOME_DOMAIN, address(hub)));
+        relayA = RegistryRelay(address(new BeaconProxy(address(relayBeacon), relayInitA)));
+
+        bytes memory relayInitB =
+            abi.encodeCall(RegistryRelay.initialize, (address(this), address(satMailboxB), HOME_DOMAIN, address(hub)));
+        relayB = RegistryRelay(address(new BeaconProxy(address(relayBeacon), relayInitB)));
 
         // Register satellites on hub
         hub.registerSatellite(SAT_DOMAIN_A, address(relayA));
@@ -978,5 +991,70 @@ contract CrossChainNameRegistryTest is Test {
         vm.prank(alice);
         vm.expectRevert(NameRegistryHub.NotOrgRegistry.selector);
         hub.changeOrgNameLocal(keccak256(bytes("old")), keccak256(bytes("new")));
+    }
+
+    /*══════════════════ Upgradeability: Double-Init & Zero-Owner ══════════════════*/
+
+    function testHubDoubleInitializeReverts() public {
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        hub.initialize(address(this), address(uar), address(homeMailbox));
+    }
+
+    function testRelayDoubleInitializeReverts() public {
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        relayA.initialize(address(this), address(satMailboxA), HOME_DOMAIN, address(hub));
+    }
+
+    function testHubInitializeRevertsZeroOwner() public {
+        NameRegistryHub hubImpl2 = new NameRegistryHub();
+        UpgradeableBeacon hubBeacon2 = new UpgradeableBeacon(address(hubImpl2), address(this));
+        bytes memory badInit =
+            abi.encodeCall(NameRegistryHub.initialize, (address(0), address(uar), address(homeMailbox)));
+        vm.expectRevert(NameRegistryHub.ZeroAddress.selector);
+        new BeaconProxy(address(hubBeacon2), badInit);
+    }
+
+    function testHubInitializeRevertsZeroAccountRegistry() public {
+        NameRegistryHub hubImpl2 = new NameRegistryHub();
+        UpgradeableBeacon hubBeacon2 = new UpgradeableBeacon(address(hubImpl2), address(this));
+        bytes memory badInit =
+            abi.encodeCall(NameRegistryHub.initialize, (address(this), address(0), address(homeMailbox)));
+        vm.expectRevert(NameRegistryHub.ZeroAddress.selector);
+        new BeaconProxy(address(hubBeacon2), badInit);
+    }
+
+    function testHubInitializeRevertsZeroMailbox() public {
+        NameRegistryHub hubImpl2 = new NameRegistryHub();
+        UpgradeableBeacon hubBeacon2 = new UpgradeableBeacon(address(hubImpl2), address(this));
+        bytes memory badInit = abi.encodeCall(NameRegistryHub.initialize, (address(this), address(uar), address(0)));
+        vm.expectRevert(NameRegistryHub.ZeroAddress.selector);
+        new BeaconProxy(address(hubBeacon2), badInit);
+    }
+
+    function testRelayInitializeRevertsZeroOwner() public {
+        RegistryRelay relayImpl2 = new RegistryRelay();
+        UpgradeableBeacon relayBeacon2 = new UpgradeableBeacon(address(relayImpl2), address(this));
+        bytes memory badInit =
+            abi.encodeCall(RegistryRelay.initialize, (address(0), address(satMailboxA), HOME_DOMAIN, address(hub)));
+        vm.expectRevert(RegistryRelay.ZeroAddress.selector);
+        new BeaconProxy(address(relayBeacon2), badInit);
+    }
+
+    function testRelayInitializeRevertsZeroMailbox() public {
+        RegistryRelay relayImpl2 = new RegistryRelay();
+        UpgradeableBeacon relayBeacon2 = new UpgradeableBeacon(address(relayImpl2), address(this));
+        bytes memory badInit =
+            abi.encodeCall(RegistryRelay.initialize, (address(this), address(0), HOME_DOMAIN, address(hub)));
+        vm.expectRevert(RegistryRelay.ZeroAddress.selector);
+        new BeaconProxy(address(relayBeacon2), badInit);
+    }
+
+    function testRelayInitializeRevertsZeroHubAddress() public {
+        RegistryRelay relayImpl2 = new RegistryRelay();
+        UpgradeableBeacon relayBeacon2 = new UpgradeableBeacon(address(relayImpl2), address(this));
+        bytes memory badInit =
+            abi.encodeCall(RegistryRelay.initialize, (address(this), address(satMailboxA), HOME_DOMAIN, address(0)));
+        vm.expectRevert(RegistryRelay.ZeroAddress.selector);
+        new BeaconProxy(address(relayBeacon2), badInit);
     }
 }

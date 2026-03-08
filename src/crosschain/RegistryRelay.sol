@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IMailbox, IMessageRecipient} from "./interfaces/IHyperlane.sol";
 
@@ -9,9 +10,9 @@ import {IMailbox, IMessageRecipient} from "./interfaces/IHyperlane.sol";
 /// @notice Satellite-chain contract that relays username registration requests
 ///         to the NameRegistryHub on Arbitrum via Hyperlane, and receives
 ///         confirmations/rejections back.
-/// @dev    Stores confirmed usernames in a local cache for on-chain reads
-///         (e.g. QuickJoin checking if a user has a username).
-contract RegistryRelay is Ownable(msg.sender), IMessageRecipient {
+/// @dev    Deploy behind a BeaconProxy. Stores confirmed usernames in a local cache
+///         for on-chain reads (e.g. QuickJoin checking if a user has a username).
+contract RegistryRelay is Initializable, OwnableUpgradeable, IMessageRecipient {
     /*──────────── Constants ───────────*/
     uint8 internal constant MSG_CLAIM_USERNAME = 0x01;
     uint8 internal constant MSG_CONFIRM_USERNAME = 0x02;
@@ -33,23 +34,27 @@ contract RegistryRelay is Ownable(msg.sender), IMessageRecipient {
     bytes32 private constant _REGISTER_TYPEHASH =
         keccak256("RegisterAccount(address user,string username,uint256 nonce,uint256 deadline)");
 
-    /*──────────── Immutables ──────────*/
-    IMailbox public immutable mailbox;
-    uint32 public immutable hubDomain;
-    bytes32 public immutable hubAddress;
+    /*──────────── ERC-7201 Storage ──────────*/
+    /// @custom:storage-location erc7201:poa.registryrelay.storage
+    struct Layout {
+        IMailbox mailbox;
+        uint32 hubDomain;
+        bytes32 hubAddress;
+        bool paused;
+        mapping(address => string) confirmedUsernames;
+        mapping(bytes32 => address) confirmedOwners;
+        mapping(address => uint256) nonces;
+        mapping(bytes32 => bool) confirmedOrgNames;
+    }
 
-    /*──────────── Storage ─────────────*/
-    bool public paused;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.registryrelay.storage");
 
-    /// @dev Local cache of confirmed usernames (populated by hub confirmations).
-    mapping(address => string) internal _confirmedUsernames;
-    mapping(bytes32 => address) internal _confirmedOwners;
-
-    /// @dev Per-user nonces for replay protection on this relay.
-    mapping(address => uint256) public nonces;
-
-    /// @dev Local cache of confirmed org names (populated by hub confirmations).
-    mapping(bytes32 => bool) public confirmedOrgNames;
+    function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
+        assembly {
+            s.slot := slot
+        }
+    }
 
     /*──────────── Errors ──────────────*/
     error UnauthorizedMailbox();
@@ -80,11 +85,19 @@ contract RegistryRelay is Ownable(msg.sender), IMessageRecipient {
     event OrgNameRejected(string orgName);
 
     /*──────────── Constructor ─────────*/
-    constructor(address _mailbox, uint32 _hubDomain, address _hubAddress) {
-        if (_mailbox == address(0) || _hubAddress == address(0)) revert ZeroAddress();
-        mailbox = IMailbox(_mailbox);
-        hubDomain = _hubDomain;
-        hubAddress = bytes32(uint256(uint160(_hubAddress)));
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /*──────────── Initializer ─────────*/
+    function initialize(address owner, address _mailbox, uint32 _hubDomain, address _hubAddress) external initializer {
+        if (owner == address(0) || _mailbox == address(0) || _hubAddress == address(0)) revert ZeroAddress();
+        __Ownable_init(owner);
+        Layout storage s = _layout();
+        s.mailbox = IMailbox(_mailbox);
+        s.hubDomain = _hubDomain;
+        s.hubAddress = bytes32(uint256(uint160(_hubAddress)));
     }
 
     /*══════════════════ Registration ══════════════════*/
@@ -99,9 +112,10 @@ contract RegistryRelay is Ownable(msg.sender), IMessageRecipient {
         uint256 nonce,
         bytes calldata signature
     ) external payable {
-        if (paused) revert IsPaused();
+        Layout storage s = _layout();
+        if (s.paused) revert IsPaused();
         if (block.timestamp > deadline) revert SignatureExpired();
-        if (nonce != nonces[user]) revert InvalidNonce();
+        if (nonce != s.nonces[user]) revert InvalidNonce();
 
         // Validate username format locally (saves gas on invalid names)
         _validateUsername(username);
@@ -113,51 +127,54 @@ contract RegistryRelay is Ownable(msg.sender), IMessageRecipient {
         address signer = ECDSA.recover(digest, signature);
         if (signer != user) revert InvalidSigner();
 
-        nonces[user] = nonce + 1;
+        s.nonces[user] = nonce + 1;
 
         // Dispatch claim to hub
         bytes memory payload = abi.encode(MSG_CLAIM_USERNAME, user, username);
-        bytes32 msgId = mailbox.dispatch{value: msg.value}(hubDomain, hubAddress, payload);
+        bytes32 msgId = s.mailbox.dispatch{value: msg.value}(s.hubDomain, s.hubAddress, payload);
 
         emit ClaimDispatched(user, username, msgId);
     }
 
     /// @notice Direct registration — caller registers their own username.
     function registerAccountDirect(string calldata username) external payable {
-        if (paused) revert IsPaused();
+        Layout storage s = _layout();
+        if (s.paused) revert IsPaused();
         _validateUsername(username);
 
         bytes memory payload = abi.encode(MSG_CLAIM_USERNAME, msg.sender, username);
-        bytes32 msgId = mailbox.dispatch{value: msg.value}(hubDomain, hubAddress, payload);
+        bytes32 msgId = s.mailbox.dispatch{value: msg.value}(s.hubDomain, s.hubAddress, payload);
 
         emit ClaimDispatched(msg.sender, username, msgId);
     }
 
     /// @notice Change username — caller changes their own username.
     function changeUsername(string calldata newUsername) external payable {
-        if (paused) revert IsPaused();
+        Layout storage s = _layout();
+        if (s.paused) revert IsPaused();
         _validateUsername(newUsername);
 
         bytes memory payload = abi.encode(MSG_CHANGE_USERNAME, msg.sender, newUsername);
-        bytes32 msgId = mailbox.dispatch{value: msg.value}(hubDomain, hubAddress, payload);
+        bytes32 msgId = s.mailbox.dispatch{value: msg.value}(s.hubDomain, s.hubAddress, payload);
 
         emit ChangeDispatched(msg.sender, newUsername, msgId);
     }
 
     /// @notice Delete account — caller deletes their username (permanently burned).
     function deleteAccount() external payable {
-        if (paused) revert IsPaused();
+        Layout storage s = _layout();
+        if (s.paused) revert IsPaused();
 
         // Clear local cache
-        string memory oldName = _confirmedUsernames[msg.sender];
+        string memory oldName = s.confirmedUsernames[msg.sender];
         if (bytes(oldName).length > 0) {
             bytes32 oldHash = _hashUsername(oldName);
-            delete _confirmedUsernames[msg.sender];
-            delete _confirmedOwners[oldHash];
+            delete s.confirmedUsernames[msg.sender];
+            delete s.confirmedOwners[oldHash];
         }
 
         bytes memory payload = abi.encode(MSG_BURN_USERNAME, msg.sender);
-        bytes32 msgId = mailbox.dispatch{value: msg.value}(hubDomain, hubAddress, payload);
+        bytes32 msgId = s.mailbox.dispatch{value: msg.value}(s.hubDomain, s.hubAddress, payload);
 
         emit BurnDispatched(msg.sender, msgId);
     }
@@ -167,11 +184,12 @@ contract RegistryRelay is Ownable(msg.sender), IMessageRecipient {
     /// @notice Dispatch a cross-chain org name claim to the hub.
     /// @dev    Only owner (governance) can claim org names to prevent squatting.
     function claimOrgName(string calldata orgName) external payable onlyOwner {
-        if (paused) revert IsPaused();
+        Layout storage s = _layout();
+        if (s.paused) revert IsPaused();
         _validateOrgName(orgName);
 
         bytes memory payload = abi.encode(MSG_CLAIM_ORG_NAME, orgName);
-        bytes32 msgId = mailbox.dispatch{value: msg.value}(hubDomain, hubAddress, payload);
+        bytes32 msgId = s.mailbox.dispatch{value: msg.value}(s.hubDomain, s.hubAddress, payload);
 
         emit OrgNameClaimDispatched(orgName, msgId);
     }
@@ -180,9 +198,10 @@ contract RegistryRelay is Ownable(msg.sender), IMessageRecipient {
 
     /// @notice Receives confirm/reject from the NameRegistryHub.
     function handle(uint32 _origin, bytes32 _sender, bytes calldata _body) external override {
-        if (msg.sender != address(mailbox)) revert UnauthorizedMailbox();
-        if (_origin != hubDomain) revert UnauthorizedOrigin();
-        if (_sender != hubAddress) revert UnauthorizedSender();
+        Layout storage s = _layout();
+        if (msg.sender != address(s.mailbox)) revert UnauthorizedMailbox();
+        if (_origin != s.hubDomain) revert UnauthorizedOrigin();
+        if (_sender != s.hubAddress) revert UnauthorizedSender();
 
         uint8 msgType = abi.decode(_body[:32], (uint8));
 
@@ -190,15 +209,15 @@ contract RegistryRelay is Ownable(msg.sender), IMessageRecipient {
             (, address user, string memory username) = abi.decode(_body, (uint8, address, string));
 
             // Clear stale cache entry if user had a previous name (e.g. username change)
-            string memory oldName = _confirmedUsernames[user];
+            string memory oldName = s.confirmedUsernames[user];
             if (bytes(oldName).length > 0) {
-                delete _confirmedOwners[_hashUsername(oldName)];
+                delete s.confirmedOwners[_hashUsername(oldName)];
             }
 
             // Update local cache
             bytes32 nameHash = _hashUsername(username);
-            _confirmedUsernames[user] = username;
-            _confirmedOwners[nameHash] = user;
+            s.confirmedUsernames[user] = username;
+            s.confirmedOwners[nameHash] = user;
 
             emit UsernameConfirmed(user, username);
         } else if (msgType == MSG_REJECT_USERNAME) {
@@ -207,7 +226,7 @@ contract RegistryRelay is Ownable(msg.sender), IMessageRecipient {
             emit UsernameRejected(user, username);
         } else if (msgType == MSG_CONFIRM_ORG_NAME) {
             (, string memory orgName) = abi.decode(_body, (uint8, string));
-            confirmedOrgNames[_hashUsername(orgName)] = true;
+            s.confirmedOrgNames[_hashUsername(orgName)] = true;
             emit OrgNameConfirmed(orgName);
         } else if (msgType == MSG_REJECT_ORG_NAME) {
             (, string memory orgName) = abi.decode(_body, (uint8, string));
@@ -217,24 +236,50 @@ contract RegistryRelay is Ownable(msg.sender), IMessageRecipient {
         }
     }
 
+    /*══════════════════ Public Getters ══════════════════*/
+
+    function mailbox() external view returns (IMailbox) {
+        return _layout().mailbox;
+    }
+
+    function hubDomain() external view returns (uint32) {
+        return _layout().hubDomain;
+    }
+
+    function hubAddress() external view returns (bytes32) {
+        return _layout().hubAddress;
+    }
+
+    function paused() external view returns (bool) {
+        return _layout().paused;
+    }
+
+    function nonces(address user) external view returns (uint256) {
+        return _layout().nonces[user];
+    }
+
+    function confirmedOrgNames(bytes32 nameHash) external view returns (bool) {
+        return _layout().confirmedOrgNames[nameHash];
+    }
+
     /*══════════════════ View Helpers ══════════════════*/
 
     /// @notice Get a user's confirmed username (from local cache).
     function getUsername(address user) external view returns (string memory) {
-        return _confirmedUsernames[user];
+        return _layout().confirmedUsernames[user];
     }
 
     /// @notice Check if a name is taken in the local cache.
     /// @dev    This is NOT authoritative — the hub is the source of truth.
     ///         A name may be taken on the hub but not yet synced to this cache.
     function getAddressOfUsername(string calldata name) external view returns (address) {
-        return _confirmedOwners[_hashUsername(name)];
+        return _layout().confirmedOwners[_hashUsername(name)];
     }
 
     /// @notice Check if an org name is confirmed in the local cache.
     /// @dev    This is NOT authoritative — the hub is the source of truth.
     function isOrgNameConfirmed(string calldata orgName) external view returns (bool) {
-        return confirmedOrgNames[_hashUsername(orgName)];
+        return _layout().confirmedOrgNames[_hashUsername(orgName)];
     }
 
     /// @notice EIP-712 domain separator for this relay.
@@ -246,7 +291,7 @@ contract RegistryRelay is Ownable(msg.sender), IMessageRecipient {
     /*══════════════════ Admin ══════════════════*/
 
     function setPaused(bool _paused) external onlyOwner {
-        paused = _paused;
+        _layout().paused = _paused;
         emit PauseSet(_paused);
     }
 

@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {PoaManager} from "../src/PoaManager.sol";
 import {ImplementationRegistry} from "../src/ImplementationRegistry.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -55,8 +56,11 @@ contract PoaManagerHubTest is Test {
         // Deploy MockMailbox on domain 1
         mailbox = new MockMailbox(1);
 
-        // Deploy Hub
-        hub = new PoaManagerHub(address(pm), address(mailbox));
+        // Deploy Hub behind a beacon proxy
+        PoaManagerHub hubImpl = new PoaManagerHub();
+        UpgradeableBeacon hubBeacon = new UpgradeableBeacon(address(hubImpl), address(this));
+        bytes memory hubInit = abi.encodeCall(PoaManagerHub.initialize, (address(this), address(pm), address(mailbox)));
+        hub = PoaManagerHub(payable(address(new BeaconProxy(address(hubBeacon), hubInit))));
 
         // Transfer PM ownership to hub
         pm.transferOwnership(address(hub));
@@ -228,21 +232,27 @@ contract PoaManagerHubTest is Test {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  10. Constructor reverts on zero poaManager address
+    //  10. Initialize reverts on zero poaManager address
     // ══════════════════════════════════════════════════════════
 
-    function testConstructorRevertsZeroPoaManager() public {
+    function testInitializeRevertsZeroPoaManager() public {
+        PoaManagerHub hubImpl2 = new PoaManagerHub();
+        UpgradeableBeacon hubBeacon2 = new UpgradeableBeacon(address(hubImpl2), address(this));
+        bytes memory badInit = abi.encodeCall(PoaManagerHub.initialize, (address(this), address(0), address(mailbox)));
         vm.expectRevert(PoaManagerHub.ZeroAddress.selector);
-        new PoaManagerHub(address(0), address(mailbox));
+        new BeaconProxy(address(hubBeacon2), badInit);
     }
 
     // ══════════════════════════════════════════════════════════
-    //  11. Constructor reverts on zero mailbox address
+    //  11. Initialize reverts on zero mailbox address
     // ══════════════════════════════════════════════════════════
 
-    function testConstructorRevertsZeroMailbox() public {
+    function testInitializeRevertsZeroMailbox() public {
+        PoaManagerHub hubImpl2 = new PoaManagerHub();
+        UpgradeableBeacon hubBeacon2 = new UpgradeableBeacon(address(hubImpl2), address(this));
+        bytes memory badInit = abi.encodeCall(PoaManagerHub.initialize, (address(this), address(pm), address(0)));
         vm.expectRevert(PoaManagerHub.ZeroAddress.selector);
-        new PoaManagerHub(address(pm), address(0));
+        new BeaconProxy(address(hubBeacon2), badInit);
     }
 
     // ══════════════════════════════════════════════════════════
@@ -730,6 +740,27 @@ contract PoaManagerHubTest is Test {
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         hub.adminCall(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 99));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  Initialize reverts on zero owner
+    // ══════════════════════════════════════════════════════════
+
+    function testInitializeRevertsZeroOwner() public {
+        PoaManagerHub hubImpl2 = new PoaManagerHub();
+        UpgradeableBeacon hubBeacon2 = new UpgradeableBeacon(address(hubImpl2), address(this));
+        bytes memory badInit = abi.encodeCall(PoaManagerHub.initialize, (address(0), address(pm), address(mailbox)));
+        vm.expectRevert(PoaManagerHub.ZeroAddress.selector);
+        new BeaconProxy(address(hubBeacon2), badInit);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  Double initialization reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testDoubleInitializeReverts() public {
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        hub.initialize(address(this), address(pm), address(mailbox));
     }
 
     // ══════════════════════════════════════════════════════════

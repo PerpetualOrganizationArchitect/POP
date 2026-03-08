@@ -1,27 +1,38 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import {IMessageRecipient} from "./interfaces/IHyperlane.sol";
 import {PoaManager} from "../PoaManager.sol";
 
 /// @title PoaManagerSatellite
 /// @notice Remote-chain receiver that applies beacon upgrades dispatched by the Hub.
-/// @dev    Deploy on each satellite chain. Owns a local PoaManager instance.
+/// @dev    Deploy behind a BeaconProxy on each satellite chain. Owns a local PoaManager instance.
 ///         Only accepts Hyperlane messages from the Hub on the home chain.
-contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
+contract PoaManagerSatellite is Initializable, OwnableUpgradeable, IMessageRecipient {
     /*──────────── Constants ───────────*/
     uint8 internal constant MSG_UPGRADE_BEACON = 0x01;
     uint8 internal constant MSG_ADD_CONTRACT_TYPE = 0x02;
 
-    /*──────────── Immutables ──────────*/
-    PoaManager public immutable poaManager;
-    address public immutable mailbox;
-    uint32 public immutable hubDomain;
-    bytes32 public immutable hubAddress;
+    /*──────────── ERC-7201 Storage ──────────*/
+    /// @custom:storage-location erc7201:poa.poamanagersatellite.storage
+    struct Layout {
+        PoaManager poaManager;
+        address mailbox;
+        uint32 hubDomain;
+        bytes32 hubAddress;
+        bool paused;
+    }
 
-    /*──────────── Storage ─────────────*/
-    bool public paused;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.poamanagersatellite.storage");
+
+    function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
+        assembly {
+            s.slot := slot
+        }
+    }
 
     /*──────────── Errors ──────────────*/
     error UnauthorizedMailbox();
@@ -38,14 +49,25 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
     event PauseSet(bool paused);
 
     /*──────────── Constructor ─────────*/
-    constructor(address _poaManager, address _mailbox, uint32 _hubDomain, address _hubAddress) {
-        if (_poaManager == address(0) || _mailbox == address(0) || _hubAddress == address(0)) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /*──────────── Initializer ─────────*/
+    function initialize(address owner, address _poaManager, address _mailbox, uint32 _hubDomain, address _hubAddress)
+        external
+        initializer
+    {
+        if (owner == address(0) || _poaManager == address(0) || _mailbox == address(0) || _hubAddress == address(0)) {
             revert ZeroAddress();
         }
-        poaManager = PoaManager(_poaManager);
-        mailbox = _mailbox;
-        hubDomain = _hubDomain;
-        hubAddress = bytes32(uint256(uint160(_hubAddress)));
+        __Ownable_init(owner);
+        Layout storage s = _layout();
+        s.poaManager = PoaManager(_poaManager);
+        s.mailbox = _mailbox;
+        s.hubDomain = _hubDomain;
+        s.hubAddress = bytes32(uint256(uint160(_hubAddress)));
     }
 
     /*══════════════════ Hyperlane Receiver ══════════════════*/
@@ -53,10 +75,11 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
     /// @notice Called by the Hyperlane Mailbox when a message arrives from the Hub.
     /// @dev    Validates origin chain, sender address, and mailbox caller.
     function handle(uint32 _origin, bytes32 _sender, bytes calldata _body) external override {
-        if (msg.sender != mailbox) revert UnauthorizedMailbox();
-        if (_origin != hubDomain) revert UnauthorizedOrigin();
-        if (_sender != hubAddress) revert UnauthorizedSender();
-        if (paused) revert IsPaused();
+        Layout storage s = _layout();
+        if (msg.sender != s.mailbox) revert UnauthorizedMailbox();
+        if (_origin != s.hubDomain) revert UnauthorizedOrigin();
+        if (_sender != s.hubAddress) revert UnauthorizedSender();
+        if (s.paused) revert IsPaused();
 
         uint8 msgType = abi.decode(_body[:32], (uint8));
 
@@ -64,18 +87,40 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
             (, string memory typeName, address newImpl, string memory version) =
                 abi.decode(_body, (uint8, string, address, string));
 
-            poaManager.upgradeBeacon(typeName, newImpl, version);
+            s.poaManager.upgradeBeacon(typeName, newImpl, version);
 
             emit UpgradeReceived(keccak256(bytes(typeName)), newImpl, version, _origin);
         } else if (msgType == MSG_ADD_CONTRACT_TYPE) {
             (, string memory typeName, address impl) = abi.decode(_body, (uint8, string, address));
 
-            poaManager.addContractType(typeName, impl);
+            s.poaManager.addContractType(typeName, impl);
 
             emit ContractTypeReceived(keccak256(bytes(typeName)), typeName, impl, _origin);
         } else {
             revert UnknownMessageType();
         }
+    }
+
+    /*══════════════════ Public Getters ══════════════════*/
+
+    function poaManager() external view returns (PoaManager) {
+        return _layout().poaManager;
+    }
+
+    function mailbox() external view returns (address) {
+        return _layout().mailbox;
+    }
+
+    function hubDomain() external view returns (uint32) {
+        return _layout().hubDomain;
+    }
+
+    function hubAddress() external view returns (bytes32) {
+        return _layout().hubAddress;
+    }
+
+    function paused() external view returns (bool) {
+        return _layout().paused;
     }
 
     /*══════════════════ Ownership Safety ══════════════════*/
@@ -88,7 +133,7 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
     /*══════════════════ Pause ══════════════════*/
 
     function setPaused(bool _paused) external onlyOwner {
-        paused = _paused;
+        _layout().paused = _paused;
         emit PauseSet(_paused);
     }
 
@@ -98,7 +143,7 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
     /// @dev Owner can use this to call admin functions on sub-contracts
     ///      that gate on `msg.sender == poaManager`.
     function adminCall(address target, bytes calldata data) external onlyOwner returns (bytes memory) {
-        return poaManager.adminCall(target, data);
+        return _layout().poaManager.adminCall(target, data);
     }
 
     /*══════════════════ Emergency / Direct Admin ══════════════════*/
@@ -108,22 +153,22 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
         external
         onlyOwner
     {
-        poaManager.upgradeBeacon(typeName, newImpl, version);
+        _layout().poaManager.upgradeBeacon(typeName, newImpl, version);
     }
 
     /// @notice Register a new contract type locally.
     function addContractType(string calldata typeName, address impl) external onlyOwner {
-        poaManager.addContractType(typeName, impl);
+        _layout().poaManager.addContractType(typeName, impl);
     }
 
     /// @notice Update the ImplementationRegistry on the local PoaManager.
     function updateImplRegistry(address registryAddr) external onlyOwner {
-        poaManager.updateImplRegistry(registryAddr);
+        _layout().poaManager.updateImplRegistry(registryAddr);
     }
 
     /// @notice Transfer PoaManager ownership (e.g. to a replacement satellite).
     function transferPoaManagerOwnership(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert ZeroAddress();
-        poaManager.transferOwnership(newOwner);
+        _layout().poaManager.transferOwnership(newOwner);
     }
 }

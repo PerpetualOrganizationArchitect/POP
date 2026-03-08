@@ -111,14 +111,22 @@ contract DeployHomeChain is DeployHelper {
         // 2. Deploy full infrastructure
         InfraResult memory infra = _deployInfrastructure(deployer);
 
-        // 3. Deploy PoaManagerHub and transfer PoaManager ownership to it
-        PoaManagerHub hub = new PoaManagerHub(infra.poaManager, mailboxAddr);
-        PoaManager(infra.poaManager).transferOwnership(address(hub));
+        // 3. Deploy PoaManagerHub via BeaconProxy
+        PoaManager pm = PoaManager(infra.poaManager);
+        address poaHubImpl = address(new PoaManagerHub());
+        pm.addContractType("PoaManagerHub", poaHubImpl);
+        address poaHubBeacon = pm.getBeaconById(keccak256("PoaManagerHub"));
+        bytes memory poaHubInit = abi.encodeCall(PoaManagerHub.initialize, (deployer, infra.poaManager, mailboxAddr));
+        PoaManagerHub hub = PoaManagerHub(payable(address(new BeaconProxy(poaHubBeacon, poaHubInit))));
         console.log("PoaManagerHub:", address(hub));
-        console.log("PoaManager ownership transferred to Hub");
 
-        // 3b. Deploy NameRegistryHub and wire to GlobalAccountRegistry + OrgRegistry
-        NameRegistryHub nameHub = new NameRegistryHub(infra.globalAccountRegistry, mailboxAddr);
+        // 3b. Deploy NameRegistryHub via BeaconProxy and wire to GlobalAccountRegistry + OrgRegistry
+        address nameHubImpl = address(new NameRegistryHub());
+        pm.addContractType("NameRegistryHub", nameHubImpl);
+        address nameHubBeacon = pm.getBeaconById(keccak256("NameRegistryHub"));
+        bytes memory nameHubInit =
+            abi.encodeCall(NameRegistryHub.initialize, (deployer, infra.globalAccountRegistry, mailboxAddr));
+        NameRegistryHub nameHub = NameRegistryHub(payable(address(new BeaconProxy(nameHubBeacon, nameHubInit))));
         UniversalAccountRegistry(infra.globalAccountRegistry).setNameRegistryHub(address(nameHub));
         nameHub.setAuthorizedOrgRegistry(infra.orgRegistry, true);
         OrgRegistry(infra.orgRegistry).setNameRegistryHub(address(nameHub));
@@ -126,6 +134,10 @@ contract DeployHomeChain is DeployHelper {
         console.log("NameRegistryHub:", address(nameHub));
         console.log("GlobalAccountRegistry wired to NameRegistryHub");
         console.log("OrgRegistry wired to NameRegistryHub");
+
+        // 3c. Transfer PoaManager ownership to Hub (after both types are registered)
+        pm.transferOwnership(address(hub));
+        console.log("PoaManager ownership transferred to Hub");
 
         // 4. Deploy governance org
         OrgDeployer.DeploymentResult memory orgResult = _deployGovernanceOrg(infra, deployer);
@@ -523,15 +535,25 @@ contract DeploySatellite is DeployHelper {
         // 3. Deploy implementations via DD and register all contract types
         _deployAndRegisterTypesDD(pm, dd);
 
-        // 4. Deploy PoaManagerSatellite
-        PoaManagerSatellite satellite = new PoaManagerSatellite(address(pm), mailboxAddr, hubDomain, hubAddress);
+        // 4. Deploy PoaManagerSatellite via BeaconProxy
+        address satImpl = address(new PoaManagerSatellite());
+        pm.addContractType("PoaManagerSatellite", satImpl);
+        address satBeacon = pm.getBeaconById(keccak256("PoaManagerSatellite"));
+        bytes memory satInit =
+            abi.encodeCall(PoaManagerSatellite.initialize, (deployer, address(pm), mailboxAddr, hubDomain, hubAddress));
+        PoaManagerSatellite satellite = PoaManagerSatellite(payable(address(new BeaconProxy(satBeacon, satInit))));
 
-        // 4b. Deploy RegistryRelay (points to NameRegistryHub on home chain)
+        // 4b. Deploy RegistryRelay via BeaconProxy (points to NameRegistryHub on home chain)
         address nameHubAddress = vm.parseJsonAddress(state, ".homeChain.nameRegistryHub");
-        RegistryRelay registryRelay = new RegistryRelay(mailboxAddr, hubDomain, nameHubAddress);
+        address relayImpl = address(new RegistryRelay());
+        pm.addContractType("RegistryRelay", relayImpl);
+        address relayBeacon = pm.getBeaconById(keccak256("RegistryRelay"));
+        bytes memory relayInit =
+            abi.encodeCall(RegistryRelay.initialize, (deployer, mailboxAddr, hubDomain, nameHubAddress));
+        RegistryRelay registryRelay = RegistryRelay(address(new BeaconProxy(relayBeacon, relayInit)));
         console.log("RegistryRelay:", address(registryRelay));
 
-        // 5. Transfer PoaManager ownership to Satellite
+        // 5. Transfer PoaManager ownership to Satellite (after all types registered)
         pm.transferOwnership(address(satellite));
 
         vm.stopBroadcast();

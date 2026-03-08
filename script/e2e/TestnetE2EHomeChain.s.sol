@@ -76,19 +76,29 @@ contract TestnetE2EHomeChain is Script {
         UniversalAccountRegistry uar = UniversalAccountRegistry(address(new BeaconProxy(uarBeacon, uarInit)));
         console.log("UniversalAccountRegistry:", address(uar));
 
-        // 5. Deploy PoaManagerHub
-        PoaManagerHub hub = new PoaManagerHub(address(pm), mailboxAddr);
+        // 5. Deploy PoaManagerHub via BeaconProxy
+        address poaHubImpl = address(new PoaManagerHub());
+        pm.addContractType("PoaManagerHub", poaHubImpl);
+        address poaHubBeacon = pm.getBeaconById(keccak256("PoaManagerHub"));
+        bytes memory poaHubInit =
+            abi.encodeCall(PoaManagerHub.initialize, (vm.addr(deployerKey), address(pm), mailboxAddr));
+        PoaManagerHub hub = PoaManagerHub(payable(address(new BeaconProxy(poaHubBeacon, poaHubInit))));
         console.log("PoaManagerHub:", address(hub));
 
-        // 6. Transfer PoaManager ownership to Hub
-        pm.transferOwnership(address(hub));
-        console.log("PoaManager ownership transferred to Hub");
-
-        // 7. Deploy NameRegistryHub and wire to UAR
-        NameRegistryHub nameHub = new NameRegistryHub(address(uar), mailboxAddr);
+        // 6. Deploy NameRegistryHub via BeaconProxy and wire to UAR
+        address nameHubImpl = address(new NameRegistryHub());
+        pm.addContractType("NameRegistryHub", nameHubImpl);
+        address nameHubBeacon = pm.getBeaconById(keccak256("NameRegistryHub"));
+        bytes memory nameHubInit =
+            abi.encodeCall(NameRegistryHub.initialize, (vm.addr(deployerKey), address(uar), mailboxAddr));
+        NameRegistryHub nameHub = NameRegistryHub(payable(address(new BeaconProxy(nameHubBeacon, nameHubInit))));
         uar.setNameRegistryHub(address(nameHub));
         console.log("NameRegistryHub:", address(nameHub));
         console.log("UAR wired to NameRegistryHub");
+
+        // 7. Transfer PoaManager ownership to Hub (after all types registered)
+        pm.transferOwnership(address(hub));
+        console.log("PoaManager ownership transferred to Hub");
 
         vm.stopBroadcast();
 

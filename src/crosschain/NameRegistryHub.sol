@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import {IMailbox, IMessageRecipient} from "./interfaces/IHyperlane.sol";
 
 /// @notice Minimal interface for UAR cross-chain registration.
@@ -16,10 +17,10 @@ interface IAccountRegistryCrossChain {
 ///         Receives claims from satellite relays via Hyperlane, registers on the
 ///         canonical UniversalAccountRegistry (usernames) or reserves globally (org names),
 ///         and dispatches confirm/reject back.
-/// @dev    Bidirectional: implements IMessageRecipient (receives from satellites)
-///         AND dispatches responses back through the same Mailbox.
+/// @dev    Deploy behind a BeaconProxy. Bidirectional: implements IMessageRecipient
+///         (receives from satellites) AND dispatches responses back through the same Mailbox.
 ///         The confirm/reject dispatch happens in the same tx as handle().
-contract NameRegistryHub is Ownable(msg.sender), IMessageRecipient {
+contract NameRegistryHub is Initializable, OwnableUpgradeable, IMessageRecipient {
     /*──────────── Types ───────────*/
     struct SatelliteConfig {
         uint32 domain;
@@ -37,26 +38,27 @@ contract NameRegistryHub is Ownable(msg.sender), IMessageRecipient {
     uint8 internal constant MSG_CONFIRM_ORG_NAME = 0x07;
     uint8 internal constant MSG_REJECT_ORG_NAME = 0x08;
 
-    /*──────────── Immutables ──────────*/
-    IAccountRegistryCrossChain public immutable accountRegistry;
-    IMailbox public immutable mailbox;
+    /*──────────── ERC-7201 Storage ──────────*/
+    /// @custom:storage-location erc7201:poa.nameregistryhub.storage
+    struct Layout {
+        IAccountRegistryCrossChain accountRegistry;
+        IMailbox mailbox;
+        SatelliteConfig[] satellites;
+        bool paused;
+        mapping(bytes32 => bool) reserved;
+        mapping(bytes32 => bool) reservedOrgNames;
+        mapping(address => bool) authorizedOrgRegistries;
+        uint256 returnFee;
+    }
 
-    /*──────────── Storage ─────────────*/
-    SatelliteConfig[] public satellites;
-    bool public paused;
+    bytes32 private constant _STORAGE_SLOT = keccak256("poa.nameregistryhub.storage");
 
-    /// @dev Global reservation map for usernames. A name is taken iff reserved[nameHash] == true.
-    ///      This is the single source of truth for cross-chain username uniqueness.
-    mapping(bytes32 => bool) public reserved;
-
-    /// @dev Global reservation map for org names. Separate namespace from usernames.
-    mapping(bytes32 => bool) public reservedOrgNames;
-
-    /// @dev Addresses authorized to call the *OrgNameLocal functions (home-chain OrgRegistry).
-    mapping(address => bool) public authorizedOrgRegistries;
-
-    /// @dev Fee to use per return dispatch. Owner-configurable to adapt to gas price changes.
-    uint256 public returnFee;
+    function _layout() private pure returns (Layout storage s) {
+        bytes32 slot = _STORAGE_SLOT;
+        assembly {
+            s.slot := slot
+        }
+    }
 
     /*──────────── Errors ──────────────*/
     error IsPaused();
@@ -92,10 +94,18 @@ contract NameRegistryHub is Ownable(msg.sender), IMessageRecipient {
     event ReturnFeeSet(uint256 fee);
 
     /*──────────── Constructor ─────────*/
-    constructor(address _accountRegistry, address _mailbox) {
-        if (_accountRegistry == address(0) || _mailbox == address(0)) revert ZeroAddress();
-        accountRegistry = IAccountRegistryCrossChain(_accountRegistry);
-        mailbox = IMailbox(_mailbox);
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /*──────────── Initializer ─────────*/
+    function initialize(address owner, address _accountRegistry, address _mailbox) external initializer {
+        if (owner == address(0) || _accountRegistry == address(0) || _mailbox == address(0)) revert ZeroAddress();
+        __Ownable_init(owner);
+        Layout storage s = _layout();
+        s.accountRegistry = IAccountRegistryCrossChain(_accountRegistry);
+        s.mailbox = IMailbox(_mailbox);
     }
 
     /*══════════════════ Hyperlane Receiver ══════════════════*/
@@ -104,20 +114,21 @@ contract NameRegistryHub is Ownable(msg.sender), IMessageRecipient {
     /// @dev    Validates origin + sender against registered satellites, then processes
     ///         the claim and dispatches confirm/reject back in the same transaction.
     function handle(uint32 _origin, bytes32 _sender, bytes calldata _body) external override {
-        if (msg.sender != address(mailbox)) revert UnauthorizedMailbox();
-        if (paused) revert IsPaused();
-        if (!_isRegisteredSatellite(_origin, _sender)) revert UnauthorizedSatellite();
+        Layout storage s = _layout();
+        if (msg.sender != address(s.mailbox)) revert UnauthorizedMailbox();
+        if (s.paused) revert IsPaused();
+        if (!_isRegisteredSatellite(s, _origin, _sender)) revert UnauthorizedSatellite();
 
         uint8 msgType = abi.decode(_body[:32], (uint8));
 
         if (msgType == MSG_CLAIM_USERNAME) {
-            _handleClaimUsername(_origin, _sender, _body);
+            _handleClaimUsername(s, _origin, _sender, _body);
         } else if (msgType == MSG_BURN_USERNAME) {
-            _handleBurnUsername(_origin, _body);
+            _handleBurnUsername(s, _origin, _body);
         } else if (msgType == MSG_CHANGE_USERNAME) {
-            _handleChangeUsername(_origin, _sender, _body);
+            _handleChangeUsername(s, _origin, _sender, _body);
         } else if (msgType == MSG_CLAIM_ORG_NAME) {
-            _handleClaimOrgName(_origin, _sender, _body);
+            _handleClaimOrgName(s, _origin, _sender, _body);
         } else {
             revert UnknownMessageType();
         }
@@ -128,22 +139,25 @@ contract NameRegistryHub is Ownable(msg.sender), IMessageRecipient {
     /// @notice Called by the home-chain UniversalAccountRegistry during local registration.
     /// @dev    Synchronous — reverts if name is taken, no Hyperlane involved.
     function claimUsernameLocal(bytes32 nameHash) external {
-        if (msg.sender != address(accountRegistry)) revert NotAccountRegistry();
-        if (reserved[nameHash]) revert NameTaken();
-        reserved[nameHash] = true;
+        Layout storage s = _layout();
+        if (msg.sender != address(s.accountRegistry)) revert NotAccountRegistry();
+        if (s.reserved[nameHash]) revert NameTaken();
+        s.reserved[nameHash] = true;
     }
 
     /// @notice Called by the home-chain UAR during local username change.
     function changeUsernameLocal(bytes32, bytes32 newHash) external {
-        if (msg.sender != address(accountRegistry)) revert NotAccountRegistry();
-        if (reserved[newHash]) revert NameTaken();
-        reserved[newHash] = true;
+        Layout storage s = _layout();
+        if (msg.sender != address(s.accountRegistry)) revert NotAccountRegistry();
+        if (s.reserved[newHash]) revert NameTaken();
+        s.reserved[newHash] = true;
         // Old name stays reserved (burned) — cannot be reclaimed
     }
 
     /// @notice Called by the home-chain UAR during local username delete.
     function burnUsernameLocal(bytes32) external view {
-        if (msg.sender != address(accountRegistry)) revert NotAccountRegistry();
+        Layout storage s = _layout();
+        if (msg.sender != address(s.accountRegistry)) revert NotAccountRegistry();
         // Name stays reserved — burned names can never be reclaimed (POP invariant)
     }
 
@@ -152,28 +166,31 @@ contract NameRegistryHub is Ownable(msg.sender), IMessageRecipient {
     /// @notice Called by the home-chain OrgRegistry during local org creation.
     /// @dev    Synchronous — reverts if name is taken, no Hyperlane involved.
     function claimOrgNameLocal(bytes32 nameHash) external {
-        if (!authorizedOrgRegistries[msg.sender]) revert NotOrgRegistry();
-        if (reservedOrgNames[nameHash]) revert OrgNameTaken();
-        reservedOrgNames[nameHash] = true;
+        Layout storage s = _layout();
+        if (!s.authorizedOrgRegistries[msg.sender]) revert NotOrgRegistry();
+        if (s.reservedOrgNames[nameHash]) revert OrgNameTaken();
+        s.reservedOrgNames[nameHash] = true;
     }
 
     /// @notice Called by the home-chain OrgRegistry during org name change.
     /// @dev    Old name is released (unlike usernames, org names CAN be reclaimed after rename).
     function changeOrgNameLocal(bytes32 oldHash, bytes32 newHash) external {
-        if (!authorizedOrgRegistries[msg.sender]) revert NotOrgRegistry();
-        if (reservedOrgNames[newHash]) revert OrgNameTaken();
-        delete reservedOrgNames[oldHash];
-        reservedOrgNames[newHash] = true;
+        Layout storage s = _layout();
+        if (!s.authorizedOrgRegistries[msg.sender]) revert NotOrgRegistry();
+        if (s.reservedOrgNames[newHash]) revert OrgNameTaken();
+        delete s.reservedOrgNames[oldHash];
+        s.reservedOrgNames[newHash] = true;
     }
 
     /*══════════════════ Satellite Management ══════════════════*/
 
     function registerSatellite(uint32 domain, address satellite) external onlyOwner {
         if (satellite == address(0)) revert ZeroAddress();
+        Layout storage s = _layout();
 
-        uint256 len = satellites.length;
+        uint256 len = s.satellites.length;
         for (uint256 i; i < len;) {
-            if (satellites[i].domain == domain && satellites[i].active) {
+            if (s.satellites[i].domain == domain && s.satellites[i].active) {
                 revert DuplicateDomain(domain);
             }
             unchecked {
@@ -181,31 +198,67 @@ contract NameRegistryHub is Ownable(msg.sender), IMessageRecipient {
             }
         }
 
-        satellites.push(
-            SatelliteConfig({domain: domain, satellite: bytes32(uint256(uint160(satellite))), active: true})
-        );
+        s.satellites
+            .push(SatelliteConfig({domain: domain, satellite: bytes32(uint256(uint160(satellite))), active: true}));
         emit SatelliteRegistered(domain, satellite);
     }
 
     function removeSatellite(uint256 index) external onlyOwner {
-        uint32 domain = satellites[index].domain;
-        satellites[index].active = false;
+        Layout storage s = _layout();
+        uint32 domain = s.satellites[index].domain;
+        s.satellites[index].active = false;
         emit SatelliteRemoved(domain);
     }
 
     function satelliteCount() external view returns (uint256) {
-        return satellites.length;
+        return _layout().satellites.length;
+    }
+
+    /*══════════════════ Public Getters ══════════════════*/
+
+    function accountRegistry() external view returns (IAccountRegistryCrossChain) {
+        return _layout().accountRegistry;
+    }
+
+    function mailbox() external view returns (IMailbox) {
+        return _layout().mailbox;
+    }
+
+    function satellites(uint256 index) external view returns (uint32 domain, bytes32 satellite, bool active) {
+        Layout storage s = _layout();
+        SatelliteConfig storage sat = s.satellites[index];
+        return (sat.domain, sat.satellite, sat.active);
+    }
+
+    function paused() external view returns (bool) {
+        return _layout().paused;
+    }
+
+    function reserved(bytes32 nameHash) external view returns (bool) {
+        return _layout().reserved[nameHash];
+    }
+
+    function reservedOrgNames(bytes32 nameHash) external view returns (bool) {
+        return _layout().reservedOrgNames[nameHash];
+    }
+
+    function authorizedOrgRegistries(address registry) external view returns (bool) {
+        return _layout().authorizedOrgRegistries[registry];
+    }
+
+    function returnFee() external view returns (uint256) {
+        return _layout().returnFee;
     }
 
     /*══════════════════ Admin ══════════════════*/
 
     function setPaused(bool _paused) external onlyOwner {
-        paused = _paused;
+        _layout().paused = _paused;
         emit PauseSet(_paused);
     }
 
     function setReturnFee(uint256 _fee) external onlyOwner {
-        returnFee = _fee;
+        _layout().returnFee = _fee;
         emit ReturnFeeSet(_fee);
     }
 
@@ -224,19 +277,19 @@ contract NameRegistryHub is Ownable(msg.sender), IMessageRecipient {
 
     /// @notice Admin burn: permanently reserve a username (e.g. to block offensive names).
     function adminBurn(bytes32 nameHash) external onlyOwner {
-        reserved[nameHash] = true;
+        _layout().reserved[nameHash] = true;
     }
 
     /// @notice Admin burn: permanently reserve an org name.
     function adminBurnOrgName(bytes32 nameHash) external onlyOwner {
-        reservedOrgNames[nameHash] = true;
+        _layout().reservedOrgNames[nameHash] = true;
         emit OrgNameBurned(nameHash);
     }
 
     /// @notice Authorize an OrgRegistry to call *OrgNameLocal functions.
     function setAuthorizedOrgRegistry(address registry, bool authorized) external onlyOwner {
         if (registry == address(0)) revert ZeroAddress();
-        authorizedOrgRegistries[registry] = authorized;
+        _layout().authorizedOrgRegistries[registry] = authorized;
         emit OrgRegistryAuthorized(registry, authorized);
     }
 
@@ -245,87 +298,87 @@ contract NameRegistryHub is Ownable(msg.sender), IMessageRecipient {
 
     /*══════════════════ Internal: Message Handlers ══════════════════*/
 
-    function _handleClaimUsername(uint32 _origin, bytes32 _sender, bytes calldata _body) internal {
+    function _handleClaimUsername(Layout storage s, uint32 _origin, bytes32 _sender, bytes calldata _body) internal {
         (, address user, string memory username) = abi.decode(_body, (uint8, address, string));
         bytes32 nameHash = _hashUsername(username);
 
         // Try to register on canonical UAR
-        try accountRegistry.registerAccountCrossChain(user, username) {
-            reserved[nameHash] = true;
+        try s.accountRegistry.registerAccountCrossChain(user, username) {
+            s.reserved[nameHash] = true;
             emit UsernameReserved(nameHash, _origin, user);
 
             bytes memory confirm = abi.encode(MSG_CONFIRM_USERNAME, user, username);
-            _dispatchToSatellite(_origin, _sender, confirm);
+            _dispatchToSatellite(s, _origin, _sender, confirm);
         } catch {
             emit UsernameRejected(nameHash, _origin, user);
 
             bytes memory reject = abi.encode(MSG_REJECT_USERNAME, user, username);
-            _dispatchToSatellite(_origin, _sender, reject);
+            _dispatchToSatellite(s, _origin, _sender, reject);
         }
     }
 
-    function _handleBurnUsername(uint32, bytes calldata _body) internal {
+    function _handleBurnUsername(Layout storage s, uint32, bytes calldata _body) internal {
         (, address user) = abi.decode(_body, (uint8, address));
 
         // Fire-and-forget: delete on canonical UAR. Name stays reserved.
-        try accountRegistry.deleteAccountCrossChain(user) {} catch {}
+        try s.accountRegistry.deleteAccountCrossChain(user) {} catch {}
 
         // No response needed — burn is permanent regardless
     }
 
-    function _handleChangeUsername(uint32 _origin, bytes32 _sender, bytes calldata _body) internal {
+    function _handleChangeUsername(Layout storage s, uint32 _origin, bytes32 _sender, bytes calldata _body) internal {
         (, address user, string memory newUsername) = abi.decode(_body, (uint8, address, string));
         bytes32 newHash = _hashUsername(newUsername);
 
         // Check global reservation first (catches admin-burned names).
         // changeUsernameCrossChain on UAR doesn't call back to claimUsernameLocal
         // (unlike _register), so we must check reserved here explicitly.
-        if (reserved[newHash]) {
+        if (s.reserved[newHash]) {
             emit UsernameRejected(newHash, _origin, user);
             bytes memory reject = abi.encode(MSG_REJECT_USERNAME, user, newUsername);
-            _dispatchToSatellite(_origin, _sender, reject);
+            _dispatchToSatellite(s, _origin, _sender, reject);
             return;
         }
 
         // Atomic: try change on UAR (it burns old + claims new internally)
-        try accountRegistry.changeUsernameCrossChain(user, newUsername) {
-            reserved[newHash] = true;
+        try s.accountRegistry.changeUsernameCrossChain(user, newUsername) {
+            s.reserved[newHash] = true;
             emit UsernameChanged(bytes32(0), newHash, _origin, user);
 
             bytes memory confirm = abi.encode(MSG_CONFIRM_USERNAME, user, newUsername);
-            _dispatchToSatellite(_origin, _sender, confirm);
+            _dispatchToSatellite(s, _origin, _sender, confirm);
         } catch {
             emit UsernameRejected(newHash, _origin, user);
 
             bytes memory reject = abi.encode(MSG_REJECT_USERNAME, user, newUsername);
-            _dispatchToSatellite(_origin, _sender, reject);
+            _dispatchToSatellite(s, _origin, _sender, reject);
         }
     }
 
     /*══════════════════ Internal: Org Name Handlers ══════════════════*/
 
-    function _handleClaimOrgName(uint32 _origin, bytes32 _sender, bytes calldata _body) internal {
+    function _handleClaimOrgName(Layout storage s, uint32 _origin, bytes32 _sender, bytes calldata _body) internal {
         (, string memory orgName) = abi.decode(_body, (uint8, string));
         bytes32 nameHash = _hashUsername(orgName);
 
-        if (reservedOrgNames[nameHash]) {
+        if (s.reservedOrgNames[nameHash]) {
             emit OrgNameRejected(nameHash, _origin);
             bytes memory reject = abi.encode(MSG_REJECT_ORG_NAME, orgName);
-            _dispatchToSatellite(_origin, _sender, reject);
+            _dispatchToSatellite(s, _origin, _sender, reject);
         } else {
-            reservedOrgNames[nameHash] = true;
+            s.reservedOrgNames[nameHash] = true;
             emit OrgNameReserved(nameHash, _origin);
             bytes memory confirm = abi.encode(MSG_CONFIRM_ORG_NAME, orgName);
-            _dispatchToSatellite(_origin, _sender, confirm);
+            _dispatchToSatellite(s, _origin, _sender, confirm);
         }
     }
 
     /*══════════════════ Internal: Helpers ══════════════════*/
 
-    function _isRegisteredSatellite(uint32 domain, bytes32 sender) internal view returns (bool) {
-        uint256 len = satellites.length;
+    function _isRegisteredSatellite(Layout storage s, uint32 domain, bytes32 sender) internal view returns (bool) {
+        uint256 len = s.satellites.length;
         for (uint256 i; i < len;) {
-            if (satellites[i].active && satellites[i].domain == domain && satellites[i].satellite == sender) {
+            if (s.satellites[i].active && s.satellites[i].domain == domain && s.satellites[i].satellite == sender) {
                 return true;
             }
             unchecked {
@@ -335,10 +388,10 @@ contract NameRegistryHub is Ownable(msg.sender), IMessageRecipient {
         return false;
     }
 
-    function _dispatchToSatellite(uint32 domain, bytes32 satellite, bytes memory payload) internal {
-        uint256 fee = returnFee;
+    function _dispatchToSatellite(Layout storage s, uint32 domain, bytes32 satellite, bytes memory payload) internal {
+        uint256 fee = s.returnFee;
         if (fee > 0 && address(this).balance < fee) revert InsufficientBalance();
-        mailbox.dispatch{value: fee}(domain, satellite, payload);
+        s.mailbox.dispatch{value: fee}(domain, satellite, payload);
     }
 
     function _hashUsername(string memory username) internal pure returns (bytes32) {

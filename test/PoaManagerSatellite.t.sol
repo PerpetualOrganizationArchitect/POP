@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {PoaManager} from "../src/PoaManager.sol";
 import {ImplementationRegistry} from "../src/ImplementationRegistry.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -27,6 +28,8 @@ contract PoaManagerSatelliteTest is Test {
     PoaManager pm;
     PoaManagerSatellite satellite;
 
+    UpgradeableBeacon satBeacon;
+
     SatDummyImplV1 implV1;
     SatDummyImplV2 implV2;
 
@@ -46,8 +49,12 @@ contract PoaManagerSatelliteTest is Test {
         pm = new PoaManager(address(reg));
         reg.transferOwnership(address(pm));
 
-        // Deploy Satellite
-        satellite = new PoaManagerSatellite(address(pm), mailbox, hubDomain, hubAddr);
+        // Deploy Satellite behind beacon proxy
+        PoaManagerSatellite satImpl = new PoaManagerSatellite();
+        satBeacon = new UpgradeableBeacon(address(satImpl), address(this));
+        bytes memory satInit =
+            abi.encodeCall(PoaManagerSatellite.initialize, (address(this), address(pm), mailbox, hubDomain, hubAddr));
+        satellite = PoaManagerSatellite(address(new BeaconProxy(address(satBeacon), satInit)));
 
         // Transfer PM ownership to satellite
         pm.transferOwnership(address(satellite));
@@ -292,30 +299,38 @@ contract PoaManagerSatelliteTest is Test {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  18. Constructor reverts on zero poaManager
+    //  18. Initialize reverts on zero poaManager
     // ══════════════════════════════════════════════════════════
 
-    function testConstructorRevertsZeroPoaManager() public {
+    function testInitializeRevertsZeroPoaManager() public {
+        bytes memory badInit =
+            abi.encodeCall(PoaManagerSatellite.initialize, (address(this), address(0), mailbox, hubDomain, hubAddr));
         vm.expectRevert(PoaManagerSatellite.ZeroAddress.selector);
-        new PoaManagerSatellite(address(0), mailbox, hubDomain, hubAddr);
+        new BeaconProxy(address(satBeacon), badInit);
     }
 
     // ══════════════════════════════════════════════════════════
-    //  19. Constructor reverts on zero mailbox
+    //  19. Initialize reverts on zero mailbox
     // ══════════════════════════════════════════════════════════
 
-    function testConstructorRevertsZeroMailbox() public {
+    function testInitializeRevertsZeroMailbox() public {
+        bytes memory badInit = abi.encodeCall(
+            PoaManagerSatellite.initialize, (address(this), address(pm), address(0), hubDomain, hubAddr)
+        );
         vm.expectRevert(PoaManagerSatellite.ZeroAddress.selector);
-        new PoaManagerSatellite(address(pm), address(0), hubDomain, hubAddr);
+        new BeaconProxy(address(satBeacon), badInit);
     }
 
     // ══════════════════════════════════════════════════════════
-    //  20. Constructor reverts on zero hubAddress
+    //  20. Initialize reverts on zero hubAddress
     // ══════════════════════════════════════════════════════════
 
-    function testConstructorRevertsZeroHubAddress() public {
+    function testInitializeRevertsZeroHubAddress() public {
+        bytes memory badInit = abi.encodeCall(
+            PoaManagerSatellite.initialize, (address(this), address(pm), mailbox, hubDomain, address(0))
+        );
         vm.expectRevert(PoaManagerSatellite.ZeroAddress.selector);
-        new PoaManagerSatellite(address(pm), mailbox, hubDomain, address(0));
+        new BeaconProxy(address(satBeacon), badInit);
     }
 
     // ══════════════════════════════════════════════════════════
@@ -474,6 +489,26 @@ contract PoaManagerSatelliteTest is Test {
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         satellite.adminCall(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 77));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  33. Initialize reverts on zero owner
+    // ══════════════════════════════════════════════════════════
+
+    function testInitializeRevertsZeroOwner() public {
+        bytes memory badInit =
+            abi.encodeCall(PoaManagerSatellite.initialize, (address(0), address(pm), mailbox, hubDomain, hubAddr));
+        vm.expectRevert(PoaManagerSatellite.ZeroAddress.selector);
+        new BeaconProxy(address(satBeacon), badInit);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  34. Double initialization reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testDoubleInitializeReverts() public {
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        satellite.initialize(address(this), address(pm), mailbox, hubDomain, hubAddr);
     }
 }
 

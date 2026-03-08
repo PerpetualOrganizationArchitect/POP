@@ -271,7 +271,12 @@ contract DeployInfrastructure is Script {
         // Optional: Deploy NameRegistryHub if MAILBOX is provided
         address mailboxAddr = vm.envOr("MAILBOX", address(0));
         if (mailboxAddr != address(0)) {
-            NameRegistryHub hub = new NameRegistryHub(globalAccountRegistry, mailboxAddr);
+            address nameHubImpl = address(new NameRegistryHub());
+            pm.addContractType("NameRegistryHub", nameHubImpl);
+            address nameHubBeacon = pm.getBeaconById(keccak256("NameRegistryHub"));
+            bytes memory nameHubInit =
+                abi.encodeCall(NameRegistryHub.initialize, (deployer, globalAccountRegistry, mailboxAddr));
+            NameRegistryHub hub = NameRegistryHub(payable(address(new BeaconProxy(nameHubBeacon, nameHubInit))));
             UniversalAccountRegistry(globalAccountRegistry).setNameRegistryHub(address(hub));
             nameRegistryHub = address(hub);
             console.log("\n--- Cross-Chain Name Registry ---");
