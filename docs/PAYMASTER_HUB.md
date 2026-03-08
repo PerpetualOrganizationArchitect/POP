@@ -118,7 +118,6 @@ mapping(bytes32 orgId => mapping(bytes32 => Budget)) private _budgets;
 - Rules (which contracts/functions are allowed)
 - Budgets (spending limits per user/role/org)
 - Fee caps (gas price limits)
-- Bounty config (bundler incentives)
 
 **What is shared globally:**
 - Solidarity fund balance
@@ -562,102 +561,6 @@ hub.setFeeCaps(
 
 ---
 
-### Bundler Bounties
-
-Optional rewards to incentivize fast transaction inclusion.
-
-#### Bounty Structure
-
-```solidity
-struct Bounty {
-    bool enabled;               // Is bounty system enabled?
-    uint96 maxBountyWeiPerOp;   // Max bounty per operation
-    uint16 pctBpCap;            // Max % of gas cost (basis points)
-    uint144 totalPaid;          // Lifetime bounties paid (tracking)
-}
-
-// Storage: orgId → Bounty
-mapping(bytes32 => Bounty) private _bounty;
-```
-
-#### Bounty Calculation
-
-```solidity
-bountyAmount = min(
-    maxBountyWeiPerOp,
-    (actualGasCost * pctBpCap) / 10000
-);
-```
-
-**Example:**
-- `maxBountyWeiPerOp = 0.001 ether` (1 finney)
-- `pctBpCap = 500` (5%)
-- `actualGasCost = 0.05 ether`
-
-Calculation: `min(0.001 ether, 0.05 ether * 500 / 10000) = min(0.001, 0.0025) = 0.001 ether`
-
-#### Bounty Payment
-
-Bounties are paid in `postOp` **only on successful execution**:
-
-```solidity
-function _processBounty(bytes32 orgId, bytes32 userOpHash, address bundlerOrigin, uint256 actualGasCost) {
-    Bounty storage bounty = _bounty[orgId];
-
-    if (!bounty.enabled) return;
-
-    uint256 bountyAmount = min(
-        bounty.maxBountyWeiPerOp,
-        (actualGasCost * bounty.pctBpCap) / 10000
-    );
-
-    if (bountyAmount == 0) return;
-
-    // Check bounty balance (separate from deposits)
-    if (address(this).balance < bountyAmount) {
-        emit BountyPayFailed(userOpHash, bundlerOrigin, bountyAmount);
-        return;
-    }
-
-    // Pay bundler
-    (bool success,) = payable(bundlerOrigin).call{value: bountyAmount}("");
-
-    if (success) {
-        bounty.totalPaid += uint144(bountyAmount);
-        emit BountyPaid(userOpHash, bundlerOrigin, bountyAmount);
-    } else {
-        emit BountyPayFailed(userOpHash, bundlerOrigin, bountyAmount);
-    }
-}
-```
-
-#### Funding Bounties
-
-Bounties are funded **separately** from paymaster deposits:
-
-```solidity
-// Anyone can fund bounty pool
-hub.fundBounty{value: 1 ether}();
-
-// Admin can sweep unused bounty funds
-hub.sweepBounty(payable(recipient), amount);
-```
-
-#### Setting Bounty Config
-
-```solidity
-hub.setBounty(
-    orgId,
-    true,           // enabled
-    0.001 ether,    // maxBountyWeiPerOp (1 finney)
-    500             // pctBpCap (5%)
-);
-```
-
-**Access:** Admin hat only
-
----
-
 ### Access Control
 
 PaymasterHub uses **Hats Protocol** for decentralized, role-based access control. Each organization has two hats:
@@ -1026,9 +929,8 @@ paymasterAndData = PaymasterHub address (20 bytes)
                  + version (1 byte)
                  + orgId (32 bytes)
                  + subjectType (1 byte)
-                 + subjectId (20 bytes)
+                 + subjectId (32 bytes)
                  + ruleId (4 bytes)
-                 + mailboxCommit8 (8 bytes)
 ```
 
 2. **EntryPoint calls `validatePaymasterUserOp`:**
@@ -1048,7 +950,6 @@ paymasterAndData = PaymasterHub address (20 bytes)
    - Update per-subject budget usage
    - Update org financials (50/50 split)
    - Collect 1% solidarity fee
-   - Pay bundler bounty (if configured)
 
 ### Storage Layout (ERC-7201)
 
@@ -1063,7 +964,6 @@ FINANCIALS_STORAGE_LOCATION     = 0x1234... // orgId → OrgFinancials
 FEECAPS_STORAGE_LOCATION        = 0x31c1... // orgId → FeeCaps
 RULES_STORAGE_LOCATION          = 0xbe22... // orgId → target → selector → Rule
 BUDGETS_STORAGE_LOCATION        = 0xf14d... // orgId → subjectKey → Budget
-BOUNTY_STORAGE_LOCATION         = 0x5aef... // orgId → Bounty
 SOLIDARITY_STORAGE_LOCATION     = 0xabcd... // SolidarityFund
 GRACEPERIOD_STORAGE_LOCATION    = 0xfedc... // GracePeriodConfig
 ```
@@ -1188,11 +1088,6 @@ event FeeCapsSet(bytes32 indexed orgId, uint256 maxFeePerGas, ...);
 
 // Usage tracking
 event UsageIncreased(bytes32 indexed orgId, bytes32 subjectKey, uint256 delta, uint128 usedInEpoch, uint32 epochStart);
-event UserOpPosted(bytes32 indexed opHash, address indexed postedBy);
-
-// Bounties
-event BountyPaid(bytes32 indexed userOpHash, address indexed to, uint256 amount);
-event BountyPayFailed(bytes32 indexed userOpHash, address indexed to, uint256 amount);
 
 // Governance
 event GracePeriodConfigUpdated(uint32 initialGraceDays, uint128 maxSpendDuringGrace, uint128 minDepositRequired);
