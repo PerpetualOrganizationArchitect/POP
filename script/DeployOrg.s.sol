@@ -33,7 +33,7 @@ contract DeployOrg is Script {
         string orgId;
         string orgName;
         bool autoUpgrade;
-        QuorumConfig quorum;
+        ThresholdConfig threshold;
         RoleConfig[] roles;
         VotingClassConfig[] votingClasses;
         RoleAssignmentsConfig roleAssignments;
@@ -43,7 +43,7 @@ contract DeployOrg is Script {
         BootstrapConfigJson bootstrap; // Optional: initial projects and tasks
     }
 
-    struct QuorumConfig {
+    struct ThresholdConfig {
         uint8 hybrid;
         uint8 directDemocracy;
     }
@@ -212,9 +212,9 @@ contract DeployOrg is Script {
             config.withEducationHub = true; // Default to enabled for backward compatibility
         }
 
-        // Parse quorum
-        config.quorum.hybrid = uint8(vm.parseJsonUint(configJson, ".quorum.hybrid"));
-        config.quorum.directDemocracy = uint8(vm.parseJsonUint(configJson, ".quorum.directDemocracy"));
+        // Parse threshold
+        config.threshold.hybrid = uint8(vm.parseJsonUint(configJson, ".threshold.hybrid"));
+        config.threshold.directDemocracy = uint8(vm.parseJsonUint(configJson, ".threshold.directDemocracy"));
 
         // Parse roles array - use serializeJson to work around struct array limitations
         // First, manually count by trying to parse until we fail (reasonable max: 100)
@@ -478,8 +478,8 @@ contract DeployOrg is Script {
         // Note: regDeadline/regNonce/regSignature left as default (0/"") = skip sig-based registration
         // The frontend should provide these when deployerUsername is non-empty
         params.autoUpgrade = config.autoUpgrade;
-        params.hybridQuorumPct = config.quorum.hybrid;
-        params.ddQuorumPct = config.quorum.directDemocracy;
+        params.hybridThresholdPct = config.threshold.hybrid;
+        params.ddThresholdPct = config.threshold.directDemocracy;
         params.ddInitialTargets = config.ddInitialTargets;
 
         // Build role configs

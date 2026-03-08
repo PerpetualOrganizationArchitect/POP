@@ -2,7 +2,7 @@
   "orgId": "worker-cooperative-alpha",
   "orgName": "Worker Cooperative Alpha",
   "autoUpgrade": true,
-  "quorum": {
+  "threshold": {
     "hybrid": 50,
     "directDemocracy": 50
   },

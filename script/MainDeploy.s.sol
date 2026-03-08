@@ -290,8 +290,8 @@ contract DeployHomeChain is DeployHelper {
         params.deployerUsername = "";
         // regDeadline/regNonce/regSignature left as default (0/"") = skip registration
         params.autoUpgrade = true;
-        params.hybridQuorumPct = 50;
-        params.ddQuorumPct = 50;
+        params.hybridThresholdPct = 50;
+        params.ddThresholdPct = 50;
 
         // --- Roles ---
         params.roles = new RoleConfigStructs.RoleConfig[](2);

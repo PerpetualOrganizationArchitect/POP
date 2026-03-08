@@ -2,7 +2,7 @@
   "orgId": "direct-democracy-collective",
   "orgName": "Direct Democracy Collective",
   "autoUpgrade": true,
-  "quorum": {
+  "threshold": {
     "hybrid": 60,
     "directDemocracy": 60
   },

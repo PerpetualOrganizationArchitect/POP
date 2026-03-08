@@ -154,7 +154,7 @@ contract MockERC20 is IERC20 {
                     address(exec), // executor
                     creatorHats, // allowed creator hats
                     targets, // allowed target(s)
-                    uint8(50), // quorum %
+                    uint8(50), // threshold %
                     classes // class configurations
                 )
             );
@@ -314,7 +314,7 @@ contract MockERC20 is IERC20 {
             vm.prank(alice);
             (uint256 win, bool ok) = hv.announceWinner(id);
 
-            assertTrue(ok, "quorum not met");
+            assertTrue(ok, "threshold not met");
             assertEq(win, 0, "YES should win");
 
             /* executor should be called with the winning option's batch */
@@ -457,9 +457,9 @@ contract MockERC20 is IERC20 {
             vm.expectRevert();
             hv.setConfig(HybridVoting.ConfigKey.TARGET_ALLOWED, abi.encode(address(0xDEAD), true));
 
-            // Set quorum
+            // Set threshold
             vm.expectRevert();
-            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(60));
+            hv.setConfig(HybridVoting.ConfigKey.THRESHOLD, abi.encode(60));
 
             // Split, quadratic, and min balance are now configured via setClasses
             // These legacy config options no longer exist
@@ -471,9 +471,9 @@ contract MockERC20 is IERC20 {
             // Test that executor can call admin functions
             vm.startPrank(address(exec));
 
-            // Set quorum
-            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(60));
-            assertEq(hv.quorumPct(), 60);
+            // Set threshold
+            hv.setConfig(HybridVoting.ConfigKey.THRESHOLD, abi.encode(60));
+            assertEq(hv.thresholdPct(), 60);
 
             // Split, quadratic, and min balance are now configured via setClasses
             // Test class configuration update instead
@@ -505,12 +505,12 @@ contract MockERC20 is IERC20 {
             // Old executor should no longer have permissions
             vm.prank(address(exec));
             vm.expectRevert();
-            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(70));
+            hv.setConfig(HybridVoting.ConfigKey.THRESHOLD, abi.encode(70));
 
             // New executor should have permissions
             vm.prank(newExecutor);
-            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(70));
-            assertEq(hv.quorumPct(), 70);
+            hv.setConfig(HybridVoting.ConfigKey.THRESHOLD, abi.encode(70));
+            assertEq(hv.thresholdPct(), 70);
         }
 
         // function testCleanup() public {
@@ -789,7 +789,7 @@ contract MockERC20 is IERC20 {
             vm.prank(alice);
             (uint256 win, bool ok) = hv.announceWinner(id);
 
-            assertTrue(ok, "Quorum should be met");
+            assertTrue(ok, "Threshold should be met");
             assertEq(win, 0, "YES should win");
         }
 
@@ -921,7 +921,7 @@ contract MockERC20 is IERC20 {
             vm.warp(block.timestamp + 16 minutes);
             (uint256 win, bool ok) = hv.announceWinner(id);
 
-            assertTrue(ok, "Should have quorum");
+            assertTrue(ok, "Should meet threshold");
             // YES votes: alice (30% of 30% = 9%), carol (30% of 30% + her token share of 50%)
             // NO votes: bob (his token share of 50%), dave (100% of 20% = 20%)
             // Winner depends on token distribution
@@ -1015,15 +1015,15 @@ contract MockERC20 is IERC20 {
             // Check results
             vm.warp(block.timestamp + 16 minutes);
             (uint256 win, bool ok) = hv.announceWinner(id);
-            assertTrue(ok, "Should meet quorum");
+            assertTrue(ok, "Should meet threshold");
         }
 
-        function testNClassQuorumCalculation() public {
-            // Test that quorum is calculated correctly across all classes
+        function testNClassThresholdCalculation() public {
+            // Test that threshold is calculated correctly across all classes
             vm.startPrank(address(exec));
 
-            // Set up 2-class system with 40% quorum requirement
-            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(40));
+            // Set up 2-class system with 40% threshold requirement
+            hv.setConfig(HybridVoting.ConfigKey.THRESHOLD, abi.encode(40));
 
             HybridVoting.ClassConfig[] memory classes = new HybridVoting.ClassConfig[](2);
             uint256[] memory emptyHats = new uint256[](0);
@@ -1063,12 +1063,12 @@ contract MockERC20 is IERC20 {
             w[0] = 100;
             hv.vote(id, idx, w);
 
-            // Should meet quorum with significant participation in token class
+            // Should meet threshold with significant participation in token class
             vm.warp(block.timestamp + 16 minutes);
             (uint256 win, bool ok) = hv.announceWinner(id);
 
-            // With only one voter in token class (40% of total), should meet 40% quorum
-            assertTrue(ok, "Should meet quorum with 40% participation");
+            // With only one voter in token class (40% of total), should meet 40% threshold
+            assertTrue(ok, "Should meet threshold with 40% participation");
         }
 
         function testNClassZeroBalanceVoters() public {
@@ -1126,7 +1126,7 @@ contract MockERC20 is IERC20 {
             (uint256 win, bool ok) = hv.announceWinner(id);
 
             assertEq(win, 0, "Option 0 should win");
-            assertTrue(ok, "Should have quorum from rich voter");
+            assertTrue(ok, "Should meet threshold from rich voter");
         }
 
         function testNClassMixedQuadraticLinear() public {
@@ -1480,8 +1480,95 @@ contract MockERC20 is IERC20 {
             vm.warp(block.timestamp + 16 minutes);
             (uint256 win, bool ok) = hv.announceWinner(id);
 
-            assertTrue(ok, "Should have quorum with multiple participants");
+            assertTrue(ok, "Should meet threshold with multiple participants");
             // The result depends on the complex interaction of all classes
+        }
+
+        /* ───────────────────────── QUORUM TESTS ───────────────────────── */
+
+        function testSetQuorum() public {
+            assertEq(hv.quorum(), 0, "Default quorum should be 0");
+            vm.prank(address(exec));
+            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(uint32(5)));
+            assertEq(hv.quorum(), 5, "Quorum should be 5");
+        }
+
+        function testSetQuorumEmitsEvent() public {
+            vm.prank(address(exec));
+            vm.expectEmit(true, true, true, true);
+            emit HybridVoting.QuorumSet(uint32(5));
+            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(uint32(5)));
+        }
+
+        function testSetQuorumUnauthorized() public {
+            vm.expectRevert(VotingErrors.Unauthorized.selector);
+            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(uint32(5)));
+        }
+
+        function testQuorumNotMet() public {
+            // Set quorum to 3 voters
+            vm.prank(address(exec));
+            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(uint32(3)));
+
+            // Create proposal and have only 1 voter vote
+            uint256 id = _create();
+            _voteYES(alice);
+
+            vm.warp(block.timestamp + 16 minutes);
+            (uint256 winner, bool valid) = hv.announceWinner(id);
+            assertFalse(valid, "Should be invalid when quorum not met");
+            assertEq(winner, 0, "Winner should be 0 when quorum not met");
+        }
+
+        function testQuorumMet() public {
+            // Set quorum to 2 voters
+            vm.prank(address(exec));
+            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(uint32(2)));
+
+            // Create proposal and have 2 voters vote
+            uint256 id = _create();
+            _voteYES(alice);
+            _voteYES(carol);
+
+            vm.warp(block.timestamp + 16 minutes);
+            (uint256 winner, bool valid) = hv.announceWinner(id);
+            assertTrue(valid, "Should be valid when quorum met");
+        }
+
+        function testQuorumDisabledByDefault() public {
+            // Default quorum is 0, even 1 voter should work
+            uint256 id = _create();
+            _voteYES(alice);
+
+            vm.warp(block.timestamp + 16 minutes);
+            (uint256 winner, bool valid) = hv.announceWinner(id);
+            assertTrue(valid, "Should be valid with quorum disabled (0)");
+        }
+
+        function testVoterCountTracking() public {
+            uint256 id = _create();
+            _voteYES(alice);
+            _voteYES(bob);
+            _voteYES(carol);
+
+            // Verify voter count is tracked (3 voters)
+            // Set quorum to 3 - should pass exactly
+            vm.prank(address(exec));
+            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(uint32(3)));
+
+            vm.warp(block.timestamp + 16 minutes);
+            (uint256 winner, bool valid) = hv.announceWinner(id);
+            assertTrue(valid, "Should pass with exactly 3 voters and quorum of 3");
+        }
+
+        function testQuorumCanBeSetToZeroToDisable() public {
+            vm.prank(address(exec));
+            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(uint32(10)));
+            assertEq(hv.quorum(), 10);
+
+            vm.prank(address(exec));
+            hv.setConfig(HybridVoting.ConfigKey.QUORUM, abi.encode(uint32(0)));
+            assertEq(hv.quorum(), 0, "Quorum should be disabled after setting to 0");
         }
 
         /* ───────────── ANNOUNCE WINNER REPLAY PROTECTION ───────────── */

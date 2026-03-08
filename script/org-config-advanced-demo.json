@@ -2,7 +2,7 @@
   "orgId": "advanced-demo-cooperative-with-vouching",
   "orgName": "Advanced Demo Cooperative",
   "autoUpgrade": true,
-  "quorum": {
+  "threshold": {
     "hybrid": 50,
     "directDemocracy": 60
   },

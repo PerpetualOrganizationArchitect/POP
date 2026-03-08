@@ -2,7 +2,7 @@
   "orgId": "governance-demo-cooperative",
   "orgName": "Governance Demo Cooperative",
   "autoUpgrade": true,
-  "quorum": {
+  "threshold": {
     "hybrid": 50,
     "directDemocracy": 60
   },

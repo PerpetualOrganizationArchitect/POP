@@ -8,7 +8,7 @@ pragma solidity ^0.8.20;
  */
 library VotingMath {
     /* ─────────── Errors ─────────── */
-    error InvalidQuorum();
+    error InvalidThreshold();
     error InvalidSplit();
     error InvalidMinBalance();
     error MinBalanceNotMet(uint256 required);
@@ -35,11 +35,11 @@ library VotingMath {
     /* ─────────── Validation Functions ─────────── */
 
     /**
-     * @notice Validate quorum percentage
-     * @param quorum Quorum percentage (1-100)
+     * @notice Validate threshold percentage
+     * @param threshold Threshold percentage (1-100)
      */
-    function validateQuorum(uint8 quorum) internal pure {
-        if (quorum == 0 || quorum > 100) revert InvalidQuorum();
+    function validateThreshold(uint8 threshold) internal pure {
+        if (threshold == 0 || threshold > 100) revert InvalidThreshold();
     }
 
     /**
@@ -251,39 +251,39 @@ library VotingMath {
         }
     }
 
-    /* ─────────── Winner & Quorum Functions ─────────── */
+    /* ─────────── Winner & Threshold Functions ─────────── */
 
     /**
-     * @notice Check if a proposal meets quorum requirements (legacy)
+     * @notice Check if a proposal meets threshold requirements (legacy)
      * @param highestVote Highest vote count
      * @param secondHighest Second highest vote count
      * @param totalWeight Total voting weight
-     * @param quorumPercentage Required quorum percentage
-     * @return valid Whether the proposal meets quorum
+     * @param thresholdPct Required support threshold percentage
+     * @return valid Whether the proposal meets threshold
      */
-    function meetsQuorum(uint256 highestVote, uint256 secondHighest, uint256 totalWeight, uint8 quorumPercentage)
+    function meetsThreshold(uint256 highestVote, uint256 secondHighest, uint256 totalWeight, uint8 thresholdPct)
         internal
         pure
         returns (bool valid)
     {
-        return (highestVote * 100 >= totalWeight * quorumPercentage) && (highestVote > secondHighest);
+        return (highestVote * 100 >= totalWeight * thresholdPct) && (highestVote > secondHighest);
     }
 
     /**
      * @notice Determine winner using majority rules
      * @param optionScores Per-option vote totals
      * @param totalWeight Total voting weight (e.g., sum power or voters*100)
-     * @param quorumPct Required quorum percentage (1-100)
+     * @param thresholdPct Required support threshold percentage (1-100)
      * @param requireStrictMajority Whether winner must strictly exceed second place
      * @return win Winning option index
-     * @return ok Whether quorum is met and winner is valid
+     * @return ok Whether threshold is met and winner is valid
      * @return hi Highest score
      * @return second Second highest score
      */
     function pickWinnerMajority(
         uint256[] memory optionScores,
         uint256 totalWeight,
-        uint8 quorumPct,
+        uint8 thresholdPct,
         bool requireStrictMajority
     ) internal pure returns (uint256 win, bool ok, uint256 hi, uint256 second) {
         uint256 len = optionScores.length;
@@ -301,11 +301,10 @@ library VotingMath {
 
         if (hi == 0) return (win, false, hi, second);
 
-        // Threshold check: hi * 100 >= totalWeight * quorumPct
-        bool quorumMet = (hi * 100 >= totalWeight * quorumPct);
+        bool thresholdMet = (hi * 100 >= totalWeight * thresholdPct);
         bool meetsMargin = requireStrictMajority ? (hi > second) : (hi >= second);
 
-        ok = quorumMet && meetsMargin;
+        ok = thresholdMet && meetsMargin;
     }
 
     /**
@@ -315,9 +314,9 @@ library VotingMath {
      * @param ddTotalRaw Total DD raw votes
      * @param ptTotalRaw Total PT raw votes
      * @param ddSharePct DD share percentage (e.g., 50 = 50%)
-     * @param quorumPct Required quorum percentage (1-100)
+     * @param thresholdPct Required support threshold percentage (1-100)
      * @return win Winning option index
-     * @return ok Whether quorum is met and winner is valid
+     * @return ok Whether threshold is met and winner is valid
      * @return hi Highest combined score
      * @return second Second highest combined score
      */
@@ -327,7 +326,7 @@ library VotingMath {
         uint256 ddTotalRaw,
         uint256 ptTotalRaw,
         uint8 ddSharePct,
-        uint8 quorumPct
+        uint8 thresholdPct
     ) internal pure returns (uint256 win, bool ok, uint256 hi, uint256 second) {
         if (ddTotalRaw == 0 && ptTotalRaw == 0) return (0, false, 0, 0);
 
@@ -349,9 +348,9 @@ library VotingMath {
             }
         }
 
-        // Quorum interpreted on the final scaled total (max 100)
+        // Threshold on the final scaled total (max 100)
         // Requires strict margin for hybrid voting
-        ok = (hi > second) && (hi >= quorumPct);
+        ok = (hi > second) && (hi >= thresholdPct);
     }
 
     /**
@@ -359,10 +358,10 @@ library VotingMath {
      * @param perOptionPerClassRaw [option][class] raw vote matrix
      * @param totalsRaw [class] total raw votes per class
      * @param slices [class] slice percentages (must sum to 100)
-     * @param quorumPct Required quorum percentage (1-100)
+     * @param thresholdPct Required support threshold percentage (1-100)
      * @param strict Whether to require strict majority (winner > second)
      * @return win Winning option index
-     * @return ok Whether quorum is met and winner is valid
+     * @return ok Whether threshold is met and winner is valid
      * @return hi Highest combined score
      * @return second Second highest combined score
      */
@@ -370,7 +369,7 @@ library VotingMath {
         uint256[][] memory perOptionPerClassRaw,
         uint256[] memory totalsRaw,
         uint8[] memory slices,
-        uint8 quorumPct,
+        uint8 thresholdPct,
         bool strict
     ) internal pure returns (uint256 win, bool ok, uint256 hi, uint256 second) {
         uint256 numOptions = perOptionPerClassRaw.length;
@@ -400,10 +399,10 @@ library VotingMath {
             }
         }
 
-        // Check quorum and margin requirements
-        bool quorumMet = hi >= quorumPct;
+        // Check threshold and margin requirements
+        bool thresholdMet = hi >= thresholdPct;
         bool meetsMargin = strict ? (hi > second) : (hi >= second);
-        ok = quorumMet && meetsMargin;
+        ok = thresholdMet && meetsMargin;
     }
 
     /**
@@ -411,7 +410,7 @@ library VotingMath {
      * @param slices Array of slice percentages
      */
     function validateClassSlices(uint8[] memory slices) internal pure {
-        if (slices.length == 0) revert InvalidQuorum();
+        if (slices.length == 0) revert InvalidSplit();
         uint256 sum;
         for (uint256 i; i < slices.length; ++i) {
             if (slices[i] == 0 || slices[i] > 100) revert InvalidSplit();
