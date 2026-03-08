@@ -26,6 +26,8 @@ import {HatsTreeSetup} from "../src/HatsTreeSetup.sol";
 import {DeterministicDeployer} from "../src/crosschain/DeterministicDeployer.sol";
 import {PoaManagerHub} from "../src/crosschain/PoaManagerHub.sol";
 import {PoaManagerSatellite} from "../src/crosschain/PoaManagerSatellite.sol";
+import {NameRegistryHub} from "../src/crosschain/NameRegistryHub.sol";
+import {RegistryRelay} from "../src/crosschain/RegistryRelay.sol";
 
 // Config structs
 import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
@@ -81,6 +83,7 @@ contract DeployHomeChain is DeployHelper {
         address accessFactory;
         address modulesFactory;
         address hatsTreeSetup;
+        address nameRegistryHub;
     }
 
     /*═══════════════════════════ MAIN ═══════════════════════════*/
@@ -113,6 +116,16 @@ contract DeployHomeChain is DeployHelper {
         PoaManager(infra.poaManager).transferOwnership(address(hub));
         console.log("PoaManagerHub:", address(hub));
         console.log("PoaManager ownership transferred to Hub");
+
+        // 3b. Deploy NameRegistryHub and wire to GlobalAccountRegistry + OrgRegistry
+        NameRegistryHub nameHub = new NameRegistryHub(infra.globalAccountRegistry, mailboxAddr);
+        UniversalAccountRegistry(infra.globalAccountRegistry).setNameRegistryHub(address(nameHub));
+        nameHub.setAuthorizedOrgRegistry(infra.orgRegistry, true);
+        OrgRegistry(infra.orgRegistry).setNameRegistryHub(address(nameHub));
+        infra.nameRegistryHub = address(nameHub);
+        console.log("NameRegistryHub:", address(nameHub));
+        console.log("GlobalAccountRegistry wired to NameRegistryHub");
+        console.log("OrgRegistry wired to NameRegistryHub");
 
         // 4. Deploy governance org
         OrgDeployer.DeploymentResult memory orgResult = _deployGovernanceOrg(infra, deployer);
@@ -435,6 +448,7 @@ contract DeployHomeChain is DeployHelper {
         vm.serializeAddress(home, "accessFactory", infra.accessFactory);
         vm.serializeAddress(home, "modulesFactory", infra.modulesFactory);
         vm.serializeAddress(home, "hatsTreeSetup", infra.hatsTreeSetup);
+        vm.serializeAddress(home, "nameRegistryHub", infra.nameRegistryHub);
         vm.serializeAddress(home, "hub", hub);
         string memory homeJson = vm.serializeString(home, "governance", govJson);
 
@@ -512,6 +526,11 @@ contract DeploySatellite is DeployHelper {
         // 4. Deploy PoaManagerSatellite
         PoaManagerSatellite satellite = new PoaManagerSatellite(address(pm), mailboxAddr, hubDomain, hubAddress);
 
+        // 4b. Deploy RegistryRelay (points to NameRegistryHub on home chain)
+        address nameHubAddress = vm.parseJsonAddress(state, ".homeChain.nameRegistryHub");
+        RegistryRelay registryRelay = new RegistryRelay(mailboxAddr, hubDomain, nameHubAddress);
+        console.log("RegistryRelay:", address(registryRelay));
+
         // 5. Transfer PoaManager ownership to Satellite
         pm.transferOwnership(address(satellite));
 
@@ -533,6 +552,7 @@ contract DeploySatellite is DeployHelper {
         string memory satObj = "satellite_state";
         vm.serializeUint(satObj, "domain", uint256(satDomain));
         vm.serializeAddress(satObj, "satellite", address(satellite));
+        vm.serializeAddress(satObj, "registryRelay", address(registryRelay));
         vm.serializeAddress(satObj, "poaManager", address(pm));
         string memory satJson = vm.serializeAddress(satObj, "implRegistry", address(reg));
         string memory filename = string.concat("script/satellite-state-", vm.toString(uint256(satDomain)), ".json");
@@ -587,19 +607,23 @@ contract RegisterAndTransfer is Script {
         // Read state
         string memory state = vm.readFile("script/main-deploy-state.json");
         address hubAddr = vm.parseJsonAddress(state, ".homeChain.hub");
+        address nameHubAddr = vm.parseJsonAddress(state, ".homeChain.nameRegistryHub");
         address executorAddr = vm.parseJsonAddress(state, ".homeChain.governance.executor");
 
         console.log("\n=== MainDeploy: Register Satellites & Transfer Ownership ===");
-        console.log("Hub:", hubAddr);
+        console.log("PoaManagerHub:", hubAddr);
+        console.log("NameRegistryHub:", nameHubAddr);
         console.log("Executor:", executorAddr);
         console.log("Satellites to register:", numSatellites);
 
         vm.startBroadcast(deployerKey);
 
         PoaManagerHub hub = PoaManagerHub(payable(hubAddr));
+        NameRegistryHub nameHub = NameRegistryHub(payable(nameHubAddr));
 
         // Build set of already-registered active domains (for idempotent re-runs)
-        uint256 existingCount = hub.satelliteCount();
+        uint256 existingHubCount = hub.satelliteCount();
+        uint256 existingNameHubCount = nameHub.satelliteCount();
 
         // Register each satellite by reading its state file
         for (uint256 i = 0; i < numSatellites; i++) {
@@ -607,38 +631,64 @@ contract RegisterAndTransfer is Script {
             string memory envKey = string.concat("SATELLITE_DOMAIN_", vm.toString(i));
             uint32 domain = uint32(vm.envUint(envKey));
 
-            // Skip if this domain is already actively registered
-            bool alreadyRegistered = false;
-            for (uint256 j = 0; j < existingCount; j++) {
-                (uint32 existingDomain,, bool active) = hub.satellites(j);
-                if (existingDomain == domain && active) {
-                    alreadyRegistered = true;
-                    break;
-                }
-            }
-            if (alreadyRegistered) {
-                console.log("Satellite already registered, skipping domain:", domain);
-                continue;
-            }
-
-            // Read satellite address from its state file
+            // Read satellite state file
             string memory filename = string.concat("script/satellite-state-", vm.toString(uint256(domain)), ".json");
             string memory satState = vm.readFile(filename);
-            address satAddr = vm.parseJsonAddress(satState, ".satellite");
 
-            hub.registerSatellite(domain, satAddr);
-            console.log("Registered satellite domain:", domain, "at", satAddr);
+            // Register PoaManagerSatellite (skip if already active)
+            bool hubRegistered = _isDomainRegistered(hub, domain, existingHubCount);
+            if (hubRegistered) {
+                console.log("PoaManagerSatellite already registered, skipping domain:", domain);
+            } else {
+                address satAddr = vm.parseJsonAddress(satState, ".satellite");
+                hub.registerSatellite(domain, satAddr);
+                console.log("Registered PoaManagerSatellite domain:", domain, "at", satAddr);
+            }
+
+            // Register RegistryRelay on NameRegistryHub (skip if already active)
+            bool relayRegistered = _isDomainRegisteredOnNameHub(nameHub, domain, existingNameHubCount);
+            if (relayRegistered) {
+                console.log("RegistryRelay already registered, skipping domain:", domain);
+            } else {
+                address relayAddr = vm.parseJsonAddress(satState, ".registryRelay");
+                nameHub.registerSatellite(domain, relayAddr);
+                console.log("Registered RegistryRelay domain:", domain, "at", relayAddr);
+            }
         }
 
         // Transfer Hub ownership to Executor (governance now controls upgrades)
         hub.transferOwnership(executorAddr);
-        console.log("\nHub ownership transferred to Executor:", executorAddr);
+        console.log("\nPoaManagerHub ownership transferred to Executor:", executorAddr);
+
+        nameHub.transferOwnership(executorAddr);
+        console.log("NameRegistryHub ownership transferred to Executor:", executorAddr);
 
         vm.stopBroadcast();
 
         console.log("\n=== Registration & Transfer Complete ===");
         console.log("Governance chain is now fully wired:");
         console.log("  HybridVoting -> Executor -> Hub -> PoaManager");
+        console.log("  HybridVoting -> Executor -> NameRegistryHub -> UAR");
+    }
+
+    function _isDomainRegistered(PoaManagerHub hub, uint32 domain, uint256 count) internal view returns (bool) {
+        for (uint256 j = 0; j < count; j++) {
+            (uint32 d,, bool active) = hub.satellites(j);
+            if (d == domain && active) return true;
+        }
+        return false;
+    }
+
+    function _isDomainRegisteredOnNameHub(NameRegistryHub nameHub, uint32 domain, uint256 count)
+        internal
+        view
+        returns (bool)
+    {
+        for (uint256 j = 0; j < count; j++) {
+            (uint32 d,, bool active) = nameHub.satellites(j);
+            if (d == domain && active) return true;
+        }
+        return false;
     }
 }
 
@@ -659,8 +709,10 @@ contract VerifyDeployment is Script {
     function run() public view {
         string memory state = vm.readFile("script/main-deploy-state.json");
         address hubAddr = vm.parseJsonAddress(state, ".homeChain.hub");
+        address nameHubAddr = vm.parseJsonAddress(state, ".homeChain.nameRegistryHub");
         address executorAddr = vm.parseJsonAddress(state, ".homeChain.governance.executor");
         address pmAddr = vm.parseJsonAddress(state, ".homeChain.poaManager");
+        address garAddr = vm.parseJsonAddress(state, ".homeChain.globalAccountRegistry");
         address orgDeployerAddr = vm.parseJsonAddress(state, ".homeChain.orgDeployer");
 
         console.log("\n=== Deployment Verification (Home Chain) ===");
@@ -668,14 +720,30 @@ contract VerifyDeployment is Script {
         uint256 checks;
         uint256 passed;
 
-        // Check Hub owner
+        // Check PoaManagerHub owner
         address hubOwner = PoaManagerHub(payable(hubAddr)).owner();
-        console.log("\nHub owner:", hubOwner);
+        console.log("\nPoaManagerHub owner:", hubOwner);
         console.log("Expected (Executor):", executorAddr);
         bool hubCheck = hubOwner == executorAddr;
-        console.log("Hub ownership:", hubCheck ? "PASS" : "FAIL");
+        console.log("PoaManagerHub ownership:", hubCheck ? "PASS" : "FAIL");
         checks++;
         if (hubCheck) passed++;
+
+        // Check NameRegistryHub owner
+        address nameHubOwner = NameRegistryHub(payable(nameHubAddr)).owner();
+        console.log("\nNameRegistryHub owner:", nameHubOwner);
+        bool nameHubCheck = nameHubOwner == executorAddr;
+        console.log("NameRegistryHub ownership:", nameHubCheck ? "PASS" : "FAIL");
+        checks++;
+        if (nameHubCheck) passed++;
+
+        // Check UAR wired to NameRegistryHub
+        address wiredHub = UniversalAccountRegistry(garAddr).nameRegistryHub();
+        console.log("\nUAR.nameRegistryHub:", wiredHub);
+        bool uarCheck = wiredHub == nameHubAddr;
+        console.log("UAR wired to NameRegistryHub:", uarCheck ? "PASS" : "FAIL");
+        checks++;
+        if (uarCheck) passed++;
 
         // Check PoaManager owner
         address pmOwner = PoaManager(pmAddr).owner();
@@ -686,26 +754,31 @@ contract VerifyDeployment is Script {
         checks++;
         if (pmCheck) passed++;
 
-        // Check satellite count
+        // Check PoaManagerHub satellite count
         uint256 satCount = PoaManagerHub(payable(hubAddr)).satelliteCount();
-        console.log("\nRegistered satellites:", satCount);
+        console.log("\nPoaManagerHub satellites:", satCount);
         bool satCheck = satCount > 0;
         console.log("Has satellites:", satCheck ? "PASS" : "WARNING - none registered");
         checks++;
         if (satCheck) passed++;
 
+        // Check NameRegistryHub satellite count
+        uint256 nameSatCount = NameRegistryHub(payable(nameHubAddr)).satelliteCount();
+        console.log("NameRegistryHub satellites:", nameSatCount);
+        bool nameSatCheck = nameSatCount > 0;
+        console.log("Has relays:", nameSatCheck ? "PASS" : "WARNING - none registered");
+        checks++;
+        if (nameSatCheck) passed++;
+
         // Check Executor ETH balance
         uint256 execBal = executorAddr.balance;
-        console.log("Executor ETH balance:", execBal);
+        console.log("\nExecutor ETH balance:", execBal);
         bool execCheck = execBal > 0;
         console.log("Has Hyperlane funds:", execCheck ? "PASS" : "WARNING - no ETH");
         checks++;
         if (execCheck) passed++;
 
-        // Check OrgDeployer is set as orgRegistrar on PaymasterHub
-        address paymasterAddr = vm.parseJsonAddress(state, ".homeChain.paymasterHub");
-        // Note: We can't directly read orgRegistrar from PaymasterHub (it's in private storage),
-        // but we verify OrgDeployer exists
+        // Check OrgDeployer exists
         bool deployerCheck = orgDeployerAddr.code.length > 0;
         console.log("\nOrgDeployer has code:", deployerCheck ? "PASS" : "FAIL");
         checks++;

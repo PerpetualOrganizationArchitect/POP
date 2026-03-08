@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {PoaManager} from "../../src/PoaManager.sol";
 import {ImplementationRegistry} from "../../src/ImplementationRegistry.sol";
 import {PoaManagerSatellite} from "../../src/crosschain/PoaManagerSatellite.sol";
+import {RegistryRelay} from "../../src/crosschain/RegistryRelay.sol";
 import {DeterministicDeployer} from "../../src/crosschain/DeterministicDeployer.sol";
 import {HybridVoting} from "../../src/HybridVoting.sol";
 
@@ -15,7 +16,7 @@ import {HybridVoting} from "../../src/HybridVoting.sol";
  * @title TestnetE2ESatellite
  * @notice Deploys minimal satellite infrastructure for E2E cross-chain testing.
  *         Deploys: PoaManager, ImplementationRegistry, HybridVoting v1 (via DeterministicDeployer),
- *         PoaManagerSatellite, and transfers PoaManager ownership to Satellite.
+ *         PoaManagerSatellite, RegistryRelay, and transfers PoaManager ownership to Satellite.
  *
  * Required env vars:
  *   PRIVATE_KEY, DETERMINISTIC_DEPLOYER, HUB_DOMAIN, HUB_ADDRESS, MAILBOX
@@ -31,10 +32,15 @@ contract TestnetE2ESatellite is Script {
         address hubAddress = vm.envAddress("HUB_ADDRESS");
         address mailboxAddr = vm.envAddress("MAILBOX");
 
+        // Read home chain state for NameRegistryHub address
+        string memory existing = vm.readFile("script/e2e/e2e-state.json");
+        address nameHubAddress = vm.parseJsonAddress(existing, ".homeChain.nameRegistryHub");
+
         console.log("\n=== E2E Satellite Setup ===");
         console.log("Deployer:", vm.addr(deployerKey));
         console.log("Hub domain:", hubDomain);
         console.log("Hub address:", hubAddress);
+        console.log("NameRegistryHub:", nameHubAddress);
         console.log("Mailbox:", mailboxAddr);
 
         vm.startBroadcast(deployerKey);
@@ -72,20 +78,24 @@ contract TestnetE2ESatellite is Script {
         PoaManagerSatellite satellite = new PoaManagerSatellite(address(pm), mailboxAddr, hubDomain, hubAddress);
         console.log("PoaManagerSatellite:", address(satellite));
 
-        // 5. Transfer PoaManager ownership to Satellite
+        // 5. Deploy RegistryRelay (points to NameRegistryHub on home chain)
+        RegistryRelay relay = new RegistryRelay(mailboxAddr, hubDomain, nameHubAddress);
+        console.log("RegistryRelay:", address(relay));
+
+        // 6. Transfer PoaManager ownership to Satellite
         pm.transferOwnership(address(satellite));
         console.log("PoaManager ownership transferred to Satellite");
 
         vm.stopBroadcast();
 
-        // 6. Read existing home chain state and merge
-        string memory existing = vm.readFile("script/e2e/e2e-state.json");
+        // 7. Read existing home chain state and merge
         address homePm = vm.parseJsonAddress(existing, ".homeChain.poaManager");
         address homeReg = vm.parseJsonAddress(existing, ".homeChain.implRegistry");
         address homeHub = vm.parseJsonAddress(existing, ".homeChain.hub");
         address homeHv = vm.parseJsonAddress(existing, ".homeChain.hybridVotingV1");
+        address homeUar = vm.parseJsonAddress(existing, ".homeChain.uar");
 
-        string memory json = string.concat(
+        string memory json1 = string.concat(
             "{\n",
             '  "deterministicDeployer": "',
             vm.toString(ddAddr),
@@ -99,14 +109,23 @@ contract TestnetE2ESatellite is Script {
             '",\n',
             '    "hub": "',
             vm.toString(homeHub),
-            '",\n',
+            '",\n'
+        );
+
+        string memory json2 = string.concat(
             '    "hybridVotingV1": "',
             vm.toString(homeHv),
+            '",\n',
+            '    "uar": "',
+            vm.toString(homeUar),
+            '",\n',
+            '    "nameRegistryHub": "',
+            vm.toString(nameHubAddress),
             '"\n',
             "  },\n"
         );
 
-        string memory json2 = string.concat(
+        string memory json3 = string.concat(
             '  "satellite": {\n',
             '    "poaManager": "',
             vm.toString(address(pm)),
@@ -116,6 +135,12 @@ contract TestnetE2ESatellite is Script {
             '",\n',
             '    "satellite": "',
             vm.toString(address(satellite)),
+            '",\n'
+        );
+
+        string memory json4 = string.concat(
+            '    "registryRelay": "',
+            vm.toString(address(relay)),
             '",\n',
             '    "hybridVotingV1": "',
             vm.toString(hvImpl),
@@ -124,7 +149,7 @@ contract TestnetE2ESatellite is Script {
             "}\n"
         );
 
-        vm.writeFile("script/e2e/e2e-state.json", string.concat(json, json2));
+        vm.writeFile("script/e2e/e2e-state.json", string.concat(json1, json2, json3, json4));
 
         console.log("\n=== Satellite E2E Setup Complete ===");
         console.log("State written to script/e2e/e2e-state.json");

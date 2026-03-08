@@ -15,6 +15,12 @@ interface IPasskeyFactory {
         returns (address);
 }
 
+interface INameRegistryHub {
+    function claimUsernameLocal(bytes32 nameHash) external;
+    function changeUsernameLocal(bytes32 oldHash, bytes32 newHash) external;
+    function burnUsernameLocal(bytes32 nameHash) external;
+}
+
 contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     /*────────────────────────── Custom Errors ──────────────────────────*/
     error UsernameEmpty();
@@ -28,6 +34,7 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     error InvalidNonce();
     error InvalidSigner();
     error PasskeyFactoryNotSet();
+    error NotHub();
 
     /*─────────────────────────── Constants ─────────────────────────────*/
     uint256 private constant MAX_LEN = 64;
@@ -51,6 +58,8 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         mapping(bytes32 => address) ownerOfUsernameHash;
         mapping(address => uint256) nonces;
         address passkeyFactory;
+        // Cross-chain: NameRegistryHub address (0 = standalone mode, backward compatible)
+        address nameRegistryHub;
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.universalaccountregistry.storage");
@@ -68,6 +77,7 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     event UserDeleted(address indexed user, string oldUsername);
     event BatchRegistered(uint256 count);
     event PasskeyFactoryUpdated(address indexed factory);
+    event NameRegistryHubUpdated(address indexed hub);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -84,6 +94,13 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     function setPasskeyFactory(address factory) external onlyOwner {
         _layout().passkeyFactory = factory;
         emit PasskeyFactoryUpdated(factory);
+    }
+
+    /// @notice Set the NameRegistryHub for cross-chain uniqueness.
+    ///         Set to address(0) to disable cross-chain checks (standalone mode).
+    function setNameRegistryHub(address hub) external onlyOwner {
+        _layout().nameRegistryHub = hub;
+        emit NameRegistryHubUpdated(hub);
     }
 
     /*──────────────────── Public Registration API ─────────────────────*/
@@ -206,11 +223,17 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         (bytes32 newHash, string memory norm) = _validate(newUsername);
         if (l.ownerOfUsernameHash[newHash] != address(0)) revert UsernameTaken();
 
+        bytes32 oldHash = keccak256(bytes(_toLower(oldName)));
+
+        // Global uniqueness check via hub (if configured)
+        if (l.nameRegistryHub != address(0)) {
+            INameRegistryHub(l.nameRegistryHub).changeUsernameLocal(oldHash, newHash);
+        }
+
         // reserve new
         l.ownerOfUsernameHash[newHash] = msg.sender;
 
         // keep old reserved forever by burning ownership
-        bytes32 oldHash = keccak256(bytes(_toLower(oldName)));
         l.ownerOfUsernameHash[oldHash] = BURN_ADDRESS;
 
         l.addressToUsername[msg.sender] = norm;
@@ -227,6 +250,12 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         if (bytes(oldName).length == 0) revert AccountUnknown();
 
         bytes32 oldHash = keccak256(bytes(_toLower(oldName)));
+
+        // Notify hub (if configured) — name stays reserved (burned)
+        if (l.nameRegistryHub != address(0)) {
+            INameRegistryHub(l.nameRegistryHub).burnUsernameLocal(oldHash);
+        }
+
         l.ownerOfUsernameHash[oldHash] = BURN_ADDRESS;
         delete l.addressToUsername[msg.sender];
 
@@ -259,6 +288,10 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         return _layout().passkeyFactory;
     }
 
+    function nameRegistryHub() external view returns (address) {
+        return _layout().nameRegistryHub;
+    }
+
     /// @notice Returns the EIP-712 domain separator.
     // solhint-disable-next-line func-name-mixedcase
     function DOMAIN_SEPARATOR() external view returns (bytes32) {
@@ -270,6 +303,48 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         return keccak256(abi.encode(_DOMAIN_TYPEHASH, _NAME_HASH, _VERSION_HASH, block.chainid, address(this)));
     }
 
+    /*──────────── Cross-chain entry points ────────────────────────────*/
+
+    /// @notice Called by NameRegistryHub for registrations originating from satellite chains.
+    function registerAccountCrossChain(address user, string calldata username) external {
+        if (msg.sender != _layout().nameRegistryHub) revert NotHub();
+        _register(user, username);
+    }
+
+    /// @notice Called by NameRegistryHub for username changes originating from satellite chains.
+    function changeUsernameCrossChain(address user, string calldata newUsername) external {
+        if (msg.sender != _layout().nameRegistryHub) revert NotHub();
+
+        Layout storage l = _layout();
+        string storage oldName = l.addressToUsername[user];
+        if (bytes(oldName).length == 0) revert AccountUnknown();
+
+        (bytes32 newHash, string memory norm) = _validate(newUsername);
+        if (l.ownerOfUsernameHash[newHash] != address(0)) revert UsernameTaken();
+
+        l.ownerOfUsernameHash[newHash] = user;
+        bytes32 oldHash = keccak256(bytes(_toLower(oldName)));
+        l.ownerOfUsernameHash[oldHash] = BURN_ADDRESS;
+        l.addressToUsername[user] = norm;
+
+        emit UsernameChanged(user, norm);
+    }
+
+    /// @notice Called by NameRegistryHub for account deletions originating from satellite chains.
+    function deleteAccountCrossChain(address user) external {
+        if (msg.sender != _layout().nameRegistryHub) revert NotHub();
+
+        Layout storage l = _layout();
+        string storage oldName = l.addressToUsername[user];
+        if (bytes(oldName).length == 0) revert AccountUnknown();
+
+        bytes32 oldHash = keccak256(bytes(_toLower(oldName)));
+        l.ownerOfUsernameHash[oldHash] = BURN_ADDRESS;
+        delete l.addressToUsername[user];
+
+        emit UserDeleted(user, oldName);
+    }
+
     /*──────────────────── Internal Registration ───────────────────────*/
     function _register(address user, string calldata username) internal {
         Layout storage l = _layout();
@@ -277,6 +352,11 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
 
         (bytes32 hash, string memory norm) = _validate(username);
         if (l.ownerOfUsernameHash[hash] != address(0)) revert UsernameTaken();
+
+        // Global uniqueness check via NameRegistryHub (if configured)
+        if (l.nameRegistryHub != address(0)) {
+            INameRegistryHub(l.nameRegistryHub).claimUsernameLocal(hash);
+        }
 
         l.ownerOfUsernameHash[hash] = user;
         l.addressToUsername[user] = norm;

@@ -175,4 +175,79 @@ contract OrgRegistryTest is Test {
         vm.expectRevert(NotOrgMetadataAdmin.selector);
         reg.updateOrgMetaAsAdmin(ORG_ID, bytes("New Name"), bytes32(uint256(1)));
     }
+
+    /* ══════════ Org Name Uniqueness on Update ══════════ */
+
+    function testUpdateOrgMeta_RevertWhenNameTaken() public {
+        // Register two orgs with different names
+        bytes32 orgA = keccak256("ORG_A");
+        bytes32 orgB = keccak256("ORG_B");
+        reg.registerOrg(orgA, address(this), bytes("Alpha"), bytes32(0));
+        reg.registerOrg(orgB, address(this), bytes("Beta"), bytes32(0));
+
+        // Try to rename Alpha to Beta via executor path — should fail
+        vm.expectRevert(OrgNameTaken.selector);
+        reg.updateOrgMeta(orgA, bytes("Beta"), bytes32(0));
+    }
+
+    function testUpdateOrgMeta_SameNameNoOp() public {
+        bytes32 orgA = keccak256("ORG_A");
+        reg.registerOrg(orgA, address(this), bytes("Alpha"), bytes32(0));
+
+        // Updating to the same name should succeed (no-op)
+        reg.updateOrgMeta(orgA, bytes("Alpha"), bytes32(uint256(1)));
+    }
+
+    function testUpdateOrgMeta_ReleasesOldName() public {
+        bytes32 orgA = keccak256("ORG_A");
+        bytes32 orgB = keccak256("ORG_B");
+        reg.registerOrg(orgA, address(this), bytes("Alpha"), bytes32(0));
+
+        // Rename Alpha → Gamma
+        reg.updateOrgMeta(orgA, bytes("Gamma"), bytes32(0));
+
+        // "Alpha" is now free — a new org should be able to claim it
+        reg.registerOrg(orgB, address(this), bytes("Alpha"), bytes32(0));
+        assertTrue(reg.isOrgNameTaken(bytes("Alpha")));
+    }
+
+    function testUpdateOrgMeta_CaseInsensitive() public {
+        bytes32 orgA = keccak256("ORG_A");
+        bytes32 orgB = keccak256("ORG_B");
+        reg.registerOrg(orgA, address(this), bytes("Alpha"), bytes32(0));
+        reg.registerOrg(orgB, address(this), bytes("Beta"), bytes32(0));
+
+        // "BETA" should collide with "Beta" (case-insensitive)
+        vm.expectRevert(OrgNameTaken.selector);
+        reg.updateOrgMeta(orgA, bytes("BETA"), bytes32(0));
+    }
+
+    function testUpdateOrgMetaAsAdmin_RevertWhenNameTaken() public {
+        bytes32 orgA = keccak256("ORG_A");
+        bytes32 orgB = keccak256("ORG_B");
+        reg.registerOrg(orgA, address(this), bytes("Alpha"), bytes32(0));
+        reg.registerOrg(orgB, address(this), bytes("Beta"), bytes32(0));
+
+        // Setup hats for admin path
+        uint256[] memory roleHats = new uint256[](0);
+        reg.registerHatsTree(orgA, TOP_HAT_ID, roleHats);
+        mockHats.setWearer(ADMIN_USER, TOP_HAT_ID, true);
+
+        // Admin tries to rename Alpha to Beta — should fail
+        vm.prank(ADMIN_USER);
+        vm.expectRevert(OrgNameTaken.selector);
+        reg.updateOrgMetaAsAdmin(orgA, bytes("Beta"), bytes32(0));
+    }
+
+    function testUpdateOrgMeta_EmptyNameSkipsUniqueness() public {
+        bytes32 orgA = keccak256("ORG_A");
+        reg.registerOrg(orgA, address(this), bytes("Alpha"), bytes32(0));
+
+        // Empty name = metadata-only update, should not touch name mappings
+        reg.updateOrgMeta(orgA, bytes(""), bytes32(uint256(42)));
+
+        // Name still registered
+        assertTrue(reg.isOrgNameTaken(bytes("Alpha")));
+        assertEq(reg.orgIdOfName(bytes("Alpha")), orgA);
+    }
 }

@@ -16,6 +16,12 @@ error NotOrgExecutor();
 error NotOrgMetadataAdmin();
 error OwnerOnlyDuringBootstrap(); // deployer tried after bootstrap
 error AutoUpgradeRequired(); // deployer must set autoUpgrade=true
+error OrgNameTaken();
+
+interface INameRegistryHubOrgNames {
+    function claimOrgNameLocal(bytes32 nameHash) external;
+    function changeOrgNameLocal(bytes32 oldHash, bytes32 newHash) external;
+}
 
 /* ────────────────── Org Registry ────────────────── */
 contract OrgRegistry is Initializable, OwnableUpgradeable {
@@ -65,6 +71,11 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         mapping(bytes32 => uint256) metadataAdminHatOf;
         // Hats Protocol address for permission checks
         IHats hats;
+        // Cross-chain: org name uniqueness
+        mapping(bytes32 => bytes32) orgNameHashToOrgId; // keccak256(normalized_name) → orgId
+        mapping(bytes32 => bytes32) orgIdToNameHash; // orgId → name hash
+        // Cross-chain: NameRegistryHub address (0 = standalone mode, backward compatible)
+        address nameRegistryHub;
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.orgregistry.storage");
@@ -90,6 +101,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
     );
     event HatsTreeRegistered(bytes32 indexed orgId, uint256 topHatId, uint256[] roleHatIds);
     event OrgMetadataAdminHatSet(bytes32 indexed orgId, uint256 hatId);
+    event NameRegistryHubUpdated(address indexed hub);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -114,6 +126,17 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
         return address(_layout().hats);
     }
 
+    /// @notice Set the NameRegistryHub for cross-chain org name uniqueness.
+    ///         Set to address(0) to disable cross-chain checks (standalone mode).
+    function setNameRegistryHub(address hub) external onlyOwner {
+        _layout().nameRegistryHub = hub;
+        emit NameRegistryHubUpdated(hub);
+    }
+
+    function nameRegistryHub() external view returns (address) {
+        return _layout().nameRegistryHub;
+    }
+
     /* ═════════════════ ORG  LOGIC ═════════════════ */
     function registerOrg(bytes32 orgId, address executorAddr, bytes calldata name, bytes32 metadataHash)
         external
@@ -124,6 +147,18 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
 
         Layout storage l = _layout();
         if (l.orgOf[orgId].exists) revert OrgExists();
+
+        // Enforce org name uniqueness (local)
+        bytes32 nameHash = _normalizeAndHashOrgName(name);
+        if (l.orgNameHashToOrgId[nameHash] != bytes32(0)) revert OrgNameTaken();
+
+        // Cross-chain uniqueness check via hub (if configured)
+        if (l.nameRegistryHub != address(0)) {
+            INameRegistryHubOrgNames(l.nameRegistryHub).claimOrgNameLocal(nameHash);
+        }
+
+        l.orgNameHashToOrgId[nameHash] = orgId;
+        l.orgIdToNameHash[orgId] = nameHash;
 
         l.orgOf[orgId] = OrgInfo({
             executor: executorAddr,
@@ -147,6 +182,18 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
 
         Layout storage l = _layout();
         if (l.orgOf[orgId].exists) revert OrgExists();
+
+        // Enforce org name uniqueness (local)
+        bytes32 nameHash = _normalizeAndHashOrgName(name);
+        if (l.orgNameHashToOrgId[nameHash] != bytes32(0)) revert OrgNameTaken();
+
+        // Cross-chain uniqueness check via hub (if configured)
+        if (l.nameRegistryHub != address(0)) {
+            INameRegistryHubOrgNames(l.nameRegistryHub).claimOrgNameLocal(nameHash);
+        }
+
+        l.orgNameHashToOrgId[nameHash] = orgId;
+        l.orgIdToNameHash[orgId] = nameHash;
 
         l.orgOf[orgId] = OrgInfo({
             executor: address(0), // no executor yet
@@ -181,12 +228,13 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
      * @param newMetadataHash New IPFS metadata hash (bytes32)
      */
     function updateOrgMeta(bytes32 orgId, bytes calldata newName, bytes32 newMetadataHash) external {
-        ValidationLib.requireValidTitle(newName);
+        if (newName.length > 0) ValidationLib.requireValidTitle(newName);
         Layout storage l = _layout();
         OrgInfo storage o = l.orgOf[orgId];
         if (!o.exists) revert OrgUnknown();
         if (msg.sender != o.executor) revert NotOrgExecutor();
 
+        _updateOrgNameHash(l, orgId, newName);
         emit MetaUpdated(orgId, newName, newMetadataHash);
     }
 
@@ -197,7 +245,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
      * @param newMetadataHash New IPFS metadata hash (bytes32)
      */
     function updateOrgMetaAsAdmin(bytes32 orgId, bytes calldata newName, bytes32 newMetadataHash) external {
-        ValidationLib.requireValidTitle(newName);
+        if (newName.length > 0) ValidationLib.requireValidTitle(newName);
 
         Layout storage l = _layout();
         OrgInfo storage o = l.orgOf[orgId];
@@ -216,6 +264,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
 
         if (!hats.isWearerOfHat(msg.sender, metadataAdminHat)) revert NotOrgMetadataAdmin();
 
+        _updateOrgNameHash(l, orgId, newName);
         emit MetaUpdated(orgId, newName, newMetadataHash);
     }
 
@@ -471,5 +520,54 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
 
     function getRoleHat(bytes32 orgId, uint256 roleIndex) external view returns (uint256) {
         return _layout().roleHatOf[orgId][roleIndex];
+    }
+
+    /* ══════════ ORG NAME UNIQUENESS ══════════ */
+
+    /// @notice Check if an org name is already taken.
+    function isOrgNameTaken(bytes calldata name) external view returns (bool) {
+        bytes32 nameHash = _normalizeAndHashOrgName(name);
+        return _layout().orgNameHashToOrgId[nameHash] != bytes32(0);
+    }
+
+    /// @notice Get the orgId that owns a given name.
+    function orgIdOfName(bytes calldata name) external view returns (bytes32) {
+        bytes32 nameHash = _normalizeAndHashOrgName(name);
+        return _layout().orgNameHashToOrgId[nameHash];
+    }
+
+    /* ══════════ INTERNAL ══════════ */
+
+    /// @dev Update org name hash mappings, enforcing uniqueness on name changes.
+    ///      Skips if newName is empty (metadata-only update) or name hash unchanged.
+    function _updateOrgNameHash(Layout storage l, bytes32 orgId, bytes calldata newName) internal {
+        if (newName.length == 0) return; // metadata-only update, name not changing
+
+        bytes32 newHash = _normalizeAndHashOrgName(newName);
+        bytes32 oldHash = l.orgIdToNameHash[orgId];
+
+        if (newHash == oldHash) return; // name unchanged
+
+        // Check new name isn't taken by a different org (local)
+        if (l.orgNameHashToOrgId[newHash] != bytes32(0)) revert OrgNameTaken();
+
+        // Cross-chain uniqueness check via hub (if configured)
+        if (l.nameRegistryHub != address(0)) {
+            INameRegistryHubOrgNames(l.nameRegistryHub).changeOrgNameLocal(oldHash, newHash);
+        }
+
+        // Release old name, claim new
+        delete l.orgNameHashToOrgId[oldHash];
+        l.orgNameHashToOrgId[newHash] = orgId;
+        l.orgIdToNameHash[orgId] = newHash;
+    }
+
+    /// @dev Normalize org name (lowercase) and hash it for uniqueness comparison.
+    function _normalizeAndHashOrgName(bytes memory name) internal pure returns (bytes32) {
+        for (uint256 i; i < name.length; ++i) {
+            uint8 c = uint8(name[i]);
+            if (c >= 65 && c <= 90) name[i] = bytes1(c + 32); // A-Z → a-z
+        }
+        return keccak256(name);
     }
 }

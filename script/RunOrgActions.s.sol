@@ -16,6 +16,7 @@ import {OrgRegistry} from "../src/OrgRegistry.sol";
 import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
 import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
 import {ModulesFactory} from "../src/factories/ModulesFactory.sol";
+import {NameRegistryHub} from "../src/crosschain/NameRegistryHub.sol";
 
 /**
  * @title RunOrgActions
@@ -213,6 +214,9 @@ contract RunOrgActions is Script {
 
         // Step 5: Create and Execute Governance Proposal
         _demonstrateGovernance();
+
+        // Step 6: Cross-Chain Name Registry
+        _demonstrateNameRegistry();
 
         console.log("\n========================================================");
         console.log("   Demo Complete! All Actions Executed Successfully    ");
@@ -1022,5 +1026,61 @@ contract RunOrgActions is Script {
         }
 
         return bootstrap;
+    }
+
+    /*=========================== STEP 6: NAME REGISTRY ===========================*/
+
+    function _demonstrateNameRegistry() internal {
+        console.log("\n=======================================================");
+        console.log("STEP 6: Cross-Chain Name Registry");
+        console.log("=======================================================\n");
+
+        // Read infrastructure addresses
+        string memory infraJson = vm.readFile("script/infrastructure.json");
+        address garAddr = vm.parseJsonAddress(infraJson, ".globalAccountRegistry");
+
+        // Check if nameRegistryHub was deployed (optional — depends on MAILBOX)
+        address nameHubAddr = vm.parseJsonAddress(infraJson, ".nameRegistryHub");
+        if (nameHubAddr == address(0)) {
+            console.log("  NameRegistryHub not deployed (no MAILBOX during infra deploy)");
+            console.log("  Skipping cross-chain name registry demo\n");
+            return;
+        }
+
+        console.log("  GlobalAccountRegistry:", garAddr);
+        console.log("  NameRegistryHub:", nameHubAddr);
+
+        // Verify wiring
+        address wiredHub = UniversalAccountRegistry(garAddr).nameRegistryHub();
+        require(wiredHub == nameHubAddr, "UAR not wired to NameRegistryHub");
+        console.log("  UAR wired to NameRegistryHub: OK");
+
+        // Register a username (home-chain path — instant, no Hyperlane)
+        UniversalAccountRegistry gar = UniversalAccountRegistry(garAddr);
+        string memory existingUsername = gar.getUsername(members.deployer);
+
+        if (bytes(existingUsername).length > 0) {
+            console.log("  Deployer already has username:", existingUsername);
+            console.log("  Skipping registration (already onboarded)");
+        } else {
+            uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+            vm.startBroadcast(deployerKey);
+            gar.registerAccount("demo-user");
+            vm.stopBroadcast();
+            console.log("  Registered username: demo-user");
+        }
+
+        // Verify registration
+        string memory username = gar.getUsername(members.deployer);
+        console.log("  Current username:", username);
+
+        // Verify global reservation on hub (check the deployer's actual username,
+        // which is already stored normalized/lowercase by UAR)
+        bytes32 nameHash = keccak256(bytes(username));
+        bool isReserved = NameRegistryHub(payable(nameHubAddr)).reserved(nameHash);
+        require(isReserved, "Name not globally reserved on hub");
+        console.log("  Name globally reserved: true");
+
+        console.log("\n[OK] Cross-Chain Name Registry Demo Complete\n");
     }
 }
