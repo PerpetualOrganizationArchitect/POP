@@ -37,6 +37,7 @@ contract NameRegistryHub is Initializable, OwnableUpgradeable, IMessageRecipient
     uint8 internal constant MSG_CLAIM_ORG_NAME = 0x06;
     uint8 internal constant MSG_CONFIRM_ORG_NAME = 0x07;
     uint8 internal constant MSG_REJECT_ORG_NAME = 0x08;
+    uint8 internal constant MSG_RELEASE_ORG_NAME = 0x09;
 
     /*──────────── ERC-7201 Storage ──────────*/
     /// @custom:storage-location erc7201:poa.nameregistryhub.storage
@@ -87,6 +88,7 @@ contract NameRegistryHub is Initializable, OwnableUpgradeable, IMessageRecipient
     event OrgNameRejected(bytes32 indexed nameHash, uint32 indexed originDomain);
 
     event OrgNameBurned(bytes32 indexed nameHash);
+    event OrgNameReleased(bytes32 indexed nameHash, uint32 indexed originDomain);
     event OrgRegistryAuthorized(address indexed registry, bool authorized);
     event SatelliteRegistered(uint32 indexed domain, address satellite);
     event SatelliteRemoved(uint32 indexed domain);
@@ -129,6 +131,8 @@ contract NameRegistryHub is Initializable, OwnableUpgradeable, IMessageRecipient
             _handleChangeUsername(s, _origin, _sender, _body);
         } else if (msgType == MSG_CLAIM_ORG_NAME) {
             _handleClaimOrgName(s, _origin, _sender, _body);
+        } else if (msgType == MSG_RELEASE_ORG_NAME) {
+            _handleReleaseOrgName(s, _origin, _body);
         } else {
             revert UnknownMessageType();
         }
@@ -165,7 +169,8 @@ contract NameRegistryHub is Initializable, OwnableUpgradeable, IMessageRecipient
 
     /// @notice Called by the home-chain OrgRegistry during local org creation.
     /// @dev    Synchronous — reverts if name is taken, no Hyperlane involved.
-    function claimOrgNameLocal(bytes32 nameHash) external {
+    ///         The orgName param is unused on home chain (hash is sufficient).
+    function claimOrgNameLocal(bytes32 nameHash, string calldata) external {
         Layout storage s = _layout();
         if (!s.authorizedOrgRegistries[msg.sender]) revert NotOrgRegistry();
         if (s.reservedOrgNames[nameHash]) revert OrgNameTaken();
@@ -302,6 +307,14 @@ contract NameRegistryHub is Initializable, OwnableUpgradeable, IMessageRecipient
         (, address user, string memory username) = abi.decode(_body, (uint8, address, string));
         bytes32 nameHash = _hashUsername(username);
 
+        // Pre-check: reject if name is already reserved (e.g. admin burn, prior claim)
+        if (s.reserved[nameHash]) {
+            emit UsernameRejected(nameHash, _origin, user);
+            bytes memory reject = abi.encode(MSG_REJECT_USERNAME, user, username);
+            _dispatchToSatellite(s, _origin, _sender, reject);
+            return;
+        }
+
         // Try to register on canonical UAR
         try s.accountRegistry.registerAccountCrossChain(user, username) {
             s.reserved[nameHash] = true;
@@ -371,6 +384,12 @@ contract NameRegistryHub is Initializable, OwnableUpgradeable, IMessageRecipient
             bytes memory confirm = abi.encode(MSG_CONFIRM_ORG_NAME, orgName);
             _dispatchToSatellite(s, _origin, _sender, confirm);
         }
+    }
+
+    function _handleReleaseOrgName(Layout storage s, uint32 _origin, bytes calldata _body) internal {
+        (, bytes32 nameHash) = abi.decode(_body, (uint8, bytes32));
+        delete s.reservedOrgNames[nameHash];
+        emit OrgNameReleased(nameHash, _origin);
     }
 
     /*══════════════════ Internal: Helpers ══════════════════*/

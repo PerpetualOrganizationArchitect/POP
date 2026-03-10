@@ -44,7 +44,7 @@ contract DeployRegistryRelay is Script {
         address relayBeacon = pm.getBeaconById(keccak256("RegistryRelay"));
         bytes memory relayInit =
             abi.encodeCall(RegistryRelay.initialize, (deployer, mailboxAddr, hubDomain, hubAddress));
-        RegistryRelay relay = RegistryRelay(address(new BeaconProxy(relayBeacon, relayInit)));
+        RegistryRelay relay = RegistryRelay(payable(address(new BeaconProxy(relayBeacon, relayInit))));
         console.log("RegistryRelay deployed:", address(relay));
 
         vm.stopBroadcast();

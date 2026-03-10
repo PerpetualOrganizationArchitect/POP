@@ -19,7 +19,7 @@ error AutoUpgradeRequired(); // deployer must set autoUpgrade=true
 error OrgNameTaken();
 
 interface INameRegistryHubOrgNames {
-    function claimOrgNameLocal(bytes32 nameHash) external;
+    function claimOrgNameLocal(bytes32 nameHash, string calldata orgName) external;
     function changeOrgNameLocal(bytes32 oldHash, bytes32 newHash) external;
 }
 
@@ -154,7 +154,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
 
         // Cross-chain uniqueness check via hub (if configured)
         if (l.nameRegistryHub != address(0)) {
-            INameRegistryHubOrgNames(l.nameRegistryHub).claimOrgNameLocal(nameHash);
+            INameRegistryHubOrgNames(l.nameRegistryHub).claimOrgNameLocal(nameHash, string(name));
         }
 
         l.orgNameHashToOrgId[nameHash] = orgId;
@@ -189,7 +189,7 @@ contract OrgRegistry is Initializable, OwnableUpgradeable {
 
         // Cross-chain uniqueness check via hub (if configured)
         if (l.nameRegistryHub != address(0)) {
-            INameRegistryHubOrgNames(l.nameRegistryHub).claimOrgNameLocal(nameHash);
+            INameRegistryHubOrgNames(l.nameRegistryHub).claimOrgNameLocal(nameHash, string(name));
         }
 
         l.orgNameHashToOrgId[nameHash] = orgId;

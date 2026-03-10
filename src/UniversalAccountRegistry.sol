@@ -306,12 +306,28 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     /*──────────── Cross-chain entry points ────────────────────────────*/
 
     /// @notice Called by NameRegistryHub for registrations originating from satellite chains.
+    /// @dev    Does NOT call back to hub.claimUsernameLocal() — the hub already manages
+    ///         its own reserved[] mapping directly in _handleClaimUsername. Using _register()
+    ///         here would re-enter the hub via claimUsernameLocal, causing a redundant write.
     function registerAccountCrossChain(address user, string calldata username) external {
         if (msg.sender != _layout().nameRegistryHub) revert NotHub();
-        _register(user, username);
+
+        Layout storage l = _layout();
+        if (bytes(l.addressToUsername[user]).length != 0) revert AccountExists();
+
+        (bytes32 hash, string memory norm) = _validate(username);
+        if (l.ownerOfUsernameHash[hash] != address(0)) revert UsernameTaken();
+
+        l.ownerOfUsernameHash[hash] = user;
+        l.addressToUsername[user] = norm;
+
+        emit UserRegistered(user, norm);
     }
 
     /// @notice Called by NameRegistryHub for username changes originating from satellite chains.
+    /// @dev    Does NOT call hub.changeUsernameLocal() — the hub already manages reserved[]
+    ///         directly in _handleChangeUsername. The local changeUsername() calls the hub
+    ///         because it's the only code path for home-chain changes; here the hub is the caller.
     function changeUsernameCrossChain(address user, string calldata newUsername) external {
         if (msg.sender != _layout().nameRegistryHub) revert NotHub();
 

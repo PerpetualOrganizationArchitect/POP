@@ -557,7 +557,7 @@ contract DeploySatellite is DeployHelper {
         address relayBeacon = pm.getBeaconById(keccak256("RegistryRelay"));
         bytes memory relayInit =
             abi.encodeCall(RegistryRelay.initialize, (deployer, mailboxAddr, hubDomain, nameHubAddress));
-        RegistryRelay registryRelay = RegistryRelay(address(new BeaconProxy(relayBeacon, relayInit)));
+        RegistryRelay registryRelay = RegistryRelay(payable(address(new BeaconProxy(relayBeacon, relayInit))));
         console.log("RegistryRelay:", address(registryRelay));
 
         // 5. Deploy satellite org infrastructure

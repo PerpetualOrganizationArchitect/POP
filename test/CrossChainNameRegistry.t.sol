@@ -71,11 +71,11 @@ contract CrossChainNameRegistryTest is Test {
 
         bytes memory relayInitA =
             abi.encodeCall(RegistryRelay.initialize, (address(this), address(satMailboxA), HOME_DOMAIN, address(hub)));
-        relayA = RegistryRelay(address(new BeaconProxy(address(relayBeacon), relayInitA)));
+        relayA = RegistryRelay(payable(address(new BeaconProxy(address(relayBeacon), relayInitA))));
 
         bytes memory relayInitB =
             abi.encodeCall(RegistryRelay.initialize, (address(this), address(satMailboxB), HOME_DOMAIN, address(hub)));
-        relayB = RegistryRelay(address(new BeaconProxy(address(relayBeacon), relayInitB)));
+        relayB = RegistryRelay(payable(address(new BeaconProxy(address(relayBeacon), relayInitB))));
 
         // Register satellites on hub
         hub.registerSatellite(SAT_DOMAIN_A, address(relayA));
@@ -985,7 +985,7 @@ contract CrossChainNameRegistryTest is Test {
         // Unauthorized address cannot call claimOrgNameLocal
         vm.prank(alice);
         vm.expectRevert(NameRegistryHub.NotOrgRegistry.selector);
-        hub.claimOrgNameLocal(keccak256(bytes("test")));
+        hub.claimOrgNameLocal(keccak256(bytes("test")), "test");
 
         // Unauthorized address cannot call changeOrgNameLocal
         vm.prank(alice);
@@ -1056,5 +1056,249 @@ contract CrossChainNameRegistryTest is Test {
             abi.encodeCall(RegistryRelay.initialize, (address(this), address(satMailboxA), HOME_DOMAIN, address(0)));
         vm.expectRevert(RegistryRelay.ZeroAddress.selector);
         new BeaconProxy(address(relayBeacon2), badInit);
+    }
+
+    /*══════════════════ RegistryRelay: registerAccountForUser ══════════════════*/
+
+    function testRegisterAccountForUser() public {
+        address helperContract = address(0xBEEF);
+        relayA.setAuthorizedCaller(helperContract, true);
+        assertTrue(relayA.authorizedCallers(helperContract));
+
+        vm.prank(helperContract);
+        relayA.registerAccountForUser(alice, "alice");
+
+        // Verify dispatch
+        assertEq(satMailboxA.dispatchedCount(), 1);
+        StoringMailbox.DispatchedMessage memory msg_ = satMailboxA.getDispatched(0);
+        (uint8 msgType, address user, string memory name) = abi.decode(msg_.messageBody, (uint8, address, string));
+        assertEq(msgType, 0x01); // MSG_CLAIM_USERNAME
+        assertEq(user, alice);
+        assertEq(name, "alice");
+    }
+
+    function testRegisterAccountForUserRevertsUnauthorized() public {
+        vm.prank(alice);
+        vm.expectRevert(RegistryRelay.UnauthorizedCaller.selector);
+        relayA.registerAccountForUser(alice, "alice");
+    }
+
+    function testRegisterAccountForUserRevertsZeroUser() public {
+        address helperContract = address(0xBEEF);
+        relayA.setAuthorizedCaller(helperContract, true);
+
+        vm.prank(helperContract);
+        vm.expectRevert(RegistryRelay.ZeroAddress.selector);
+        relayA.registerAccountForUser(address(0), "alice");
+    }
+
+    function testRegisterAccountForUserRevertsPaused() public {
+        address helperContract = address(0xBEEF);
+        relayA.setAuthorizedCaller(helperContract, true);
+        relayA.setPaused(true);
+
+        vm.prank(helperContract);
+        vm.expectRevert(RegistryRelay.IsPaused.selector);
+        relayA.registerAccountForUser(alice, "alice");
+    }
+
+    function testSetAuthorizedCaller() public {
+        address helperContract = address(0xBEEF);
+
+        relayA.setAuthorizedCaller(helperContract, true);
+        assertTrue(relayA.authorizedCallers(helperContract));
+
+        relayA.setAuthorizedCaller(helperContract, false);
+        assertFalse(relayA.authorizedCallers(helperContract));
+    }
+
+    function testSetAuthorizedCallerRevertsNonOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        relayA.setAuthorizedCaller(address(0xBEEF), true);
+    }
+
+    function testSetAuthorizedCallerRevertsZeroAddress() public {
+        vm.expectRevert(RegistryRelay.ZeroAddress.selector);
+        relayA.setAuthorizedCaller(address(0), true);
+    }
+
+    /*══════════════════ RegistryRelay: Org Name Release ══════════════════*/
+
+    function testDispatchOrgNameRelease() public {
+        // Confirm a name first
+        bytes32 nameHash = _hashName("ReleaseMe");
+        bytes memory confirmBody = abi.encode(uint8(0x07), "ReleaseMe"); // MSG_CONFIRM_ORG_NAME
+        vm.prank(address(satMailboxA));
+        relayA.handle(HOME_DOMAIN, bytes32(uint256(uint160(address(hub)))), confirmBody);
+        assertTrue(relayA.isOrgNameConfirmed("ReleaseMe"));
+
+        // Authorize a caller and dispatch release
+        address adapter = address(0xADA9);
+        relayA.setAuthorizedCaller(adapter, true);
+
+        vm.prank(adapter);
+        relayA.dispatchOrgNameRelease(nameHash);
+
+        // Local cache should be cleared
+        assertFalse(relayA.isOrgNameConfirmed("ReleaseMe"));
+
+        // Verify Hyperlane dispatch
+        assertEq(satMailboxA.dispatchedCount(), 1);
+        StoringMailbox.DispatchedMessage memory msg_ = satMailboxA.getDispatched(0);
+        (uint8 msgType, bytes32 releasedHash) = abi.decode(msg_.messageBody, (uint8, bytes32));
+        assertEq(msgType, 0x09); // MSG_RELEASE_ORG_NAME
+        assertEq(releasedHash, nameHash);
+    }
+
+    function testDispatchOrgNameReleaseRevertsUnauthorized() public {
+        vm.prank(alice);
+        vm.expectRevert(RegistryRelay.UnauthorizedCaller.selector);
+        relayA.dispatchOrgNameRelease(keccak256("test"));
+    }
+
+    function testSetDispatchFee() public {
+        relayA.setDispatchFee(0.001 ether);
+        assertEq(relayA.dispatchFee(), 0.001 ether);
+    }
+
+    function testRelayReceiveETH() public {
+        (bool ok,) = address(relayA).call{value: 1 ether}("");
+        assertTrue(ok);
+        assertEq(address(relayA).balance, 1 ether);
+    }
+
+    function testRelayWithdrawETH() public {
+        // Fund relay
+        (bool ok,) = address(relayA).call{value: 1 ether}("");
+        assertTrue(ok);
+
+        address payable recipient = payable(address(0xCAFE));
+        relayA.withdrawETH(recipient);
+        assertEq(address(relayA).balance, 0);
+        assertEq(recipient.balance, 1 ether);
+    }
+
+    function testRelayWithdrawETHRevertsZeroAddress() public {
+        vm.expectRevert(RegistryRelay.ZeroAddress.selector);
+        relayA.withdrawETH(payable(address(0)));
+    }
+
+    function testRelayWithdrawETHRevertsNonOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        relayA.withdrawETH(payable(alice));
+    }
+
+    function testDispatchOrgNameReleaseWithFee() public {
+        // Set fee and fund relay
+        relayA.setDispatchFee(0.001 ether);
+        (bool ok,) = address(relayA).call{value: 0.01 ether}("");
+        assertTrue(ok);
+
+        // Confirm a name
+        bytes memory confirmBody = abi.encode(uint8(0x07), "FeeTest"); // MSG_CONFIRM_ORG_NAME
+        vm.prank(address(satMailboxA));
+        relayA.handle(HOME_DOMAIN, bytes32(uint256(uint160(address(hub)))), confirmBody);
+
+        // Dispatch release
+        address adapter = address(0xADA9);
+        relayA.setAuthorizedCaller(adapter, true);
+        vm.prank(adapter);
+        relayA.dispatchOrgNameRelease(_hashName("FeeTest"));
+
+        assertFalse(relayA.isOrgNameConfirmed("FeeTest"));
+    }
+
+    function testDispatchOrgNameReleaseInsufficientBalance() public {
+        relayA.setDispatchFee(1 ether); // fee set but relay has no ETH
+
+        address adapter = address(0xADA9);
+        relayA.setAuthorizedCaller(adapter, true);
+
+        vm.prank(adapter);
+        vm.expectRevert(RegistryRelay.InsufficientBalance.selector);
+        relayA.dispatchOrgNameRelease(keccak256("test"));
+    }
+
+    /*══════════════════ NameRegistryHub: Org Name Release ══════════════════*/
+
+    function testHandleReleaseOrgName() public {
+        // First reserve the name on the hub
+        bytes32 nameHash = _hashName("ToRelease");
+        bytes memory claimBody = abi.encode(uint8(0x06), "ToRelease"); // MSG_CLAIM_ORG_NAME
+        _hubHandle(SAT_DOMAIN_A, address(relayA), claimBody);
+        assertTrue(hub.reservedOrgNames(nameHash));
+
+        // Now release it
+        bytes memory releaseBody = abi.encode(uint8(0x09), nameHash); // MSG_RELEASE_ORG_NAME
+        _hubHandle(SAT_DOMAIN_A, address(relayA), releaseBody);
+        assertFalse(hub.reservedOrgNames(nameHash));
+    }
+
+    function testHandleReleaseOrgNameIdempotent() public {
+        // Release a name that was never reserved — should not revert
+        bytes32 nameHash = keccak256("NeverReserved");
+        bytes memory releaseBody = abi.encode(uint8(0x09), nameHash); // MSG_RELEASE_ORG_NAME
+        _hubHandle(SAT_DOMAIN_A, address(relayA), releaseBody);
+        assertFalse(hub.reservedOrgNames(nameHash));
+    }
+
+    /*══════════════════ Integration: Rename + Auto-Release ══════════════════*/
+
+    function testOrgNameRenameAutoRelease() public {
+        // 1. Claim "OriginalOrg" on hub from satellite A
+        bytes32 origHash = _hashName("OriginalOrg");
+        bytes memory claimBody = abi.encode(uint8(0x06), "OriginalOrg");
+        _hubHandle(SAT_DOMAIN_A, address(relayA), claimBody);
+        assertTrue(hub.reservedOrgNames(origHash));
+
+        // 2. Simulate confirmation arriving at relay
+        bytes memory confirmBody = abi.encode(uint8(0x07), "OriginalOrg");
+        vm.prank(address(satMailboxA));
+        relayA.handle(HOME_DOMAIN, bytes32(uint256(uint160(address(hub)))), confirmBody);
+        assertTrue(relayA.isOrgNameConfirmed("OriginalOrg"));
+
+        // 3. Claim "NewOrgName" on hub too (new name must be pre-confirmed)
+        bytes32 newHash = _hashName("NewOrgName");
+        bytes memory claimBody2 = abi.encode(uint8(0x06), "NewOrgName");
+        _hubHandle(SAT_DOMAIN_A, address(relayA), claimBody2);
+        bytes memory confirmBody2 = abi.encode(uint8(0x07), "NewOrgName");
+        vm.prank(address(satMailboxA));
+        relayA.handle(HOME_DOMAIN, bytes32(uint256(uint160(address(hub)))), confirmBody2);
+
+        // 4. Simulate the adapter's auto-release during rename
+        address adapter = address(0xADA9);
+        relayA.setAuthorizedCaller(adapter, true);
+        vm.prank(adapter);
+        relayA.dispatchOrgNameRelease(origHash);
+
+        // Local cache cleared
+        assertFalse(relayA.isOrgNameConfirmed("OriginalOrg"));
+
+        // 5. Deliver release to hub
+        StoringMailbox.DispatchedMessage memory msg_ = satMailboxA.getDispatched(satMailboxA.dispatchedCount() - 1);
+        _hubHandle(SAT_DOMAIN_A, address(relayA), msg_.messageBody);
+
+        // Hub freed the name
+        assertFalse(hub.reservedOrgNames(origHash));
+        // New name still reserved
+        assertTrue(hub.reservedOrgNames(newHash));
+
+        // 6. Another satellite can now claim the original name
+        bytes memory reclaimBody = abi.encode(uint8(0x06), "OriginalOrg");
+        _hubHandle(SAT_DOMAIN_B, address(relayB), reclaimBody);
+        assertTrue(hub.reservedOrgNames(origHash)); // re-reserved by satellite B
+    }
+
+    /*══════════════════ Helper ══════════════════*/
+
+    function _hashName(string memory name) internal pure returns (bytes32) {
+        bytes memory b = bytes(name);
+        for (uint256 i; i < b.length; ++i) {
+            uint8 c = uint8(b[i]);
+            if (c >= 65 && c <= 90) b[i] = bytes1(c + 32);
+        }
+        return keccak256(b);
     }
 }

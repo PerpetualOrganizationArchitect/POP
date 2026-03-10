@@ -19,7 +19,7 @@ contract DispatchNameRegistryTest is Script {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
         address relayAddr = vm.envAddress("RELAY");
 
-        RegistryRelay relay = RegistryRelay(relayAddr);
+        RegistryRelay relay = RegistryRelay(payable(relayAddr));
 
         console.log("\n=== Dispatching Name Registry Tests ===");
         console.log("Relay:", relayAddr);
@@ -31,9 +31,10 @@ contract DispatchNameRegistryTest is Script {
         relay.registerAccountDirect{value: 0.01 ether}("e2etestuser");
         console.log("Username claim dispatched: e2etestuser");
 
-        // 2. Claim an org name (deployer is relay owner)
-        relay.claimOrgName{value: 0.01 ether}("E2ETestOrg");
-        console.log("Org name claim dispatched: E2ETestOrg");
+        // 2. Claim an org name via owner-only path (separate from the optimistic
+        //    claim that happens during deployFullOrg — uses a different name to avoid conflict)
+        relay.claimOrgName{value: 0.01 ether}("E2EManualClaim");
+        console.log("Org name claim dispatched: E2EManualClaim");
 
         vm.stopBroadcast();
 

@@ -28,8 +28,8 @@ contract VerifyNameRegistry is Script {
         string memory username = uar.getUsername(user);
         bool usernameOk = bytes(username).length > 0;
 
-        // Check org name reservation
-        bytes32 orgNameHash = _hashName("E2ETestOrg");
+        // Check org name reservation (manual claim dispatched in Step 4b)
+        bytes32 orgNameHash = _hashName("E2EManualClaim");
         bool orgNameOk = nameHub.reservedOrgNames(orgNameHash);
 
         console.log("=== Verify Name Registry ===");

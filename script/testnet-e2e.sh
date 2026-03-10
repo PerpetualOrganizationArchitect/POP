@@ -2,10 +2,16 @@
 set -euo pipefail
 
 #############################################################################
-# testnet-e2e.sh - End-to-end cross-chain beacon upgrade + name registry test
+# testnet-e2e.sh - End-to-end cross-chain test suite
 #
 # Tests the full cross-chain flow:
 #   Sepolia (home) <--Hyperlane--> Base Sepolia (satellite)
+#
+# Test Coverage:
+#   1. Cross-chain beacon upgrades (HybridVoting v1 -> v2)
+#   2. Cross-chain name registry (username + org name claims)
+#   3. Satellite org deployment (org name uniqueness via cross-chain)
+#   4. Satellite onboarding infrastructure verification
 #
 # Prerequisites:
 #   - .env with PRIVATE_KEY (funded on both Sepolia and Base Sepolia)
@@ -13,7 +19,7 @@ set -euo pipefail
 #   - jq (for JSON parsing: brew install jq)
 #
 # Usage:
-#   ./script/testnet-e2e.sh                # Full deploy + upgrade test
+#   ./script/testnet-e2e.sh                # Full deploy + all tests
 #   ./script/testnet-e2e.sh --skip-deploy  # Skip infrastructure, test upgrade only
 #############################################################################
 
@@ -135,9 +141,10 @@ echo "    Home PoaManager: $HOME_PM"
 echo ""
 
 ###########################################################################
-# STEP 3: Deploy Satellite Infrastructure
+# STEP 3: Deploy Full Satellite Infrastructure
 ###########################################################################
-echo ">>> STEP 3: Deploy Satellite (PoaManager + Satellite + RegistryRelay)..."
+echo ">>> STEP 3: Deploy Satellite (full infra: PoaManager, Satellite, RegistryRelay,"
+echo "            NameClaimAdapter, OrgRegistry, OrgDeployer, factories, PaymasterHub)..."
 DETERMINISTIC_DEPLOYER=$DD_ADDR \
 HUB_DOMAIN=$HOME_DOMAIN \
 HUB_ADDRESS=$HUB_ADDR \
@@ -314,6 +321,71 @@ done
 echo ""
 
 ###########################################################################
+# STEP 10: Deploy Org on Satellite Chain (optimistic — no pre-confirmation needed)
+###########################################################################
+echo ">>> STEP 10: Deploy org on satellite chain (optimistic org name claim)..."
+SAT_ORG_OK=false
+if forge script script/e2e/DeploySatelliteOrg.s.sol:DeploySatelliteOrg \
+    --rpc-url $SAT_RPC \
+    --broadcast \
+    --slow 2>&1 | tee /tmp/e2e-sat-org.log; then
+    SAT_ORG_OK=true
+    echo "    Satellite org deployed (org name claim dispatched optimistically)."
+else
+    echo "    Satellite org deployment failed."
+fi
+echo ""
+
+###########################################################################
+# STEP 11: Verify Satellite Onboarding Infrastructure
+###########################################################################
+SAT_ONBOARD_OK=false
+if $SAT_ORG_OK; then
+    echo ">>> STEP 11: Verify satellite onboarding infrastructure..."
+    if forge script script/e2e/TestSatelliteOnboarding.s.sol:TestSatelliteOnboarding \
+        --rpc-url $SAT_RPC \
+        --broadcast \
+        --slow 2>&1 | grep -q "PASS"; then
+        SAT_ONBOARD_OK=true
+        echo "    Satellite onboarding infrastructure verified."
+    else
+        echo "    Satellite onboarding verification failed."
+    fi
+    echo ""
+fi
+
+###########################################################################
+# STEP 12: Verify Org Name Round-Trip on Satellite (Hyperlane confirmation)
+###########################################################################
+echo ">>> STEP 12: Verify org name confirmed back on satellite relay..."
+echo "    Waiting for Hyperlane to deliver MSG_CONFIRM_ORG_NAME to satellite."
+echo "    (Org already deployed optimistically — this just confirms the name.)"
+echo ""
+
+ORG_NAME_SAT_OK=false
+ON_MAX_ATTEMPTS=20
+ON_ATTEMPT=0
+while [ $ON_ATTEMPT -lt $ON_MAX_ATTEMPTS ]; do
+    ON_ATTEMPT=$((ON_ATTEMPT + 1))
+    echo "    Attempt $ON_ATTEMPT/$ON_MAX_ATTEMPTS..."
+
+    if RELAY=$RELAY_ADDR \
+       ORG_NAME="E2ETestOrg" \
+       forge script script/e2e/VerifySatelliteOrgName.s.sol:VerifySatelliteOrgName \
+           --rpc-url $SAT_RPC 2>&1 | grep -q "PASS"; then
+        ORG_NAME_SAT_OK=true
+        echo "    Org name confirmed on satellite relay."
+        break
+    fi
+
+    if [ $ON_ATTEMPT -lt $ON_MAX_ATTEMPTS ]; then
+        echo "    Not yet confirmed. Sleeping 30s..."
+        sleep 30
+    fi
+done
+echo ""
+
+###########################################################################
 # Final Results
 ###########################################################################
 echo "============================================================"
@@ -342,9 +414,44 @@ else
     echo "         Check: https://explorer.hyperlane.xyz"
 fi
 echo ""
+
+if $SAT_ORG_OK; then
+    echo "  [PASS] Satellite org deployment (optimistic)"
+    echo "         Org deployed on satellite via OrgDeployer"
+    echo "         Org name claim dispatched optimistically to hub"
+    echo "         SatelliteOnboardingHelper deployed + authorized on relay"
+else
+    echo "  [FAIL] Satellite org deployment"
+    echo "         Deployment failed — check logs"
+fi
+echo ""
+
+if $ORG_NAME_SAT_OK; then
+    echo "  [PASS] Org name round-trip confirmation"
+    echo "         Org name confirmed back on satellite relay"
+else
+    echo "  [FAIL] Org name round-trip confirmation (timeout)"
+    echo "         Org name not confirmed on satellite after 10 minutes."
+fi
+echo ""
+
+if ${SAT_ONBOARD_OK:-false}; then
+    echo "  [PASS] Satellite onboarding infrastructure"
+    echo "         Org registered, helper authorized, username dispatched"
+else
+    echo "  [FAIL] Satellite onboarding infrastructure"
+fi
+echo ""
+
 echo "============================================================"
 
-if $UPGRADE_OK && $NAME_REG_OK; then
+ALL_PASS=true
+$UPGRADE_OK || ALL_PASS=false
+$NAME_REG_OK || ALL_PASS=false
+$ORG_NAME_SAT_OK || ALL_PASS=false
+$SAT_ORG_OK || ALL_PASS=false
+
+if $ALL_PASS; then
     echo "  ALL TESTS PASSED"
     echo "============================================================"
     exit 0

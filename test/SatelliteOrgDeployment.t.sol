@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {Initializable} from "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {NameClaimAdapter} from "../src/crosschain/NameClaimAdapter.sol";
-import {SatelliteOnboardingHelper} from "../src/crosschain/SatelliteOnboardingHelper.sol";
+import {SatelliteOnboardingHelper, IPasskeyFactory} from "../src/crosschain/SatelliteOnboardingHelper.sol";
 
 /* ═══════════════ Mock contracts ═══════════════ */
 
@@ -14,12 +14,37 @@ contract MockRelay {
     mapping(bytes32 => bool) public confirmedOrgNames;
     mapping(address => string) private _usernames;
 
+    // Track calls for assertions
+    address public lastRegisteredUser;
+    string public lastRegisteredUsername;
+    bytes32 public lastReleasedNameHash;
+
     function setConfirmedOrgName(bytes32 nameHash, bool confirmed) external {
         confirmedOrgNames[nameHash] = confirmed;
     }
 
-    function registerAccountDirect(string calldata) external payable {
-        // no-op in mock; real relay dispatches via Hyperlane
+    string public lastClaimedOrgName;
+
+    function dispatchOrgNameClaim(string calldata orgName) external {
+        lastClaimedOrgName = orgName;
+    }
+
+    function dispatchOrgNameRelease(bytes32 nameHash) external {
+        lastReleasedNameHash = nameHash;
+        delete confirmedOrgNames[nameHash];
+    }
+
+    function registerAccountForUser(address user, string calldata username) external payable {
+        lastRegisteredUser = user;
+        lastRegisteredUsername = username;
+    }
+
+    function registerAccount(address user, string calldata username, uint256, uint256, bytes calldata)
+        external
+        payable
+    {
+        lastRegisteredUser = user;
+        lastRegisteredUsername = username;
     }
 
     function getUsername(address user) external view returns (string memory) {
@@ -33,9 +58,28 @@ contract MockRelay {
 
 contract MockQuickJoin {
     mapping(address => bool) public joined;
+    mapping(address => bool) public joinedNoUser;
 
     function quickJoinForUser(address user) external {
         joined[user] = true;
+    }
+
+    function quickJoinNoUserMasterDeploy(address newUser) external {
+        joinedNoUser[newUser] = true;
+    }
+}
+
+contract MockPasskeyFactory {
+    address public lastCreatedAccount;
+
+    /// @dev Returns a deterministic address based ONLY on the passkey params (not msg.sender),
+    ///      so both the test and the helper get the same address for the same inputs.
+    function createAccount(bytes32 credentialId, bytes32 pubKeyX, bytes32 pubKeyY, uint256 salt)
+        external
+        returns (address account)
+    {
+        account = address(uint160(uint256(keccak256(abi.encodePacked(credentialId, pubKeyX, pubKeyY, salt)))));
+        lastCreatedAccount = account;
     }
 }
 
@@ -60,60 +104,39 @@ contract NameClaimAdapterTest is Test {
         adapter.setAuthorizedCaller(orgRegistry, true);
     }
 
-    function testClaimConfirmedNameSucceeds() public {
+    function testClaimDispatchesOptimistically() public {
         bytes32 nameHash = keccak256("MyOrg");
-        relay.setConfirmedOrgName(nameHash, true);
 
         vm.prank(orgRegistry);
-        adapter.claimOrgNameLocal(nameHash);
+        adapter.claimOrgNameLocal(nameHash, "MyOrg");
 
-        assertTrue(adapter.consumedOrgNames(nameHash));
-    }
-
-    function testClaimUnconfirmedNameReverts() public {
-        bytes32 nameHash = keccak256("NoOrg");
-
-        vm.prank(orgRegistry);
-        vm.expectRevert(NameClaimAdapter.NameNotConfirmed.selector);
-        adapter.claimOrgNameLocal(nameHash);
-    }
-
-    function testClaimAlreadyConsumedNameReverts() public {
-        bytes32 nameHash = keccak256("MyOrg");
-        relay.setConfirmedOrgName(nameHash, true);
-
-        vm.prank(orgRegistry);
-        adapter.claimOrgNameLocal(nameHash);
-
-        vm.prank(orgRegistry);
-        vm.expectRevert(NameClaimAdapter.NameAlreadyConsumed.selector);
-        adapter.claimOrgNameLocal(nameHash);
+        // Verify claim was dispatched to relay
+        assertEq(relay.lastClaimedOrgName(), "MyOrg");
     }
 
     function testChangeOrgNameSucceeds() public {
         bytes32 oldHash = keccak256("OldOrg");
         bytes32 newHash = keccak256("NewOrg");
 
-        relay.setConfirmedOrgName(oldHash, true);
         relay.setConfirmedOrgName(newHash, true);
 
         vm.prank(orgRegistry);
-        adapter.claimOrgNameLocal(oldHash);
+        adapter.claimOrgNameLocal(oldHash, "OldOrg");
 
         vm.prank(orgRegistry);
         adapter.changeOrgNameLocal(oldHash, newHash);
 
-        assertFalse(adapter.consumedOrgNames(oldHash));
-        assertTrue(adapter.consumedOrgNames(newHash));
+        // Verify old name was released on relay
+        assertEq(relay.lastReleasedNameHash(), oldHash);
+        assertFalse(relay.confirmedOrgNames(oldHash));
     }
 
     function testChangeOrgNameUnconfirmedNewNameReverts() public {
         bytes32 oldHash = keccak256("OldOrg");
         bytes32 newHash = keccak256("NewOrg");
 
-        relay.setConfirmedOrgName(oldHash, true);
         vm.prank(orgRegistry);
-        adapter.claimOrgNameLocal(oldHash);
+        adapter.claimOrgNameLocal(oldHash, "OldOrg");
 
         vm.prank(orgRegistry);
         vm.expectRevert(NameClaimAdapter.NameNotConfirmed.selector);
@@ -122,11 +145,10 @@ contract NameClaimAdapterTest is Test {
 
     function testUnauthorizedCallerReverts() public {
         bytes32 nameHash = keccak256("MyOrg");
-        relay.setConfirmedOrgName(nameHash, true);
 
         vm.prank(address(0x999));
         vm.expectRevert(NameClaimAdapter.NotAuthorized.selector);
-        adapter.claimOrgNameLocal(nameHash);
+        adapter.claimOrgNameLocal(nameHash, "MyOrg");
     }
 
     function testDoubleInitializeReverts() public {
@@ -160,69 +182,91 @@ contract SatelliteOnboardingHelperTest is Test {
     SatelliteOnboardingHelper helper;
     MockRelay relay;
     MockQuickJoin quickJoin;
+    MockPasskeyFactory passkeyFactory;
 
     address owner = address(this);
     address user1 = address(0x100);
 
-    event JoinRequested(address indexed user, string username);
+    event RegisterAndJoined(address indexed user, string username);
+    event RegisterAndJoinedWithPasskey(address indexed account, bytes32 indexed credentialId, string username);
     event JoinCompleted(address indexed user);
+    event JoinCompletedWithPasskey(address indexed account, bytes32 indexed credentialId);
 
     function setUp() public {
         relay = new MockRelay();
         quickJoin = new MockQuickJoin();
+        passkeyFactory = new MockPasskeyFactory();
 
         SatelliteOnboardingHelper impl = new SatelliteOnboardingHelper();
         UpgradeableBeacon beacon = new UpgradeableBeacon(address(impl), address(this));
         helper = SatelliteOnboardingHelper(
             address(
                 new BeaconProxy(
-                    address(beacon), abi.encodeCall(impl.initialize, (owner, address(relay), address(quickJoin)))
+                    address(beacon),
+                    abi.encodeCall(
+                        impl.initialize, (owner, address(relay), address(quickJoin), address(passkeyFactory))
+                    )
                 )
             )
         );
     }
 
-    function testRegisterAndRequestJoin() public {
+    /* ── Optimistic: registerAndJoin (EOA direct) ── */
+
+    function testRegisterAndJoin() public {
         vm.prank(user1);
         vm.expectEmit(true, true, true, true);
-        emit JoinRequested(user1, "alice");
-        helper.registerAndRequestJoin("alice");
+        emit RegisterAndJoined(user1, "alice");
+        helper.registerAndJoin("alice");
 
-        assertTrue(helper.pendingJoins(user1));
+        // Verify relay was called with correct user
+        assertEq(relay.lastRegisteredUser(), user1);
+        assertEq(relay.lastRegisteredUsername(), "alice");
+        // Verify user joined immediately (no username check)
+        assertTrue(quickJoin.joinedNoUser(user1));
     }
 
-    function testCompletePendingJoinMintsHats() public {
-        // Step 1: Request join
-        vm.prank(user1);
-        helper.registerAndRequestJoin("alice");
+    /* ── Optimistic: registerAndJoinSponsored (relayer path) ── */
 
-        // Step 2: Simulate username confirmation arriving via Hyperlane
-        relay.setUsername(user1, "alice");
+    function testRegisterAndJoinSponsored() public {
+        address relayer = address(0x200);
 
-        // Step 3: Complete the join (anyone can call)
+        vm.prank(relayer);
         vm.expectEmit(true, true, true, true);
-        emit JoinCompleted(user1);
-        helper.completePendingJoin(user1);
+        emit RegisterAndJoined(user1, "alice");
+        helper.registerAndJoinSponsored(user1, "alice", block.timestamp + 1 hours, 0, "fakesig");
 
-        assertTrue(quickJoin.joined(user1));
-        assertFalse(helper.pendingJoins(user1));
+        assertEq(relay.lastRegisteredUser(), user1);
+        assertEq(relay.lastRegisteredUsername(), "alice");
+        assertTrue(quickJoin.joinedNoUser(user1));
     }
 
-    function testCompletePendingJoinRevertsNoConfirmation() public {
-        vm.prank(user1);
-        helper.registerAndRequestJoin("alice");
+    /* ── Optimistic: registerAndJoinWithPasskey ── */
 
-        // Username not confirmed yet
-        vm.expectRevert(SatelliteOnboardingHelper.UsernameNotConfirmed.selector);
-        helper.completePendingJoin(user1);
+    function testRegisterAndJoinWithPasskey() public {
+        SatelliteOnboardingHelper.PasskeyEnrollment memory passkey = _defaultPasskey();
+
+        address account = helper.registerAndJoinWithPasskey(passkey, "alice");
+
+        // Verify passkey account was created
+        assertEq(passkeyFactory.lastCreatedAccount(), account);
+        // Verify relay was called with passkey account address
+        assertEq(relay.lastRegisteredUser(), account);
+        assertEq(relay.lastRegisteredUsername(), "alice");
+        // Verify account joined immediately
+        assertTrue(quickJoin.joinedNoUser(account));
     }
 
-    function testCompletePendingJoinRevertsNoPending() public {
-        vm.expectRevert(SatelliteOnboardingHelper.NoPendingJoin.selector);
-        helper.completePendingJoin(user1);
+    function testRegisterAndJoinWithPasskeyRevertsNoFactory() public {
+        SatelliteOnboardingHelper noPasskeyHelper = _deployWithoutPasskey();
+
+        vm.expectRevert(SatelliteOnboardingHelper.PasskeyFactoryNotSet.selector);
+        noPasskeyHelper.registerAndJoinWithPasskey(_defaultPasskey(), "alice");
     }
 
-    function testQuickJoinWithUserDirect() public {
+    /* ── Non-optimistic: quickJoinWithUser ── */
+
+    function testQuickJoinWithUser() public {
         relay.setUsername(user1, "alice");
 
         vm.prank(user1);
@@ -239,9 +283,48 @@ contract SatelliteOnboardingHelperTest is Test {
         helper.quickJoinWithUser();
     }
 
+    /* ── Non-optimistic: quickJoinWithPasskey ── */
+
+    function testQuickJoinWithPasskey() public {
+        SatelliteOnboardingHelper.PasskeyEnrollment memory passkey = _defaultPasskey();
+
+        // Compute the deterministic account address (same formula as MockPasskeyFactory)
+        address account = address(
+            uint160(
+                uint256(
+                    keccak256(
+                        abi.encodePacked(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt)
+                    )
+                )
+            )
+        );
+
+        // Simulate username already confirmed for this passkey account
+        relay.setUsername(account, "alice");
+
+        address returned = helper.quickJoinWithPasskey(passkey);
+
+        assertEq(returned, account);
+        assertTrue(quickJoin.joined(account));
+    }
+
+    function testQuickJoinWithPasskeyRevertsNoUsername() public {
+        vm.expectRevert(SatelliteOnboardingHelper.NoUsername.selector);
+        helper.quickJoinWithPasskey(_defaultPasskey());
+    }
+
+    function testQuickJoinWithPasskeyRevertsNoFactory() public {
+        SatelliteOnboardingHelper noPasskeyHelper = _deployWithoutPasskey();
+
+        vm.expectRevert(SatelliteOnboardingHelper.PasskeyFactoryNotSet.selector);
+        noPasskeyHelper.quickJoinWithPasskey(_defaultPasskey());
+    }
+
+    /* ── Admin / Init ── */
+
     function testDoubleInitializeReverts() public {
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        helper.initialize(owner, address(relay), address(quickJoin));
+        helper.initialize(owner, address(relay), address(quickJoin), address(passkeyFactory));
     }
 
     function testZeroAddressInitReverts() public {
@@ -250,11 +333,41 @@ contract SatelliteOnboardingHelperTest is Test {
         SatelliteOnboardingHelper tmp = SatelliteOnboardingHelper(address(new BeaconProxy(address(beacon), "")));
 
         vm.expectRevert(SatelliteOnboardingHelper.ZeroAddress.selector);
-        tmp.initialize(address(0), address(relay), address(quickJoin));
+        tmp.initialize(address(0), address(relay), address(quickJoin), address(passkeyFactory));
     }
 
     function testRenounceOwnershipReverts() public {
         vm.expectRevert(SatelliteOnboardingHelper.CannotRenounce.selector);
         helper.renounceOwnership();
+    }
+
+    function testGetters() public view {
+        assertEq(address(helper.relay()), address(relay));
+        assertEq(address(helper.quickJoin()), address(quickJoin));
+        assertEq(address(helper.passkeyFactory()), address(passkeyFactory));
+    }
+
+    /* ── Test Helpers ── */
+
+    function _defaultPasskey() internal pure returns (SatelliteOnboardingHelper.PasskeyEnrollment memory) {
+        return SatelliteOnboardingHelper.PasskeyEnrollment({
+            credentialId: bytes32(uint256(1)),
+            publicKeyX: bytes32(uint256(2)),
+            publicKeyY: bytes32(uint256(3)),
+            salt: 42
+        });
+    }
+
+    function _deployWithoutPasskey() internal returns (SatelliteOnboardingHelper) {
+        SatelliteOnboardingHelper impl = new SatelliteOnboardingHelper();
+        UpgradeableBeacon beacon = new UpgradeableBeacon(address(impl), address(this));
+        return SatelliteOnboardingHelper(
+            address(
+                new BeaconProxy(
+                    address(beacon),
+                    abi.encodeCall(impl.initialize, (owner, address(relay), address(quickJoin), address(0)))
+                )
+            )
+        );
     }
 }

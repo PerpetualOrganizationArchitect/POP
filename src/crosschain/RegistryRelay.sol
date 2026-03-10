@@ -22,6 +22,7 @@ contract RegistryRelay is Initializable, OwnableUpgradeable, IMessageRecipient {
     uint8 internal constant MSG_CLAIM_ORG_NAME = 0x06;
     uint8 internal constant MSG_CONFIRM_ORG_NAME = 0x07;
     uint8 internal constant MSG_REJECT_ORG_NAME = 0x08;
+    uint8 internal constant MSG_RELEASE_ORG_NAME = 0x09;
 
     uint256 private constant MAX_LEN = 64;
     uint256 private constant MAX_ORG_NAME_LEN = 256;
@@ -45,6 +46,8 @@ contract RegistryRelay is Initializable, OwnableUpgradeable, IMessageRecipient {
         mapping(bytes32 => address) confirmedOwners;
         mapping(address => uint256) nonces;
         mapping(bytes32 => bool) confirmedOrgNames;
+        mapping(address => bool) authorizedCallers;
+        uint256 dispatchFee;
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.registryrelay.storage");
@@ -72,6 +75,9 @@ contract RegistryRelay is Initializable, OwnableUpgradeable, IMessageRecipient {
     error InvalidSigner();
     error OrgNameEmpty();
     error OrgNameTooLong();
+    error UnauthorizedCaller();
+    error InsufficientBalance();
+    error TransferFailed();
 
     /*──────────── Events ──────────────*/
     event ClaimDispatched(address indexed user, string username, bytes32 messageId);
@@ -83,6 +89,9 @@ contract RegistryRelay is Initializable, OwnableUpgradeable, IMessageRecipient {
     event OrgNameClaimDispatched(string orgName, bytes32 messageId);
     event OrgNameConfirmed(string orgName);
     event OrgNameRejected(string orgName);
+    event AuthorizedCallerSet(address indexed caller, bool authorized);
+    event OrgNameReleaseDispatched(bytes32 indexed nameHash, bytes32 messageId);
+    event DispatchFeeSet(uint256 fee);
 
     /*──────────── Constructor ─────────*/
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -148,6 +157,21 @@ contract RegistryRelay is Initializable, OwnableUpgradeable, IMessageRecipient {
         emit ClaimDispatched(msg.sender, username, msgId);
     }
 
+    /// @notice Register a username on behalf of a user. Authorized callers only.
+    /// @dev    Used by SatelliteOnboardingHelper to register users in a single tx.
+    function registerAccountForUser(address user, string calldata username) external payable {
+        Layout storage s = _layout();
+        if (s.paused) revert IsPaused();
+        if (!s.authorizedCallers[msg.sender]) revert UnauthorizedCaller();
+        if (user == address(0)) revert ZeroAddress();
+        _validateUsername(username);
+
+        bytes memory payload = abi.encode(MSG_CLAIM_USERNAME, user, username);
+        bytes32 msgId = s.mailbox.dispatch{value: msg.value}(s.hubDomain, s.hubAddress, payload);
+
+        emit ClaimDispatched(user, username, msgId);
+    }
+
     /// @notice Change username — caller changes their own username.
     function changeUsername(string calldata newUsername) external payable {
         Layout storage s = _layout();
@@ -192,6 +216,29 @@ contract RegistryRelay is Initializable, OwnableUpgradeable, IMessageRecipient {
         bytes32 msgId = s.mailbox.dispatch{value: msg.value}(s.hubDomain, s.hubAddress, payload);
 
         emit OrgNameClaimDispatched(orgName, msgId);
+    }
+
+    /// @notice Dispatch an optimistic org name claim to the hub.
+    /// @dev    Uses pre-funded relay balance for Hyperlane fee. Authorized callers only.
+    ///         Called by NameClaimAdapter during org deployment.
+    function dispatchOrgNameClaim(string calldata orgName) external {
+        if (!_layout().authorizedCallers[msg.sender]) revert UnauthorizedCaller();
+        _validateOrgName(orgName);
+
+        bytes32 msgId = _dispatchPreFunded(abi.encode(MSG_CLAIM_ORG_NAME, orgName));
+        emit OrgNameClaimDispatched(orgName, msgId);
+    }
+
+    /// @notice Release a confirmed org name — clears local cache and dispatches to hub.
+    /// @dev    Uses pre-funded relay balance for Hyperlane fee. Authorized callers only.
+    function dispatchOrgNameRelease(bytes32 nameHash) external {
+        Layout storage s = _layout();
+        if (!s.authorizedCallers[msg.sender]) revert UnauthorizedCaller();
+
+        delete s.confirmedOrgNames[nameHash];
+
+        bytes32 msgId = _dispatchPreFunded(abi.encode(MSG_RELEASE_ORG_NAME, nameHash));
+        emit OrgNameReleaseDispatched(nameHash, msgId);
     }
 
     /*══════════════════ Hyperlane Receiver ══════════════════*/
@@ -262,6 +309,14 @@ contract RegistryRelay is Initializable, OwnableUpgradeable, IMessageRecipient {
         return _layout().confirmedOrgNames[nameHash];
     }
 
+    function authorizedCallers(address caller) external view returns (bool) {
+        return _layout().authorizedCallers[caller];
+    }
+
+    function dispatchFee() external view returns (uint256) {
+        return _layout().dispatchFee;
+    }
+
     /*══════════════════ View Helpers ══════════════════*/
 
     /// @notice Get a user's confirmed username (from local cache).
@@ -295,12 +350,41 @@ contract RegistryRelay is Initializable, OwnableUpgradeable, IMessageRecipient {
         emit PauseSet(_paused);
     }
 
+    function setAuthorizedCaller(address caller, bool authorized) external onlyOwner {
+        if (caller == address(0)) revert ZeroAddress();
+        _layout().authorizedCallers[caller] = authorized;
+        emit AuthorizedCallerSet(caller, authorized);
+    }
+
+    function setDispatchFee(uint256 _fee) external onlyOwner {
+        _layout().dispatchFee = _fee;
+        emit DispatchFeeSet(_fee);
+    }
+
+    function withdrawETH(address payable to) external onlyOwner {
+        if (to == address(0)) revert ZeroAddress();
+        uint256 balance = address(this).balance;
+        (bool ok,) = to.call{value: balance}("");
+        if (!ok) revert TransferFailed();
+    }
+
     /// @dev Ownership cannot be renounced.
     function renounceOwnership() public pure override {
         revert CannotRenounce();
     }
 
+    /// @dev Accept ETH for pre-funded dispatches (claims + releases).
+    receive() external payable {}
+
     /*══════════════════ Internal ══════════════════*/
+
+    /// @dev Dispatch a message to the hub using pre-funded relay balance.
+    function _dispatchPreFunded(bytes memory payload) internal returns (bytes32) {
+        Layout storage s = _layout();
+        uint256 fee = s.dispatchFee;
+        if (fee > 0 && address(this).balance < fee) revert InsufficientBalance();
+        return s.mailbox.dispatch{value: fee}(s.hubDomain, s.hubAddress, payload);
+    }
 
     function _domainSeparator() internal view returns (bytes32) {
         return keccak256(abi.encode(_DOMAIN_TYPEHASH, _NAME_HASH, _VERSION_HASH, block.chainid, address(this)));

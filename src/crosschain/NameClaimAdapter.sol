@@ -4,28 +4,40 @@ pragma solidity ^0.8.20;
 import "@openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 
-/// @notice Minimal interface for reading RegistryRelay's confirmed org names cache.
-interface IRegistryRelayReader {
+/// @notice Interface for RegistryRelay — read confirmed names + dispatch claims/releases.
+interface IRegistryRelay {
     function confirmedOrgNames(bytes32 nameHash) external view returns (bool);
+    function dispatchOrgNameClaim(string calldata orgName) external;
+    function dispatchOrgNameRelease(bytes32 nameHash) external;
 }
 
 /// @title NameClaimAdapter
 /// @notice Satellite-chain adapter that bridges OrgRegistry's synchronous
 ///         `INameRegistryHubOrgNames` interface to RegistryRelay's async
-///         confirmed-names cache.
+///         Hyperlane dispatch.
 /// @dev    On the home chain, OrgRegistry calls NameRegistryHub.claimOrgNameLocal()
 ///         directly (synchronous). On satellites, OrgRegistry points its
-///         `nameRegistryHub` at this adapter instead. The adapter checks the
-///         RegistryRelay's `confirmedOrgNames` cache (populated after Hyperlane
-///         round-trip) and tracks consumption to prevent double-use.
+///         `nameRegistryHub` at this adapter instead.
+///
+///         On initial claim, the adapter dispatches the claim to the hub
+///         optimistically via the relay (using pre-funded relay ETH).
+///         On rename, the adapter verifies the new name is pre-confirmed
+///         and dispatches a release of the old name to the hub.
+///
+///         IMPORTANT — Rejection recovery:
+///         Initial claims are optimistic: the org deploys before the hub confirms.
+///         If the hub rejects the name (e.g. already taken globally), the org exists
+///         on the satellite with a locally invalid name. There is no automatic retry.
+///         The RegistryRelay emits `OrgNameRejected` — operators/frontend should
+///         monitor this event. Recovery requires org governance to call
+///         `OrgRegistry.updateOrgMeta()` with a new, pre-confirmed name.
 ///
 ///         Deploy behind a BeaconProxy.
 contract NameClaimAdapter is Initializable, OwnableUpgradeable {
     /*──────────── ERC-7201 Storage ──────────*/
     /// @custom:storage-location erc7201:poa.nameclaimadapter.storage
     struct Layout {
-        IRegistryRelayReader relay;
-        mapping(bytes32 => bool) consumedOrgNames;
+        IRegistryRelay relay;
         mapping(address => bool) authorizedCallers;
     }
 
@@ -43,7 +55,6 @@ contract NameClaimAdapter is Initializable, OwnableUpgradeable {
     error CannotRenounce();
     error NotAuthorized();
     error NameNotConfirmed();
-    error NameAlreadyConsumed();
 
     /*──────────── Events ──────────*/
     event OrgNameConsumed(bytes32 indexed nameHash);
@@ -60,36 +71,37 @@ contract NameClaimAdapter is Initializable, OwnableUpgradeable {
     function initialize(address owner, address _relay) external initializer {
         if (owner == address(0) || _relay == address(0)) revert ZeroAddress();
         __Ownable_init(owner);
-        _layout().relay = IRegistryRelayReader(_relay);
+        _layout().relay = IRegistryRelay(_relay);
     }
 
     /*══════════════════ INameRegistryHubOrgNames ══════════════════*/
 
-    /// @notice Consume a pre-confirmed org name from the relay's cache.
+    /// @notice Dispatch an optimistic org name claim to the hub via the relay.
     /// @dev    Called by OrgRegistry.registerOrg() / createOrgBootstrap().
-    ///         Reverts if the name was not confirmed by the hub or already consumed.
-    function claimOrgNameLocal(bytes32 nameHash) external {
+    ///         Dispatches the claim immediately — org deploys optimistically
+    ///         while the hub confirms/rejects in the background.
+    function claimOrgNameLocal(bytes32 nameHash, string calldata orgName) external {
         Layout storage s = _layout();
         if (!s.authorizedCallers[msg.sender]) revert NotAuthorized();
-        if (!s.relay.confirmedOrgNames(nameHash)) revert NameNotConfirmed();
-        if (s.consumedOrgNames[nameHash]) revert NameAlreadyConsumed();
 
-        s.consumedOrgNames[nameHash] = true;
+        // Dispatch claim to hub optimistically via pre-funded relay
+        s.relay.dispatchOrgNameClaim(orgName);
+
         emit OrgNameConsumed(nameHash);
     }
 
-    /// @notice Handle org name change: release old name, consume new pre-confirmed name.
+    /// @notice Handle org name change: verify new name is confirmed, release old name on hub.
     /// @dev    Called by OrgRegistry.updateOrgMeta(). The new name must have been
     ///         pre-claimed via RegistryRelay.claimOrgName() before this call.
+    ///         Automatically dispatches a release of the old name to the hub
+    ///         via the relay (using pre-funded relay ETH).
     function changeOrgNameLocal(bytes32 oldHash, bytes32 newHash) external {
         Layout storage s = _layout();
         if (!s.authorizedCallers[msg.sender]) revert NotAuthorized();
         if (!s.relay.confirmedOrgNames(newHash)) revert NameNotConfirmed();
-        if (s.consumedOrgNames[newHash]) revert NameAlreadyConsumed();
 
-        // Release old name locally (hub still reserves it globally)
-        delete s.consumedOrgNames[oldHash];
-        s.consumedOrgNames[newHash] = true;
+        // Release old name on hub (fire-and-forget via pre-funded relay)
+        s.relay.dispatchOrgNameRelease(oldHash);
 
         emit OrgNameReleased(oldHash);
         emit OrgNameConsumed(newHash);
@@ -110,12 +122,8 @@ contract NameClaimAdapter is Initializable, OwnableUpgradeable {
 
     /*══════════════════ Public Getters ══════════════════*/
 
-    function relay() external view returns (IRegistryRelayReader) {
+    function relay() external view returns (IRegistryRelay) {
         return _layout().relay;
-    }
-
-    function consumedOrgNames(bytes32 nameHash) external view returns (bool) {
-        return _layout().consumedOrgNames[nameHash];
     }
 
     function authorizedCallers(address caller) external view returns (bool) {
