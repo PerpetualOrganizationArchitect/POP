@@ -100,12 +100,26 @@ contract GovernanceCrossChainUpgradeTest is Test {
         satPM = new PoaManager(address(satReg));
         satReg.transferOwnership(address(satPM));
 
-        // ── Hub (initially owned by this test contract) ──
-        hub = new PoaManagerHub(address(homePM), address(mailbox));
+        // ── Hub (initially owned by this test contract, deployed behind BeaconProxy) ──
+        {
+            PoaManagerHub hubImpl = new PoaManagerHub();
+            UpgradeableBeacon hubBeacon = new UpgradeableBeacon(address(hubImpl), address(this));
+            bytes memory hubInit =
+                abi.encodeCall(PoaManagerHub.initialize, (address(this), address(homePM), address(mailbox)));
+            hub = PoaManagerHub(payable(address(new BeaconProxy(address(hubBeacon), hubInit))));
+        }
         homePM.transferOwnership(address(hub));
 
-        // ── Satellite ──
-        satellite = new PoaManagerSatellite(address(satPM), address(mailbox), HOME_DOMAIN, address(hub));
+        // ── Satellite (deployed behind BeaconProxy) ──
+        {
+            PoaManagerSatellite satImpl = new PoaManagerSatellite();
+            UpgradeableBeacon satBeacon = new UpgradeableBeacon(address(satImpl), address(this));
+            bytes memory satInit = abi.encodeCall(
+                PoaManagerSatellite.initialize,
+                (address(this), address(satPM), address(mailbox), HOME_DOMAIN, address(hub))
+            );
+            satellite = PoaManagerSatellite(payable(address(new BeaconProxy(address(satBeacon), satInit))));
+        }
         satPM.transferOwnership(address(satellite));
 
         // Register satellite on hub and add contract type on both chains

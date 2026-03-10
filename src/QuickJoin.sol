@@ -221,6 +221,22 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         emit QuickJoined(_msgSender(), l.memberHatIds);
     }
 
+    /// @notice Onboard a user whose username is already confirmed.
+    /// @dev    Callable by executor or masterDeployAddress (e.g. SatelliteOnboardingHelper).
+    function quickJoinForUser(address user) external onlyMasterDeploy nonReentrant {
+        if (user == address(0)) revert ZeroUser();
+
+        Layout storage l = _layout();
+        string memory existing = l.accountRegistry.getUsername(user);
+        if (bytes(existing).length == 0) revert NoUsername();
+
+        if (l.memberHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(user, l.memberHatIds);
+        }
+
+        emit QuickJoined(user, l.memberHatIds);
+    }
+
     /* ───────── Passkey join paths ─────── */
 
     /// @notice Master-deploy path for passkey onboarding

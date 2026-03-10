@@ -75,8 +75,13 @@ contract DeploySatelliteInfrastructure is Script {
         // 5. Register all contract types (using deterministic addresses)
         _registerContractTypes(pm, dd);
 
-        // 6. Deploy PoaManagerSatellite
-        PoaManagerSatellite satellite = new PoaManagerSatellite(address(pm), mailboxAddr, hubDomain, hubAddress);
+        // 6. Deploy PoaManagerSatellite via BeaconProxy
+        address satImpl = address(new PoaManagerSatellite());
+        pm.addContractType("PoaManagerSatellite", satImpl);
+        address satBeacon = pm.getBeaconById(keccak256("PoaManagerSatellite"));
+        bytes memory satInit =
+            abi.encodeCall(PoaManagerSatellite.initialize, (deployer, address(pm), mailboxAddr, hubDomain, hubAddress));
+        PoaManagerSatellite satellite = PoaManagerSatellite(payable(address(new BeaconProxy(satBeacon, satInit))));
 
         // 7. Transfer PoaManager ownership to Satellite
         pm.transferOwnership(address(satellite));

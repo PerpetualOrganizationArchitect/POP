@@ -27,6 +27,9 @@ import {OrgRegistry} from "../src/OrgRegistry.sol";
 import {OrgDeployer} from "../src/OrgDeployer.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
 
+// Cross-chain (optional)
+import {NameRegistryHub} from "../src/crosschain/NameRegistryHub.sol";
+
 // Factories
 import {GovernanceFactory} from "../src/factories/GovernanceFactory.sol";
 import {AccessFactory} from "../src/factories/AccessFactory.sol";
@@ -72,6 +75,7 @@ contract DeployInfrastructure is Script {
     address public implRegistry;
     address public paymasterHub;
     address public universalPasskeyFactory;
+    address public nameRegistryHub;
 
     // Factories
     address public governanceFactory;
@@ -263,6 +267,24 @@ contract DeployInfrastructure is Script {
             orgDeployer, orgRegistry, implRegistry, paymasterHub, globalAccountRegistry, universalPasskeyFactory
         );
         console.log("\n--- Infrastructure Registered (for subgraph indexing) ---");
+
+        // Optional: Deploy NameRegistryHub if MAILBOX is provided
+        address mailboxAddr = vm.envOr("MAILBOX", address(0));
+        if (mailboxAddr != address(0)) {
+            address nameHubImpl = address(new NameRegistryHub());
+            pm.addContractType("NameRegistryHub", nameHubImpl);
+            address nameHubBeacon = pm.getBeaconById(keccak256("NameRegistryHub"));
+            bytes memory nameHubInit =
+                abi.encodeCall(NameRegistryHub.initialize, (deployer, globalAccountRegistry, mailboxAddr));
+            NameRegistryHub hub = NameRegistryHub(payable(address(new BeaconProxy(nameHubBeacon, nameHubInit))));
+            UniversalAccountRegistry(globalAccountRegistry).setNameRegistryHub(address(hub));
+            nameRegistryHub = address(hub);
+            console.log("\n--- Cross-Chain Name Registry ---");
+            console.log("NameRegistryHub:", nameRegistryHub);
+            console.log("GlobalAccountRegistry wired to NameRegistryHub");
+        } else {
+            console.log("\n--- Cross-Chain Name Registry: SKIPPED (no MAILBOX env var) ---");
+        }
     }
 
     function _outputAddresses() internal {
@@ -352,6 +374,9 @@ contract DeployInfrastructure is Script {
             '",\n',
             '  "passkeyAccountFactoryBeacon": "',
             vm.toString(pm.getBeaconById(keccak256("PasskeyAccountFactory"))),
+            '",\n',
+            '  "nameRegistryHub": "',
+            vm.toString(nameRegistryHub),
             '"\n',
             "}\n"
         );

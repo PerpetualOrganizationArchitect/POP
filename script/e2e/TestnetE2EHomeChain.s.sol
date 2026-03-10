@@ -7,7 +7,9 @@ import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 
 import {PoaManager} from "../../src/PoaManager.sol";
 import {ImplementationRegistry} from "../../src/ImplementationRegistry.sol";
+import {UniversalAccountRegistry} from "../../src/UniversalAccountRegistry.sol";
 import {PoaManagerHub} from "../../src/crosschain/PoaManagerHub.sol";
+import {NameRegistryHub} from "../../src/crosschain/NameRegistryHub.sol";
 import {DeterministicDeployer} from "../../src/crosschain/DeterministicDeployer.sol";
 import {HybridVoting} from "../../src/HybridVoting.sol";
 
@@ -15,7 +17,8 @@ import {HybridVoting} from "../../src/HybridVoting.sol";
  * @title TestnetE2EHomeChain
  * @notice Deploys minimal home-chain infrastructure for E2E cross-chain testing.
  *         Deploys: PoaManager, ImplementationRegistry, HybridVoting v1 (via DeterministicDeployer),
- *         PoaManagerHub, and transfers PoaManager ownership to Hub.
+ *         PoaManagerHub, UniversalAccountRegistry, NameRegistryHub, and transfers PoaManager
+ *         ownership to Hub.
  *
  * Required env vars:
  *   PRIVATE_KEY, DETERMINISTIC_DEPLOYER, MAILBOX
@@ -64,18 +67,43 @@ contract TestnetE2EHomeChain is Script {
         }
         pm.addContractType("HybridVoting", hvImpl);
 
-        // 4. Deploy PoaManagerHub
-        PoaManagerHub hub = new PoaManagerHub(address(pm), mailboxAddr);
+        // 4. Deploy UniversalAccountRegistry behind beacon
+        // (must happen before ownership transfer since addContractType is onlyOwner)
+        address uarImpl = address(new UniversalAccountRegistry());
+        pm.addContractType("UniversalAccountRegistry", uarImpl);
+        address uarBeacon = pm.getBeaconById(keccak256("UniversalAccountRegistry"));
+        bytes memory uarInit = abi.encodeWithSignature("initialize(address)", vm.addr(deployerKey));
+        UniversalAccountRegistry uar = UniversalAccountRegistry(address(new BeaconProxy(uarBeacon, uarInit)));
+        console.log("UniversalAccountRegistry:", address(uar));
+
+        // 5. Deploy PoaManagerHub via BeaconProxy
+        address poaHubImpl = address(new PoaManagerHub());
+        pm.addContractType("PoaManagerHub", poaHubImpl);
+        address poaHubBeacon = pm.getBeaconById(keccak256("PoaManagerHub"));
+        bytes memory poaHubInit =
+            abi.encodeCall(PoaManagerHub.initialize, (vm.addr(deployerKey), address(pm), mailboxAddr));
+        PoaManagerHub hub = PoaManagerHub(payable(address(new BeaconProxy(poaHubBeacon, poaHubInit))));
         console.log("PoaManagerHub:", address(hub));
 
-        // 5. Transfer PoaManager ownership to Hub
+        // 6. Deploy NameRegistryHub via BeaconProxy and wire to UAR
+        address nameHubImpl = address(new NameRegistryHub());
+        pm.addContractType("NameRegistryHub", nameHubImpl);
+        address nameHubBeacon = pm.getBeaconById(keccak256("NameRegistryHub"));
+        bytes memory nameHubInit =
+            abi.encodeCall(NameRegistryHub.initialize, (vm.addr(deployerKey), address(uar), mailboxAddr));
+        NameRegistryHub nameHub = NameRegistryHub(payable(address(new BeaconProxy(nameHubBeacon, nameHubInit))));
+        uar.setNameRegistryHub(address(nameHub));
+        console.log("NameRegistryHub:", address(nameHub));
+        console.log("UAR wired to NameRegistryHub");
+
+        // 7. Transfer PoaManager ownership to Hub (after all types registered)
         pm.transferOwnership(address(hub));
         console.log("PoaManager ownership transferred to Hub");
 
         vm.stopBroadcast();
 
-        // 6. Write state JSON
-        string memory json = string.concat(
+        // 8. Write state JSON (step numbers above shifted: UAR=4, Hub=5, Transfer=6, NameHub=7)
+        string memory json1 = string.concat(
             "{\n",
             '  "deterministicDeployer": "',
             vm.toString(ddAddr),
@@ -89,14 +117,24 @@ contract TestnetE2EHomeChain is Script {
             '",\n',
             '    "hub": "',
             vm.toString(address(hub)),
-            '",\n',
+            '",\n'
+        );
+
+        string memory json2 = string.concat(
             '    "hybridVotingV1": "',
             vm.toString(hvImpl),
+            '",\n',
+            '    "uar": "',
+            vm.toString(address(uar)),
+            '",\n',
+            '    "nameRegistryHub": "',
+            vm.toString(address(nameHub)),
             '"\n',
             "  }\n",
             "}\n"
         );
-        vm.writeFile("script/e2e/e2e-state.json", json);
+
+        vm.writeFile("script/e2e/e2e-state.json", string.concat(json1, json2));
 
         console.log("\n=== Home Chain E2E Setup Complete ===");
         console.log("State written to script/e2e/e2e-state.json");
