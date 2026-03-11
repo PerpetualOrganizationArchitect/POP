@@ -2,28 +2,26 @@
 set -euo pipefail
 
 #############################################################################
-# deploy.sh - Full cross-chain protocol deployment
+# deploy-testnet.sh - Full cross-chain protocol deployment on testnets
 #
-# Orchestrates MainDeploy.s.sol across 4 chains:
-#   Home:       Arbitrum
-#   Satellites: Ethereum, Optimism, Gnosis
+# Orchestrates MainDeploy.s.sol across 2 chains:
+#   Home:      Sepolia
+#   Satellite: Base Sepolia
 #
 # Prerequisites:
-#   - .env with DEPLOYER_PRIVATE_KEY (funded on all 4 chains)
+#   - .env with DEPLOYER_PRIVATE_KEY (funded on both Sepolia and Base Sepolia)
 #   - jq (for JSON parsing: brew install jq)
 #   - foundry.toml with RPC endpoints configured
 #
 # Usage:
-#   ./script/deploy.sh                          # Full deployment (all 4 steps)
-#   ./script/deploy.sh --step 1                 # Deploy home chain only
-#   ./script/deploy.sh --step 2                 # Deploy all satellites
-#   ./script/deploy.sh --step 2 --satellite 1   # Deploy Optimism satellite only
-#   ./script/deploy.sh --step 3                 # Register satellites + transfer ownership
-#   ./script/deploy.sh --step 4                 # Verify deployment
-#   ./script/deploy.sh --step summary           # Print deployed addresses
-#   ./script/deploy.sh --verify                 # Enable Etherscan verification
-#   ./script/deploy.sh --dry-run                # Simulate without broadcasting
-#   ./script/deploy.sh --yes                    # Skip confirmation prompt
+#   ./script/deploy-testnet.sh                  # Full deployment (all 4 steps)
+#   ./script/deploy-testnet.sh --step 1         # Deploy home chain only
+#   ./script/deploy-testnet.sh --step 2         # Deploy satellite
+#   ./script/deploy-testnet.sh --step 3         # Register satellite + transfer ownership
+#   ./script/deploy-testnet.sh --step 4         # Verify deployment
+#   ./script/deploy-testnet.sh --step summary   # Print deployed addresses
+#   ./script/deploy-testnet.sh --dry-run        # Simulate without broadcasting
+#   ./script/deploy-testnet.sh --yes            # Skip confirmation prompt
 #############################################################################
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -32,19 +30,17 @@ STATE_FILE="$SCRIPT_DIR/main-deploy-state.json"
 
 # ═══════════════════════════ Chain Configuration ═══════════════════════════
 
-# Home Chain: Arbitrum
-HOME_RPC="arbitrum"
-HOME_DOMAIN=42161
-HOME_MAILBOX="0x979Ca5202784112f4738403dBec5D0F3B9daabB9"
+# Home Chain: Sepolia
+HOME_RPC="sepolia"
+HOME_DOMAIN=11155111
+HOME_MAILBOX="0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
 
-# Satellite Chains (parallel arrays)
-SAT_NAMES=("Ethereum"  "Optimism"  "Gnosis")
-SAT_RPCS=("mainnet"    "optimism"  "gnosis")
-SAT_DOMAINS=(1          10          100)
+# Satellite Chain: Base Sepolia
+SAT_NAMES=("Base Sepolia")
+SAT_RPCS=("base-sepolia")
+SAT_DOMAINS=(84532)
 SAT_MAILBOXES=(
-    "0xc005dc82818d67AF737725bD4bf75435d065D239"
-    "0xd4C1905BB1D26BC93DAC913e13CaCC278CdCC80D"
-    "0xaD09d78f4c6b9dA2Ae82b1D34107802d380Bb74f"
+    "0x6966b0E55883d49BFB24539356a2f8A673E02039"
 )
 
 # ═══════════════════════════ Output Helpers ═══════════════════════════
@@ -76,50 +72,34 @@ json_get() {
 
 # ═══════════════════════════ Argument Parsing ═══════════════════════════
 
-VERIFY_FLAG=false
 STEP=""
-SATELLITE_INDEX=""
 DRY_RUN=false
 SKIP_CONFIRM=false
 
-usage() {
-    cat <<'USAGE'
-Usage: ./script/deploy.sh [OPTIONS]
-
-Deploys the full POA protocol across 4 chains.
-
-Steps:
-  1  Deploy home chain infrastructure + governance org (Arbitrum)
-  2  Deploy satellite infrastructure (Ethereum, Optimism, Gnosis)
-  3  Register satellites on Hub + transfer ownership to governance
-  4  Verify deployment (read-only)
-
-Options:
-  --step N           Run only step N (1-4, or 'summary')
-  --satellite N      With --step 2, deploy only satellite at index N
-                       0 = Ethereum, 1 = Optimism, 2 = Gnosis
-  --verify           Enable Etherscan contract verification
-  --dry-run          Simulate without broadcasting transactions
-  --yes, -y          Skip confirmation prompt
-  --help, -h         Show this help
-
-Examples:
-  ./script/deploy.sh                          Full deployment
-  ./script/deploy.sh --step 2 --satellite 1   Deploy Optimism satellite only
-  ./script/deploy.sh --verify --yes           Full deploy with verification, no prompt
-  ./script/deploy.sh --step summary           Print all deployed addresses
-USAGE
-}
-
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --verify)     VERIFY_FLAG=true; shift ;;
         --step)       STEP="$2"; shift 2 ;;
-        --satellite)  SATELLITE_INDEX="$2"; shift 2 ;;
         --dry-run)    DRY_RUN=true; shift ;;
         --yes|-y)     SKIP_CONFIRM=true; shift ;;
-        --help|-h)    usage; exit 0 ;;
-        *)            error "Unknown option: $1"; usage; exit 1 ;;
+        --help|-h)
+            echo "Usage: ./script/deploy-testnet.sh [OPTIONS]"
+            echo ""
+            echo "Deploys full POA protocol on Sepolia (home) + Base Sepolia (satellite)."
+            echo ""
+            echo "Steps:"
+            echo "  1  Deploy home chain infrastructure + governance org (Sepolia)"
+            echo "  2  Deploy satellite infrastructure (Base Sepolia)"
+            echo "  3  Register satellite on Hub + transfer ownership to governance"
+            echo "  4  Verify deployment (read-only)"
+            echo ""
+            echo "Options:"
+            echo "  --step N       Run only step N (1-4, or 'summary')"
+            echo "  --dry-run      Simulate without broadcasting transactions"
+            echo "  --yes, -y      Skip confirmation prompt"
+            echo "  --help, -h     Show this help"
+            exit 0
+            ;;
+        *)  error "Unknown option: $1"; exit 1 ;;
     esac
 done
 
@@ -147,48 +127,10 @@ load_env() {
     fi
 }
 
-# ═══════════════════════════ Verification Flags ═══════════════════════════
-
-build_verify_flags() {
-    local rpc_name="$1"
-
-    if [ "$VERIFY_FLAG" != true ]; then
-        echo ""
-        return
-    fi
-
-    # Chain-specific API keys, fall back to ETHERSCAN_API_KEY
-    local api_key=""
-    case "$rpc_name" in
-        arbitrum)  api_key="${ARBISCAN_API_KEY:-${ETHERSCAN_API_KEY:-}}" ;;
-        mainnet)   api_key="${ETHERSCAN_API_KEY:-}" ;;
-        optimism)  api_key="${OPTIMISM_ETHERSCAN_API_KEY:-${ETHERSCAN_API_KEY:-}}" ;;
-        gnosis)    api_key="${GNOSISSCAN_API_KEY:-${ETHERSCAN_API_KEY:-}}" ;;
-    esac
-
-    if [ -z "$api_key" ]; then
-        warn "No API key for $rpc_name. Skipping verification for this chain."
-        echo ""
-        return
-    fi
-
-    local flags="--verify --etherscan-api-key $api_key"
-
-    # Chain-specific verifier URLs (mainnet uses default)
-    case "$rpc_name" in
-        arbitrum)  flags="$flags --verifier-url https://api.arbiscan.io/api" ;;
-        optimism)  flags="$flags --verifier-url https://api-optimistic.etherscan.io/api" ;;
-        gnosis)    flags="$flags --verifier-url https://api.gnosisscan.io/api" ;;
-    esac
-
-    echo "$flags"
-}
-
 # ═══════════════════════════ Error Handling ═══════════════════════════
 
 CURRENT_STEP=""
 CURRENT_STEP_NUM=""
-CURRENT_SAT_INDEX=""
 
 cleanup() {
     local exit_code=$?
@@ -196,11 +138,9 @@ cleanup() {
         echo ""
         error "Failed during: ${CURRENT_STEP}"
         echo ""
-        error "To resume, run:"
-        if [ "${CURRENT_STEP_NUM:-}" = "2" ] && [ -n "${CURRENT_SAT_INDEX:-}" ]; then
-            error "  ./script/deploy.sh --step 2 --satellite $CURRENT_SAT_INDEX"
-        elif [ -n "${CURRENT_STEP_NUM:-}" ]; then
-            error "  ./script/deploy.sh --step $CURRENT_STEP_NUM"
+        if [ -n "${CURRENT_STEP_NUM:-}" ]; then
+            error "To resume, run:"
+            error "  ./script/deploy-testnet.sh --step $CURRENT_STEP_NUM"
         fi
     fi
 }
@@ -211,7 +151,6 @@ trap cleanup EXIT
 preflight_checks() {
     header "Pre-flight Checks"
 
-    # Check required tools
     if ! command -v forge &>/dev/null; then
         error "forge not found. Install Foundry first."
         exit 1
@@ -225,7 +164,7 @@ preflight_checks() {
         exit 1
     fi
 
-    # Derive deployer address (pipe key through stdin to avoid exposure in process list)
+    # Derive deployer address
     DEPLOYER_ADDRESS=$(cast wallet address "$PRIVATE_KEY" 2>/dev/null) || {
         error "Invalid PRIVATE_KEY. Could not derive address."
         exit 1
@@ -235,7 +174,7 @@ preflight_checks() {
 
     # Check RPC connectivity and balances
     local all_rpcs=("$HOME_RPC" "${SAT_RPCS[@]}")
-    local all_names=("Arbitrum (home)" "${SAT_NAMES[@]}")
+    local all_names=("Sepolia (home)" "${SAT_NAMES[@]}")
 
     for i in "${!all_rpcs[@]}"; do
         local rpc="${all_rpcs[$i]}"
@@ -253,13 +192,53 @@ preflight_checks() {
 
     echo ""
 
-    # Build with production profile
+    # Verify external contracts exist on Sepolia
+    info "Checking external contracts on Sepolia..."
+    local hats_code
+    hats_code=$(cast code 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137 --rpc-url sepolia 2>/dev/null)
+    if [ "$hats_code" = "0x" ] || [ -z "$hats_code" ]; then
+        error "Hats Protocol not deployed on Sepolia at 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137"
+        exit 1
+    fi
+    success "Hats Protocol: deployed"
+
+    local ep_code
+    ep_code=$(cast code 0x0000000071727De22E5E9d8BAf0edAc6f37da032 --rpc-url sepolia 2>/dev/null)
+    if [ "$ep_code" = "0x" ] || [ -z "$ep_code" ]; then
+        error "EntryPoint v0.7 not deployed on Sepolia"
+        exit 1
+    fi
+    success "EntryPoint v0.7: deployed"
+
+    echo ""
+
+    # Verify external contracts exist on Base Sepolia
+    info "Checking external contracts on Base Sepolia..."
+    local sat_hats_code
+    sat_hats_code=$(cast code 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137 --rpc-url base-sepolia 2>/dev/null)
+    if [ "$sat_hats_code" = "0x" ] || [ -z "$sat_hats_code" ]; then
+        error "Hats Protocol not deployed on Base Sepolia"
+        exit 1
+    fi
+    success "Hats Protocol on Base Sepolia: deployed"
+
+    local sat_ep_code
+    sat_ep_code=$(cast code 0x0000000071727De22E5E9d8BAf0edAc6f37da032 --rpc-url base-sepolia 2>/dev/null)
+    if [ "$sat_ep_code" = "0x" ] || [ -z "$sat_ep_code" ]; then
+        error "EntryPoint v0.7 not deployed on Base Sepolia"
+        exit 1
+    fi
+    success "EntryPoint v0.7 on Base Sepolia: deployed"
+
+    echo ""
+
+    # Build with production profile (via_ir + optimizer to stay under contract size limit)
+    # --skip test avoids Yul optimizer stack-too-deep in DeployerTest.t.sol
     info "Building contracts (FOUNDRY_PROFILE=production)..."
-    FOUNDRY_PROFILE=production forge build --skip test --silent 2>/dev/null || FOUNDRY_PROFILE=production forge build --skip test --silent
+    FOUNDRY_PROFILE=production forge build --skip test --silent
     success "Build complete."
 }
 
-# Lightweight pre-flight for read-only steps (only checks home chain RPC)
 preflight_checks_minimal() {
     header "Pre-flight Checks (read-only)"
 
@@ -268,31 +247,26 @@ preflight_checks_minimal() {
         exit 1
     fi
 
-    # Verify home chain RPC is reachable
     cast chain-id --rpc-url "$HOME_RPC" &>/dev/null || {
         error "Cannot reach home chain (--rpc-url $HOME_RPC). Check foundry.toml."
         exit 1
     }
-    success "Home chain RPC reachable."
+    success "Sepolia RPC reachable."
 }
 
 # ═══════════════════════════ Confirmation ═══════════════════════════
 
 confirm_deployment() {
-    if [ "$SKIP_CONFIRM" = true ]; then
-        return
-    fi
+    if [ "$SKIP_CONFIRM" = true ]; then return; fi
     if [ "$DRY_RUN" = true ]; then
         info "Dry run mode — no transactions will be broadcast."
         return
     fi
 
     echo ""
-    warn "This will broadcast transactions on MAINNET chains:"
-    echo "    Arbitrum  (home chain)"
-    echo "    Ethereum  (satellite)"
-    echo "    Optimism  (satellite)"
-    echo "    Gnosis    (satellite)"
+    warn "This will broadcast transactions on TESTNET chains:"
+    echo "    Sepolia      (home chain)"
+    echo "    Base Sepolia  (satellite)"
     echo ""
     echo "    Deployer: $DEPLOYER_ADDRESS"
     echo ""
@@ -305,7 +279,6 @@ confirm_deployment() {
 
 # ═══════════════════════════ Forge Runner ═══════════════════════════
 
-# Runs forge script with the correct broadcast/dry-run flag
 run_forge_script() {
     local contract="$1"
     local rpc="$2"
@@ -316,26 +289,22 @@ run_forge_script() {
         broadcast_flag=""
     fi
 
-    local verify_flags
-    verify_flags=$(build_verify_flags "$rpc")
-
     # shellcheck disable=SC2086
     FOUNDRY_PROFILE=production \
     forge script "script/MainDeploy.s.sol:${contract}" \
         --rpc-url "$rpc" \
+        --skip test \
         $broadcast_flag \
         --slow \
-        --skip test \
-        $verify_flags \
         "$@"
 }
 
 # ═══════════════════════════ Step 1: Home Chain ═══════════════════════════
 
 step1_deploy_home() {
-    CURRENT_STEP="Deploy Home Chain (Arbitrum)"
+    CURRENT_STEP="Deploy Home Chain (Sepolia)"
     CURRENT_STEP_NUM=1
-    header "Step 1: Deploy Home Chain (Arbitrum, domain $HOME_DOMAIN)"
+    header "Step 1: Deploy Home Chain (Sepolia, domain $HOME_DOMAIN)"
 
     if [ -f "$STATE_FILE" ]; then
         warn "State file already exists: $STATE_FILE"
@@ -365,78 +334,58 @@ step1_deploy_home() {
     info "  Executor:   $(json_get "$STATE_FILE" "homeChain.governance.executor")"
 }
 
-# ═══════════════════════════ Step 2: Satellites ═══════════════════════════
+# ═══════════════════════════ Step 2: Satellite ═══════════════════════════
 
-step2_deploy_satellites() {
+step2_deploy_satellite() {
+    CURRENT_STEP="Deploy Satellite (Base Sepolia)"
     CURRENT_STEP_NUM=2
 
     if [ ! -f "$STATE_FILE" ]; then
         error "Home chain state not found: $STATE_FILE"
-        error "Run step 1 first: ./script/deploy.sh --step 1"
+        error "Run step 1 first: ./script/deploy-testnet.sh --step 1"
         exit 1
     fi
 
-    # Determine which satellites to deploy
-    local start=0
-    local end=${#SAT_NAMES[@]}
-    if [ -n "${SATELLITE_INDEX:-}" ]; then
-        start=$SATELLITE_INDEX
-        end=$((SATELLITE_INDEX + 1))
-        if [ "$start" -ge "${#SAT_NAMES[@]}" ]; then
-            error "Satellite index $SATELLITE_INDEX out of range (0-$((${#SAT_NAMES[@]} - 1))):"
-            for i in "${!SAT_NAMES[@]}"; do
-                error "  $i = ${SAT_NAMES[$i]}"
-            done
-            exit 1
+    local domain="${SAT_DOMAINS[0]}"
+    local rpc="${SAT_RPCS[0]}"
+    local mailbox="${SAT_MAILBOXES[0]}"
+    local sat_state_file="$SCRIPT_DIR/satellite-state-${domain}.json"
+
+    if [ -f "$sat_state_file" ]; then
+        warn "Base Sepolia satellite state already exists: $sat_state_file"
+        if [ "$SKIP_CONFIRM" != true ]; then
+            read -rp "  Redeploy? (yes/no): " confirm
+            if [ "$confirm" != "yes" ]; then
+                info "Skipping satellite deployment."
+                return
+            fi
         fi
     fi
 
-    for i in $(seq "$start" "$((end - 1))"); do
-        local name="${SAT_NAMES[$i]}"
-        local rpc="${SAT_RPCS[$i]}"
-        local domain="${SAT_DOMAINS[$i]}"
-        local mailbox="${SAT_MAILBOXES[$i]}"
+    header "Step 2: Deploy Satellite on Base Sepolia (domain $domain)"
 
-        CURRENT_STEP="Deploy Satellite: $name (domain $domain)"
-        CURRENT_SAT_INDEX=$i
+    MAILBOX="$mailbox" \
+    SATELLITE_DOMAIN="$domain" \
+    SOLIDARITY_FUND="20000000000000000" \
+    run_forge_script DeploySatellite "$rpc"
 
-        local sat_state_file="$SCRIPT_DIR/satellite-state-${domain}.json"
-        if [ -f "$sat_state_file" ]; then
-            warn "$name satellite state already exists: $sat_state_file"
-            if [ "$SKIP_CONFIRM" != true ]; then
-                read -rp "  Redeploy $name? (yes/no): " confirm
-                if [ "$confirm" != "yes" ]; then
-                    info "Skipping $name."
-                    continue
-                fi
-            fi
-        fi
+    if [ ! -f "$sat_state_file" ]; then
+        error "Satellite state file not created: $sat_state_file"
+        exit 1
+    fi
 
-        header "Step 2.$((i + 1)): Deploy Satellite on $name (domain $domain)"
-
-        MAILBOX="$mailbox" \
-        SATELLITE_DOMAIN="$domain" \
-        run_forge_script DeploySatellite "$rpc"
-
-        if [ ! -f "$sat_state_file" ]; then
-            error "Satellite state file not created: $sat_state_file"
-            exit 1
-        fi
-
-        echo ""
-        success "$name satellite deployed."
-        info "  Satellite: $(json_get "$sat_state_file" "satellite")"
-        info "  PoaManager: $(json_get "$sat_state_file" "poaManager")"
-    done
-    CURRENT_SAT_INDEX=""
+    echo ""
+    success "Base Sepolia satellite deployed."
+    info "  Satellite:  $(json_get "$sat_state_file" "satellite")"
+    info "  PoaManager: $(json_get "$sat_state_file" "poaManager")"
 }
 
 # ═══════════════════════════ Step 3: Register & Transfer ═══════════════════════════
 
 step3_register_and_transfer() {
-    CURRENT_STEP="Register Satellites & Transfer Ownership"
+    CURRENT_STEP="Register Satellite & Transfer Ownership"
     CURRENT_STEP_NUM=3
-    header "Step 3: Register Satellites & Transfer Hub Ownership"
+    header "Step 3: Register Satellite & Transfer Hub Ownership"
 
     if [ ! -f "$STATE_FILE" ]; then
         error "Home chain state not found: $STATE_FILE"
@@ -444,27 +393,20 @@ step3_register_and_transfer() {
         exit 1
     fi
 
-    # Verify all satellite state files exist
-    for i in "${!SAT_DOMAINS[@]}"; do
-        local domain="${SAT_DOMAINS[$i]}"
-        local sat_file="$SCRIPT_DIR/satellite-state-${domain}.json"
-        if [ ! -f "$sat_file" ]; then
-            error "Missing satellite state: $sat_file"
-            error "Run step 2 for ${SAT_NAMES[$i]} first: ./script/deploy.sh --step 2 --satellite $i"
-            exit 1
-        fi
-    done
+    local domain="${SAT_DOMAINS[0]}"
+    local sat_file="$SCRIPT_DIR/satellite-state-${domain}.json"
+    if [ ! -f "$sat_file" ]; then
+        error "Missing satellite state: $sat_file"
+        error "Run step 2 first: ./script/deploy-testnet.sh --step 2"
+        exit 1
+    fi
 
-    # Export numbered satellite domain env vars
-    for i in "${!SAT_DOMAINS[@]}"; do
-        export "SATELLITE_DOMAIN_${i}=${SAT_DOMAINS[$i]}"
-    done
-
-    NUM_SATELLITES=${#SAT_DOMAINS[@]} \
+    SATELLITE_DOMAIN_0="$domain" \
+    NUM_SATELLITES=1 \
     run_forge_script RegisterAndTransfer "$HOME_RPC"
 
     echo ""
-    success "Satellites registered and Hub ownership transferred to Executor."
+    success "Satellite registered and Hub ownership transferred to Executor."
 }
 
 # ═══════════════════════════ Step 4: Verify ═══════════════════════════
@@ -498,7 +440,7 @@ print_summary() {
         exit 1
     fi
 
-    echo "Home Chain: Arbitrum (domain $HOME_DOMAIN)"
+    echo "Home Chain: Sepolia (domain $HOME_DOMAIN)"
     echo "  DeterministicDeployer: $(json_get "$STATE_FILE" "deterministicDeployer")"
     echo "  PoaManager:            $(json_get "$STATE_FILE" "homeChain.poaManager")"
     echo "  PoaManagerHub:         $(json_get "$STATE_FILE" "homeChain.hub")"
@@ -519,50 +461,37 @@ print_summary() {
     echo "    PaymentManager:      $(json_get "$STATE_FILE" "homeChain.governance.paymentManager")"
     echo ""
 
-    for i in "${!SAT_DOMAINS[@]}"; do
-        local domain="${SAT_DOMAINS[$i]}"
-        local name="${SAT_NAMES[$i]}"
-        local sat_file="$SCRIPT_DIR/satellite-state-${domain}.json"
-        if [ -f "$sat_file" ]; then
-            echo "Satellite: $name (domain $domain)"
-            echo "  PoaManagerSatellite:       $(json_get "$sat_file" "satellite")"
-            echo "  PoaManager:                $(json_get "$sat_file" "poaManager")"
-            echo "  ImplRegistry:              $(json_get "$sat_file" "implRegistry")"
-            echo "  OrgRegistry:               $(json_get "$sat_file" "orgRegistry")"
-            echo "  OrgDeployer:               $(json_get "$sat_file" "orgDeployer")"
-            echo "  PaymasterHub:              $(json_get "$sat_file" "paymasterHub")"
-            echo "  GlobalAccountRegistry:     $(json_get "$sat_file" "globalAccountRegistry")"
-            echo "  UniversalPasskeyFactory:   $(json_get "$sat_file" "universalPasskeyFactory")"
-            echo ""
-        else
-            warn "Satellite $name: state file not found ($sat_file)"
-        fi
-    done
+    local domain="${SAT_DOMAINS[0]}"
+    local sat_file="$SCRIPT_DIR/satellite-state-${domain}.json"
+    if [ -f "$sat_file" ]; then
+        echo "Satellite: Base Sepolia (domain $domain)"
+        echo "  PoaManagerSatellite:   $(json_get "$sat_file" "satellite")"
+        echo "  PoaManager:            $(json_get "$sat_file" "poaManager")"
+        echo "  ImplRegistry:          $(json_get "$sat_file" "implRegistry")"
+        echo "  OrgRegistry:           $(json_get "$sat_file" "orgRegistry")"
+        echo "  OrgDeployer:           $(json_get "$sat_file" "orgDeployer")"
+        echo "  PaymasterHub:          $(json_get "$sat_file" "paymasterHub")"
+        echo "  AccountRegistry:       $(json_get "$sat_file" "globalAccountRegistry")"
+        echo "  PasskeyFactory:        $(json_get "$sat_file" "universalPasskeyFactory")"
+        echo ""
+    else
+        warn "Satellite: state file not found ($sat_file)"
+    fi
 
     echo "State files:"
     info "  $STATE_FILE"
-    for i in "${!SAT_DOMAINS[@]}"; do
-        local domain="${SAT_DOMAINS[$i]}"
-        local sat_file="$SCRIPT_DIR/satellite-state-${domain}.json"
-        if [ -f "$sat_file" ]; then
-            info "  $sat_file"
-        fi
-    done
+    if [ -f "$sat_file" ]; then
+        info "  $sat_file"
+    fi
 }
 
 # ═══════════════════════════ Main ═══════════════════════════
 
 main() {
-    # Log all output to timestamped file
-    LOG_FILE="$SCRIPT_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
-    exec > >(tee -a "$LOG_FILE") 2>&1
+    header "POA Protocol Testnet Deployment"
+    echo "  Home:      Sepolia (domain $HOME_DOMAIN)"
+    echo "  Satellite: Base Sepolia (domain ${SAT_DOMAINS[0]})"
 
-    header "POA Protocol Cross-Chain Deployment"
-    info "Logging to $LOG_FILE"
-    echo "  Home:       Arbitrum (domain $HOME_DOMAIN)"
-    echo "  Satellites: Ethereum (1), Optimism (10), Gnosis (100)"
-
-    # Summary only reads local JSON files — no env, RPC, or build needed
     if [ "$STEP" = "summary" ]; then
         print_summary
         echo ""
@@ -572,7 +501,6 @@ main() {
 
     load_env
 
-    # Step 4 is read-only on home chain — only check that RPC
     if [ "$STEP" = "4" ]; then
         preflight_checks_minimal
         step4_verify
@@ -584,31 +512,18 @@ main() {
     preflight_checks
 
     if [ -z "$STEP" ]; then
-        # Full deployment
         confirm_deployment
         step1_deploy_home
-        step2_deploy_satellites
+        step2_deploy_satellite
         step3_register_and_transfer
         step4_verify
         print_summary
     else
         case "$STEP" in
-            1)
-                confirm_deployment
-                step1_deploy_home
-                ;;
-            2)
-                confirm_deployment
-                step2_deploy_satellites
-                ;;
-            3)
-                confirm_deployment
-                step3_register_and_transfer
-                ;;
-            *)
-                error "Unknown step: $STEP (valid: 1, 2, 3, 4, summary)"
-                exit 1
-                ;;
+            1) confirm_deployment; step1_deploy_home ;;
+            2) confirm_deployment; step2_deploy_satellite ;;
+            3) confirm_deployment; step3_register_and_transfer ;;
+            *) error "Unknown step: $STEP (valid: 1, 2, 3, 4, summary)"; exit 1 ;;
         esac
     fi
 
