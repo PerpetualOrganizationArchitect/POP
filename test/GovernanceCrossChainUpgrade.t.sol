@@ -170,8 +170,10 @@ contract GovernanceCrossChainUpgradeTest is Test {
         // Wire governance: HybridVoting is the Executor's allowed caller
         executor.setCaller(address(hv));
 
-        // Transfer Hub ownership to Executor (governance now controls upgrades)
+        // Transfer Hub ownership to Executor (two-step: propose then accept)
         hub.transferOwnership(address(executor));
+        vm.prank(address(executor));
+        hub.acceptOwnership();
 
         // Fund Executor so it can pay Hyperlane fees on behalf of governance
         vm.deal(address(executor), 1 ether);

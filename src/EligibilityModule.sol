@@ -95,6 +95,10 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         mapping(uint256 => mapping(address => bytes32)) roleApplications; // hatId => applicant => applicationHash
         mapping(uint256 => address[]) roleApplicants; // hatId => array of applicant addresses
         uint256 _notEntered; // reentrancy guard (moved from slot 0 to ERC-7201 namespace)
+        // Vouch epoch tracking: invalidates stale vouch data after resetVouches/reconfigureVouching
+        mapping(uint256 => uint256) vouchConfigEpoch; // hatId => epoch counter
+        mapping(uint256 => mapping(address => uint256)) wearerVouchEpoch; // hatId => wearer => epoch of their count
+        mapping(uint256 => mapping(address => mapping(address => uint256))) voucherRecordEpoch; // hatId => wearer => voucher => epoch
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.eligibilitymodule.storage");
@@ -659,6 +663,9 @@ contract EligibilityModule is Initializable, IHatsEligibility {
             quorum: quorum, membershipHatId: membershipHatId, flags: _packVouchFlags(enabled, combineWithHierarchy)
         });
 
+        // Invalidate stale vouch data from prior configuration
+        l.vouchConfigEpoch[hatId]++;
+
         emit VouchConfigSet(hatId, quorum, membershipHatId, enabled, combineWithHierarchy);
     }
 
@@ -694,6 +701,9 @@ contract EligibilityModule is Initializable, IHatsEligibility {
                     flags: _packVouchFlags(enabled, combineWithHierarchyFlags[i])
                 });
 
+                // Invalidate stale vouch data
+                l.vouchConfigEpoch[hatId]++;
+
                 emit VouchConfigSet(hatId, quorums[i], membershipHatIds[i], enabled, combineWithHierarchyFlags[i]);
             }
         }
@@ -716,13 +726,26 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         }
 
         if (!isAuthorized) revert NotAuthorizedToVouch();
-        if (l.vouchers[hatId][wearer][msg.sender]) revert AlreadyVouched();
+
+        // Epoch-aware stale data handling:
+        // If the wearer's count is from a prior epoch, reset it lazily.
+        uint256 currentEpoch = l.vouchConfigEpoch[hatId];
+        if (l.wearerVouchEpoch[hatId][wearer] != currentEpoch) {
+            l.currentVouchCount[hatId][wearer] = 0;
+            l.wearerVouchEpoch[hatId][wearer] = currentEpoch;
+        }
+
+        // AlreadyVouched: only if this specific voucher's record is from the current epoch
+        if (l.vouchers[hatId][wearer][msg.sender] && l.voucherRecordEpoch[hatId][wearer][msg.sender] == currentEpoch) {
+            revert AlreadyVouched();
+        }
 
         // SECURITY: Rate limiting checks
         _checkVouchingRateLimit(msg.sender);
 
-        // Record the vouch
+        // Record the vouch with its epoch
         l.vouchers[hatId][wearer][msg.sender] = true;
+        l.voucherRecordEpoch[hatId][wearer][msg.sender] = currentEpoch;
         uint32 newCount = l.currentVouchCount[hatId][wearer] + 1;
         l.currentVouchCount[hatId][wearer] = newCount;
 
@@ -762,7 +785,13 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         Layout storage l = _layout();
         VouchConfig memory config = l.vouchConfigs[hatId];
         if (!_isVouchingEnabled(config.flags)) revert VouchingNotEnabled();
-        if (!l.vouchers[hatId][wearer][msg.sender]) revert HasNotVouched();
+
+        // Only current-epoch vouch records can be revoked
+        uint256 currentEpoch = l.vouchConfigEpoch[hatId];
+        if (l.wearerVouchEpoch[hatId][wearer] != currentEpoch) revert HasNotVouched();
+        if (!l.vouchers[hatId][wearer][msg.sender] || l.voucherRecordEpoch[hatId][wearer][msg.sender] != currentEpoch) {
+            revert HasNotVouched();
+        }
 
         // Remove the vouch
         l.vouchers[hatId][wearer][msg.sender] = false;
@@ -784,7 +813,10 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     }
 
     function resetVouches(uint256 hatId) external onlySuperAdmin {
-        delete _layout().vouchConfigs[hatId];
+        Layout storage l = _layout();
+        delete l.vouchConfigs[hatId];
+        // Increment epoch to invalidate all stale vouch counts and AlreadyVouched records
+        l.vouchConfigEpoch[hatId]++;
         emit VouchConfigSet(hatId, 0, 0, false, false);
     }
 
@@ -867,8 +899,10 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         }
         (hierarchyEligible, hierarchyStanding) = _unpackWearerFlags(rules.flags);
 
-        // Check vouch path if enabled
-        if (_isVouchingEnabled(config.flags) && l.currentVouchCount[hatId][wearer] >= config.quorum) {
+        // Check vouch path if enabled (only count vouches from current epoch)
+        uint32 effectiveVouchCount =
+            (l.wearerVouchEpoch[hatId][wearer] == l.vouchConfigEpoch[hatId]) ? l.currentVouchCount[hatId][wearer] : 0;
+        if (_isVouchingEnabled(config.flags) && effectiveVouchCount >= config.quorum) {
             vouchEligible = true;
             vouchStanding = true;
         }
@@ -945,12 +979,14 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     function canUserVouch(address user) external view returns (bool) {
         Layout storage l = _layout();
 
-        // Check if user has been around long enough
+        // Match the enforcement logic in _checkVouchingRateLimit:
+        // If joinTime is set, check the new-user restriction period
         uint256 joinTime = l.userJoinTime[user];
-        if (joinTime == 0) return false;
-
-        uint256 daysSinceJoined = (block.timestamp - joinTime) / SECONDS_PER_DAY;
-        if (daysSinceJoined < NEW_USER_RESTRICTION_DAYS) return false;
+        if (joinTime != 0) {
+            uint256 daysSinceJoined = (block.timestamp - joinTime) / SECONDS_PER_DAY;
+            if (daysSinceJoined < NEW_USER_RESTRICTION_DAYS) return false;
+        }
+        // If joinTime is 0, allow (matches _checkVouchingRateLimit which skips the check)
 
         // Check daily vouch limit
         uint256 currentDay = block.timestamp / SECONDS_PER_DAY;
@@ -1000,7 +1036,10 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     }
 
     function currentVouchCount(uint256 hatId, address wearer) external view returns (uint32) {
-        return _layout().currentVouchCount[hatId][wearer];
+        Layout storage l = _layout();
+        // Return 0 for stale-epoch vouch data
+        if (l.wearerVouchEpoch[hatId][wearer] != l.vouchConfigEpoch[hatId]) return 0;
+        return l.currentVouchCount[hatId][wearer];
     }
 
     function eligibilityModuleAdminHat() external view returns (uint256) {

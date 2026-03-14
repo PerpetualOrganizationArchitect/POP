@@ -734,7 +734,7 @@ contract BatchFunctionsTest is Test {
         eligibility.batchConfigureVouching(hatIds, quorums, membershipHatIds, combineFlags);
         uint256 batchGas = gasBefore - gasleft();
 
-        // Batch should be efficient (threshold adjusted for test environment overhead)
-        assertTrue(batchGas < 450000, "Batch vouching should use less than 450k gas");
+        // Batch should be efficient (threshold accounts for epoch tracking storage writes)
+        assertTrue(batchGas < 600000, "Batch vouching should use less than 600k gas");
     }
 }

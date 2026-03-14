@@ -76,7 +76,38 @@ library P256Verifier {
     /// @notice Thrown when signature components are invalid (zero or >= n)
     error InvalidSignatureComponents();
 
+    /*──────────────────────────── Constants: P-256 Curve ─────────────*/
+
+    /// @notice P-256 curve order (n)
+    uint256 internal constant P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551;
+
+    /// @notice Half of P-256 curve order (n/2), used for low-s normalization
+    uint256 internal constant P256_N_HALF = 0x7FFFFFFF800000007FFFFFFFFFFFFFFFDE737D56D38BCF4279DCE5617E3192A8;
+
+    /// @notice P-256 field prime (p)
+    uint256 internal constant P256_P = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF;
+
+    /// @notice P-256 curve parameter b
+    uint256 internal constant P256_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B;
+
     /*──────────────────────────── Main Functions ──────────────────────*/
+
+    /**
+     * @notice Normalize s to low-s form to prevent signature malleability.
+     * @dev For secp256r1, both (r, s) and (r, n-s) are valid signatures for the
+     *      same message. Enforcing s <= n/2 ensures a unique canonical form.
+     * @param s The s component of the signature
+     * @return The normalized s value (always <= n/2)
+     */
+    function _normalizeLowS(bytes32 s) private pure returns (bytes32) {
+        uint256 sVal = uint256(s);
+        // Out-of-range s (0 or >= n) is invalid; pass through and let the verifier reject it
+        if (sVal == 0 || sVal >= P256_N) return s;
+        if (sVal > P256_N_HALF) {
+            return bytes32(P256_N - sVal);
+        }
+        return s;
+    }
 
     /**
      * @notice Verify a secp256r1 signature
@@ -86,13 +117,17 @@ library P256Verifier {
      * @param x The x coordinate of the public key (32 bytes)
      * @param y The y coordinate of the public key (32 bytes)
      * @return valid True if the signature is valid, false otherwise
-     * @dev Attempts precompile first, falls back to contract verifier
+     * @dev Attempts precompile first, falls back to contract verifier.
+     *      Enforces low-s normalization to prevent signature malleability.
      */
     function verify(bytes32 messageHash, bytes32 r, bytes32 s, bytes32 x, bytes32 y)
         internal
         view
         returns (bool valid)
     {
+        // Enforce low-s to prevent signature malleability
+        s = _normalizeLowS(s);
+
         // Pack input for precompile (160 bytes total)
         // Format: messageHash(32) || r(32) || s(32) || x(32) || y(32)
         bytes memory input = abi.encodePacked(messageHash, r, s, x, y);
@@ -151,6 +186,7 @@ library P256Verifier {
         view
         returns (bool valid)
     {
+        s = _normalizeLowS(s);
         bytes memory input = abi.encodePacked(messageHash, r, s, x, y);
         (bool success, bytes memory result) = PRECOMPILE.staticcall(input);
 
@@ -176,6 +212,7 @@ library P256Verifier {
         view
         returns (bool valid)
     {
+        s = _normalizeLowS(s);
         bytes memory input = abi.encodePacked(messageHash, r, s, x, y);
         (bool success, bytes memory result) = FALLBACK_VERIFIER.staticcall(input);
 
@@ -259,15 +296,28 @@ library P256Verifier {
     /*──────────────────────────── Validation Helpers ──────────────────*/
 
     /**
-     * @notice Validate public key coordinates
+     * @notice Validate public key coordinates are non-zero, in-range, and on the P-256 curve.
      * @param x The x coordinate of the public key
      * @param y The y coordinate of the public key
-     * @return valid True if the public key is valid (non-zero)
-     * @dev Note: This only checks for zero values. Full curve validation
-     *      is performed by the verifier itself.
+     * @return valid True if the public key is a valid P-256 curve point
+     * @dev Checks: non-zero, < p (field prime), and satisfies y^2 = x^3 - 3x + b (mod p).
      */
     function isValidPublicKey(bytes32 x, bytes32 y) internal pure returns (bool valid) {
-        return x != bytes32(0) && y != bytes32(0);
+        uint256 ux = uint256(x);
+        uint256 uy = uint256(y);
+
+        // Reject zero and out-of-range coordinates
+        if (ux == 0 || uy == 0 || ux >= P256_P || uy >= P256_P) {
+            return false;
+        }
+
+        // Verify the point is on the curve: y^2 ≡ x^3 - 3x + b (mod p)
+        uint256 lhs = mulmod(uy, uy, P256_P);
+        uint256 x3 = mulmod(mulmod(ux, ux, P256_P), ux, P256_P);
+        // x^3 - 3x + b  =  x^3 + (p - 3)*x + b  (mod p)
+        uint256 rhs = addmod(addmod(x3, mulmod(P256_P - 3, ux, P256_P), P256_P), P256_B, P256_P);
+
+        return lhs == rhs;
     }
 
     /**

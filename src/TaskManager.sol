@@ -432,6 +432,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
 
         // Update participation token budget
         uint256 newSpent = p.spent + payout;
+        if (newSpent > type(uint128).max) revert BudgetLib.BudgetExceeded();
         if (p.cap != 0 && newSpent > p.cap) revert BudgetLib.BudgetExceeded();
         p.spent = uint128(newSpent);
 

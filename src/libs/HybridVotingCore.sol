@@ -72,6 +72,21 @@ library HybridVotingCore {
             }
         }
 
+        // Reject voters with zero power across all classes (prevents quorum inflation via Sybil)
+        {
+            bool hasAnyPower = false;
+            for (uint256 c2; c2 < classCount;) {
+                if (classRawPowers[c2] > 0) {
+                    hasAnyPower = true;
+                    break;
+                }
+                unchecked {
+                    ++c2;
+                }
+            }
+            if (!hasAnyPower) revert VotingErrors.Unauthorized();
+        }
+
         // Accumulate deltas for each option
         uint256 len2 = weights.length;
         for (uint256 i; i < len2;) {
