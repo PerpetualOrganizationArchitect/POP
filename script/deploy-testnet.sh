@@ -329,9 +329,12 @@ step1_deploy_home() {
 
     echo ""
     success "Home chain deployed."
-    info "  Hub:        $(json_get "$STATE_FILE" "homeChain.hub")"
-    info "  PoaManager: $(json_get "$STATE_FILE" "homeChain.poaManager")"
-    info "  Executor:   $(json_get "$STATE_FILE" "homeChain.governance.executor")"
+    info "  Hub:                $(json_get "$STATE_FILE" "homeChain.hub")"
+    info "  PoaManager:         $(json_get "$STATE_FILE" "homeChain.poaManager")"
+    info "  Executor:           $(json_get "$STATE_FILE" "homeChain.governance.executor")"
+    info "  GovernanceFactory:  $(json_get "$STATE_FILE" "homeChain.governanceFactory")"
+    info "  AccessFactory:      $(json_get "$STATE_FILE" "homeChain.accessFactory")"
+    info "  ModulesFactory:     $(json_get "$STATE_FILE" "homeChain.modulesFactory")"
 }
 
 # ═══════════════════════════ Step 2: Satellite ═══════════════════════════
@@ -376,8 +379,11 @@ step2_deploy_satellite() {
 
     echo ""
     success "Base Sepolia satellite deployed."
-    info "  Satellite:  $(json_get "$sat_state_file" "satellite")"
-    info "  PoaManager: $(json_get "$sat_state_file" "poaManager")"
+    info "  Satellite:          $(json_get "$sat_state_file" "satellite")"
+    info "  PoaManager:         $(json_get "$sat_state_file" "poaManager")"
+    info "  GovernanceFactory:  $(json_get "$sat_state_file" "governanceFactory")"
+    info "  AccessFactory:      $(json_get "$sat_state_file" "accessFactory")"
+    info "  ModulesFactory:     $(json_get "$sat_state_file" "modulesFactory")"
 }
 
 # ═══════════════════════════ Step 3: Register & Transfer ═══════════════════════════
@@ -449,6 +455,13 @@ print_summary() {
     echo "  OrgDeployer:           $(json_get "$STATE_FILE" "homeChain.orgDeployer")"
     echo "  PaymasterHub:          $(json_get "$STATE_FILE" "homeChain.paymasterHub")"
     echo "  AccountRegistry:       $(json_get "$STATE_FILE" "homeChain.globalAccountRegistry")"
+    echo "  PasskeyFactory:        $(json_get "$STATE_FILE" "homeChain.universalPasskeyFactory")"
+    echo ""
+    echo "  Factories:"
+    echo "    GovernanceFactory:   $(json_get "$STATE_FILE" "homeChain.governanceFactory")"
+    echo "    AccessFactory:       $(json_get "$STATE_FILE" "homeChain.accessFactory")"
+    echo "    ModulesFactory:      $(json_get "$STATE_FILE" "homeChain.modulesFactory")"
+    echo "    HatsTreeSetup:       $(json_get "$STATE_FILE" "homeChain.hatsTreeSetup")"
     echo ""
     echo "  Governance Org (Poa):"
     echo "    Executor:            $(json_get "$STATE_FILE" "homeChain.governance.executor")"
@@ -473,6 +486,12 @@ print_summary() {
         echo "  PaymasterHub:          $(json_get "$sat_file" "paymasterHub")"
         echo "  AccountRegistry:       $(json_get "$sat_file" "globalAccountRegistry")"
         echo "  PasskeyFactory:        $(json_get "$sat_file" "universalPasskeyFactory")"
+        echo ""
+        echo "  Factories:"
+        echo "    GovernanceFactory:   $(json_get "$sat_file" "governanceFactory")"
+        echo "    AccessFactory:       $(json_get "$sat_file" "accessFactory")"
+        echo "    ModulesFactory:      $(json_get "$sat_file" "modulesFactory")"
+        echo "    HatsTreeSetup:       $(json_get "$sat_file" "hatsTreeSetup")"
         echo ""
     else
         warn "Satellite: state file not found ($sat_file)"
