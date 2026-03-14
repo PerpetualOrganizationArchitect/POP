@@ -23,7 +23,7 @@ evm_version = "cancun"
 
 [rpc_endpoints]
 # Testnets (public dRPC endpoints - no API key needed)
-sepolia = "wss://sepolia.gateway.tenderly.co"
+sepolia = "https://sepolia.drpc.org"
 holesky = "https://holesky.drpc.org"
 optimism-sepolia = "https://optimism-sepolia.drpc.org"
 base-sepolia = "https://base-sepolia.drpc.org"

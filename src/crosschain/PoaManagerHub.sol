@@ -22,6 +22,7 @@ contract PoaManagerHub is Ownable(msg.sender) {
     /// @dev Message type tags for the satellite to distinguish upgrade vs addType
     uint8 internal constant MSG_UPGRADE_BEACON = 0x01;
     uint8 internal constant MSG_ADD_CONTRACT_TYPE = 0x02;
+    uint8 internal constant MSG_ADMIN_CALL = 0x03;
 
     /*──────────── Immutables ──────────*/
     PoaManager public immutable poaManager;
@@ -29,6 +30,7 @@ contract PoaManagerHub is Ownable(msg.sender) {
 
     /*──────────── Storage ─────────────*/
     SatelliteConfig[] public satellites;
+    uint256 public activeSatelliteCount;
     bool public paused;
 
     /*──────────── Errors ──────────────*/
@@ -38,14 +40,12 @@ contract PoaManagerHub is Ownable(msg.sender) {
     error CannotRenounce();
     error TransferFailed();
     error DuplicateDomain(uint32 domain);
+    error SatelliteNotActive();
 
     /*──────────── Events ──────────────*/
-    event CrossChainUpgradeDispatched(
-        bytes32 indexed typeId, address newImpl, string version, uint32 indexed domain, bytes32 messageId
-    );
-    event CrossChainAddTypeDispatched(
-        bytes32 indexed typeId, string typeName, uint32 indexed domain, bytes32 messageId
-    );
+    event CrossChainUpgradeDispatched(bytes32 indexed typeId, address newImpl, string version);
+    event CrossChainAddTypeDispatched(bytes32 indexed typeId, string typeName, address impl);
+    event CrossChainAdminCallDispatched(address indexed target, bytes data);
     event SatelliteRegistered(uint32 indexed domain, address satellite);
     event SatelliteRemoved(uint32 indexed domain);
     event PauseSet(bool paused);
@@ -68,27 +68,9 @@ contract PoaManagerHub is Ownable(msg.sender) {
     {
         if (paused) revert IsPaused();
         uint256 preBalance = address(this).balance - msg.value;
-
-        // 1. Upgrade locally (validates impl, updates registry, upgrades beacon)
         poaManager.upgradeBeacon(typeName, newImpl, version);
-
-        // 2. Dispatch to all active satellites
-        bytes memory payload = abi.encode(MSG_UPGRADE_BEACON, typeName, newImpl, version);
-        bytes32 typeId = keccak256(bytes(typeName));
-        uint256 feePerSatellite = _feePerActiveSatellite();
-        uint256 len = satellites.length;
-        for (uint256 i; i < len;) {
-            SatelliteConfig storage sat = satellites[i];
-            if (sat.active) {
-                bytes32 msgId = mailbox.dispatch{value: feePerSatellite}(sat.domain, sat.satellite, payload);
-                emit CrossChainUpgradeDispatched(typeId, newImpl, version, sat.domain, msgId);
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        _refundExcess(preBalance);
+        emit CrossChainUpgradeDispatched(keccak256(bytes(typeName)), newImpl, version);
+        _broadcast(abi.encode(MSG_UPGRADE_BEACON, typeName, newImpl, version), preBalance);
     }
 
     /// @notice Upgrade a beacon on the home chain only (no cross-chain propagation).
@@ -109,25 +91,9 @@ contract PoaManagerHub is Ownable(msg.sender) {
     function addContractTypeCrossChain(string calldata typeName, address impl) external payable onlyOwner {
         if (paused) revert IsPaused();
         uint256 preBalance = address(this).balance - msg.value;
-
         poaManager.addContractType(typeName, impl);
-
-        bytes memory payload = abi.encode(MSG_ADD_CONTRACT_TYPE, typeName, impl);
-        bytes32 typeId = keccak256(bytes(typeName));
-        uint256 feePerSatellite = _feePerActiveSatellite();
-        uint256 len = satellites.length;
-        for (uint256 i; i < len;) {
-            SatelliteConfig storage sat = satellites[i];
-            if (sat.active) {
-                bytes32 msgId = mailbox.dispatch{value: feePerSatellite}(sat.domain, sat.satellite, payload);
-                emit CrossChainAddTypeDispatched(typeId, typeName, sat.domain, msgId);
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        _refundExcess(preBalance);
+        emit CrossChainAddTypeDispatched(keccak256(bytes(typeName)), typeName, impl);
+        _broadcast(abi.encode(MSG_ADD_CONTRACT_TYPE, typeName, impl), preBalance);
     }
 
     /*══════════════════ Admin Call Passthrough ══════════════════*/
@@ -137,6 +103,18 @@ contract PoaManagerHub is Ownable(msg.sender) {
     ///      on sub-contracts that gate on `msg.sender == poaManager`.
     function adminCall(address target, bytes calldata data) external onlyOwner returns (bytes memory) {
         return poaManager.adminCall(target, data);
+    }
+
+    /// @notice Execute an admin call on the home chain AND propagate to all active satellites.
+    /// @dev    Send enough ETH to cover Hyperlane protocol fees for all active satellites.
+    ///         The satellite's PoaManager will call `adminCall(target, data)` on receipt.
+    ///         NOTE: `target` must exist at the same address on all satellite chains.
+    function adminCallCrossChain(address target, bytes calldata data) external payable onlyOwner {
+        if (paused) revert IsPaused();
+        uint256 preBalance = address(this).balance - msg.value;
+        poaManager.adminCall(target, data);
+        emit CrossChainAdminCallDispatched(target, data);
+        _broadcast(abi.encode(MSG_ADMIN_CALL, target, data), preBalance);
     }
 
     /*══════════════════ Registry Passthrough ══════════════════*/
@@ -165,12 +143,15 @@ contract PoaManagerHub is Ownable(msg.sender) {
         satellites.push(
             SatelliteConfig({domain: domain, satellite: bytes32(uint256(uint160(satellite))), active: true})
         );
+        ++activeSatelliteCount;
         emit SatelliteRegistered(domain, satellite);
     }
 
     function removeSatellite(uint256 index) external onlyOwner {
+        if (!satellites[index].active) revert SatelliteNotActive();
         uint32 domain = satellites[index].domain;
         satellites[index].active = false;
+        --activeSatelliteCount;
         emit SatelliteRemoved(domain);
     }
 
@@ -208,23 +189,22 @@ contract PoaManagerHub is Ownable(msg.sender) {
 
     /*══════════════════ Internal ══════════════════*/
 
-    /// @dev Computes the fee to send per active satellite by dividing msg.value evenly.
-    ///      Reverts if ETH is sent but there are no active satellites (would be lost).
-    function _feePerActiveSatellite() internal view returns (uint256) {
+    /// @dev Dispatches payload to every active satellite via Hyperlane. Handles fee split + refund.
+    function _broadcast(bytes memory payload, uint256 preBalance) internal {
+        uint256 count = activeSatelliteCount;
+        if (count == 0) revert NoActiveSatellites();
+        uint256 fee = msg.value / count;
         uint256 len = satellites.length;
-        uint256 activeCount;
         for (uint256 i; i < len;) {
-            if (satellites[i].active) {
-                unchecked {
-                    ++activeCount;
-                }
+            SatelliteConfig storage sat = satellites[i];
+            if (sat.active) {
+                mailbox.dispatch{value: fee}(sat.domain, sat.satellite, payload);
             }
             unchecked {
                 ++i;
             }
         }
-        if (activeCount == 0 && msg.value > 0) revert NoActiveSatellites();
-        return activeCount > 0 ? msg.value / activeCount : 0;
+        _refundExcess(preBalance);
     }
 
     /// @dev Refunds only the caller's overpayment (integer division remainder).

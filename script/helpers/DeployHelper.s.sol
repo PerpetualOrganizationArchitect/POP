@@ -18,6 +18,9 @@ import {EligibilityModule} from "../../src/EligibilityModule.sol";
 import {ToggleModule} from "../../src/ToggleModule.sol";
 import {PasskeyAccount} from "../../src/PasskeyAccount.sol";
 import {PasskeyAccountFactory} from "../../src/PasskeyAccountFactory.sol";
+import {OrgRegistry} from "../../src/OrgRegistry.sol";
+import {OrgDeployer} from "../../src/OrgDeployer.sol";
+import {PaymasterHub} from "../../src/PaymasterHub.sol";
 
 import {PoaManager} from "../../src/PoaManager.sol";
 import {DeterministicDeployer} from "../../src/crosschain/DeterministicDeployer.sol";
@@ -36,6 +39,11 @@ abstract contract DeployHelper is Script {
         string name;
         bytes creationCode;
     }
+
+    address public constant HATS_PROTOCOL = 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137;
+    address public constant ENTRY_POINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
+    address public constant POA_GUARDIAN = address(0);
+    uint256 public constant INITIAL_SOLIDARITY_FUND = 0.1 ether;
 
     /// @notice Canonical list of the 13 application contract types.
     ///         Infrastructure types (ImplementationRegistry, OrgRegistry,
@@ -56,6 +64,15 @@ abstract contract DeployHelper is Script {
         types[10] = ContractType("ToggleModule", type(ToggleModule).creationCode);
         types[11] = ContractType("PasskeyAccount", type(PasskeyAccount).creationCode);
         types[12] = ContractType("PasskeyAccountFactory", type(PasskeyAccountFactory).creationCode);
+    }
+
+    /// @notice Infrastructure contract types that need beacon registration for cross-chain upgrades.
+    ///         Handled separately from application types because they require special initialization.
+    function _infraContractTypes() internal pure returns (ContractType[] memory types) {
+        types = new ContractType[](3);
+        types[0] = ContractType("OrgRegistry", type(OrgRegistry).creationCode);
+        types[1] = ContractType("OrgDeployer", type(OrgDeployer).creationCode);
+        types[2] = ContractType("PaymasterHub", type(PaymasterHub).creationCode);
     }
 
     /// @notice Deploy all application types directly and register on PoaManager (home chain).
@@ -84,6 +101,22 @@ abstract contract DeployHelper is Script {
                 console.log("  Deployed:", types[i].name);
             } else {
                 console.log("  Already deployed:", types[i].name);
+            }
+            pm.addContractType(types[i].name, predicted);
+        }
+    }
+
+    /// @notice Deploy infrastructure types via DeterministicDeployer and register on PoaManager (satellite).
+    function _deployAndRegisterInfraTypesDD(PoaManager pm, DeterministicDeployer dd) internal {
+        ContractType[] memory types = _infraContractTypes();
+        for (uint256 i = 0; i < types.length; i++) {
+            bytes32 salt = dd.computeSalt(types[i].name, "v1");
+            address predicted = dd.computeAddress(salt);
+            if (predicted.code.length == 0) {
+                dd.deploy(salt, types[i].creationCode);
+                console.log("  Deployed infra:", types[i].name);
+            } else {
+                console.log("  Already deployed infra:", types[i].name);
             }
             pm.addContractType(types[i].name, predicted);
         }

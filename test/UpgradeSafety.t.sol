@@ -25,6 +25,7 @@ import {PasskeyAccountFactory} from "../src/PasskeyAccountFactory.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
 import {PoaManager} from "../src/PoaManager.sol";
 import {SwitchableBeacon} from "../src/SwitchableBeacon.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title UpgradeSafetyTest
 /// @notice Comprehensive tests verifying upgrade safety invariants for all upgradeable contracts
@@ -247,7 +248,7 @@ contract UpgradeSafetyTest is Test {
         // Switch to static (pin to current)
         switchable.pinToCurrent();
         assertEq(switchable.implementation(), address(implV1));
-        assertTrue(!switchable.isMirrorMode());
+        assertEq(uint256(switchable.mode()), uint256(SwitchableBeacon.Mode.Static));
 
         // Upgrade POA beacon to V2 - static beacon should NOT follow
         DummyImplV2 implV2 = new DummyImplV2();
@@ -259,7 +260,7 @@ contract UpgradeSafetyTest is Test {
         // Switch back to mirror - should now follow V2
         switchable.setMirror(address(poaBeacon));
         assertEq(switchable.implementation(), address(implV2));
-        assertTrue(switchable.isMirrorMode());
+        assertEq(uint256(switchable.mode()), uint256(SwitchableBeacon.Mode.Mirror));
     }
 
     function testSwitchableBeaconOnlyOwnerCanSwitchModes() public {
@@ -271,17 +272,17 @@ contract UpgradeSafetyTest is Test {
 
         // Non-owner cannot pin
         vm.prank(UNAUTHORIZED);
-        vm.expectRevert(SwitchableBeacon.NotOwner.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, UNAUTHORIZED));
         switchable.pin(address(implV1));
 
         // Non-owner cannot set mirror
         vm.prank(UNAUTHORIZED);
-        vm.expectRevert(SwitchableBeacon.NotOwner.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, UNAUTHORIZED));
         switchable.setMirror(address(poaBeacon));
 
         // Non-owner cannot pin to current
         vm.prank(UNAUTHORIZED);
-        vm.expectRevert(SwitchableBeacon.NotOwner.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, UNAUTHORIZED));
         switchable.pinToCurrent();
     }
 

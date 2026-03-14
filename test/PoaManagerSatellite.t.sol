@@ -475,6 +475,105 @@ contract PoaManagerSatelliteTest is Test {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         satellite.adminCall(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 77));
     }
+
+    /*──────────── Admin Call Cross-Chain Helper ───────────*/
+
+    function _adminCallPayload(address target, bytes memory data) internal pure returns (bytes memory) {
+        return abi.encode(uint8(0x03), target, data);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  33. handle admin call executes on target
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleAdminCallExecutesOnTarget() public {
+        MockAdminTargetSat target = new MockAdminTargetSat(address(pm));
+
+        _deliverMessage(_adminCallPayload(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 42)));
+
+        assertEq(target.value(), 42, "Target value should be set via admin call");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  34. handle admin call emits event
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleAdminCallEmitsEvent() public {
+        MockAdminTargetSat target = new MockAdminTargetSat(address(pm));
+        bytes memory data = abi.encodeWithSignature("setValueOnlyPM(uint256)", 42);
+
+        vm.expectEmit(true, false, false, true);
+        emit PoaManagerSatellite.AdminCallReceived(address(target), data, hubDomain);
+        _deliverMessage(_adminCallPayload(address(target), data));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  35. handle admin call rejects non-mailbox
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleAdminCallRejectsNonMailbox() public {
+        MockAdminTargetSat target = new MockAdminTargetSat(address(pm));
+        bytes memory body = _adminCallPayload(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 1));
+
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(PoaManagerSatellite.UnauthorizedMailbox.selector);
+        satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), body);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  36. handle admin call rejects wrong origin
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleAdminCallRejectsWrongOrigin() public {
+        MockAdminTargetSat target = new MockAdminTargetSat(address(pm));
+        bytes memory body = _adminCallPayload(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 1));
+
+        vm.prank(mailbox);
+        vm.expectRevert(PoaManagerSatellite.UnauthorizedOrigin.selector);
+        satellite.handle(999, bytes32(uint256(uint160(hubAddr))), body);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  37. handle admin call rejects wrong sender
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleAdminCallRejectsWrongSender() public {
+        MockAdminTargetSat target = new MockAdminTargetSat(address(pm));
+        bytes memory body = _adminCallPayload(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 1));
+
+        vm.prank(mailbox);
+        vm.expectRevert(PoaManagerSatellite.UnauthorizedSender.selector);
+        satellite.handle(hubDomain, bytes32(uint256(uint160(address(0xBAD)))), body);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  38. handle admin call paused reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleAdminCallPausedReverts() public {
+        MockAdminTargetSat target = new MockAdminTargetSat(address(pm));
+        satellite.setPaused(true);
+
+        bytes memory body = _adminCallPayload(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 1));
+
+        vm.prank(mailbox);
+        vm.expectRevert(PoaManagerSatellite.IsPaused.selector);
+        satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), body);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  39. handle admin call reverts when target reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testHandleAdminCallRevertsWhenTargetReverts() public {
+        SatRevertingTarget revertTarget = new SatRevertingTarget();
+
+        bytes memory body = _adminCallPayload(address(revertTarget), abi.encodeWithSignature("doRevert()"));
+
+        vm.prank(mailbox);
+        vm.expectRevert("always reverts");
+        satellite.handle(hubDomain, bytes32(uint256(uint160(hubAddr))), body);
+    }
 }
 
 /// @dev Mock target that gates a function behind msg.sender == poaManager
@@ -489,5 +588,12 @@ contract MockAdminTargetSat {
     function setValueOnlyPM(uint256 _val) external {
         require(msg.sender == poaManager, "not pm");
         value = _val;
+    }
+}
+
+/// @dev Mock target that always reverts (for satellite tests)
+contract SatRevertingTarget {
+    function doRevert() external pure {
+        revert("always reverts");
     }
 }

@@ -13,6 +13,7 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
     /*──────────── Constants ───────────*/
     uint8 internal constant MSG_UPGRADE_BEACON = 0x01;
     uint8 internal constant MSG_ADD_CONTRACT_TYPE = 0x02;
+    uint8 internal constant MSG_ADMIN_CALL = 0x03;
 
     /*──────────── Immutables ──────────*/
     PoaManager public immutable poaManager;
@@ -35,6 +36,7 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
     /*──────────── Events ──────────────*/
     event UpgradeReceived(bytes32 indexed typeId, address newImpl, string version, uint32 origin);
     event ContractTypeReceived(bytes32 indexed typeId, string typeName, address impl, uint32 origin);
+    event AdminCallReceived(address indexed target, bytes data, uint32 origin);
     event PauseSet(bool paused);
 
     /*──────────── Constructor ─────────*/
@@ -73,6 +75,12 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
             poaManager.addContractType(typeName, impl);
 
             emit ContractTypeReceived(keccak256(bytes(typeName)), typeName, impl, _origin);
+        } else if (msgType == MSG_ADMIN_CALL) {
+            (, address target, bytes memory data) = abi.decode(_body, (uint8, address, bytes));
+
+            poaManager.adminCall(target, data);
+
+            emit AdminCallReceived(target, data, _origin);
         } else {
             revert UnknownMessageType();
         }

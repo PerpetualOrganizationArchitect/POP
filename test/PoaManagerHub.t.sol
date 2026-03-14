@@ -343,17 +343,14 @@ contract PoaManagerHubTest is Test {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  20. Upgrade with no satellites registered dispatches nothing
+    //  20. Upgrade with no satellites registered reverts
     // ══════════════════════════════════════════════════════════
 
-    function testUpgradeWithNoSatellitesDispatchesNothing() public {
+    function testUpgradeWithNoSatellitesReverts() public {
         hub.addContractType("Widget", address(implV1));
 
+        vm.expectRevert(PoaManagerHub.NoActiveSatellites.selector);
         hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
-
-        bytes32 typeId = keccak256(bytes("Widget"));
-        assertEq(pm.getCurrentImplementationById(typeId), address(implV2), "Local upgrade should still work");
-        assertEq(mailbox.dispatchedCount(), 0, "No dispatch with empty satellite list");
     }
 
     // ══════════════════════════════════════════════════════════
@@ -405,8 +402,8 @@ contract PoaManagerHubTest is Test {
 
         bytes32 typeId = keccak256(bytes("Widget"));
 
-        vm.expectEmit(true, true, false, false);
-        emit PoaManagerHub.CrossChainUpgradeDispatched(typeId, address(implV2), "v2", 42, bytes32(0));
+        vm.expectEmit(true, false, false, true);
+        emit PoaManagerHub.CrossChainUpgradeDispatched(typeId, address(implV2), "v2");
         hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
     }
 
@@ -582,27 +579,23 @@ contract PoaManagerHubTest is Test {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  36. Upgrade with zero ETH and no active satellites succeeds
+    //  36. Upgrade with zero ETH and no active satellites reverts
     // ══════════════════════════════════════════════════════════
 
-    function testUpgradeWithZeroEthAndNoSatellitesSucceeds() public {
+    function testUpgradeWithZeroEthAndNoSatellitesReverts() public {
         hub.registerSatellite(42, address(noopSatellite));
         hub.removeSatellite(0);
         hub.addContractType("Widget", address(implV1));
 
-        // No ETH sent, no active satellites — should succeed (local upgrade only)
+        vm.expectRevert(PoaManagerHub.NoActiveSatellites.selector);
         hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
-
-        bytes32 typeId = keccak256(bytes("Widget"));
-        assertEq(pm.getCurrentImplementationById(typeId), address(implV2));
-        assertEq(mailbox.dispatchedCount(), 0);
     }
 
     // ══════════════════════════════════════════════════════════
-    //  37. Upgrade after all satellites removed
+    //  37. Upgrade after all satellites removed reverts
     // ══════════════════════════════════════════════════════════
 
-    function testUpgradeAfterAllSatellitesRemoved() public {
+    function testUpgradeAfterAllSatellitesRemovedReverts() public {
         hub.registerSatellite(10, address(noopSatellite));
         NoopRecipient noop2 = new NoopRecipient();
         hub.registerSatellite(20, address(noop2));
@@ -610,11 +603,9 @@ contract PoaManagerHubTest is Test {
         hub.removeSatellite(1);
 
         hub.addContractType("Widget", address(implV1));
-        hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
 
-        bytes32 typeId = keccak256(bytes("Widget"));
-        assertEq(pm.getCurrentImplementationById(typeId), address(implV2), "Local upgrade should work");
-        assertEq(mailbox.dispatchedCount(), 0, "No dispatches when all removed");
+        vm.expectRevert(PoaManagerHub.NoActiveSatellites.selector);
+        hub.upgradeBeaconCrossChain("Widget", address(implV2), "v2");
     }
 
     // ══════════════════════════════════════════════════════════
@@ -733,6 +724,234 @@ contract PoaManagerHubTest is Test {
     }
 
     // ══════════════════════════════════════════════════════════
+    //  46. adminCallCrossChain executes local AND dispatches
+    // ══════════════════════════════════════════════════════════
+
+    function testAdminCallCrossChainExecutesLocalAndDispatches() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+        hub.registerSatellite(42, address(noopSatellite));
+
+        hub.adminCallCrossChain(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 123));
+
+        // Local target state changed
+        assertEq(target.value(), 123, "Local target should be updated");
+        // One dispatch to the satellite
+        assertEq(mailbox.dispatchedCount(), 1, "Should dispatch to 1 satellite");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  47. adminCallCrossChain payload encoding
+    // ══════════════════════════════════════════════════════════
+
+    function testAdminCallCrossChainPayloadEncoding() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+        hub.registerSatellite(42, address(noopSatellite));
+
+        bytes memory data = abi.encodeWithSignature("setValueOnlyPM(uint256)", 55);
+        hub.adminCallCrossChain(address(target), data);
+
+        (,, bytes memory body) = mailbox.dispatched(0);
+        (uint8 msgType, address decodedTarget, bytes memory decodedData) = abi.decode(body, (uint8, address, bytes));
+
+        assertEq(msgType, 0x03, "Message type should be MSG_ADMIN_CALL");
+        assertEq(decodedTarget, address(target), "Target should match");
+        assertEq(keccak256(decodedData), keccak256(data), "Data should match");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  48. adminCallCrossChain multiple satellites
+    // ══════════════════════════════════════════════════════════
+
+    function testAdminCallCrossChainMultipleSatellites() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+        NoopRecipient noop2 = new NoopRecipient();
+        NoopRecipient noop3 = new NoopRecipient();
+        hub.registerSatellite(10, address(noopSatellite));
+        hub.registerSatellite(20, address(noop2));
+        hub.registerSatellite(30, address(noop3));
+
+        hub.adminCallCrossChain(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 7));
+
+        assertEq(mailbox.dispatchedCount(), 3, "All 3 active satellites should receive dispatch");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  49. adminCallCrossChain ETH fee distribution
+    // ══════════════════════════════════════════════════════════
+
+    function testAdminCallCrossChainEthFeeDistribution() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+        NoopRecipient noop2 = new NoopRecipient();
+        NoopRecipient noop3 = new NoopRecipient();
+        hub.registerSatellite(10, address(noopSatellite));
+        hub.registerSatellite(20, address(noop2));
+        hub.registerSatellite(30, address(noop3));
+
+        uint256 balanceBefore = address(this).balance;
+        hub.adminCallCrossChain{value: 10}(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 1));
+        uint256 balanceAfter = address(this).balance;
+
+        // 10 / 3 = 3 per satellite, 1 remainder refunded
+        assertEq(balanceBefore - balanceAfter, 9, "Should spend 9 wei (3 per satellite), refund 1");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  50. adminCallCrossChain paused reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testAdminCallCrossChainPausedReverts() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+        hub.registerSatellite(42, address(noopSatellite));
+        hub.setPaused(true);
+
+        vm.expectRevert(PoaManagerHub.IsPaused.selector);
+        hub.adminCallCrossChain(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 1));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  51. adminCallCrossChain only owner
+    // ══════════════════════════════════════════════════════════
+
+    function testAdminCallCrossChainOnlyOwner() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        hub.adminCallCrossChain(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 1));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  52. adminCallCrossChain no satellites reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testAdminCallCrossChainNoSatellitesReverts() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+
+        vm.expectRevert(PoaManagerHub.NoActiveSatellites.selector);
+        hub.adminCallCrossChain(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 42));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  53. adminCallCrossChain emits event
+    // ══════════════════════════════════════════════════════════
+
+    function testAdminCallCrossChainEmitsEvent() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+        hub.registerSatellite(42, address(noopSatellite));
+
+        bytes memory data = abi.encodeWithSignature("setValueOnlyPM(uint256)", 99);
+
+        vm.expectEmit(true, false, false, true);
+        emit PoaManagerHub.CrossChainAdminCallDispatched(address(target), data);
+        hub.adminCallCrossChain(address(target), data);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  54. adminCallCrossChain reverts when inner call reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testAdminCallCrossChainRevertsWhenInnerCallReverts() public {
+        RevertingTarget revertTarget = new RevertingTarget();
+        hub.registerSatellite(42, address(noopSatellite));
+
+        vm.expectRevert("always reverts");
+        hub.adminCallCrossChain(address(revertTarget), abi.encodeWithSignature("doRevert()"));
+
+        // No dispatch should have occurred since local call reverted first
+        assertEq(mailbox.dispatchedCount(), 0, "No dispatches when local call reverts");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  55. adminCallCrossChain with ETH + no active satellites reverts
+    // ══════════════════════════════════════════════════════════
+
+    function testAdminCallCrossChainWithEthNoSatellitesReverts() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+
+        vm.expectRevert(PoaManagerHub.NoActiveSatellites.selector);
+        hub.adminCallCrossChain{value: 1 ether}(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 1));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  56. NoActiveSatellites: addContractTypeCrossChain with 0 satellites
+    // ══════════════════════════════════════════════════════════
+
+    function testAddContractTypeCrossChainNoSatellitesReverts() public {
+        vm.expectRevert(PoaManagerHub.NoActiveSatellites.selector);
+        hub.addContractTypeCrossChain("Widget", address(implV1));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  57. NoActiveSatellites: addContractTypeCrossChain after all removed
+    // ══════════════════════════════════════════════════════════
+
+    function testAddContractTypeCrossChainAllRemovedReverts() public {
+        hub.registerSatellite(42, address(noopSatellite));
+        hub.removeSatellite(0);
+
+        vm.expectRevert(PoaManagerHub.NoActiveSatellites.selector);
+        hub.addContractTypeCrossChain("Widget", address(implV1));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  58. NoActiveSatellites: adminCallCrossChain after all removed
+    // ══════════════════════════════════════════════════════════
+
+    function testAdminCallCrossChainAllRemovedReverts() public {
+        MockAdminTargetHub target = new MockAdminTargetHub(address(pm));
+        hub.registerSatellite(42, address(noopSatellite));
+        hub.removeSatellite(0);
+
+        vm.expectRevert(PoaManagerHub.NoActiveSatellites.selector);
+        hub.adminCallCrossChain(address(target), abi.encodeWithSignature("setValueOnlyPM(uint256)", 1));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  59. activeSatelliteCount tracks correctly across register/remove
+    // ══════════════════════════════════════════════════════════
+
+    function testActiveSatelliteCountTracking() public {
+        assertEq(hub.activeSatelliteCount(), 0);
+
+        hub.registerSatellite(10, address(noopSatellite));
+        assertEq(hub.activeSatelliteCount(), 1);
+
+        NoopRecipient noop2 = new NoopRecipient();
+        hub.registerSatellite(20, address(noop2));
+        assertEq(hub.activeSatelliteCount(), 2);
+
+        hub.removeSatellite(0);
+        assertEq(hub.activeSatelliteCount(), 1);
+
+        hub.removeSatellite(1);
+        assertEq(hub.activeSatelliteCount(), 0);
+
+        // Re-register
+        hub.registerSatellite(10, address(noopSatellite));
+        assertEq(hub.activeSatelliteCount(), 1);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  60. removeSatellite reverts on already-inactive satellite
+    // ══════════════════════════════════════════════════════════
+
+    function testRemoveSatelliteRevertsIfAlreadyInactive() public {
+        hub.registerSatellite(10, address(noopSatellite));
+        NoopRecipient noop2 = new NoopRecipient();
+        hub.registerSatellite(20, address(noop2));
+
+        hub.removeSatellite(0);
+        assertEq(hub.activeSatelliteCount(), 1);
+
+        // Double-remove must revert, not silently corrupt activeSatelliteCount
+        vm.expectRevert(PoaManagerHub.SatelliteNotActive.selector);
+        hub.removeSatellite(0);
+
+        // Count unchanged — satellite 1 still active
+        assertEq(hub.activeSatelliteCount(), 1);
+    }
+
+    // ══════════════════════════════════════════════════════════
     //  Helper: accept ETH refunds
     // ══════════════════════════════════════════════════════════
 
@@ -751,5 +970,12 @@ contract MockAdminTargetHub {
     function setValueOnlyPM(uint256 _val) external {
         require(msg.sender == poaManager, "not pm");
         value = _val;
+    }
+}
+
+/// @dev Mock target that always reverts
+contract RevertingTarget {
+    function doRevert() external pure {
+        revert("always reverts");
     }
 }
