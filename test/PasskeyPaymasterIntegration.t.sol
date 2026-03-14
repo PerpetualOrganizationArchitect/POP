@@ -1282,9 +1282,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         assertEq(validationData, 0, "Validation should succeed");
         assertTrue(context.length > 0, "Context should be returned");
 
-        // Verify context contains explicit onboarding flag + correct orgId.
-        (bool isOnboarding, bytes32 decodedOrgId,,) = abi.decode(context, (bool, bytes32, bytes32, uint32));
-        assertFalse(isOnboarding, "Regular org operation should not be flagged as onboarding");
+        // Verify context contains sponsorshipType=0 (NONE) + correct orgId.
+        (uint8 sponsorshipType, bytes32 decodedOrgId,,) = abi.decode(context, (uint8, bytes32, bytes32, uint32));
+        assertEq(sponsorshipType, 0, "Regular org operation should not be flagged as sponsorship");
         assertEq(decodedOrgId, ORG_ID, "Context should contain correct orgId");
     }
 
@@ -1634,7 +1634,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         hub.postOp(IPaymaster.PostOpMode.opReverted, context, 50_000, 1);
     }
 
-    /// @notice Context encodes exactly 5 fields: isOnboarding, orgId, subjectKey, epochStart, maxCost
+    /// @notice Context encodes exactly 7 fields: sponsorshipType, orgId, subjectKey, epochStart, maxCost, reservedOrgBalance, sender
     function testContext_SixFieldEncoding() public {
         PasskeyAccount account = _createPasskeyAccount();
         _setupDefaultBudget(address(account));
@@ -1653,17 +1653,17 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
 
-        // Decode all 6 fields - would revert if encoding doesn't match
+        // Decode all 7 fields - would revert if encoding doesn't match
         (
-            bool isOnboarding,
+            uint8 sponsorshipType,
             bytes32 orgId,
             bytes32 subjectKey,
             uint32 epochStart,
             uint256 reservedBudget,
-            uint256 reservedOrgBalance
-        ) = abi.decode(context, (bool, bytes32, bytes32, uint32, uint256, uint256));
+            uint256 reservedOrgBalance,
+        ) = abi.decode(context, (uint8, bytes32, bytes32, uint32, uint256, uint256, address));
 
-        assertFalse(isOnboarding, "Normal op should not be onboarding");
+        assertEq(sponsorshipType, 0, "Normal op should not be sponsorship");
         assertEq(orgId, ORG_ID, "OrgId should match");
         assertTrue(subjectKey != bytes32(0), "SubjectKey should be non-zero");
         assertTrue(epochStart > 0, "EpochStart should be non-zero");
@@ -2043,7 +2043,8 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
 
-        (,,,,, uint256 reservedOrgBalance) = abi.decode(context, (bool, bytes32, bytes32, uint32, uint256, uint256));
+        (,,,,, uint256 reservedOrgBalance,) =
+            abi.decode(context, (uint8, bytes32, bytes32, uint32, uint256, uint256, address));
 
         assertEq(reservedOrgBalance, 0, "Grace org with zero deposits should have reservedOrgBalance=0");
     }
@@ -2066,8 +2067,8 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.02 ether);
 
-        (,,,, uint256 reservedBudget, uint256 reservedOrgBalance) =
-            abi.decode(context, (bool, bytes32, bytes32, uint32, uint256, uint256));
+        (,,,, uint256 reservedBudget, uint256 reservedOrgBalance,) =
+            abi.decode(context, (uint8, bytes32, bytes32, uint32, uint256, uint256, address));
 
         assertEq(reservedBudget, 0.02 ether, "Budget reservation should equal maxCost");
         assertEq(reservedOrgBalance, 0.02 ether, "Funded org should reserve maxCost in org balance");
