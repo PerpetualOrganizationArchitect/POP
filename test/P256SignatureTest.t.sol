@@ -122,17 +122,24 @@ contract P256SignatureTest is Test {
     }
 
     function testIsValidPublicKey() public pure {
-        // Valid public key
-        assertTrue(P256Verifier.isValidPublicKey(TEST1_PUB_X, TEST1_PUB_Y), "Valid public key should pass");
+        // Valid NIST P-256 test vector (known on-curve point)
+        bytes32 validX = 0x1ccbe91c075fc7f4f033bfa248db8fccd3565de94bbfb12f3c59ff46c271bf83;
+        bytes32 validY = 0xce4014c68811f9a21a1fdb2c0e6113e06db7ca93b7404e78dc7ccd5ca89a4ca9;
+        assertTrue(P256Verifier.isValidPublicKey(validX, validY), "Valid public key should pass");
 
         // Zero x
-        assertFalse(P256Verifier.isValidPublicKey(bytes32(0), TEST1_PUB_Y), "Zero x should fail");
+        assertFalse(P256Verifier.isValidPublicKey(bytes32(0), validY), "Zero x should fail");
 
         // Zero y
-        assertFalse(P256Verifier.isValidPublicKey(TEST1_PUB_X, bytes32(0)), "Zero y should fail");
+        assertFalse(P256Verifier.isValidPublicKey(validX, bytes32(0)), "Zero y should fail");
 
         // Both zero
         assertFalse(P256Verifier.isValidPublicKey(bytes32(0), bytes32(0)), "Both zero should fail");
+
+        // Arbitrary values not on curve
+        assertFalse(
+            P256Verifier.isValidPublicKey(bytes32(uint256(42)), bytes32(uint256(43))), "Off-curve point should fail"
+        );
     }
 
     function testIsValidSignature() public pure {
@@ -301,6 +308,99 @@ contract P256SignatureTest is Test {
         assertEq(parsedRpIdHash, expectedRpIdHash, "rpIdHash mismatch");
         assertEq(parsedFlags, 0x05, "flags mismatch");
         assertEq(parsedSignCount, 42, "signCount mismatch");
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                        LOW-S NORMALIZATION & UNDERFLOW TESTS
+    ══════════════════════════════════════════════════════════════════════*/
+
+    function testVerifyWithOutOfRangeS_DoesNotRevert() public view {
+        // s >= P256_N should NOT revert (underflow), it should return false
+        bytes32 hugeS = bytes32(type(uint256).max);
+        bool valid = P256Verifier.verify(TEST1_MESSAGE_HASH, TEST1_R, hugeS, TEST1_PUB_X, TEST1_PUB_Y);
+        assertFalse(valid, "Out-of-range s should return false, not revert");
+    }
+
+    function testVerifyWithSEqualToN_DoesNotRevert() public view {
+        // s == P256_N exactly
+        bytes32 sAtN = bytes32(uint256(0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551));
+        bool valid = P256Verifier.verify(TEST1_MESSAGE_HASH, TEST1_R, sAtN, TEST1_PUB_X, TEST1_PUB_Y);
+        assertFalse(valid, "s == n should return false, not revert");
+    }
+
+    function testVerifyWithZeroS_DoesNotRevert() public view {
+        bool valid = P256Verifier.verify(TEST1_MESSAGE_HASH, TEST1_R, bytes32(0), TEST1_PUB_X, TEST1_PUB_Y);
+        assertFalse(valid, "s == 0 should return false");
+    }
+
+    function testIsValidPublicKey_OutOfRangeCoordinates() public pure {
+        // x == P256_P (exactly at field prime boundary)
+        bytes32 xTooBig = bytes32(uint256(0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF));
+        bytes32 validY = 0xce4014c68811f9a21a1fdb2c0e6113e06db7ca93b7404e78dc7ccd5ca89a4ca9;
+        assertFalse(P256Verifier.isValidPublicKey(xTooBig, validY), "x >= p should fail");
+
+        // y == P256_P
+        bytes32 validX = 0x1ccbe91c075fc7f4f033bfa248db8fccd3565de94bbfb12f3c59ff46c271bf83;
+        bytes32 yTooBig = bytes32(uint256(0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF));
+        assertFalse(P256Verifier.isValidPublicKey(validX, yTooBig), "y >= p should fail");
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    WEBAUTHN JSON CONTEXT VALIDATION TESTS
+    ══════════════════════════════════════════════════════════════════════*/
+
+    function testWebAuthnRejectsWrongChallengeKey() public view {
+        // Challenge value appears after "notchallenge":" instead of "challenge":"
+        bytes memory badJSON = bytes('{"type":"webauthn.get","notchallenge":"dGVzdA"}');
+
+        bytes memory authData = new bytes(37);
+        authData[32] = bytes1(uint8(0x05));
+
+        WebAuthnLib.WebAuthnAuth memory auth = WebAuthnLib.WebAuthnAuth({
+            authenticatorData: authData,
+            clientDataJSON: badJSON,
+            challengeIndex: 39,
+            typeIndex: 9,
+            r: TEST1_R,
+            s: TEST1_S
+        });
+
+        bool valid = WebAuthnLib.verify(auth, bytes32(0), TEST1_PUB_X, TEST1_PUB_Y, false);
+        assertFalse(valid, "Should reject challenge under wrong JSON key");
+    }
+
+    function testWebAuthnRejectsWrongTypeKey() public view {
+        // type value appears after "notype":" instead of "type":"
+        bytes memory badJSON = bytes('{"notype":"webauthn.get","challenge":"dGVzdA"}');
+
+        bytes memory authData = new bytes(37);
+        authData[32] = bytes1(uint8(0x05));
+
+        WebAuthnLib.WebAuthnAuth memory auth = WebAuthnLib.WebAuthnAuth({
+            authenticatorData: authData,
+            clientDataJSON: badJSON,
+            challengeIndex: 39,
+            typeIndex: 10,
+            r: TEST1_R,
+            s: TEST1_S
+        });
+
+        bool valid = WebAuthnLib.verify(auth, bytes32(0), TEST1_PUB_X, TEST1_PUB_Y, false);
+        assertFalse(valid, "Should reject type under wrong JSON key");
+    }
+
+    function testWebAuthnRejectsChallengeIndexZero() public view {
+        bytes memory json = bytes('{"type":"webauthn.get","challenge":"dGVzdA"}');
+
+        bytes memory authData = new bytes(37);
+        authData[32] = bytes1(uint8(0x05));
+
+        WebAuthnLib.WebAuthnAuth memory auth = WebAuthnLib.WebAuthnAuth({
+            authenticatorData: authData, clientDataJSON: json, challengeIndex: 0, typeIndex: 9, r: TEST1_R, s: TEST1_S
+        });
+
+        bool valid = WebAuthnLib.verify(auth, bytes32(0), TEST1_PUB_X, TEST1_PUB_Y, false);
+        assertFalse(valid, "challengeIndex=0 should fail prefix check");
     }
 
     function testWebAuthnFlagsValidation() public view {

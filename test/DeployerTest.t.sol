@@ -2362,6 +2362,146 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         EligibilityModule(eligibilityModuleAddr).vouchFor(candidate, defaultRoleHat);
     }
 
+    function testVouchEpochInvalidatesStaleDataAfterReset() public {
+        vm.startPrank(orgOwner);
+        string[] memory names = new string[](3);
+        names[0] = "DEFAULT";
+        names[1] = "EXECUTIVE";
+        names[2] = "MEMBER";
+        string[] memory images = new string[](3);
+        images[0] = "ipfs://default";
+        images[1] = "ipfs://executive";
+        images[2] = "ipfs://member";
+        bool[] memory voting = new bool[](3);
+        voting[0] = true;
+        voting[1] = true;
+        voting[2] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: ORG_ID,
+            orgName: "Epoch Test DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridThresholdPct: 50,
+            ddThresholdPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
+        });
+
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
+        address exec = result.executor;
+        vm.stopPrank();
+
+        address eligAddr = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID);
+        EligibilityModule elig = EligibilityModule(eligAddr);
+        uint256 defaultHat = orgRegistry.getRoleHat(ORG_ID, 0);
+        uint256 memberHat = orgRegistry.getRoleHat(ORG_ID, 2);
+
+        // 1. Configure vouching with quorum=2
+        vm.prank(exec);
+        elig.configureVouching(defaultHat, 2, memberHat, false);
+
+        // Give voter1 and voter2 membership hats so they can vouch
+        vm.prank(exec);
+        IHats(SEPOLIA_HATS).mintHat(memberHat, voter1);
+        vm.prank(exec);
+        IHats(SEPOLIA_HATS).mintHat(memberHat, voter2);
+
+        address candidate = address(0x700);
+
+        // 2. voter1 vouches for candidate (epoch 1)
+        vm.prank(voter1);
+        elig.vouchFor(candidate, defaultHat);
+        assertEq(elig.currentVouchCount(defaultHat, candidate), 1);
+
+        // 3. Reset vouching, then reconfigure with quorum=1
+        vm.prank(exec);
+        elig.resetVouches(defaultHat);
+        vm.prank(exec);
+        elig.configureVouching(defaultHat, 1, memberHat, false);
+
+        // 4. Stale vouch count should be 0 (epoch changed)
+        assertEq(elig.currentVouchCount(defaultHat, candidate), 0, "Stale vouch count should be 0 after epoch change");
+
+        // 5. voter1 should be able to vouch again (stale AlreadyVouched record is ignored)
+        vm.prank(voter1);
+        elig.vouchFor(candidate, defaultHat);
+        assertEq(elig.currentVouchCount(defaultHat, candidate), 1, "Fresh vouch should count");
+
+        // 6. voter1 should NOT be able to vouch again in same epoch
+        vm.prank(voter1);
+        vm.expectRevert(abi.encodeWithSelector(EligibilityModule.AlreadyVouched.selector));
+        elig.vouchFor(candidate, defaultHat);
+    }
+
+    function testCanUserVouchMatchesEnforcement() public {
+        vm.startPrank(orgOwner);
+        string[] memory names = new string[](2);
+        names[0] = "DEFAULT";
+        names[1] = "MEMBER";
+        string[] memory images = new string[](2);
+        images[0] = "ipfs://default";
+        images[1] = "ipfs://member";
+        bool[] memory voting = new bool[](2);
+        voting[0] = true;
+        voting[1] = true;
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        OrgDeployer.RoleAssignments memory roleAssignments = _buildDefaultRoleAssignments();
+        address[] memory ddTargets = new address[](0);
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: ORG_ID,
+            orgName: "canUserVouch Test",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridThresholdPct: 50,
+            ddThresholdPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: _buildSimpleRoleConfigs(names, images, voting),
+            roleAssignments: roleAssignments,
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
+        });
+
+        deployer.deployFullOrg(params);
+        vm.stopPrank();
+
+        address eligAddr = orgRegistry.getOrgContract(ORG_ID, ModuleTypes.ELIGIBILITY_MODULE_ID);
+        EligibilityModule elig = EligibilityModule(eligAddr);
+
+        // User with joinTime=0 should be allowed to vouch (matches _checkVouchingRateLimit)
+        address newUser = address(0x800);
+        assertTrue(elig.canUserVouch(newUser), "User with joinTime=0 should be able to vouch");
+    }
+
     function testSuperAdminFullControl() public {
         vm.startPrank(orgOwner);
         string[] memory names = new string[](3);

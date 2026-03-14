@@ -284,9 +284,9 @@ contract MockERC20 is IERC20 {
             uint8[] memory w = new uint8[](1);
             w[0] = 100;
 
-            // With N-class system, anyone can vote but they need class permissions for power
-            // This voter has no hats so they get 0 power in all classes, but vote succeeds
+            // Voter with zero power across all classes is rejected to prevent quorum inflation
             vm.prank(poorVoter);
+            vm.expectRevert(VotingErrors.Unauthorized.selector);
             hv.vote(0, idx, w);
         }
 
@@ -399,9 +399,10 @@ contract MockERC20 is IERC20 {
             uint8[] memory w = new uint8[](1);
             w[0] = 100;
 
-            // They can vote but with 0 power (no matching hats in any class)
+            // Zero-power voter is rejected to prevent quorum inflation via Sybil
             vm.prank(hatOnlyVoter);
-            hv.vote(proposalId, idx, w); // Vote on correct proposal
+            vm.expectRevert(VotingErrors.Unauthorized.selector);
+            hv.vote(proposalId, idx, w);
         }
 
         function testSetCreatorHatAllowed() public {

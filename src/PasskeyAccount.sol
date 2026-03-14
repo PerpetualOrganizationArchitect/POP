@@ -363,16 +363,22 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
             revert RecoveryDelayNotPassed();
         }
 
-        // Deactivate all existing credentials for security
-        for (uint256 i = 0; i < l.credentialIds.length; i++) {
+        // Delete all existing credentials from mapping and clear the array.
+        // This prevents unbounded array growth from repeated recoveries.
+        uint256 credCount = l.credentialIds.length;
+        for (uint256 i = 0; i < credCount; i++) {
             bytes32 existingCredId = l.credentialIds[i];
             if (l.credentials[existingCredId].active) {
-                l.credentials[existingCredId].active = false;
                 emit CredentialStatusChanged(existingCredId, false);
             }
+            delete l.credentials[existingCredId];
+        }
+        // Clear the credentialIds array
+        while (l.credentialIds.length > 0) {
+            l.credentialIds.pop();
         }
 
-        // Add the new credential
+        // Add only the new recovery credential
         bytes32 credentialId = request.credentialId;
 
         l.credentials[credentialId] = PasskeyCredential({
@@ -387,10 +393,23 @@ contract PasskeyAccount is Initializable, IAccount, IPasskeyAccount {
         // Mark recovery as completed by setting executeAfter to 0
         request.executeAfter = 0;
 
+        // Cancel all other pending recovery requests to prevent race conditions
+        // where a second recovery could wipe the credential just added by this one.
+        uint256 pendingLen = l.pendingRecoveryIds.length;
+        for (uint256 i = 0; i < pendingLen; i++) {
+            bytes32 otherId = l.pendingRecoveryIds[i];
+            if (otherId != recoveryId && !l.recoveryRequests[otherId].cancelled) {
+                l.recoveryRequests[otherId].cancelled = true;
+                emit RecoveryCancelled(otherId);
+            }
+        }
+        // Clear the entire pending array since all are now resolved
+        while (l.pendingRecoveryIds.length > 0) {
+            l.pendingRecoveryIds.pop();
+        }
+
         emit RecoveryCompleted(recoveryId, credentialId);
         emit CredentialAdded(credentialId, uint64(block.timestamp));
-
-        _removePendingRecovery(recoveryId);
     }
 
     /// @inheritdoc IPasskeyAccount

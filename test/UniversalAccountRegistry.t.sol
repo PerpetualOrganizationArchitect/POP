@@ -245,4 +245,74 @@ contract UARTest is Test {
             auth
         );
     }
+
+    /* ═══════════════════ Username release tests (L-01 fix) ═══════════════════ */
+
+    function testDeleteAccountReleasesUsername() public {
+        // Register and then delete
+        vm.prank(user);
+        reg.registerAccount("alice");
+        vm.prank(user);
+        reg.deleteAccount();
+
+        // Username should now be available for re-registration
+        address user2 = address(0x42);
+        vm.prank(user2);
+        reg.registerAccount("alice");
+        assertEq(reg.getUsername(user2), "alice");
+    }
+
+    function testChangeUsernameReleasesOldName() public {
+        // Register "alice" then change to "bob"
+        vm.prank(user);
+        reg.registerAccount("alice");
+        vm.prank(user);
+        reg.changeUsername("bob");
+        assertEq(reg.getUsername(user), "bob");
+
+        // "alice" should now be available for someone else
+        address user2 = address(0x42);
+        vm.prank(user2);
+        reg.registerAccount("alice");
+        assertEq(reg.getUsername(user2), "alice");
+    }
+
+    function testDeleteAndReRegisterSameAddress() public {
+        // Register, delete, then re-register with a new name
+        vm.prank(user);
+        reg.registerAccount("alice");
+        vm.prank(user);
+        reg.deleteAccount();
+
+        vm.prank(user);
+        reg.registerAccount("bob");
+        assertEq(reg.getUsername(user), "bob");
+    }
+
+    function testDeleteAndReRegisterSameName() public {
+        // Register, delete, then re-register the exact same name
+        vm.prank(user);
+        reg.registerAccount("alice");
+        vm.prank(user);
+        reg.deleteAccount();
+
+        vm.prank(user);
+        reg.registerAccount("alice");
+        assertEq(reg.getUsername(user), "alice");
+    }
+
+    function testCannotGriefByBurningUsernames() public {
+        // Attacker registers "admin" and deletes it -- name should be reusable
+        address attacker = address(0xBAD);
+        vm.prank(attacker);
+        reg.registerAccount("admin");
+        vm.prank(attacker);
+        reg.deleteAccount();
+
+        // Legitimate user can now claim "admin"
+        address legitimate = address(0x600D);
+        vm.prank(legitimate);
+        reg.registerAccount("admin");
+        assertEq(reg.getUsername(legitimate), "admin");
+    }
 }

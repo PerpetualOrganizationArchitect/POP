@@ -144,8 +144,11 @@ contract OrgDeployer is Initializable {
         address paymasterHub; // Shared PaymasterHub for all orgs
         address universalPasskeyFactory; // Universal PasskeyAccountFactory for all orgs
         uint256 _status; // manual reentrancy guard
+        IHats hatsV2; // upgrade-safe hats reference (inside ERC-7201 namespace)
     }
 
+    /// @dev Legacy slot-0 hats variable. Kept for ABI compatibility with existing proxies.
+    ///      New deployments write to Layout.hatsV2. Reads use _getHats() which checks both.
     IHats public hats;
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.orgdeployer.storage");
@@ -155,6 +158,14 @@ contract OrgDeployer is Initializable {
         assembly {
             s.slot := slot
         }
+    }
+
+    /// @dev Returns the Hats instance, preferring the ERC-7201 slot (hatsV2) with
+    ///      fallback to the legacy slot-0 variable for pre-migration proxies.
+    function _getHats() internal view returns (IHats) {
+        IHats h = _layout().hatsV2;
+        if (address(h) != address(0)) return h;
+        return hats; // legacy slot-0 fallback
     }
 
     /*════════════════  INITIALIZATION  ════════════════*/
@@ -191,7 +202,8 @@ contract OrgDeployer is Initializable {
         l.hatsTreeSetup = _hatsTreeSetup;
         l.paymasterHub = _paymasterHub;
         l._status = 1; // Initialize manual reentrancy guard
-        hats = IHats(_hats);
+        l.hatsV2 = IHats(_hats); // ERC-7201 namespace (upgrade-safe)
+        hats = IHats(_hats); // Legacy slot-0 (ABI compatibility for public getter)
     }
 
     /**
@@ -400,7 +412,7 @@ contract OrgDeployer is Initializable {
                 orgName: params.orgName,
                 poaManager: l.poaManager,
                 orgRegistry: address(l.orgRegistry),
-                hats: address(hats),
+                hats: address(_getHats()),
                 executor: result.executor,
                 deployer: address(this), // For registration callbacks
                 registryAddr: params.registryAddr,
@@ -429,7 +441,7 @@ contract OrgDeployer is Initializable {
                 orgName: params.orgName,
                 poaManager: l.poaManager,
                 orgRegistry: address(l.orgRegistry),
-                hats: address(hats),
+                hats: address(_getHats()),
                 executor: result.executor,
                 deployer: address(this), // For registration callbacks
                 participationToken: result.participationToken,
@@ -619,7 +631,7 @@ contract OrgDeployer is Initializable {
         govParams.orgName = params.orgName;
         govParams.poaManager = l.poaManager;
         govParams.orgRegistry = address(l.orgRegistry);
-        govParams.hats = address(hats);
+        govParams.hats = address(_getHats());
         govParams.hatsTreeSetup = l.hatsTreeSetup;
         govParams.deployer = address(this);
         govParams.deployerAddress = params.deployerAddress; // Pass deployer address for ADMIN hat
@@ -659,7 +671,7 @@ contract OrgDeployer is Initializable {
         votingParams.orgName = params.orgName;
         votingParams.poaManager = l.poaManager;
         votingParams.orgRegistry = address(l.orgRegistry);
-        votingParams.hats = address(hats);
+        votingParams.hats = address(_getHats());
         votingParams.hatsTreeSetup = l.hatsTreeSetup;
         votingParams.deployer = address(this);
         votingParams.deployerAddress = params.deployerAddress;

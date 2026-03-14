@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IMessageRecipient} from "./interfaces/IHyperlane.sol";
 import {PoaManager} from "../PoaManager.sol";
 
@@ -9,7 +9,7 @@ import {PoaManager} from "../PoaManager.sol";
 /// @notice Remote-chain receiver that applies beacon upgrades dispatched by the Hub.
 /// @dev    Deploy on each satellite chain. Owns a local PoaManager instance.
 ///         Only accepts Hyperlane messages from the Hub on the home chain.
-contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
+contract PoaManagerSatellite is Ownable2Step, IMessageRecipient {
     /*──────────── Constants ───────────*/
     uint8 internal constant MSG_UPGRADE_BEACON = 0x01;
     uint8 internal constant MSG_ADD_CONTRACT_TYPE = 0x02;
@@ -40,7 +40,7 @@ contract PoaManagerSatellite is Ownable(msg.sender), IMessageRecipient {
     event PauseSet(bool paused);
 
     /*──────────── Constructor ─────────*/
-    constructor(address _poaManager, address _mailbox, uint32 _hubDomain, address _hubAddress) {
+    constructor(address _poaManager, address _mailbox, uint32 _hubDomain, address _hubAddress) Ownable(msg.sender) {
         if (_poaManager == address(0) || _mailbox == address(0) || _hubAddress == address(0)) {
             revert ZeroAddress();
         }
