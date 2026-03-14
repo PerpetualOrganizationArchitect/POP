@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {SwitchableBeacon} from "../src/SwitchableBeacon.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title UpgradeEdgeCasesTest
 /// @notice Tests the full upgrade chain: PoaBeacon → SwitchableBeacon → BeaconProxy → delegatecall
@@ -67,7 +68,7 @@ contract UpgradeEdgeCasesTest is Test {
 
         // Pin to current V1
         switchable.pinToCurrent();
-        assertFalse(switchable.isMirrorMode());
+        assertEq(uint256(switchable.mode()), uint256(SwitchableBeacon.Mode.Static));
 
         // Upgrade POA beacon to V2
         poaBeacon.upgradeTo(address(implV2));
@@ -126,7 +127,7 @@ contract UpgradeEdgeCasesTest is Test {
 
         // 2. Pin → Static
         switchable.pinToCurrent();
-        assertFalse(switchable.isMirrorMode());
+        assertEq(uint256(switchable.mode()), uint256(SwitchableBeacon.Mode.Static));
 
         // 3. Upgrade POA to V2 (proxy should NOT see it)
         poaBeacon.upgradeTo(address(implV2));
@@ -135,7 +136,7 @@ contract UpgradeEdgeCasesTest is Test {
 
         // 4. Back to Mirror
         switchable.setMirror(address(poaBeacon));
-        assertTrue(switchable.isMirrorMode());
+        assertEq(uint256(switchable.mode()), uint256(SwitchableBeacon.Mode.Mirror));
 
         // 5. Now on V2, state preserved
         MockUpgradeableV2 proxyV2 = MockUpgradeableV2(address(proxy));
@@ -162,7 +163,7 @@ contract UpgradeEdgeCasesTest is Test {
         switchable.pinToCurrent();
 
         // State unchanged - still in Mirror mode
-        assertTrue(switchable.isMirrorMode());
+        assertEq(uint256(switchable.mode()), uint256(SwitchableBeacon.Mode.Mirror));
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -186,7 +187,7 @@ contract UpgradeEdgeCasesTest is Test {
         // Recovery: pin to known-good implementation
         switchable.pin(address(implV1));
         assertEq(switchable.implementation(), address(implV1));
-        assertFalse(switchable.isMirrorMode());
+        assertEq(uint256(switchable.mode()), uint256(SwitchableBeacon.Mode.Static));
 
         // Proxy using this beacon now works
         BeaconProxy bp = new BeaconProxy(address(switchable), "");
@@ -236,7 +237,7 @@ contract UpgradeEdgeCasesTest is Test {
         // Pin directly to V3 (never served by mirror, which has V1)
         switchable.pin(address(implV3));
         assertEq(switchable.implementation(), address(implV3));
-        assertFalse(switchable.isMirrorMode());
+        assertEq(uint256(switchable.mode()), uint256(SwitchableBeacon.Mode.Static));
 
         // Proxy now uses V3
         MockUpgradeableV3 proxyV3 = MockUpgradeableV3(address(proxy));
@@ -305,13 +306,13 @@ contract UpgradeEdgeCasesTest is Test {
         assertEq(switchable.pendingOwner(), address(0));
 
         // Factory can no longer manage
-        vm.expectRevert(SwitchableBeacon.NotOwner.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, factory));
         switchable.pin(address(implV2));
 
-        vm.expectRevert(SwitchableBeacon.NotOwner.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, factory));
         switchable.setMirror(address(poaBeacon));
 
-        vm.expectRevert(SwitchableBeacon.NotOwner.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, factory));
         switchable.pinToCurrent();
 
         // Executor can manage

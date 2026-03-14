@@ -1,28 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.20;
 
-interface IBeacon {
-    function implementation() external view returns (address);
-}
+import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /**
  * @title SwitchableBeacon
- * @notice A beacon implementation that can switch between mirroring a global beacon and using a static implementation
- * @dev This contract enables organizations to toggle between auto-upgrading (following POA global beacons)
- *      and pinned mode (using a fixed implementation) without redeploying proxies
- * @custom:security-contact security@poa.org
+ * @notice A beacon that can switch between mirroring a global beacon and using a static implementation.
+ * @dev Enables organizations to toggle between auto-upgrading (following POA global beacons)
+ *      and pinned mode (using a fixed implementation) without redeploying proxies.
+ *
+ *      Three sovereignty tiers:
+ *        1. Mirror mode  – org auto-follows the POA global beacon (latest version).
+ *        2. Static mode   – org pins to a specific implementation and votes to upgrade.
+ *        3. Custom beacon – org calls setMirror() with their own beacon for full custody.
  */
-contract SwitchableBeacon is IBeacon {
+contract SwitchableBeacon is IBeacon, Ownable2Step {
     enum Mode {
         Mirror, // Follow the global beacon's implementation
         Static // Use a pinned implementation
     }
 
-    /// @notice Current owner of this beacon (typically the Executor or UpgradeAdmin)
-    address public owner;
-
-    /// @notice The pending owner awaiting acceptance of ownership transfer
-    address public pendingOwner;
+    /*──────────── Storage ─────────────*/
 
     /// @notice The global POA beacon to mirror when in Mirror mode
     address public mirrorBeacon;
@@ -33,129 +32,52 @@ contract SwitchableBeacon is IBeacon {
     /// @notice Current operational mode of the beacon
     Mode public mode;
 
-    /// @notice Emitted when ownership is transferred
-    /// @param previousOwner The address of the previous owner
-    /// @param newOwner The address of the new owner
-    event OwnerTransferred(address indexed previousOwner, address indexed newOwner);
+    /*──────────── Events ──────────────*/
 
-    /// @notice Emitted when a pending ownership transfer is started
-    /// @param pendingOwner The address of the pending new owner
-    event OwnershipTransferStarted(address indexed pendingOwner);
-
-    /// @notice Emitted when a pending ownership transfer is cancelled
-    /// @param cancelledOwner The address of the cancelled pending owner
-    event OwnershipTransferCancelled(address indexed cancelledOwner);
-
-    /// @notice Emitted when the beacon mode changes
-    /// @param mode The new mode (Mirror or Static)
     event ModeChanged(Mode mode);
-
-    /// @notice Emitted when a new mirror beacon is set
-    /// @param mirrorBeacon The address of the new mirror beacon
     event MirrorSet(address indexed mirrorBeacon);
-
-    /// @notice Emitted when an implementation is pinned
-    /// @param implementation The address of the pinned implementation
     event Pinned(address indexed implementation);
 
-    /// @notice Thrown when a non-owner attempts a restricted operation
-    error NotOwner();
+    /*──────────── Errors ──────────────*/
 
-    /// @notice Thrown when a zero address is provided where not allowed
-    error ZeroAddress();
-
-    /// @notice Thrown when the implementation address cannot be determined
     error ImplNotSet();
-
-    /// @notice Thrown when attempting to set invalid mode transition
-    error InvalidModeTransition();
-
-    /// @notice Thrown when an address is not a contract when it should be
     error NotContract();
+    error CannotRenounce();
 
-    /// @notice Thrown when there is no pending ownership transfer to cancel
-    error NoPendingTransfer();
-
-    /// @notice Thrown when the caller is not the pending owner
-    error NotPendingOwner();
-
-    /// @notice Restricts function access to the owner only
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
-    }
+    /*──────────── Constructor ─────────*/
 
     /**
-     * @notice Constructs a new SwitchableBeacon
-     * @param _owner The initial owner of the beacon
-     * @param _mirrorBeacon The POA global beacon to mirror when in Mirror mode
-     * @param _staticImpl The static implementation to use when in Static mode (can be address(0) if starting in Mirror mode)
-     * @param _mode The initial mode of operation
+     * @notice Constructs a new SwitchableBeacon.
+     * @param _owner The initial owner of the beacon (typically the Executor).
+     * @param _mirrorBeacon The POA global beacon to mirror when in Mirror mode.
+     * @param _staticImpl The static implementation when in Static mode (can be address(0) if starting in Mirror mode).
+     * @param _mode The initial mode of operation.
      */
-    constructor(address _owner, address _mirrorBeacon, address _staticImpl, Mode _mode) {
-        if (_owner == address(0)) revert ZeroAddress();
-        if (_mirrorBeacon == address(0)) revert ZeroAddress();
+    constructor(address _owner, address _mirrorBeacon, address _staticImpl, Mode _mode) Ownable(_owner) {
+        if (_mirrorBeacon == address(0) || _mirrorBeacon.code.length == 0) revert NotContract();
 
-        // Verify mirrorBeacon is a contract
-        if (_mirrorBeacon.code.length == 0) revert NotContract();
-
-        // Static implementation can be zero if starting in Mirror mode
         if (_mode == Mode.Static) {
             if (_staticImpl == address(0)) revert ImplNotSet();
-            // Verify static implementation is a contract
             if (_staticImpl.code.length == 0) revert NotContract();
         }
 
-        owner = _owner;
         mirrorBeacon = _mirrorBeacon;
         staticImplementation = _staticImpl;
         mode = _mode;
 
-        emit OwnerTransferred(address(0), _owner);
         emit ModeChanged(_mode);
     }
 
-    /**
-     * @notice Initiates a two-step ownership transfer to a new address
-     * @param newOwner The address of the pending new owner
-     * @dev Only callable by the current owner. The new owner must call acceptOwnership() to complete the transfer.
-     */
-    function transferOwnership(address newOwner) external onlyOwner {
-        if (newOwner == address(0)) revert ZeroAddress();
+    /*══════════════════ Ownership Safety ══════════════════*/
 
-        pendingOwner = newOwner;
-
-        emit OwnershipTransferStarted(newOwner);
+    /// @dev Ownership cannot be renounced — losing it bricks the beacon permanently.
+    function renounceOwnership() public pure override {
+        revert CannotRenounce();
     }
 
-    /**
-     * @notice Completes the ownership transfer
-     * @dev Only callable by the pending owner
-     */
-    function acceptOwnership() external {
-        if (msg.sender != pendingOwner) revert NotPendingOwner();
+    /*══════════════════ IBeacon ══════════════════*/
 
-        address previousOwner = owner;
-        owner = pendingOwner;
-        pendingOwner = address(0);
-
-        emit OwnerTransferred(previousOwner, msg.sender);
-    }
-
-    /// @notice Cancels a pending ownership transfer
-    /// @dev Only callable by the current owner
-    function cancelOwnershipTransfer() external onlyOwner {
-        if (pendingOwner == address(0)) revert NoPendingTransfer();
-        address cancelled = pendingOwner;
-        pendingOwner = address(0);
-        emit OwnershipTransferCancelled(cancelled);
-    }
-
-    /**
-     * @notice Returns the current implementation address based on the beacon's mode
-     * @return The address of the implementation contract
-     * @dev In Mirror mode, queries the mirror beacon. In Static mode, returns the stored implementation.
-     */
+    /// @notice Returns the current implementation address based on the beacon's mode.
     function implementation() external view override returns (address) {
         if (mode == Mode.Mirror) {
             address impl = IBeacon(mirrorBeacon).implementation();
@@ -167,22 +89,15 @@ contract SwitchableBeacon is IBeacon {
         }
     }
 
-    /**
-     * @notice Switches to Mirror mode and sets a new mirror beacon
-     * @param _mirrorBeacon The address of the POA global beacon to mirror
-     * @dev Only callable by the owner. Enables auto-upgrading by following the global beacon.
-     */
+    /*══════════════════ Mode Switching ══════════════════*/
+
+    /// @notice Switch to Mirror mode, following the given beacon.
+    /// @param _mirrorBeacon The beacon to mirror (can be the POA global beacon or a custom one).
     function setMirror(address _mirrorBeacon) external onlyOwner {
-        if (_mirrorBeacon == address(0)) revert ZeroAddress();
+        if (_mirrorBeacon == address(0) || _mirrorBeacon.code.length == 0) revert NotContract();
 
-        // Verify the beacon is a contract
-        if (_mirrorBeacon.code.length == 0) revert NotContract();
-
-        // Validate that the mirror beacon has a valid implementation
         address impl = IBeacon(_mirrorBeacon).implementation();
         if (impl == address(0)) revert ImplNotSet();
-
-        // Verify the implementation is a contract
         if (impl.code.length == 0) revert NotContract();
 
         mirrorBeacon = _mirrorBeacon;
@@ -192,16 +107,9 @@ contract SwitchableBeacon is IBeacon {
         emit ModeChanged(Mode.Mirror);
     }
 
-    /**
-     * @notice Pins the beacon to a specific implementation address
-     * @param impl The implementation address to pin
-     * @dev Only callable by the owner. Switches to Static mode with the specified implementation.
-     */
+    /// @notice Pin the beacon to a specific implementation address.
     function pin(address impl) public onlyOwner {
-        if (impl == address(0)) revert ZeroAddress();
-
-        // Verify the implementation is a contract
-        if (impl.code.length == 0) revert NotContract();
+        if (impl == address(0) || impl.code.length == 0) revert NotContract();
 
         staticImplementation = impl;
         mode = Mode.Static;
@@ -210,31 +118,16 @@ contract SwitchableBeacon is IBeacon {
         emit ModeChanged(Mode.Static);
     }
 
-    /**
-     * @notice Pins the beacon to the current implementation of the mirror beacon
-     * @dev Only callable by the owner. Convenient way to freeze at the current global version.
-     */
+    /// @notice Pin the beacon to the current implementation of the mirror beacon.
     function pinToCurrent() external onlyOwner {
         address impl = IBeacon(mirrorBeacon).implementation();
         if (impl == address(0)) revert ImplNotSet();
-
-        // The pin function will validate the implementation is a contract
         pin(impl);
     }
 
-    /**
-     * @notice Checks if the beacon is in Mirror mode
-     * @return True if in Mirror mode, false otherwise
-     */
-    function isMirrorMode() external view returns (bool) {
-        return mode == Mode.Mirror;
-    }
+    /*══════════════════ Views ══════════════════*/
 
-    /**
-     * @notice Gets the current implementation without reverting
-     * @return success True if implementation could be determined
-     * @return impl The implementation address (zero if not determinable)
-     */
+    /// @notice Gets the current implementation without reverting.
     function tryGetImplementation() external view returns (bool success, address impl) {
         if (mode == Mode.Mirror) {
             try IBeacon(mirrorBeacon).implementation() returns (address mirrorImpl) {

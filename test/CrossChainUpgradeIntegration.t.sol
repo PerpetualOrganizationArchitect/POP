@@ -307,7 +307,68 @@ contract CrossChainUpgradeIntegrationTest is Test {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  12. Mixed: one satellite pinned, one mirroring
+    //  12. Cross-chain admin call propagates to all chains
+    // ══════════════════════════════════════════════════════════
+
+    function testCrossChainAdminCallPropagates() public {
+        // Deploy MockAdminTarget on home chain (owned by homePm)
+        IntegrationAdminTarget homeTarget = new IntegrationAdminTarget(address(homePm));
+        // Deploy MockAdminTarget on satellite 1 (owned by sat1Pm)
+        IntegrationAdminTarget sat1Target = new IntegrationAdminTarget(address(sat1Pm));
+        // Deploy MockAdminTarget on satellite 2 (owned by sat2Pm)
+        IntegrationAdminTarget sat2Target = new IntegrationAdminTarget(address(sat2Pm));
+
+        // All targets must be at the same address for cross-chain admin calls.
+        // Since they won't be, we test with separate calls for realism.
+        // The hub dispatches the same (target, data) to all satellites.
+        // For this integration test, we use separate target addresses and
+        // do two calls: one for home+sat1 target and one for sat2 target.
+
+        // Actually, cross-chain admin call sends the same target address to all chains.
+        // In production the target must be deployed at the same address on all chains.
+        // In our synchronous mock, all contracts are on the same EVM, so we can
+        // test by deploying a single target that accepts calls from any PoaManager.
+
+        // Let's use a permissive target instead:
+        IntegrationAdminTargetPermissive sharedTarget = new IntegrationAdminTargetPermissive();
+
+        bytes memory data = abi.encodeWithSignature("setValue(uint256)", 999);
+        hub.adminCallCrossChain(address(sharedTarget), data);
+
+        // The call is executed 3 times: once locally (via homePm) and once per satellite (via sat1Pm, sat2Pm)
+        // Since the mock mailbox delivers synchronously, all 3 calls happen
+        assertEq(sharedTarget.value(), 999, "Target value should be set");
+        assertEq(sharedTarget.callCount(), 3, "Should be called 3 times (home + 2 satellites)");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  13. Cross-chain infra beacon upgrade
+    // ══════════════════════════════════════════════════════════
+
+    function testCrossChainInfraBeaconUpgrade() public {
+        // Add an infra-style type "OrgDeployer" on all chains
+        hub.addContractType("OrgDeployer", address(implV1));
+        satellite1.addContractType("OrgDeployer", address(implV1));
+        satellite2.addContractType("OrgDeployer", address(implV1));
+
+        bytes32 typeId = keccak256(bytes("OrgDeployer"));
+
+        // Verify all chains start with V1
+        assertEq(homePm.getCurrentImplementationById(typeId), address(implV1), "Home should start at V1");
+        assertEq(sat1Pm.getCurrentImplementationById(typeId), address(implV1), "Sat1 should start at V1");
+        assertEq(sat2Pm.getCurrentImplementationById(typeId), address(implV1), "Sat2 should start at V1");
+
+        // Upgrade cross-chain to V2
+        hub.upgradeBeaconCrossChain("OrgDeployer", address(implV2), "v2");
+
+        // Verify all chains upgraded to V2
+        assertEq(homePm.getCurrentImplementationById(typeId), address(implV2), "Home should be V2");
+        assertEq(sat1Pm.getCurrentImplementationById(typeId), address(implV2), "Sat1 should be V2");
+        assertEq(sat2Pm.getCurrentImplementationById(typeId), address(implV2), "Sat2 should be V2");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  14. Mixed: one satellite pinned, one mirroring
     // ══════════════════════════════════════════════════════════
 
     function testMixedPinnedAndMirroringSatellites() public {
@@ -395,5 +456,31 @@ contract IntegrationImplV2 {
 contract IntegrationImplV3 {
     function version() external pure returns (uint256) {
         return 3;
+    }
+}
+
+/// @dev Admin target gated behind a specific PoaManager (for single-chain tests)
+contract IntegrationAdminTarget {
+    address public poaManager;
+    uint256 public value;
+
+    constructor(address _pm) {
+        poaManager = _pm;
+    }
+
+    function setValueOnlyPM(uint256 _val) external {
+        require(msg.sender == poaManager, "not pm");
+        value = _val;
+    }
+}
+
+/// @dev Permissive admin target that accepts calls from any PoaManager (for cross-chain integration tests)
+contract IntegrationAdminTargetPermissive {
+    uint256 public value;
+    uint256 public callCount;
+
+    function setValue(uint256 _val) external {
+        value = _val;
+        callCount++;
     }
 }

@@ -61,10 +61,6 @@ import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
 contract DeployHomeChain is DeployHelper {
     /*═══════════════════════════ CONSTANTS ═══════════════════════════*/
 
-    address public constant HATS_PROTOCOL = 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137;
-    address public constant ENTRY_POINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
-    address public constant POA_GUARDIAN = address(0);
-    uint256 public constant INITIAL_SOLIDARITY_FUND = 0.1 ether;
     bytes32 public constant DD_SALT = keccak256("POA_DETERMINISTIC_DEPLOYER_V1");
 
     /*═══════════════════════════ RESULT STRUCTS ═══════════════════════════*/
@@ -197,7 +193,8 @@ contract DeployHomeChain is DeployHelper {
             "initialize(address,address,address)", ENTRY_POINT_V07, HATS_PROTOCOL, infra.poaManager
         );
         infra.paymasterHub = address(new BeaconProxy(paymasterHubBeacon, paymasterHubInit));
-        PaymasterHub(payable(infra.paymasterHub)).donateToSolidarity{value: INITIAL_SOLIDARITY_FUND}();
+        uint256 solidarityFund = vm.envOr("SOLIDARITY_FUND", INITIAL_SOLIDARITY_FUND);
+        PaymasterHub(payable(infra.paymasterHub)).donateToSolidarity{value: solidarityFund}();
         console.log("PaymasterHub:", infra.paymasterHub);
 
         // Deploy OrgDeployer proxy
@@ -252,7 +249,10 @@ contract DeployHomeChain is DeployHelper {
             );
         // Wire up universal factory to GlobalAccountRegistry (owner = deployer)
         UniversalAccountRegistry(infra.globalAccountRegistry).setPasskeyFactory(infra.universalPasskeyFactory);
+        // Transfer ownership to PoaManager so governance can manage via adminCall
+        UniversalAccountRegistry(infra.globalAccountRegistry).transferOwnership(infra.poaManager);
         console.log("UniversalPasskeyFactory:", infra.universalPasskeyFactory);
+        console.log("GlobalAccountRegistry ownership -> PoaManager");
 
         // Register infrastructure for subgraph indexing
         pm.registerInfrastructure(
@@ -472,6 +472,18 @@ contract DeployHomeChain is DeployHelper {
 contract DeploySatellite is DeployHelper {
     bytes32 public constant DD_SALT = keccak256("POA_DETERMINISTIC_DEPLOYER_V1");
 
+    struct SatelliteInfraResult {
+        address orgRegistry;
+        address orgDeployer;
+        address paymasterHub;
+        address globalAccountRegistry;
+        address universalPasskeyFactory;
+        address governanceFactory;
+        address accessFactory;
+        address modulesFactory;
+        address hatsTreeSetup;
+    }
+
     function run() public {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
         address mailboxAddr = vm.envAddress("MAILBOX");
@@ -490,6 +502,10 @@ contract DeploySatellite is DeployHelper {
 
         vm.startBroadcast(deployerKey);
 
+        // Verify external contracts exist on this chain
+        require(HATS_PROTOCOL.code.length > 0, "Hats Protocol not deployed on this chain");
+        require(ENTRY_POINT_V07.code.length > 0, "EntryPoint v0.7 not deployed on this chain");
+
         // 1. Deploy DeterministicDeployer if needed
         address ddAddr = _deployDeterministicDeployer(deployer);
         DeterministicDeployer dd = DeterministicDeployer(ddAddr);
@@ -505,36 +521,150 @@ contract DeploySatellite is DeployHelper {
         pm.updateImplRegistry(address(reg));
         reg.registerImplementation("ImplementationRegistry", "v1", address(regImpl), true);
         reg.transferOwnership(address(pm));
+        console.log("ImplementationRegistry:", address(reg));
 
-        // 3. Deploy implementations via DD and register all contract types
+        // 3. Deploy infrastructure types via DD and register on PoaManager
+        _deployAndRegisterInfraTypesDD(pm, dd);
+
+        // 4. Deploy application types via DD and register
         _deployAndRegisterTypesDD(pm, dd);
 
-        // 4. Deploy PoaManagerSatellite
-        PoaManagerSatellite satellite = new PoaManagerSatellite(address(pm), mailboxAddr, hubDomain, hubAddress);
+        // 5. Deploy full infrastructure
+        SatelliteInfraResult memory infra = _deploySatelliteInfrastructure(pm, deployer);
 
-        // 5. Transfer PoaManager ownership to Satellite
+        // 6. Register infrastructure for subgraph indexing
+        pm.registerInfrastructure(
+            infra.orgDeployer,
+            infra.orgRegistry,
+            address(reg),
+            infra.paymasterHub,
+            infra.globalAccountRegistry,
+            infra.universalPasskeyFactory
+        );
+        console.log("Infrastructure registered for subgraph indexing");
+
+        // 7. Deploy PoaManagerSatellite (AFTER all wiring)
+        PoaManagerSatellite satellite = new PoaManagerSatellite(address(pm), mailboxAddr, hubDomain, hubAddress);
+        console.log("PoaManagerSatellite:", address(satellite));
+
+        // 8. Transfer PoaManager ownership to Satellite (MUST BE LAST)
         pm.transferOwnership(address(satellite));
+        console.log("PoaManager ownership transferred to Satellite");
 
         vm.stopBroadcast();
 
+        // Write state
+        _writeSatelliteState(pm, reg, satellite, infra);
+
         console.log("\n=== Satellite Deployment Complete ===");
-        console.log("PoaManager:", address(pm));
-        console.log("ImplementationRegistry:", address(reg));
-        console.log("PoaManagerSatellite:", address(satellite));
+    }
 
-        // 7. Write satellite info for manual addition to state file
+    function _deploySatelliteInfrastructure(PoaManager pm, address deployer)
+        internal
+        returns (SatelliteInfraResult memory infra)
+    {
+        // --- Deploy stateless factories ---
+        infra.governanceFactory = address(new GovernanceFactory());
+        infra.accessFactory = address(new AccessFactory());
+        infra.modulesFactory = address(new ModulesFactory());
+        infra.hatsTreeSetup = address(new HatsTreeSetup());
+        console.log("Factories deployed");
+
+        // --- OrgRegistry proxy ---
+        address orgRegBeacon = pm.getBeaconById(keccak256("OrgRegistry"));
+        bytes memory orgRegInit = abi.encodeWithSignature("initialize(address,address)", deployer, HATS_PROTOCOL);
+        infra.orgRegistry = address(new BeaconProxy(orgRegBeacon, orgRegInit));
+        console.log("OrgRegistry:", infra.orgRegistry);
+
+        // --- PaymasterHub proxy ---
+        address paymasterHubBeacon = pm.getBeaconById(keccak256("PaymasterHub"));
+        bytes memory paymasterHubInit =
+            abi.encodeWithSignature("initialize(address,address,address)", ENTRY_POINT_V07, HATS_PROTOCOL, address(pm));
+        infra.paymasterHub = address(new BeaconProxy(paymasterHubBeacon, paymasterHubInit));
+        uint256 solidarityFund = vm.envOr("SOLIDARITY_FUND", INITIAL_SOLIDARITY_FUND);
+        PaymasterHub(payable(infra.paymasterHub)).donateToSolidarity{value: solidarityFund}();
+        console.log("PaymasterHub:", infra.paymasterHub);
+
+        // --- OrgDeployer proxy ---
+        address deployerBeacon = pm.getBeaconById(keccak256("OrgDeployer"));
+        bytes memory orgDeployerInit = abi.encodeWithSignature(
+            "initialize(address,address,address,address,address,address,address,address)",
+            infra.governanceFactory,
+            infra.accessFactory,
+            infra.modulesFactory,
+            address(pm),
+            infra.orgRegistry,
+            HATS_PROTOCOL,
+            infra.hatsTreeSetup,
+            infra.paymasterHub
+        );
+        infra.orgDeployer = address(new BeaconProxy(deployerBeacon, orgDeployerInit));
+        console.log("OrgDeployer:", infra.orgDeployer);
+
+        // --- Wire OrgRegistry ownership to OrgDeployer ---
+        OrgRegistry(infra.orgRegistry).transferOwnership(infra.orgDeployer);
+
+        // --- Authorize OrgDeployer as org registrar on PaymasterHub ---
+        pm.adminCall(infra.paymasterHub, abi.encodeWithSignature("setOrgRegistrar(address)", infra.orgDeployer));
+        console.log("OrgDeployer authorized as orgRegistrar on PaymasterHub");
+
+        // --- Deploy GlobalAccountRegistry ---
+        address accRegBeacon = pm.getBeaconById(keccak256("UniversalAccountRegistry"));
+        bytes memory accRegInit = abi.encodeWithSignature("initialize(address)", deployer);
+        infra.globalAccountRegistry = address(new BeaconProxy(accRegBeacon, accRegInit));
+        console.log("GlobalAccountRegistry:", infra.globalAccountRegistry);
+
+        // --- Deploy UniversalPasskeyFactory ---
+        address passkeyAccountBeacon = pm.getBeaconById(keccak256("PasskeyAccount"));
+        address passkeyFactoryBeacon = pm.getBeaconById(keccak256("PasskeyAccountFactory"));
+        bytes memory passkeyFactoryInit = abi.encodeWithSignature(
+            "initialize(address,address,address,uint48)",
+            address(pm),
+            passkeyAccountBeacon,
+            POA_GUARDIAN,
+            uint48(7 days)
+        );
+        infra.universalPasskeyFactory = address(new BeaconProxy(passkeyFactoryBeacon, passkeyFactoryInit));
+        console.log("UniversalPasskeyFactory:", infra.universalPasskeyFactory);
+
+        // --- Wire passkey factory to OrgDeployer ---
+        pm.adminCall(
+            infra.orgDeployer,
+            abi.encodeWithSignature("setUniversalPasskeyFactory(address)", infra.universalPasskeyFactory)
+        );
+
+        // --- Wire passkey factory to GlobalAccountRegistry ---
+        UniversalAccountRegistry(infra.globalAccountRegistry).setPasskeyFactory(infra.universalPasskeyFactory);
+        // Transfer ownership to PoaManager so home chain governance can manage via adminCall
+        UniversalAccountRegistry(infra.globalAccountRegistry).transferOwnership(address(pm));
+        console.log("GlobalAccountRegistry ownership -> PoaManager");
+
+        console.log("--- Satellite Infrastructure Complete ---");
+    }
+
+    function _writeSatelliteState(
+        PoaManager pm,
+        ImplementationRegistry reg,
+        PoaManagerSatellite satellite,
+        SatelliteInfraResult memory infra
+    ) internal {
         uint32 satDomain = uint32(vm.envUint("SATELLITE_DOMAIN"));
-        console.log("\nAdd to main-deploy-state.json satellites array:");
-        console.log('  { "domain":', satDomain, ",");
-        console.log('    "satellite": "', address(satellite), '",');
-        console.log('    "poaManager": "', address(pm), '" }');
 
-        // Write satellite-specific state file
         string memory satObj = "satellite_state";
         vm.serializeUint(satObj, "domain", uint256(satDomain));
         vm.serializeAddress(satObj, "satellite", address(satellite));
         vm.serializeAddress(satObj, "poaManager", address(pm));
-        string memory satJson = vm.serializeAddress(satObj, "implRegistry", address(reg));
+        vm.serializeAddress(satObj, "implRegistry", address(reg));
+        vm.serializeAddress(satObj, "orgRegistry", infra.orgRegistry);
+        vm.serializeAddress(satObj, "orgDeployer", infra.orgDeployer);
+        vm.serializeAddress(satObj, "paymasterHub", infra.paymasterHub);
+        vm.serializeAddress(satObj, "globalAccountRegistry", infra.globalAccountRegistry);
+        vm.serializeAddress(satObj, "universalPasskeyFactory", infra.universalPasskeyFactory);
+        vm.serializeAddress(satObj, "governanceFactory", infra.governanceFactory);
+        vm.serializeAddress(satObj, "accessFactory", infra.accessFactory);
+        vm.serializeAddress(satObj, "modulesFactory", infra.modulesFactory);
+        string memory satJson = vm.serializeAddress(satObj, "hatsTreeSetup", infra.hatsTreeSetup);
+
         string memory filename = string.concat("script/satellite-state-", vm.toString(uint256(satDomain)), ".json");
         vm.writeJson(satJson, filename);
         console.log("Satellite state written to", filename);
