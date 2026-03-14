@@ -31,7 +31,6 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
 
     /*─────────────────────────── Constants ─────────────────────────────*/
     uint256 private constant MAX_LEN = 64;
-    address private constant BURN_ADDRESS = address(0xdead);
 
     /*──────────────────────── EIP-712 Constants ───────────────────────*/
     bytes32 private constant _DOMAIN_TYPEHASH =
@@ -40,9 +39,8 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     bytes32 private constant _VERSION_HASH = keccak256("1");
     bytes32 private constant _REGISTER_TYPEHASH =
         keccak256("RegisterAccount(address user,string username,uint256 nonce,uint256 deadline)");
-    bytes32 private constant _REGISTER_PASSKEY_TYPEHASH = keccak256(
-        "RegisterPasskeyAccount(address user,string username,uint256 nonce,uint256 deadline,uint256 chainId,address verifyingContract)"
-    );
+    bytes32 private constant _REGISTER_PASSKEY_TYPEHASH =
+        keccak256("RegisterPasskeyAccount(address user,string username,uint256 nonce,uint256 deadline)");
 
     /*──────────────────────── ERC-7201 Storage ──────────────────────────*/
     /// @custom:storage-location erc7201:poa.universalaccountregistry.storage
@@ -51,6 +49,9 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         mapping(bytes32 => address) ownerOfUsernameHash;
         mapping(address => uint256) nonces;
         address passkeyFactory;
+        // Cached EIP-712 domain separator (recomputed on chain ID change, e.g. hard forks)
+        bytes32 cachedDomainSeparator;
+        uint256 cachedChainId;
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.universalaccountregistry.storage");
@@ -78,6 +79,7 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     function initialize(address initialOwner) external initializer {
         if (initialOwner == address(0)) revert InvalidChars();
         __Ownable_init(initialOwner);
+        // Domain separator is lazily cached on first use by _domainSeparator()
     }
 
     /*──────────────────── Admin ──────────────────────────────────────*/
@@ -157,18 +159,12 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
 
         if (nonce != l.nonces[user]) revert InvalidNonce();
 
-        // Build the challenge that the user signed with their passkey
-        bytes32 challenge = keccak256(
-            abi.encode(
-                _REGISTER_PASSKEY_TYPEHASH,
-                user,
-                keccak256(bytes(username)),
-                nonce,
-                deadline,
-                block.chainid,
-                address(this)
-            )
-        );
+        // Build the EIP-712 digest as the challenge for the WebAuthn signature.
+        // Uses \x19\x01 + domainSeparator + structHash for proper domain separation,
+        // consistent with the ECDSA registration path.
+        bytes32 structHash =
+            keccak256(abi.encode(_REGISTER_PASSKEY_TYPEHASH, user, keccak256(bytes(username)), nonce, deadline));
+        bytes32 challenge = keccak256(abi.encodePacked("\x19\x01", _domainSeparator(), structHash));
 
         // Verify the WebAuthn signature proves the user controls the passkey
         if (!WebAuthnLib.verify(auth, challenge, pubKeyX, pubKeyY, false)) {
@@ -209,25 +205,26 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         // reserve new
         l.ownerOfUsernameHash[newHash] = msg.sender;
 
-        // keep old reserved forever by burning ownership
+        // release old username so it can be claimed by others
         bytes32 oldHash = keccak256(bytes(_toLower(oldName)));
-        l.ownerOfUsernameHash[oldHash] = BURN_ADDRESS;
+        delete l.ownerOfUsernameHash[oldHash];
 
         l.addressToUsername[msg.sender] = norm;
         emit UsernameChanged(msg.sender, norm);
     }
 
     /**
-     * @notice Delete address <-> username link.  Name remains permanently
-     *         reserved (cannot be claimed by others).
+     * @notice Delete address <-> username link.  The username is released
+     *         and can be claimed by others.
      */
     function deleteAccount() external {
         Layout storage l = _layout();
         string storage oldName = l.addressToUsername[msg.sender];
         if (bytes(oldName).length == 0) revert AccountUnknown();
 
+        // release username so it can be re-registered
         bytes32 oldHash = keccak256(bytes(_toLower(oldName)));
-        l.ownerOfUsernameHash[oldHash] = BURN_ADDRESS;
+        delete l.ownerOfUsernameHash[oldHash];
         delete l.addressToUsername[msg.sender];
 
         emit UserDeleted(msg.sender, oldName);
@@ -262,11 +259,32 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     /// @notice Returns the EIP-712 domain separator.
     // solhint-disable-next-line func-name-mixedcase
     function DOMAIN_SEPARATOR() external view returns (bytes32) {
-        return _domainSeparator();
+        return _domainSeparatorView();
     }
 
     /*──────────────────── EIP-712 Helpers ─────────────────────────────*/
-    function _domainSeparator() internal view returns (bytes32) {
+    /// @dev Returns the cached domain separator if chain ID hasn't changed, otherwise recomputes.
+    function _domainSeparator() internal returns (bytes32) {
+        Layout storage l = _layout();
+        if (l.cachedChainId == block.chainid && l.cachedDomainSeparator != bytes32(0)) {
+            return l.cachedDomainSeparator;
+        }
+        bytes32 ds = _computeDomainSeparator();
+        l.cachedChainId = block.chainid;
+        l.cachedDomainSeparator = ds;
+        return ds;
+    }
+
+    /// @dev View-only domain separator (for DOMAIN_SEPARATOR() getter, cannot update cache).
+    function _domainSeparatorView() internal view returns (bytes32) {
+        Layout storage l = _layout();
+        if (l.cachedChainId == block.chainid && l.cachedDomainSeparator != bytes32(0)) {
+            return l.cachedDomainSeparator;
+        }
+        return _computeDomainSeparator();
+    }
+
+    function _computeDomainSeparator() private view returns (bytes32) {
         return keccak256(abi.encode(_DOMAIN_TYPEHASH, _NAME_HASH, _VERSION_HASH, block.chainid, address(this)));
     }
 

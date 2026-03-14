@@ -62,7 +62,7 @@ contract HybridVoting is Initializable {
         /* Config / Storage */
         IHats hats;
         IExecutor executor;
-        mapping(address => bool) allowedTarget; // execution allow‑list
+        mapping(address => bool) allowedTarget; // deprecated: kept for storage layout compatibility
         uint256[] creatorHatIds; // enumeration array for creator hats
         uint8 thresholdPct; // 1‑100  (min % of support for winning option)
         ClassConfig[] classes; // global N-class configuration
@@ -114,7 +114,6 @@ contract HybridVoting is Initializable {
 
     /* ─────── Events ─────── */
     event HatSet(HatType hatType, uint256 hat, bool allowed);
-    event TargetAllowed(address target, bool allowed);
     event ExecutorUpdated(address newExec);
     event ThresholdPctSet(uint8 pct);
     event QuorumSet(uint32 quorum);
@@ -148,9 +147,9 @@ contract HybridVoting is Initializable {
         l.thresholdPct = thresholdPct_;
         emit ThresholdPctSet(thresholdPct_);
 
-        // Initialize creator hats and targets
         _initializeCreatorHats(initialCreatorHats);
-        _initializeTargets(initialTargets);
+        // initialTargets parameter kept for ABI compatibility but not used;
+        // HybridVoting passes batches directly to Executor without target restrictions.
 
         // Use library for class initialization
         HybridVotingConfig.validateAndInitClasses(initialClasses);
@@ -161,19 +160,6 @@ contract HybridVoting is Initializable {
         uint256 len = creatorHats.length;
         for (uint256 i; i < len;) {
             HatManager.setHatInArray(l.creatorHatIds, creatorHats[i], true);
-            unchecked {
-                ++i;
-            }
-        }
-    }
-
-    /* ─────── Internal Initialization Helpers ─────── */
-    function _initializeTargets(address[] calldata targets) internal {
-        Layout storage l = _layout();
-        uint256 len = targets.length;
-        for (uint256 i; i < len;) {
-            l.allowedTarget[targets[i]] = true;
-            emit TargetAllowed(targets[i], true);
             unchecked {
                 ++i;
             }
@@ -225,7 +211,7 @@ contract HybridVoting is Initializable {
     /* ─────── Configuration Setters ─────── */
     enum ConfigKey {
         THRESHOLD,
-        TARGET_ALLOWED,
+        TARGET_ALLOWED, // deprecated: kept for enum ordering compatibility
         EXECUTOR,
         QUORUM
     }
@@ -238,10 +224,6 @@ contract HybridVoting is Initializable {
             VotingMath.validateThreshold(q);
             l.thresholdPct = q;
             emit ThresholdPctSet(q);
-        } else if (key == ConfigKey.TARGET_ALLOWED) {
-            (address target, bool allowed) = abi.decode(value, (address, bool));
-            l.allowedTarget[target] = allowed;
-            emit TargetAllowed(target, allowed);
         } else if (key == ConfigKey.EXECUTOR) {
             address newExecutor = abi.decode(value, (address));
             if (newExecutor == address(0)) revert VotingErrors.ZeroAddress();
@@ -325,10 +307,6 @@ contract HybridVoting is Initializable {
 
     function quorum() external view returns (uint32) {
         return _layout().quorum;
-    }
-
-    function isTargetAllowed(address target) external view returns (bool) {
-        return _layout().allowedTarget[target];
     }
 
     function creatorHats() external view returns (uint256[] memory) {

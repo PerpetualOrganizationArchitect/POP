@@ -960,10 +960,12 @@ contract PasskeyTest is Test {
     }
 
     function testP256VerifierValidationHelpers() public pure {
-        // Test isValidPublicKey
-        assertTrue(P256Verifier.isValidPublicKey(PUB_KEY_X, PUB_KEY_Y));
-        assertFalse(P256Verifier.isValidPublicKey(bytes32(0), PUB_KEY_Y));
-        assertFalse(P256Verifier.isValidPublicKey(PUB_KEY_X, bytes32(0)));
+        // Test isValidPublicKey with a real NIST P-256 test vector (on-curve point)
+        bytes32 validX = 0x1ccbe91c075fc7f4f033bfa248db8fccd3565de94bbfb12f3c59ff46c271bf83;
+        bytes32 validY = 0xce4014c68811f9a21a1fdb2c0e6113e06db7ca93b7404e78dc7ccd5ca89a4ca9;
+        assertTrue(P256Verifier.isValidPublicKey(validX, validY));
+        assertFalse(P256Verifier.isValidPublicKey(bytes32(0), validY));
+        assertFalse(P256Verifier.isValidPublicKey(validX, bytes32(0)));
 
         // Test isValidSignature
         bytes32 r = bytes32(uint256(1));
@@ -1063,19 +1065,84 @@ contract PasskeyTest is Test {
         vm.warp(block.timestamp + 7 days + 1);
         account.completeRecovery(recoveryId);
 
-        // Verify array has both entries (original deactivated + new active)
+        // Recovery now fully replaces all credentials (prevents unbounded array growth)
         bytes32[] memory credIds = account.getCredentialIds();
-        assertEq(credIds.length, 2);
+        assertEq(credIds.length, 1, "Recovery should leave exactly 1 credential");
+        assertEq(credIds[0], recoveryCredId, "Only the recovery credential should remain");
 
-        // Each credential ID should be unique
-        assertTrue(credIds[0] != credIds[1], "Credential IDs must be unique");
-
-        // Original credential should be deactivated
+        // Original credential should be fully deleted (not just deactivated)
         IPasskeyAccount.PasskeyCredential memory origCred = account.getCredential(CREDENTIAL_ID);
-        assertFalse(origCred.active, "Original credential should be deactivated after recovery");
+        assertEq(origCred.createdAt, 0, "Original credential should be deleted after recovery");
 
         // Recovery credential should be active
         IPasskeyAccount.PasskeyCredential memory recoveryCred = account.getCredential(recoveryCredId);
         assertTrue(recoveryCred.active, "Recovery credential should be active");
+    }
+
+    // ──────── M-02 Fix: Simultaneous recovery race condition ────────
+
+    function testCompletingRecoveryCancelsOtherPendingRecoveries() public {
+        PasskeyAccount account = _createAccount();
+
+        // Guardian initiates two recovery requests with different credentials
+        bytes32 credA = keccak256("recovery_A");
+        bytes32 credB = keccak256("recovery_B");
+
+        vm.prank(guardian);
+        account.initiateRecovery(credA, keccak256("ax"), keccak256("ay"));
+        bytes32 recoveryIdA = keccak256(abi.encodePacked(credA, block.timestamp, guardian));
+
+        vm.warp(block.timestamp + 1); // different timestamp for unique recovery ID
+        vm.prank(guardian);
+        account.initiateRecovery(credB, keccak256("bx"), keccak256("by"));
+        bytes32 recoveryIdB = keccak256(abi.encodePacked(credB, block.timestamp, guardian));
+
+        // Both recoveries should be pending
+        IPasskeyAccount.RecoveryRequest memory reqA = account.getRecoveryRequest(recoveryIdA);
+        IPasskeyAccount.RecoveryRequest memory reqB = account.getRecoveryRequest(recoveryIdB);
+        assertTrue(reqA.executeAfter > 0, "Recovery A should be pending");
+        assertTrue(reqB.executeAfter > 0, "Recovery B should be pending");
+
+        // Warp past both delays
+        vm.warp(block.timestamp + 7 days + 1);
+
+        // Complete recovery A
+        account.completeRecovery(recoveryIdA);
+
+        // Verify credential A is active
+        bytes32[] memory credIds = account.getCredentialIds();
+        assertEq(credIds.length, 1, "Should have exactly 1 credential after recovery");
+        assertEq(credIds[0], credA, "Should be credA");
+
+        // Recovery B should now be cancelled
+        IPasskeyAccount.RecoveryRequest memory reqBAfter = account.getRecoveryRequest(recoveryIdB);
+        assertTrue(reqBAfter.cancelled, "Recovery B should be cancelled after A completes");
+
+        // Attempting to complete recovery B should revert
+        vm.expectRevert(IPasskeyAccount.RecoveryNotPending.selector);
+        account.completeRecovery(recoveryIdB);
+    }
+
+    function testRepeatedRecoveriesDoNotGrowArray() public {
+        PasskeyAccount account = _createAccount();
+
+        // Perform 5 sequential recoveries
+        for (uint256 round = 1; round <= 5; round++) {
+            bytes32 newCredId = keccak256(abi.encodePacked("recovery_round_", round));
+
+            vm.prank(guardian);
+            account.initiateRecovery(
+                newCredId, keccak256(abi.encodePacked("x", round)), keccak256(abi.encodePacked("y", round))
+            );
+            bytes32 recoveryId = keccak256(abi.encodePacked(newCredId, block.timestamp, guardian));
+
+            vm.warp(block.timestamp + 7 days + 1);
+            account.completeRecovery(recoveryId);
+
+            // After each recovery, array should have exactly 1 credential
+            bytes32[] memory credIds = account.getCredentialIds();
+            assertEq(credIds.length, 1, "Array must stay at length 1 after each recovery");
+            assertEq(credIds[0], newCredId, "Should be the latest recovery credential");
+        }
     }
 }

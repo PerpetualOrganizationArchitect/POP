@@ -76,7 +76,7 @@ library HybridVotingProposals {
             for (uint256 i; i < numOptions;) {
                 if (batches[i].length > 0) {
                     isExecuting = true;
-                    _validateTargets(batches[i], l);
+                    _validateTargets(batches[i]);
                 }
                 unchecked {
                     ++i;
@@ -131,12 +131,9 @@ library HybridVotingProposals {
         }
     }
 
-    function _validateTargets(IExecutor.Call[] calldata batch, HybridVoting.Layout storage) internal view {
+    function _validateTargets(IExecutor.Call[] calldata batch) internal view {
         uint256 batchLen = batch.length;
         if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
-        // Note: We don't validate allowedTarget here - HybridVoting just passes batches to Executor.
-        // The Executor has onlyExecutor permission on all org contracts and handles the actual calls.
-        // We only check that the batch doesn't target the voting contract itself.
         for (uint256 j; j < batchLen;) {
             if (batch[j].target == address(this)) revert VotingErrors.TargetSelf();
             unchecked {

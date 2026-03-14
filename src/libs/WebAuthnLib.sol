@@ -283,8 +283,20 @@ library WebAuthnLib {
         pure
         returns (bool valid)
     {
-        // The challenge in clientDataJSON is base64url-encoded
-        // We need to decode it and compare with expected
+        // Verify the JSON key context: the bytes immediately before challengeIndex
+        // must be "challenge":" to prevent an attacker from pointing challengeIndex
+        // at a challenge value embedded in a different JSON field.
+        {
+            bytes memory expectedPrefix = bytes('"challenge":"');
+            uint256 prefixLen = expectedPrefix.length;
+            if (challengeIndex < prefixLen) return false;
+            uint256 prefixStart = challengeIndex - prefixLen;
+            for (uint256 k = 0; k < prefixLen; k++) {
+                if (clientDataJSON[prefixStart + k] != expectedPrefix[k]) {
+                    return false;
+                }
+            }
+        }
 
         // Find the end of the challenge string (look for closing quote)
         uint256 endIndex = challengeIndex;
@@ -320,6 +332,21 @@ library WebAuthnLib {
      * @return valid True if type is "webauthn.get"
      */
     function _verifyType(bytes memory clientDataJSON, uint256 typeIndex) private pure returns (bool valid) {
+        // Verify the JSON key context: the bytes immediately before typeIndex
+        // must be "type":" to prevent pointing typeIndex at "webauthn.get"
+        // embedded in a different JSON field.
+        {
+            bytes memory expectedPrefix = bytes('"type":"');
+            uint256 prefixLen = expectedPrefix.length;
+            if (typeIndex < prefixLen) return false;
+            uint256 prefixStart = typeIndex - prefixLen;
+            for (uint256 k = 0; k < prefixLen; k++) {
+                if (clientDataJSON[prefixStart + k] != expectedPrefix[k]) {
+                    return false;
+                }
+            }
+        }
+
         // Expected: "webauthn.get"
         bytes memory expected = bytes("webauthn.get");
 
