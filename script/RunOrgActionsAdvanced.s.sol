@@ -272,11 +272,24 @@ contract RunOrgActionsAdvanced is Script {
         OrgDeployer.DeploymentParams memory params =
             _buildDeploymentParams(config, globalAccountRegistry, members.deployer);
 
+        // Set deployer username from env var (pure helper can't read env)
+        string memory deployerUsername = vm.envOr("DEPLOYER_USERNAME", string("hudsonhrh"));
+        params.deployerUsername = deployerUsername;
+
         // Deploy
         vm.startBroadcast(deployerPrivateKey);
 
         OrgDeployer orgDeployer = OrgDeployer(orgDeployerAddr);
         OrgDeployer.DeploymentResult memory result = orgDeployer.deployFullOrg(params);
+
+        // Register deployer username on GlobalAccountRegistry
+        if (bytes(deployerUsername).length > 0) {
+            UniversalAccountRegistry globalReg = UniversalAccountRegistry(globalAccountRegistry);
+            if (bytes(globalReg.getUsername(members.deployer)).length == 0) {
+                globalReg.registerAccount(deployerUsername);
+                console.log("Deployer registered as:", deployerUsername);
+            }
+        }
 
         vm.stopBroadcast();
 
@@ -1002,7 +1015,7 @@ contract RunOrgActionsAdvanced is Script {
         params.metadataHash = bytes32(0); // No metadata hash for demo
         params.registryAddr = globalAccountRegistry;
         params.deployerAddress = deployerAddress; // Address to receive ADMIN hat
-        params.deployerUsername = ""; // Registration requires EIP-712 signature (regSignature) from frontend
+        params.deployerUsername = ""; // overridden by run() from DEPLOYER_USERNAME env var
         params.autoUpgrade = config.autoUpgrade;
         params.hybridThresholdPct = config.threshold.hybrid;
         params.ddThresholdPct = config.threshold.directDemocracy;
