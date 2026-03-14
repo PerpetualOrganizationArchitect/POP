@@ -60,6 +60,16 @@ struct Budget {
     uint32 epochStart;
 }
 
+struct OrgDeployConfig {
+    uint128 maxGasPerDeploy;
+    uint128 dailyDeployLimit;
+    uint128 attemptsToday;
+    uint32 currentDay;
+    uint8 maxDeploysPerAccount;
+    bool enabled;
+    address orgDeployer;
+}
+
 // Interface for PaymasterHub Storage Getters — matches org-scoped signatures
 interface IPaymasterHubStorage {
     function getOrgConfig(bytes32 orgId) external view returns (OrgConfig memory);
@@ -73,6 +83,8 @@ interface IPaymasterHubStorage {
         external
         view
         returns (bool inGrace, uint128 spendRemaining, bool requiresDeposit, uint256 solidarityLimit);
+    function getOrgDeployConfig() external view returns (OrgDeployConfig memory);
+    function getOrgDeployCount(address account) external view returns (uint8);
     function ENTRY_POINT() external view returns (address);
     function HATS() external view returns (address);
 }
@@ -97,6 +109,7 @@ contract PaymasterHubLens {
     uint8 private constant SUBJECT_TYPE_ACCOUNT = 0x00;
     uint8 private constant SUBJECT_TYPE_HAT = 0x01;
     uint8 private constant SUBJECT_TYPE_POA_ONBOARDING = 0x03;
+    uint8 private constant SUBJECT_TYPE_ORG_DEPLOY = 0x04;
 
     uint32 private constant RULE_ID_GENERIC = 0x00000000;
     uint32 private constant RULE_ID_EXECUTOR = 0x00000001;
@@ -194,6 +207,14 @@ contract PaymasterHubLens {
                 return (false, "InvalidOnboardingRequest");
             }
             return (true, "Onboarding");
+        }
+
+        // Handle org deploy sponsorship separately
+        if (subjectType == SUBJECT_TYPE_ORG_DEPLOY) {
+            if (decodedOrgId != bytes32(0) || subjectId != bytes32(0) || ruleId != RULE_ID_GENERIC) {
+                return (false, "InvalidOrgDeployRequest");
+            }
+            return (true, "OrgDeploy");
         }
 
         // Check subject eligibility
