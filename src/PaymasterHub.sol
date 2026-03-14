@@ -57,6 +57,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     error Overflow();
     error InvalidOnboardingRequest();
     error InvalidOrgId();
+    error ZeroAmount();
 
     // ============ Constants ============
     uint8 private constant PAYMASTER_DATA_VERSION = 1;
@@ -212,7 +213,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.solidarity")) - 1));
     bytes32 private constant GRACEPERIOD_STORAGE_LOCATION =
         keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.graceperiod")) - 1));
-    bytes32 private constant ONBOARDING_STORAGE_LOCATION = keccak256("poa.paymasterhub.onboarding");
+    bytes32 private constant ONBOARDING_STORAGE_LOCATION =
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.onboarding")) - 1));
 
     // ============ Constructor ============
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -556,7 +558,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param orgId The organization to deposit for
      */
     function depositForOrg(bytes32 orgId) external payable {
-        if (msg.value == 0) revert ZeroAddress();
+        if (msg.value == 0) revert ZeroAmount();
 
         // Verify org exists
         if (_getOrgsStorage()[orgId].adminHatId == 0) revert OrgNotRegistered();
@@ -626,7 +628,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @dev Anyone can donate to support all orgs
      */
     function donateToSolidarity() external payable {
-        if (msg.value == 0) revert ZeroAddress();
+        if (msg.value == 0) revert ZeroAmount();
         if (msg.value > type(uint128).max) revert Overflow();
 
         SolidarityFund storage solidarity = _getSolidarityStorage();
@@ -664,6 +666,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         bytes32 subjectKey;
         uint32 currentEpochStart;
         bytes32 contextOrgId = orgId;
+        uint256 reservedOrgBalance;
 
         bool isOnboarding = subjectType == SUBJECT_TYPE_POA_ONBOARDING;
 
@@ -699,27 +702,33 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             // Check per-subject budget (existing functionality)
             currentEpochStart = _checkBudget(orgId, subjectKey, maxCost);
 
-            // Check per-org financial balance (new: prevents overdraft)
-            _checkOrgBalance(orgId, maxCost);
-
-            // Check solidarity fund access (new: grace period + allocation)
+            // Check solidarity fund access BEFORE reserving org balance.
+            // _checkSolidarityAccess reads depositAvailable for tier calculation and
+            // minDepositRequired checks — the reservation would deflate depositAvailable.
             _checkSolidarityAccess(orgId, maxCost);
+
+            // Reserve maxCost from org deposits (after solidarity check)
+            reservedOrgBalance = _checkOrgBalance(orgId, maxCost);
         }
 
         // Prepare context for postOp
-        context = abi.encode(isOnboarding, contextOrgId, subjectKey, currentEpochStart);
+        // maxCost = budget reservation (always reserved), reservedOrgBalance = org deposit reservation (0 during grace)
+        context = abi.encode(isOnboarding, contextOrgId, subjectKey, currentEpochStart, maxCost, reservedOrgBalance);
 
         // Return 0 for no signature failure and no time restrictions
         validationData = 0;
     }
 
     /**
-     * @notice Check if org has sufficient balance to cover operation
-     * @dev Prevents org from spending more than deposited + solidarity allocation
+     * @notice Check if org has sufficient balance to cover operation and reserve maxCost
+     * @dev Prevents org from spending more than deposited + solidarity allocation.
+     *      Reserves maxCost by incrementing org.spent (unreserved in postOp).
+     *      This ensures bundle safety: multiple UserOps for the same org in one bundle
+     *      cannot bypass the balance check because each validation sees the reserved amounts.
      * @param orgId The organization identifier
      * @param maxCost Maximum cost of the operation
      */
-    function _checkOrgBalance(bytes32 orgId, uint256 maxCost) internal view {
+    function _checkOrgBalance(bytes32 orgId, uint256 maxCost) internal returns (uint256 reserved) {
         mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
         OrgFinancials storage org = financials[orgId];
 
@@ -733,11 +742,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             if (depositAvailable < maxCost) {
                 revert InsufficientOrgBalance();
             }
-            return;
+            org.spent += uint128(maxCost); // Reserve for bundle safety
+            return maxCost;
         }
-
-        // If deposits alone cover the cost, no solidarity needed
-        if (depositAvailable >= maxCost) return;
 
         // Deposits are fully exhausted — check if grace period allows solidarity-only coverage
         if (depositAvailable == 0) {
@@ -746,11 +753,15 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             OrgConfig storage config = orgs[orgId];
             uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
             if (block.timestamp < graceEndTime) {
-                return; // Grace period: _checkSolidarityAccess handles spending limits
+                return 0; // Grace period with zero deposits: no reservation needed
             }
             revert InsufficientOrgBalance();
         }
-        // Partial coverage: solidarity will cover the rest (validated by _checkSolidarityAccess)
+
+        // Deposits cover fully or partially — solidarity covers the rest
+        // Reserve maxCost from org deposits (unreserved in postOp)
+        org.spent += uint128(maxCost);
+        return maxCost;
     }
 
     /**
@@ -771,8 +782,14 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         onlyEntryPoint
         nonReentrant
     {
-        (bool isOnboarding, bytes32 orgId, bytes32 subjectKey, uint32 epochStart) =
-            abi.decode(context, (bool, bytes32, bytes32, uint32));
+        (
+            bool isOnboarding,
+            bytes32 orgId,
+            bytes32 subjectKey,
+            uint32 epochStart,
+            uint256 reservedBudget,
+            uint256 reservedOrgBalance
+        ) = abi.decode(context, (bool, bytes32, bytes32, uint32, uint256, uint256));
 
         // Onboarding uses a dedicated context flag (not orgId sentinel).
         if (isOnboarding) {
@@ -780,12 +797,74 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             // Count a created account only when the operation succeeded.
             _updateOnboardingUsage(actualGasCost, mode == IPaymaster.PostOpMode.opSucceeded);
         } else {
+            // If the first postOp call reverted, EntryPoint calls again with postOpReverted.
+            // Use a fallback that cannot revert: charge 100% from deposits, skip solidarity.
+            if (mode == IPaymaster.PostOpMode.postOpReverted) {
+                _postOpFallback(orgId, subjectKey, epochStart, actualGasCost, reservedBudget, reservedOrgBalance);
+                return;
+            }
+
             // Regular org operation
-            // Update per-subject budget usage (existing functionality)
-            _updateUsage(orgId, subjectKey, epochStart, actualGasCost);
+            // Update per-subject budget usage
+            _updateUsage(orgId, subjectKey, epochStart, actualGasCost, reservedBudget);
 
             // Update per-org financial tracking and collect solidarity fee
-            _updateOrgFinancials(orgId, actualGasCost);
+            _updateOrgFinancials(orgId, actualGasCost, reservedOrgBalance);
+        }
+    }
+
+    /**
+     * @notice Fallback accounting when the first postOp call reverts
+     * @dev Called with PostOpMode.postOpReverted. Must not revert — if this reverts too,
+     *      the paymaster is charged by EntryPoint with no accounting update.
+     *      Charges 100% from org deposits (skips solidarity to avoid the revert path).
+     */
+    function _postOpFallback(
+        bytes32 orgId,
+        bytes32 subjectKey,
+        uint32 epochStart,
+        uint256 actualGasCost,
+        uint256 reservedBudget,
+        uint256 reservedOrgBalance
+    ) private {
+        // Adjust budget: replace reservation with actual cost
+        mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
+        Budget storage budget = budgets[subjectKey];
+        if (budget.epochStart == epochStart) {
+            budget.usedInEpoch = budget.usedInEpoch - uint128(reservedBudget) + uint128(actualGasCost);
+            emit UsageIncreased(orgId, subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
+        }
+
+        // Unreserve org balance, then charge actual + fee from deposits only (no solidarity)
+        mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
+        OrgFinancials storage org = financials[orgId];
+        org.spent -= uint128(reservedOrgBalance);
+
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+
+        // Zero the fee during grace — same as _updateOrgFinancials.
+        // Grace orgs have no deposits; charging a fee would create phantom debt
+        // and circular solidarity accounting (solidarity pays itself).
+        uint256 solidarityFee;
+        mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
+        GracePeriodConfig storage grace = _getGracePeriodStorage();
+        uint256 graceEndTime = orgs[orgId].registeredAt + (uint256(grace.initialGraceDays) * 1 days);
+        if (block.timestamp < graceEndTime) {
+            solidarityFee = 0;
+        } else {
+            solidarityFee = (actualGasCost * uint256(solidarity.feePercentageBps)) / 10000;
+        }
+
+        org.spent += uint128(actualGasCost + solidarityFee);
+        solidarity.balance += uint128(solidarityFee);
+
+        // Count this op against the org's solidarity spending limit.
+        // Even though solidarity didn't pay, the op consumed paymaster resources
+        // and should count toward maxSpendDuringGrace to prevent repeated fallbacks.
+        org.solidarityUsedThisPeriod += uint128(actualGasCost);
+
+        if (solidarityFee > 0) {
+            emit SolidarityFeeCollected(orgId, solidarityFee);
         }
     }
 
@@ -835,8 +914,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      *
      * @param orgId The organization identifier
      * @param actualGasCost Actual gas cost paid
+     * @param reservedOrgBalance The org deposit amount reserved during validation (to be unreserved)
      */
-    function _updateOrgFinancials(bytes32 orgId, uint256 actualGasCost) internal {
+    function _updateOrgFinancials(bytes32 orgId, uint256 actualGasCost, uint256 reservedOrgBalance) internal {
         mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
         mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
 
@@ -844,6 +924,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         OrgFinancials storage org = financials[orgId];
         GracePeriodConfig storage grace = _getGracePeriodStorage();
         SolidarityFund storage solidarity = _getSolidarityStorage();
+
+        // Unreserve the org deposit amount that was reserved during validation
+        org.spent -= uint128(reservedOrgBalance);
 
         // Calculate 1% solidarity fee (always collected, even when distribution is paused)
         uint256 solidarityFee = (actualGasCost * uint256(solidarity.feePercentageBps)) / 10000;
@@ -869,6 +952,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             // Grace period: 100% from solidarity (deposits untouched)
             if (solidarityLiquidity < actualGasCost) revert InsufficientFunds();
             fromSolidarity = actualGasCost;
+            // No fee during grace — would be circular (solidarity pays itself)
+            solidarityFee = 0;
         } else {
             // Post-grace: 50/50 split with tier-based solidarity allowance
             // Calculate available balance (not cumulative deposits)
@@ -1757,20 +1842,31 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             revert BudgetExceeded();
         }
 
+        // Reserve maxCost for bundle safety — ensures a second UserOp for the same
+        // subject in the same bundle sees the updated usedInEpoch. Adjusted to actual
+        // cost in _updateUsage during postOp.
+        budget.usedInEpoch += uint128(maxCost);
+
         currentEpochStart = budget.epochStart;
     }
 
-    function _updateUsage(bytes32 orgId, bytes32 subjectKey, uint32 epochStart, uint256 actualGasCost) private {
+    function _updateUsage(
+        bytes32 orgId,
+        bytes32 subjectKey,
+        uint32 epochStart,
+        uint256 actualGasCost,
+        uint256 reservedMaxCost
+    ) private {
         mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
         Budget storage budget = budgets[subjectKey];
 
         // Only update if we're still in the same epoch
         if (budget.epochStart == epochStart) {
-            // Safe to cast as actualGasCost is bounded
-            uint128 cost = uint128(actualGasCost);
-            budget.usedInEpoch += cost;
+            // Replace reservation (maxCost) with actual cost (actualGasCost <= maxCost)
+            budget.usedInEpoch = budget.usedInEpoch - uint128(reservedMaxCost) + uint128(actualGasCost);
             emit UsageIncreased(orgId, subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
         }
+        // If epoch rolled since validation, reservation was already cleared by epoch reset
     }
 
     /**

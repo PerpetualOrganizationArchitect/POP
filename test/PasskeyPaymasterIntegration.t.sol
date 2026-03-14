@@ -380,7 +380,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PasskeyAccount account = _createPasskeyAccount();
         _setupDefaultBudget(address(account));
 
-        // Don't set any rules — first inner call should be denied
+        // Don't set any rules - first inner call should be denied
         address[] memory targets = new address[](1);
         targets[0] = address(mockTarget);
 
@@ -414,7 +414,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
-        // Build batch with both calls — second should be denied
+        // Build batch with both calls - second should be denied
         address[] memory targets = new address[](2);
         targets[0] = address(mockTarget);
         targets[1] = address(mockTarget);
@@ -455,7 +455,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         hub.setRule(ORG_ID, address(target2), MockTarget.doSomethingElse.selector, true, 0);
         vm.stopPrank();
 
-        // Batch calls target2.doSomething (NOT whitelisted — only doSomethingElse is)
+        // Batch calls target2.doSomething (NOT whitelisted - only doSomethingElse is)
         address[] memory targets = new address[](2);
         targets[0] = address(mockTarget);
         targets[1] = address(target2);
@@ -486,7 +486,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PasskeyAccount account = _createPasskeyAccount();
         _setupDefaultBudget(address(account));
 
-        // Empty batch — no inner calls to deny
+        // Empty batch - no inner calls to deny
         address[] memory targets = new address[](0);
         uint256[] memory values = new uint256[](0);
         bytes[] memory datas = new bytes[](0);
@@ -513,7 +513,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
 
-        // Single inner call in batch — should work same as execute()
+        // Single inner call in batch - should work same as execute()
         address[] memory targets = new address[](1);
         targets[0] = address(mockTarget);
 
@@ -732,7 +732,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PasskeyAccount account = _createPasskeyAccount();
         _setupDefaultBudget(address(account));
 
-        // No rule set — inner call should be denied
+        // No rule set - inner call should be denied
         address[] memory targets = new address[](1);
         targets[0] = address(mockTarget);
 
@@ -759,13 +759,13 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PasskeyAccount account = _createPasskeyAccount();
         _setupDefaultBudget(address(account));
 
-        // Inner call with empty bytes — selector defaults to bytes4(0)
+        // Inner call with empty bytes - selector defaults to bytes4(0)
         address[] memory targets = new address[](1);
         targets[0] = address(mockTarget);
 
         uint256[] memory values = new uint256[](1);
         bytes[] memory datas = new bytes[](1);
-        datas[0] = ""; // Empty calldata — raw transfer / fallback
+        datas[0] = ""; // Empty calldata - raw transfer / fallback
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
         bytes memory paymasterAndData = _buildPaymasterData(
@@ -784,7 +784,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PasskeyAccount account = _createPasskeyAccount();
         _setupDefaultBudget(address(account));
 
-        // Inner call with < 4 bytes — selector defaults to bytes4(0)
+        // Inner call with < 4 bytes - selector defaults to bytes4(0)
         address[] memory targets = new address[](1);
         targets[0] = address(mockTarget);
 
@@ -808,7 +808,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PasskeyAccount account = _createPasskeyAccount();
         _setupDefaultBudget(address(account));
 
-        // Whitelist bytes4(0) for mockTarget — allowing raw transfer / fallback
+        // Whitelist bytes4(0) for mockTarget - allowing raw transfer / fallback
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(mockTarget), bytes4(0), true, 0);
 
@@ -920,7 +920,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
 
         bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        // Use COARSE mode — needs (account, executeBatch) rule, not inner rules
+        // Use COARSE mode - needs (account, executeBatch) rule, not inner rules
         bytes memory paymasterAndData = _buildPaymasterData(
             ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_COARSE
         );
@@ -970,7 +970,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PasskeyAccount account = _createPasskeyAccount();
         _setupDefaultBudget(address(account));
 
-        // With RULE_ID_COARSE, executeBatch should still use (sender, executeBatch) — old behavior
+        // With RULE_ID_COARSE, executeBatch should still use (sender, executeBatch) - old behavior
         vm.prank(orgAdmin);
         hub.setRule(ORG_ID, address(account), EXECUTE_BATCH_SELECTOR, true, 0);
 
@@ -1341,9 +1341,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
                     HAT ELIGIBILITY TESTS
     ══════════════════════════════════════════════════════════════════════*/
 
-    /// @notice Test that a user who is eligible for a hat (but not yet wearing it) passes SUBJECT_TYPE_HAT validation
+    /// @notice Test that a user who is eligible for a hat but NOT wearing it can still use the paymaster
     function testHat_EligibleButNotWearing_Succeeds() public {
-        // Use a new address that is NOT a hat wearer but IS eligible
+        // Use a new address that is NOT a hat wearer but IS eligible (e.g. vouched)
         address eligibleUser = address(0xE119);
 
         // Set the user as eligible (but not wearing) via the mock
@@ -1365,12 +1365,12 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         PackedUserOperation memory userOp = _createUserOp(eligibleUser, callData, paymasterAndData, "");
 
-        // Validate should succeed — user is eligible even though they don't wear the hat yet
+        // Validate should succeed - eligible users can use paymaster even without wearing the hat
         vm.prank(address(entryPoint));
         (bytes memory context, uint256 validationData) =
             hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
 
-        assertEq(validationData, 0, "Validation should succeed for eligible user");
+        assertEq(validationData, 0, "Eligible user should pass validation");
         assertTrue(context.length > 0, "Context should be returned");
     }
 
@@ -1378,7 +1378,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
     function testHat_NotEligible_Fails() public {
         address ineligibleUser = address(0xBAD);
 
-        // Do NOT set eligible — user is neither wearing nor eligible
+        // Do NOT set eligible - user is neither wearing nor eligible
 
         bytes32 hatSubjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_HAT, bytes32(USER_HAT)));
         vm.prank(orgAdmin);
@@ -1634,8 +1634,8 @@ contract PasskeyPaymasterIntegrationTest is Test {
         hub.postOp(IPaymaster.PostOpMode.opReverted, context, 50_000, 1);
     }
 
-    /// @notice Context encodes exactly 4 fields: isOnboarding, orgId, subjectKey, epochStart
-    function testContext_FourFieldEncoding() public {
+    /// @notice Context encodes exactly 5 fields: isOnboarding, orgId, subjectKey, epochStart, maxCost
+    function testContext_SixFieldEncoding() public {
         PasskeyAccount account = _createPasskeyAccount();
         _setupDefaultBudget(address(account));
 
@@ -1653,14 +1653,22 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
 
-        // Decode all 4 fields — would revert if encoding doesn't match
-        (bool isOnboarding, bytes32 orgId, bytes32 subjectKey, uint32 epochStart) =
-            abi.decode(context, (bool, bytes32, bytes32, uint32));
+        // Decode all 6 fields - would revert if encoding doesn't match
+        (
+            bool isOnboarding,
+            bytes32 orgId,
+            bytes32 subjectKey,
+            uint32 epochStart,
+            uint256 reservedBudget,
+            uint256 reservedOrgBalance
+        ) = abi.decode(context, (bool, bytes32, bytes32, uint32, uint256, uint256));
 
         assertFalse(isOnboarding, "Normal op should not be onboarding");
         assertEq(orgId, ORG_ID, "OrgId should match");
         assertTrue(subjectKey != bytes32(0), "SubjectKey should be non-zero");
         assertTrue(epochStart > 0, "EpochStart should be non-zero");
+        assertEq(reservedBudget, 0.01 ether, "Reserved budget should match maxCost");
+        assertEq(reservedOrgBalance, 0.01 ether, "Reserved org balance should match maxCost");
     }
 
     /// @notice Verify postOp updates budget usage (accounting works without bounty)
@@ -1684,17 +1692,1076 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PaymasterHub.Budget memory budgetBefore = hub.getBudget(ORG_ID, subjectKey);
         assertEq(budgetBefore.usedInEpoch, 0, "Budget should start at 0");
 
-        // Validate + postOp
+        uint256 maxCost = 0.01 ether;
+        // Validate (reserves maxCost in budget)
         vm.prank(address(entryPoint));
-        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), maxCost);
+
+        // After validation, budget should have reserved maxCost
+        PaymasterHub.Budget memory budgetReserved = hub.getBudget(ORG_ID, subjectKey);
+        assertEq(budgetReserved.usedInEpoch, maxCost, "Budget should reserve maxCost after validation");
 
         uint256 gasCost = 50_000;
         vm.prank(address(entryPoint));
         hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, gasCost, 1);
 
-        // Budget should have increased
+        // After postOp, reservation replaced with actual cost
         PaymasterHub.Budget memory budgetAfter = hub.getBudget(ORG_ID, subjectKey);
-        assertEq(budgetAfter.usedInEpoch, gasCost, "Budget usage should reflect gas cost");
+        assertEq(budgetAfter.usedInEpoch, gasCost, "Budget usage should reflect actual gas cost");
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    BUNDLE SAFETY TESTS (C-1, C-3)
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice Two UserOps for the same subject in one bundle cannot bypass the budget
+    function testBundleSafety_TwoOpsReserveBudget() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        // Set budget cap at 0.009 ether
+        vm.prank(orgAdmin);
+        hub.setBudget(ORG_ID, subjectKey, 0.009 ether, 1 days);
+
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Op 1 validation: maxCost=0.005 ETH, reserves in budget (0.005 < 0.009 cap)
+        vm.prank(address(entryPoint));
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.005 ether);
+
+        // Op 2 validation: maxCost=0.005 ETH, but budget already has 0.005 reserved
+        // Total would be 0.01 > 0.009 cap → must revert
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.BudgetExceeded.selector);
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.005 ether);
+    }
+
+    /// @notice Two UserOps for the same org cannot overdraw the org balance
+    function testBundleSafety_TwoOpsReserveOrgBalance() public {
+        // Use a fresh org with controlled deposit (setUp deposits 0.1 ETH for ORG_ID)
+        bytes32 freshOrg = keccak256("BUNDLE_ORG");
+        uint256 FRESH_ADMIN_HAT = 200;
+        uint256 FRESH_OPERATOR_HAT = 201;
+        hats.mintHat(FRESH_ADMIN_HAT, orgAdmin);
+        hats.mintHat(FRESH_OPERATOR_HAT, orgAdmin);
+
+        vm.prank(poaManager);
+        hub.registerOrg(freshOrg, FRESH_ADMIN_HAT, FRESH_OPERATOR_HAT);
+
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        // Set large budget so budget check doesn't block
+        vm.prank(orgAdmin);
+        hub.setBudget(freshOrg, subjectKey, 10 ether, 1 days);
+
+        // Deposit only 0.008 ether
+        vm.deal(orgAdmin, 1 ether);
+        vm.prank(orgAdmin);
+        hub.depositForOrg{value: 0.008 ether}(freshOrg);
+
+        // Warp past grace period so org must use deposits
+        vm.warp(block.timestamp + 91 days);
+
+        // Pause solidarity so org must cover 100% from deposits
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        vm.prank(orgAdmin);
+        hub.setRule(freshOrg, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        bytes memory paymasterAndData = _buildPaymasterData(
+            freshOrg, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Op 1: maxCost=0.005, reserves from 0.008 deposit → 0.003 remaining
+        vm.prank(address(entryPoint));
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.005 ether);
+
+        // Op 2: maxCost=0.005, but only 0.003 remaining → must revert
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.005 ether);
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    POSTOP FALLBACK TEST (C-2)
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice postOpReverted mode charges 100% from deposits and doesn't revert
+    function testPostOp_PostOpReverted_FallbackChargesDeposits() public {
+        // Warp past the default 90-day grace period so the fee applies
+        vm.warp(block.timestamp + 91 days);
+
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        PaymasterHub.OrgFinancials memory finBefore = hub.getOrgFinancials(ORG_ID);
+
+        // Validate (creates context with reservation)
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+
+        // PostOp with postOpReverted should NOT revert (uses fallback path)
+        uint256 gasCost = 50_000;
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, gasCost, 1);
+
+        // Verify org was charged actual cost + fee from deposits
+        PaymasterHub.OrgFinancials memory finAfter = hub.getOrgFinancials(ORG_ID);
+        PaymasterHub.SolidarityFund memory sol = hub.getSolidarityFund();
+
+        uint256 fee = (gasCost * uint256(sol.feePercentageBps)) / 10000;
+        assertEq(
+            uint256(finAfter.spent) - uint256(finBefore.spent), gasCost + fee, "Org should be charged actual + fee"
+        );
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    GRACE PERIOD FEE TEST (H-4)
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice During grace period, no solidarity fee debt accrues on org
+    function testGracePeriod_NoFeeDebt() public {
+        // Register a fresh org with NO deposits
+        bytes32 graceOrg = keccak256("GRACE_ORG");
+        uint256 GRACE_ADMIN_HAT = 100;
+        uint256 GRACE_OPERATOR_HAT = 101;
+        hats.mintHat(GRACE_ADMIN_HAT, orgAdmin);
+        hats.mintHat(GRACE_OPERATOR_HAT, orgAdmin);
+
+        vm.prank(poaManager);
+        hub.registerOrg(graceOrg, GRACE_ADMIN_HAT, GRACE_OPERATOR_HAT);
+
+        // Configure grace period (90 days)
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(90, 1 ether, 0.003 ether);
+
+        // Fund solidarity so grace ops can be covered
+        vm.prank(owner);
+        hub.donateToSolidarity{value: 1 ether}();
+
+        // Resume solidarity distribution if paused
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        vm.prank(orgAdmin);
+        hub.setBudget(graceOrg, subjectKey, 1 ether, 1 days);
+
+        vm.prank(orgAdmin);
+        hub.setRule(graceOrg, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            graceOrg, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Validate and postOp during grace period (no deposits, zero-deposit grace path)
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, 50_000, 1);
+
+        // org.spent should be 0 - no fee debt during grace
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(graceOrg);
+        assertEq(fin.spent, 0, "Org should have no spending debt during grace period");
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    RESERVATION INVARIANT TESTS
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice After postOp, budget should reflect actual cost, not reservation
+    function testReservation_BudgetReleaseDelta() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+        _setupDefaultBudget(address(account));
+
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        uint256 maxCost = 0.05 ether;
+        uint256 actualCost = 50_000;
+
+        // Validate - reserves maxCost in budget
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), maxCost);
+
+        PaymasterHub.Budget memory mid = hub.getBudget(ORG_ID, subjectKey);
+        assertEq(mid.usedInEpoch, maxCost, "Budget should hold reservation");
+
+        // PostOp - releases reservation, charges actual
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, actualCost, 1);
+
+        PaymasterHub.Budget memory after_ = hub.getBudget(ORG_ID, subjectKey);
+        assertEq(after_.usedInEpoch, actualCost, "Budget should hold actual cost, not reservation");
+    }
+
+    /// @notice postOp releases reservation so the next op can use the freed budget
+    function testReservation_PostOpReleasesForNextOp() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        // Budget cap slightly above 2 * maxCost to test tight budgets
+        vm.prank(orgAdmin);
+        hub.setBudget(ORG_ID, subjectKey, 0.012 ether, 1 days);
+
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Op 1: validate with maxCost=0.01 (reserves 0.01 of 0.012 cap)
+        vm.prank(address(entryPoint));
+        (bytes memory ctx1,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+
+        // Op 1: postOp with actualCost=1000 (releases 0.01 reservation, charges 1000)
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx1, 1000, 1);
+
+        // Op 2: validate with maxCost=0.01 should succeed (budget now has 1000 used of 0.012 cap)
+        vm.prank(address(entryPoint));
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.01 ether);
+
+        // Verify: budget should show reservation + prior actual
+        PaymasterHub.Budget memory b = hub.getBudget(ORG_ID, subjectKey);
+        assertEq(b.usedInEpoch, 1000 + 0.01 ether, "Budget should reflect prior actual + new reservation");
+    }
+
+    /// @notice Three ops progressively exhaust budget - third one fails
+    function testBundleSafety_ThreeOpsProgressiveExhaustion() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        // Cap at exactly 3x the maxCost minus 1 wei
+        vm.prank(orgAdmin);
+        hub.setBudget(ORG_ID, subjectKey, 0.015 ether - 1, 1 days);
+
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Op 1: 0.005 reserved (total 0.005)
+        vm.prank(address(entryPoint));
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.005 ether);
+
+        // Op 2: 0.005 reserved (total 0.01)
+        vm.prank(address(entryPoint));
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.005 ether);
+
+        // Op 3: 0.005 would make total 0.015 > cap (0.015 - 1), must revert
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.BudgetExceeded.selector);
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(3)), 0.005 ether);
+    }
+
+    /// @notice Context encodes reservedOrgBalance=0 for grace+zero-deposit org
+    function testReservation_GraceOrgContextHasZeroOrgReservation() public {
+        // Setup fresh grace org with no deposits
+        bytes32 graceOrg = keccak256("RESERVATION_GRACE_ORG");
+        uint256 hatA = 300;
+        uint256 hatO = 301;
+        hats.mintHat(hatA, orgAdmin);
+        hats.mintHat(hatO, orgAdmin);
+
+        vm.prank(poaManager);
+        hub.registerOrg(graceOrg, hatA, hatO);
+
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(90, 1 ether, 0.003 ether);
+
+        vm.prank(owner);
+        hub.donateToSolidarity{value: 1 ether}();
+
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        vm.prank(orgAdmin);
+        hub.setBudget(graceOrg, subjectKey, 1 ether, 1 days);
+
+        vm.prank(orgAdmin);
+        hub.setRule(graceOrg, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            graceOrg, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+
+        (,,,,, uint256 reservedOrgBalance) = abi.decode(context, (bool, bytes32, bytes32, uint32, uint256, uint256));
+
+        assertEq(reservedOrgBalance, 0, "Grace org with zero deposits should have reservedOrgBalance=0");
+    }
+
+    /// @notice Funded org context encodes reservedOrgBalance = maxCost
+    function testReservation_FundedOrgContextHasMaxCostReservation() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.02 ether);
+
+        (,,,, uint256 reservedBudget, uint256 reservedOrgBalance) =
+            abi.decode(context, (bool, bytes32, bytes32, uint32, uint256, uint256));
+
+        assertEq(reservedBudget, 0.02 ether, "Budget reservation should equal maxCost");
+        assertEq(reservedOrgBalance, 0.02 ether, "Funded org should reserve maxCost in org balance");
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    FALLBACK ACCOUNTING TESTS
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice Fallback for grace org doesn't underflow (reservedOrgBalance=0)
+    function testFallback_GraceOrgNoUnderflow() public {
+        bytes32 graceOrg = keccak256("FALLBACK_GRACE_ORG");
+        uint256 hatA = 400;
+        uint256 hatO = 401;
+        hats.mintHat(hatA, orgAdmin);
+        hats.mintHat(hatO, orgAdmin);
+
+        vm.prank(poaManager);
+        hub.registerOrg(graceOrg, hatA, hatO);
+
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(90, 1 ether, 0.003 ether);
+
+        vm.prank(owner);
+        hub.donateToSolidarity{value: 1 ether}();
+
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        vm.prank(orgAdmin);
+        hub.setBudget(graceOrg, subjectKey, 1 ether, 1 days);
+
+        vm.prank(orgAdmin);
+        hub.setRule(graceOrg, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            graceOrg, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+
+        // Fallback should NOT revert even though org has zero deposits and reservedOrgBalance=0
+        uint256 gasCost = 50_000;
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, gasCost, 1);
+
+        // Verify: org was charged actual cost + fee (creates deficit, but doesn't revert)
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(graceOrg);
+        assertTrue(fin.spent > 0, "Fallback should charge org even with zero deposits");
+
+        // Budget should reflect actual cost
+        PaymasterHub.Budget memory b = hub.getBudget(graceOrg, subjectKey);
+        assertEq(b.usedInEpoch, gasCost, "Budget should hold actual cost after fallback");
+    }
+
+    /// @notice Fallback increments solidarityUsedThisPeriod to bound repeated fallbacks
+    function testFallback_CountsAgainstGraceSpendingLimit() public {
+        bytes32 graceOrg = keccak256("SPENDING_LIMIT_ORG");
+        uint256 hatA = 500;
+        uint256 hatO = 501;
+        hats.mintHat(hatA, orgAdmin);
+        hats.mintHat(hatO, orgAdmin);
+
+        vm.prank(poaManager);
+        hub.registerOrg(graceOrg, hatA, hatO);
+
+        // Set tight grace spending limit
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(90, 100_000, 0.003 ether);
+
+        vm.prank(owner);
+        hub.donateToSolidarity{value: 1 ether}();
+
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        vm.prank(orgAdmin);
+        hub.setBudget(graceOrg, subjectKey, 10 ether, 1 days);
+
+        vm.prank(orgAdmin);
+        hub.setRule(graceOrg, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            graceOrg, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // 3 cycles of validate+fallback, each adds 25_000 to solidarityUsedThisPeriod
+        for (uint256 i = 1; i <= 3; i++) {
+            vm.prank(address(entryPoint));
+            (bytes memory ctx,) = hub.validatePaymasterUserOp(userOp, bytes32(i), 30_000);
+
+            vm.prank(address(entryPoint));
+            hub.postOp(IPaymaster.PostOpMode.postOpReverted, ctx, 25_000, 1);
+        }
+
+        // solidarityUsedThisPeriod is now 75_000. Next validate: 75_000 + 30_000 = 105_000 > 100_000
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.GracePeriodSpendLimitReached.selector);
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(4)), 30_000);
+    }
+
+    /// @notice Org balance reservation is correctly unreserved after normal postOp
+    function testReservation_OrgBalanceUnreservedAfterPostOp() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        // Pause solidarity so we get the simple deposit-only path
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        // Warp past grace
+        vm.warp(block.timestamp + 91 days);
+
+        PaymasterHub.OrgFinancials memory before_ = hub.getOrgFinancials(ORG_ID);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        uint256 maxCost = 0.01 ether;
+        uint256 actualCost = 50_000;
+
+        // Validate - reserves maxCost in org.spent
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), maxCost);
+
+        PaymasterHub.OrgFinancials memory mid = hub.getOrgFinancials(ORG_ID);
+        assertEq(mid.spent - before_.spent, maxCost, "Org should have reserved maxCost");
+
+        // PostOp - unreserves maxCost, charges actual + fee
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, actualCost, 1);
+
+        PaymasterHub.OrgFinancials memory after_ = hub.getOrgFinancials(ORG_ID);
+        PaymasterHub.SolidarityFund memory sol = hub.getSolidarityFund();
+        uint256 fee = (actualCost * uint256(sol.feePercentageBps)) / 10000;
+
+        assertEq(after_.spent - before_.spent, actualCost + fee, "Final spent should be actual + fee, not maxCost");
+        assertTrue(after_.spent < mid.spent, "PostOp should have reduced spent from reservation level");
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    EPOCH BOUNDARY TESTS
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice If epoch rolls between validate and postOp, reservation is harmlessly lost
+    function testEpochRoll_ReservationClearedByReset() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        // Short epoch for testing (1 hour)
+        vm.prank(orgAdmin);
+        hub.setBudget(ORG_ID, subjectKey, 1 ether, 1 hours);
+
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Validate at time T (maxCost within 0.1 ETH org deposit from setUp)
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+
+        // Warp past epoch boundary
+        vm.warp(block.timestamp + 2 hours);
+
+        // PostOp still succeeds - epoch roll is lazy (only in _checkBudget during validation)
+        // postOp sees the same epochStart and adjusts reservation → actual cost
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, 50_000, 1);
+
+        // Budget has actual cost in old epoch (not yet rolled)
+        PaymasterHub.Budget memory b = hub.getBudget(ORG_ID, subjectKey);
+        assertEq(b.usedInEpoch, 50_000, "PostOp adjusts reservation to actual even after time passes");
+
+        // Next validation triggers lazy epoch roll → budget resets
+        vm.prank(address(entryPoint));
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.01 ether);
+
+        PaymasterHub.Budget memory rolled = hub.getBudget(ORG_ID, subjectKey);
+        assertEq(
+            rolled.usedInEpoch, 0.01 ether, "After epoch roll, usedInEpoch should be only new reservation (old cleared)"
+        );
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    INVARIANT: ORG DEPOSIT >= SPENT (non-grace)
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice After validate+postOp cycle for funded org, deposited >= spent always holds
+    function testInvariant_FundedOrgDepositGteSpent() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        vm.prank(orgAdmin);
+        hub.setBudget(ORG_ID, subjectKey, 10 ether, 1 days);
+
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        // Pause solidarity for simple deposit-only accounting
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+        vm.warp(block.timestamp + 91 days);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Run 5 validate+postOp cycles
+        for (uint256 i = 1; i <= 5; i++) {
+            vm.prank(address(entryPoint));
+            (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(i), 0.001 ether);
+
+            // After validation: deposited >= spent (reservation is within bounds)
+            PaymasterHub.OrgFinancials memory midFin = hub.getOrgFinancials(ORG_ID);
+            assertTrue(midFin.deposited >= midFin.spent, "Invariant violated mid-cycle: deposited < spent");
+
+            vm.prank(address(entryPoint));
+            hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, 50_000, 1);
+
+            // After postOp: deposited >= spent
+            PaymasterHub.OrgFinancials memory postFin = hub.getOrgFinancials(ORG_ID);
+            assertTrue(postFin.deposited >= postFin.spent, "Invariant violated post-cycle: deposited < spent");
+        }
+    }
+
+    /// @notice Multiple ops in bundle all correctly reserve, then postOps correctly settle
+    function testBundleSafety_FullBundleCycle() public {
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        vm.prank(orgAdmin);
+        hub.setBudget(ORG_ID, subjectKey, 10 ether, 1 days);
+
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        // Pause solidarity for simple accounting
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+        vm.warp(block.timestamp + 91 days);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        PaymasterHub.OrgFinancials memory before_ = hub.getOrgFinancials(ORG_ID);
+
+        // Simulate bundle: 3 validations first (like EntryPoint does)
+        bytes memory ctx1;
+        bytes memory ctx2;
+        bytes memory ctx3;
+
+        vm.prank(address(entryPoint));
+        (ctx1,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+        vm.prank(address(entryPoint));
+        (ctx2,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.01 ether);
+        vm.prank(address(entryPoint));
+        (ctx3,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(3)), 0.01 ether);
+
+        // After all validations: org.spent should be before + 3 * maxCost reserved
+        PaymasterHub.OrgFinancials memory midFin = hub.getOrgFinancials(ORG_ID);
+        assertEq(midFin.spent - before_.spent, 0.03 ether, "3 reservations should sum correctly");
+
+        // Budget should also hold all 3 reservations
+        PaymasterHub.Budget memory midBudget = hub.getBudget(ORG_ID, subjectKey);
+        assertEq(midBudget.usedInEpoch, 0.03 ether, "Budget should hold 3 reservations");
+
+        // Then 3 postOps (actual costs much less than reserved)
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx1, 10_000, 1);
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx2, 20_000, 1);
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx3, 30_000, 1);
+
+        // Budget should hold sum of actual costs
+        PaymasterHub.Budget memory finalBudget = hub.getBudget(ORG_ID, subjectKey);
+        assertEq(finalBudget.usedInEpoch, 60_000, "Budget should hold sum of actual costs");
+
+        // Org financials: spent should be actual costs + fees (not reservations)
+        PaymasterHub.OrgFinancials memory finalFin = hub.getOrgFinancials(ORG_ID);
+        uint256 totalActual = 60_000;
+        PaymasterHub.SolidarityFund memory sol = hub.getSolidarityFund();
+        uint256 totalFee = (10_000 + 20_000 + 30_000) * uint256(sol.feePercentageBps) / 10000;
+        assertEq(finalFin.spent - before_.spent, totalActual + totalFee, "Spent should be actual costs + fees");
+
+        // Invariant: deposited >= spent
+        assertTrue(finalFin.deposited >= finalFin.spent, "deposited >= spent must hold");
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    ORDERING FIX REGRESSION TESTS
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice Post-grace org with deposits at minDepositRequired succeeds.
+    ///         Regression test: with old ordering (_checkOrgBalance before _checkSolidarityAccess),
+    ///         the maxCost reservation would deflate depositAvailable below minDepositRequired,
+    ///         causing a spurious InsufficientDepositForSolidarity revert.
+    function testOrdering_SolidarityCheckSeesCleanDeposits() public {
+        // Create a fresh org
+        bytes32 orderOrg = keccak256("ORDER_TEST_ORG");
+        uint256 hatA = 600;
+        uint256 hatO = 601;
+        hats.mintHat(hatA, orgAdmin);
+        hats.mintHat(hatO, orgAdmin);
+
+        vm.prank(poaManager);
+        hub.registerOrg(orderOrg, hatA, hatO);
+
+        // Warp past grace period
+        vm.warp(block.timestamp + 91 days);
+
+        // Set grace config: minDepositRequired = 0.003 ether
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(90, 1 ether, 0.003 ether);
+
+        // Unpause solidarity distribution
+        vm.prank(owner);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+
+        // Deposit exactly at minDepositRequired (0.003 ether)
+        vm.prank(owner);
+        hub.depositForOrg{value: 0.003 ether}(orderOrg);
+
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        vm.prank(orgAdmin);
+        hub.setBudget(orderOrg, subjectKey, 1 ether, 1 days);
+
+        vm.prank(orgAdmin);
+        hub.setRule(orderOrg, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            orderOrg, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // maxCost of 0.002 ether would push deposits below minDeposit with old ordering.
+        // With correct ordering, solidarity access sees the clean 0.003 ether deposit first.
+        vm.prank(address(entryPoint));
+        (bytes memory context, uint256 validationData) =
+            hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.002 ether);
+
+        assertEq(validationData, 0, "Validation should succeed - solidarity check sees clean deposits");
+        assertTrue(context.length > 0, "Context should be returned");
+
+        // After validation, org.spent should have the reservation
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(orderOrg);
+        assertEq(fin.spent, 0.002 ether, "Reservation applied after solidarity check");
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    GRACE FALLBACK FEE ZEROING TEST
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice During grace, fallback charges actualGasCost but NOT the solidarity fee
+    function testFallback_GracePeriodZerosFee() public {
+        bytes32 graceOrg = keccak256("GRACE_FEE_ZERO_ORG");
+        uint256 hatA = 700;
+        uint256 hatO = 701;
+        hats.mintHat(hatA, orgAdmin);
+        hats.mintHat(hatO, orgAdmin);
+
+        vm.prank(poaManager);
+        hub.registerOrg(graceOrg, hatA, hatO);
+
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(90, 1 ether, 0.003 ether);
+
+        vm.prank(owner);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        vm.prank(orgAdmin);
+        hub.setBudget(graceOrg, subjectKey, 1 ether, 1 days);
+
+        vm.prank(orgAdmin);
+        hub.setRule(graceOrg, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            graceOrg, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        PaymasterHub.SolidarityFund memory solBefore = hub.getSolidarityFund();
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+
+        uint256 gasCost = 50_000;
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, gasCost, 1);
+
+        // Verify: no fee collected during grace fallback
+        PaymasterHub.SolidarityFund memory solAfter = hub.getSolidarityFund();
+        assertEq(solAfter.balance, solBefore.balance, "Solidarity balance unchanged - no fee during grace fallback");
+
+        // Verify: org.spent = actualGasCost only (no fee component)
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(graceOrg);
+        assertEq(fin.spent, gasCost, "Org charged actual cost only, no fee during grace");
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    50/50 SPLIT CORRECTNESS (ACTIVE SOLIDARITY)
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice Post-grace org with active solidarity gets 50/50 split
+    function testPostOp_5050SplitWithActiveSolidarity() public {
+        // Create fresh org
+        bytes32 splitOrg = keccak256("SPLIT_TEST_ORG");
+        uint256 hatA = 800;
+        uint256 hatO = 801;
+        hats.mintHat(hatA, orgAdmin);
+        hats.mintHat(hatO, orgAdmin);
+
+        vm.prank(poaManager);
+        hub.registerOrg(splitOrg, hatA, hatO);
+
+        // Warp past grace
+        vm.warp(block.timestamp + 91 days);
+
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(90, 1 ether, 0.003 ether);
+
+        // Fund solidarity and unpause
+        vm.prank(owner);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+
+        // Deposit enough for Tier 1 (>= minDeposit)
+        vm.prank(owner);
+        hub.depositForOrg{value: 0.01 ether}(splitOrg);
+
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        vm.prank(orgAdmin);
+        hub.setBudget(splitOrg, subjectKey, 1 ether, 1 days);
+        vm.prank(orgAdmin);
+        hub.setRule(splitOrg, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            splitOrg, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        PaymasterHub.OrgFinancials memory finBefore = hub.getOrgFinancials(splitOrg);
+        PaymasterHub.SolidarityFund memory solBefore = hub.getSolidarityFund();
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.001 ether);
+
+        uint256 actualCost = 100_000;
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, actualCost, 1);
+
+        PaymasterHub.OrgFinancials memory finAfter = hub.getOrgFinancials(splitOrg);
+        PaymasterHub.SolidarityFund memory solAfter = hub.getSolidarityFund();
+
+        uint256 fee = (actualCost * uint256(solBefore.feePercentageBps)) / 10000;
+        uint256 halfCost = actualCost / 2;
+
+        // Org paid: half the cost (from deposits) + fee
+        uint256 orgDelta = finAfter.spent - finBefore.spent;
+        assertEq(orgDelta, halfCost + fee, "Org should pay half + fee");
+
+        // Solidarity paid: half the cost (minus fee income)
+        uint256 solidarityDelta = solBefore.balance - solAfter.balance;
+        assertEq(solidarityDelta, halfCost - fee, "Solidarity net = half paid - fee received");
+
+        // solidarityUsedThisPeriod tracks solidarity's contribution
+        assertEq(finAfter.solidarityUsedThisPeriod, halfCost, "solidarityUsedThisPeriod should track solidarity half");
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+            BUNDLE WITH ACTIVE SOLIDARITY (POST-GRACE)
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice Two ops in a bundle with active solidarity - second op sees reduced deposits from first's reservation
+    function testBundleSafety_ActiveSolidarityTwoOps() public {
+        bytes32 bundleOrg = keccak256("BUNDLE_SOLIDARITY_ORG");
+        uint256 hatA = 900;
+        uint256 hatO = 901;
+        hats.mintHat(hatA, orgAdmin);
+        hats.mintHat(hatO, orgAdmin);
+
+        vm.prank(poaManager);
+        hub.registerOrg(bundleOrg, hatA, hatO);
+
+        vm.warp(block.timestamp + 91 days);
+
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(90, 1 ether, 0.003 ether);
+
+        vm.prank(owner);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+
+        // Deposit 0.005 ether - above minDeposit (0.003)
+        vm.prank(owner);
+        hub.depositForOrg{value: 0.005 ether}(bundleOrg);
+
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        vm.prank(orgAdmin);
+        hub.setBudget(bundleOrg, subjectKey, 10 ether, 1 days);
+        vm.prank(orgAdmin);
+        hub.setRule(bundleOrg, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            bundleOrg, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Op1: validate with maxCost = 0.004 ether (almost all deposits)
+        vm.prank(address(entryPoint));
+        (bytes memory ctx1,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.004 ether);
+
+        // After op1 validation: org.spent = 0.004 ether (reservation), deposits = 0.005 ether
+        // depositAvailable for op2's solidarity check = 0.005 - 0.004 = 0.001 ether
+        // 0.001 ether < minDepositRequired (0.003 ether), so op2 should fail InsufficientDepositForSolidarity
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InsufficientDepositForSolidarity.selector);
+        hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.004 ether);
+
+        // But after op1's postOp settles, deposits are freed for the next validation
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx1, 50_000, 1);
+
+        // Now op2 should succeed - deposits are available again
+        vm.prank(address(entryPoint));
+        (bytes memory ctx2, uint256 v2) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.004 ether);
+        assertEq(v2, 0, "Op2 should succeed after op1 postOp settled");
+
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx2, 50_000, 1);
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+            FALLBACK PHANTOM DEBT FOR FUNDED POST-GRACE ORG
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice When fallback charges more than deposits, spent > deposited (phantom debt)
+    function testFallback_PostGracePhantomDebt() public {
+        bytes32 debtOrg = keccak256("PHANTOM_DEBT_ORG");
+        uint256 hatA = 1000;
+        uint256 hatO = 1001;
+        hats.mintHat(hatA, orgAdmin);
+        hats.mintHat(hatO, orgAdmin);
+
+        vm.prank(poaManager);
+        hub.registerOrg(debtOrg, hatA, hatO);
+
+        vm.warp(block.timestamp + 91 days);
+
+        vm.prank(poaManager);
+        hub.setGracePeriodConfig(90, 1 ether, 0.003 ether);
+
+        vm.prank(owner);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+
+        // Small deposit: 0.003 ether (just at minDeposit)
+        vm.prank(owner);
+        hub.depositForOrg{value: 0.003 ether}(debtOrg);
+
+        PasskeyAccount account = _createPasskeyAccount();
+        bytes32 subjectKey = keccak256(abi.encodePacked(uint8(0), bytes32(uint256(uint160(address(account))))));
+
+        vm.prank(orgAdmin);
+        hub.setBudget(debtOrg, subjectKey, 1 ether, 1 days);
+        vm.prank(orgAdmin);
+        hub.setRule(debtOrg, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            debtOrg, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        // Validate succeeds - solidarity covers the gap
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.002 ether);
+
+        // Fallback with actualGasCost much larger than deposits
+        // Gas cost = 0.005 ether > deposited = 0.003 ether
+        // This creates phantom debt: spent > deposited
+        uint256 gasCost = 0.005 ether;
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, gasCost, 1);
+
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(debtOrg);
+        PaymasterHub.SolidarityFund memory sol = hub.getSolidarityFund();
+        uint256 fee = (gasCost * uint256(sol.feePercentageBps)) / 10000;
+
+        // Phantom debt: spent > deposited
+        assertTrue(fin.spent > fin.deposited, "Fallback should create phantom debt when actual > deposits");
+        assertEq(fin.spent, gasCost + fee, "Spent = actualGasCost + fee");
+
+        // Fallback does NOT revert - this is the key invariant
+        // The phantom debt is the cost of the gas consumed. The paymaster was already charged by EntryPoint.
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+            DISTRIBUTION-PAUSED POSTOP FEE COLLECTION
+    ══════════════════════════════════════════════════════════════════════*/
+
+    /// @notice When distribution is paused, postOp still collects solidarity fee from deposits
+    function testPostOp_PausedDistributionStillCollectsFee() public {
+        vm.warp(block.timestamp + 91 days);
+
+        PasskeyAccount account = _createPasskeyAccount();
+        _setupDefaultBudget(address(account));
+
+        vm.prank(orgAdmin);
+        hub.setRule(ORG_ID, address(mockTarget), MockTarget.doSomething.selector, true, 0);
+
+        // Ensure distribution is paused (default)
+        PaymasterHub.SolidarityFund memory solCheck = hub.getSolidarityFund();
+        assertTrue(solCheck.distributionPaused, "Distribution should be paused by default");
+
+        PaymasterHub.SolidarityFund memory solBefore = hub.getSolidarityFund();
+
+        bytes memory paymasterAndData = _buildPaymasterData(
+            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_GENERIC
+        );
+        bytes memory innerCall = abi.encodeWithSelector(MockTarget.doSomething.selector);
+        bytes memory callData = _buildExecuteCalldata(address(mockTarget), 0, innerCall);
+        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, bytes32(uint256(1)), 0.01 ether);
+
+        uint256 actualCost = 100_000;
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, actualCost, 1);
+
+        PaymasterHub.SolidarityFund memory solAfter = hub.getSolidarityFund();
+        uint256 expectedFee = (actualCost * uint256(solBefore.feePercentageBps)) / 10000;
+
+        assertEq(solAfter.balance - solBefore.balance, expectedFee, "Fee collected even when distribution paused");
+        assertTrue(expectedFee > 0, "Fee should be nonzero");
     }
 }
 

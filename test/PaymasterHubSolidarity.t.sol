@@ -780,13 +780,13 @@ contract PaymasterHubSolidarityTest is Test {
 
     function testCannotDepositZero() public {
         vm.prank(user1);
-        vm.expectRevert(PaymasterHub.ZeroAddress.selector);
+        vm.expectRevert(PaymasterHub.ZeroAmount.selector);
         hub.depositForOrg{value: 0}(ORG_ALPHA);
     }
 
     function testCannotDonateZero() public {
         vm.prank(user1);
-        vm.expectRevert(PaymasterHub.ZeroAddress.selector);
+        vm.expectRevert(PaymasterHub.ZeroAmount.selector);
         hub.donateToSolidarity{value: 0}();
     }
 
@@ -1561,8 +1561,8 @@ contract PaymasterHubSolidarityTest is Test {
 ══════════════════════════════════════════════════════════════════*/
 
 contract PaymasterHubHarness is PaymasterHub {
-    function exposed_checkOrgBalance(bytes32 orgId, uint256 maxCost) external view {
-        _checkOrgBalance(orgId, maxCost);
+    function exposed_checkOrgBalance(bytes32 orgId, uint256 maxCost) external returns (uint256 reserved) {
+        return _checkOrgBalance(orgId, maxCost);
     }
 
     function exposed_checkSolidarityAccess(bytes32 orgId, uint256 maxCost) external view {
@@ -1611,7 +1611,7 @@ contract PaymasterHubBalanceCheckTest is Test {
 
     /*──────────── _checkOrgBalance: grace period tests ────────────*/
 
-    function testCheckOrgBalance_ZeroDeposit_InGrace_Passes() public view {
+    function testCheckOrgBalance_ZeroDeposit_InGrace_Passes() public {
         // Core fix: zero-deposit org in grace period should NOT revert
         hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
     }
@@ -1665,7 +1665,7 @@ contract PaymasterHubBalanceCheckTest is Test {
         hub.exposed_checkOrgBalance(ORG_A, 0.005 ether);
     }
 
-    function testCheckOrgBalance_ZeroMaxCost_Passes() public view {
+    function testCheckOrgBalance_ZeroMaxCost_Passes() public {
         // Edge case: zero maxCost always passes (depositAvailable >= 0)
         hub.exposed_checkOrgBalance(ORG_A, 0);
     }
@@ -1761,7 +1761,7 @@ contract PaymasterHubBalanceCheckTest is Test {
 
     /*──────────── Combined flow: both checks in sequence ────────────*/
 
-    function testBothChecks_ZeroDeposit_InGrace_BothPass() public view {
+    function testBothChecks_ZeroDeposit_InGrace_BothPass() public {
         // Simulate the validatePaymasterUserOp call order
         hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
         hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
@@ -1781,8 +1781,12 @@ contract PaymasterHubBalanceCheckTest is Test {
 
         vm.warp(block.timestamp + 91 days);
 
-        hub.exposed_checkOrgBalance(ORG_A, 0.005 ether);
+        // Note: _checkOrgBalance now reserves maxCost in org.spent for bundle safety,
+        // so we must check solidarity BEFORE balance (or use a small maxCost).
+        // In the real flow, _checkSolidarityAccess runs before reservation takes effect
+        // because _checkOrgBalance reserves at the end.
         hub.exposed_checkSolidarityAccess(ORG_A, 0.001 ether);
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
     }
 
     function testBothChecks_GraceEdge_ExactlyAtExpiry() public {
@@ -1808,5 +1812,88 @@ contract PaymasterHubBalanceCheckTest is Test {
 
         // One second before expiry — still in grace
         hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+    }
+
+    /*──────────── _checkOrgBalance: reservation return value ────────────*/
+
+    function testCheckOrgBalance_ReturnsZeroForGracePath() public {
+        // Grace org with zero deposits should return reserved=0
+        uint256 reserved = hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+        assertEq(reserved, 0, "Grace+zero-deposit should return 0 reserved");
+    }
+
+    function testCheckOrgBalance_ReturnsMaxCostForFundedOrg() public {
+        // Deposit so org has funds
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.1 ether}(ORG_A);
+
+        uint256 reserved = hub.exposed_checkOrgBalance(ORG_A, 0.005 ether);
+        assertEq(reserved, 0.005 ether, "Funded org should return maxCost as reserved");
+    }
+
+    function testCheckOrgBalance_ReturnsMaxCostWhenPaused() public {
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.1 ether}(ORG_A);
+
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+
+        uint256 reserved = hub.exposed_checkOrgBalance(ORG_A, 0.005 ether);
+        assertEq(reserved, 0.005 ether, "Paused path should return maxCost as reserved");
+    }
+
+    /*──────────── Reservation increments org.spent correctly ────────────*/
+
+    function testCheckOrgBalance_ReservationIncrementsSpent() public {
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.1 ether}(ORG_A);
+
+        PaymasterHub.OrgFinancials memory before_ = hub.getOrgFinancials(ORG_A);
+
+        hub.exposed_checkOrgBalance(ORG_A, 0.005 ether);
+
+        PaymasterHub.OrgFinancials memory after_ = hub.getOrgFinancials(ORG_A);
+        assertEq(after_.spent - before_.spent, 0.005 ether, "checkOrgBalance should increment org.spent by maxCost");
+    }
+
+    function testCheckOrgBalance_GracePathNoSpentIncrease() public {
+        PaymasterHub.OrgFinancials memory before_ = hub.getOrgFinancials(ORG_A);
+
+        hub.exposed_checkOrgBalance(ORG_A, 0.001 ether);
+
+        PaymasterHub.OrgFinancials memory after_ = hub.getOrgFinancials(ORG_A);
+        assertEq(after_.spent, before_.spent, "Grace+zero-deposit should not increment org.spent");
+    }
+
+    function testCheckOrgBalance_MultipleReservationsStack() public {
+        vm.prank(user1);
+        hub.depositForOrg{value: 0.1 ether}(ORG_A);
+
+        hub.exposed_checkOrgBalance(ORG_A, 0.01 ether);
+        hub.exposed_checkOrgBalance(ORG_A, 0.02 ether);
+        hub.exposed_checkOrgBalance(ORG_A, 0.03 ether);
+
+        PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(ORG_A);
+        assertEq(fin.spent, 0.06 ether, "Multiple reservations should stack in org.spent");
+    }
+
+    /*──────────── Fuzz: reservation return value matches org.spent delta ────────────*/
+
+    function testFuzz_CheckOrgBalance_ReturnMatchesDelta(uint128 deposit, uint128 maxCost) public {
+        vm.assume(deposit > 0 && deposit <= 10 ether);
+        vm.assume(maxCost > 0 && maxCost <= deposit);
+
+        vm.prank(user1);
+        hub.depositForOrg{value: deposit}(ORG_A);
+
+        PaymasterHub.OrgFinancials memory before_ = hub.getOrgFinancials(ORG_A);
+
+        uint256 reserved = hub.exposed_checkOrgBalance(ORG_A, maxCost);
+
+        PaymasterHub.OrgFinancials memory after_ = hub.getOrgFinancials(ORG_A);
+        uint256 delta = after_.spent - before_.spent;
+
+        assertEq(reserved, delta, "Return value should equal org.spent delta");
+        assertEq(reserved, maxCost, "Funded org should reserve full maxCost");
     }
 }
