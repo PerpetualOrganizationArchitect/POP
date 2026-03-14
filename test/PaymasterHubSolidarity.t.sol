@@ -1312,11 +1312,13 @@ contract PaymasterHubSolidarityTest is Test {
     uint8 constant PAYMASTER_DATA_VERSION = 1;
     uint8 constant SUBJECT_TYPE_ACCOUNT = 0x00;
     uint8 constant SUBJECT_TYPE_POA_ONBOARDING = 0x03;
+    uint8 constant SUBJECT_TYPE_ORG_DEPLOY = 0x04;
     uint32 constant RULE_ID_COARSE = 0x000000FF;
     uint32 constant RULE_ID_GENERIC = 0;
     uint256 constant MAX_COST = 100_000;
 
     event OnboardingAccountCreated(address indexed account, uint256 gasCost);
+    event OrgDeploymentSponsored(address indexed account, uint256 gasCost);
 
     function _buildPaymasterData(bytes32 orgId, uint8 subjectType, bytes32 subjectId, uint32 ruleId)
         internal
@@ -1525,6 +1527,725 @@ contract PaymasterHubSolidarityTest is Test {
         vm.prank(address(entryPoint));
         vm.expectRevert(PaymasterHub.InvalidOnboardingRequest.selector);
         hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    // ============ Org Deploy Sponsorship Tests ============
+
+    function _setupOrgDeploy(address deployer) internal {
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(uint128(MAX_COST), 100, 2, true, deployer);
+    }
+
+    function _buildOrgDeployCallData(address deployer) internal pure returns (bytes memory) {
+        // execute(orgDeployerAddress, 0, deployFullOrg(...)) — inner data is arbitrary for target-only validation
+        bytes memory innerData = abi.encodeWithSelector(bytes4(0x12345678), "somedata");
+        return abi.encodeWithSelector(bytes4(0xb61d27f6), deployer, uint256(0), innerData);
+    }
+
+    /// @notice Happy path: free org deployment succeeds, solidarity deducted, counter incremented
+    function testOrgDeployHappyPath() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+
+        PaymasterHub.SolidarityFund memory fundBefore = hub.getSolidarityFund();
+
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, 50_000, 1);
+
+        assertEq(hub.getOrgDeployCount(sender), 1, "Deploy count should be 1");
+
+        PaymasterHub.SolidarityFund memory fundAfter = hub.getSolidarityFund();
+        assertEq(fundBefore.balance - fundAfter.balance, 50_000, "Solidarity should be deducted by actual cost");
+    }
+
+    /// @notice Second deploy succeeds, third is rejected (lifetime limit of 2)
+    function testOrgDeployLifetimeLimit() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+
+        // First deploy
+        PackedUserOperation memory userOp1 = _buildUserOp(sender, callData, pmData);
+        vm.prank(address(entryPoint));
+        (bytes memory ctx1,) = hub.validatePaymasterUserOp(userOp1, keccak256("h1"), MAX_COST);
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx1, 50_000, 1);
+
+        // Second deploy
+        PackedUserOperation memory userOp2 = _buildUserOp(sender, callData, pmData);
+        vm.prank(address(entryPoint));
+        (bytes memory ctx2,) = hub.validatePaymasterUserOp(userOp2, keccak256("h2"), MAX_COST);
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx2, 50_000, 1);
+
+        assertEq(hub.getOrgDeployCount(sender), 2, "Deploy count should be 2");
+
+        // Third deploy should revert
+        PackedUserOperation memory userOp3 = _buildUserOp(sender, callData, pmData);
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.OrgDeployLimitExceeded.selector);
+        hub.validatePaymasterUserOp(userOp3, keccak256("h3"), MAX_COST);
+    }
+
+    /// @notice Daily limit exceeded reverts
+    function testOrgDeployDailyLimitExceeded() public {
+        address deployer = address(0xDE);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        // Set daily limit to 1, lifetime to 10
+        hub.setOrgDeployConfig(uint128(MAX_COST), 1, 10, true, deployer);
+
+        // First deploy (from account1) succeeds
+        address sender1 = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp1 = _buildUserOp(sender1, callData, pmData);
+        vm.prank(address(entryPoint));
+        (bytes memory ctx1,) = hub.validatePaymasterUserOp(userOp1, keccak256("h1"), MAX_COST);
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx1, 50_000, 1);
+
+        // Second deploy (from different account) should hit daily limit
+        address sender2 = address(new DummySender());
+        PackedUserOperation memory userOp2 = _buildUserOp(sender2, callData, pmData);
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.OrgDeployDailyLimitExceeded.selector);
+        hub.validatePaymasterUserOp(userOp2, keccak256("h2"), MAX_COST);
+    }
+
+    /// @notice Max gas per deploy exceeded reverts
+    function testOrgDeployMaxGasExceeded() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.GasTooHigh.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST + 1);
+    }
+
+    /// @notice Disabled feature reverts
+    function testOrgDeployDisabledReverts() public {
+        address deployer = address(0xDE);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(uint128(MAX_COST), 100, 2, false, deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.OrgDeployDisabled.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Non-zero orgId rejected
+    function testOrgDeployRejectsNonZeroOrgId() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        bytes memory pmData = _buildPaymasterData(ORG_ALPHA, SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(address(0xdead), callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOrgDeployRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Non-zero subjectId rejected
+    function testOrgDeployRejectsNonZeroSubjectId() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        bytes memory pmData =
+            _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(uint256(1)), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(address(0xdead), callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOrgDeployRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice initCode present rejected (account must already exist)
+    function testOrgDeployRejectsInitCode() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+        userOp.initCode = hex"01";
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOrgDeployRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Wrong target address rejected
+    function testOrgDeployRejectsWrongTarget() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        // Build calldata targeting wrong address
+        bytes memory innerData = abi.encodeWithSelector(bytes4(0x12345678), "somedata");
+        bytes memory callData = abi.encodeWithSelector(bytes4(0xb61d27f6), address(0xBAD), uint256(0), innerData);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOrgDeployRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Non-zero value in execute() rejected
+    function testOrgDeployRejectsNonZeroValue() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        // Build calldata with non-zero value
+        bytes memory innerData = abi.encodeWithSelector(bytes4(0x12345678), "somedata");
+        bytes memory callData = abi.encodeWithSelector(bytes4(0xb61d27f6), deployer, uint256(1 ether), innerData);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOrgDeployRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Solidarity paused reverts
+    function testOrgDeployRevertsSolidarityPaused() public {
+        address deployer = address(0xDE);
+        hub.donateToSolidarity{value: 1 ether}();
+        // Re-pause distribution (setUp unpauses it)
+        vm.prank(poaManager);
+        hub.pauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(uint128(MAX_COST), 100, 2, true, deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.SolidarityDistributionIsPaused.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Insufficient solidarity balance reverts
+    function testOrgDeployRevertsInsufficientFunds() public {
+        address deployer = address(0xDE);
+        // Donate less than MAX_COST
+        hub.donateToSolidarity{value: 1}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(uint128(MAX_COST), 100, 2, true, deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InsufficientFunds.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Failed op refunds daily counter but does NOT increment per-account counter
+    function testOrgDeployFailedOpRefundsDailyCounter() public {
+        address deployer = address(0xDE);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(uint128(MAX_COST), 1, 2, true, deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+
+        // Validate (increments daily counter to 1)
+        PackedUserOperation memory userOp1 = _buildUserOp(sender, callData, pmData);
+        vm.prank(address(entryPoint));
+        (bytes memory ctx1,) = hub.validatePaymasterUserOp(userOp1, keccak256("h1"), MAX_COST);
+
+        // PostOp with failure (refunds daily counter)
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opReverted, ctx1, 50_000, 1);
+
+        // Per-account counter should NOT have been incremented
+        assertEq(hub.getOrgDeployCount(sender), 0, "Failed op should not increment deploy count");
+
+        // Daily counter was refunded, so another attempt should succeed
+        address sender2 = address(new DummySender());
+        PackedUserOperation memory userOp2 = _buildUserOp(sender2, callData, pmData);
+        vm.prank(address(entryPoint));
+        hub.validatePaymasterUserOp(userOp2, keccak256("h2"), MAX_COST);
+    }
+
+    /// @notice Config setter round-trips, emits event, requires poaManager
+    function testOrgDeployConfigSetterGetter() public {
+        address deployer = address(0xDE);
+
+        // Non-poaManager should revert
+        vm.prank(user1);
+        vm.expectRevert(PaymasterHub.NotPoaManager.selector);
+        hub.setOrgDeployConfig(0.1 ether, 50, 3, true, deployer);
+
+        // PoaManager can set
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(0.1 ether, 50, 3, true, deployer);
+
+        PaymasterHub.OrgDeployConfig memory config = hub.getOrgDeployConfig();
+        assertEq(config.maxGasPerDeploy, 0.1 ether);
+        assertEq(config.dailyDeployLimit, 50);
+        assertEq(config.maxDeploysPerAccount, 3);
+        assertTrue(config.enabled);
+        assertEq(config.orgDeployer, deployer);
+    }
+
+    /// @notice Day rollover resets daily counter
+    function testOrgDeployDayRollover() public {
+        address deployer = address(0xDE);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(uint128(MAX_COST), 1, 10, true, deployer);
+
+        address sender1 = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+
+        // Use up the daily limit
+        PackedUserOperation memory userOp1 = _buildUserOp(sender1, callData, pmData);
+        vm.prank(address(entryPoint));
+        (bytes memory ctx1,) = hub.validatePaymasterUserOp(userOp1, keccak256("h1"), MAX_COST);
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx1, 50_000, 1);
+
+        // Same day — should fail
+        address sender2 = address(new DummySender());
+        PackedUserOperation memory userOp2 = _buildUserOp(sender2, callData, pmData);
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.OrgDeployDailyLimitExceeded.selector);
+        hub.validatePaymasterUserOp(userOp2, keccak256("h2"), MAX_COST);
+
+        // Warp to next day
+        vm.warp(block.timestamp + 1 days);
+
+        // Should succeed now
+        PackedUserOperation memory userOp3 = _buildUserOp(sender2, callData, pmData);
+        vm.prank(address(entryPoint));
+        hub.validatePaymasterUserOp(userOp3, keccak256("h3"), MAX_COST);
+    }
+
+    /// @notice Non-execute outer selector rejected
+    function testOrgDeployRejectsNonExecuteSelector() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        // Build arbitrary callData (not execute())
+        bytes memory callData = abi.encodeWithSelector(bytes4(0x12345678), deployer, uint256(0));
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOrgDeployRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Successful deploy emits OrgDeploymentSponsored event with correct args
+    function testOrgDeployEmitsEvent() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+
+        vm.expectEmit(true, false, false, true);
+        emit OrgDeploymentSponsored(sender, 50_000);
+
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, 50_000, 1);
+    }
+
+    /// @notice Config setter emits OrgDeployConfigUpdated event
+    function testOrgDeployConfigEmitsEvent() public {
+        address deployer = address(0xDE);
+
+        vm.prank(poaManager);
+        vm.expectEmit(false, false, false, true);
+        emit PaymasterHub.OrgDeployConfigUpdated(0.1 ether, 50, 3, true, deployer);
+        hub.setOrgDeployConfig(0.1 ether, 50, 3, true, deployer);
+    }
+
+    /// @notice postOpReverted mode: solidarity still deducted, counter NOT incremented
+    function testOrgDeployPostOpReverted() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+
+        PaymasterHub.SolidarityFund memory fundBefore = hub.getSolidarityFund();
+
+        // postOpReverted = the first postOp itself reverted, EntryPoint retries
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, 50_000, 1);
+
+        // Counter should NOT increment (postOpReverted != opSucceeded)
+        assertEq(hub.getOrgDeployCount(sender), 0, "postOpReverted should not increment deploy count");
+
+        // Solidarity should still be deducted (paymaster was still charged)
+        PaymasterHub.SolidarityFund memory fundAfter = hub.getSolidarityFund();
+        assertEq(fundBefore.balance - fundAfter.balance, 50_000, "Solidarity should be deducted even on postOpReverted");
+    }
+
+    /// @notice postOpReverted with depleted solidarity fund does NOT revert for onboarding
+    function testOnboardingPostOpRevertedDepletedSolidarity() public {
+        // Donate minimal solidarity — just enough for validation
+        hub.donateToSolidarity{value: MAX_COST}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true, address(0));
+
+        address newAccount = address(0xbeef);
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC);
+        PackedUserOperation memory userOp = _buildUserOp(newAccount, "", pmData);
+        userOp.initCode = hex"01";
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+
+        // postOpReverted with cost exceeding remaining solidarity — MUST NOT revert
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, MAX_COST + 1, 1);
+
+        // Solidarity should be fully drained (clamped deduction)
+        PaymasterHub.SolidarityFund memory fund = hub.getSolidarityFund();
+        assertEq(fund.balance, 0, "Solidarity should be fully drained");
+
+        // Daily counter should be refunded
+        PaymasterHub.OnboardingConfig memory onboarding = hub.getOnboardingConfig();
+        assertEq(onboarding.attemptsToday, 0, "Daily counter should be refunded in fallback");
+    }
+
+    /// @notice postOpReverted with depleted solidarity fund does NOT revert for org deploy
+    function testOrgDeployPostOpRevertedDepletedSolidarity() public {
+        address deployer = address(0xDE);
+        // Donate minimal solidarity — just enough for validation
+        hub.donateToSolidarity{value: MAX_COST}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(uint128(MAX_COST), 100, 2, true, deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+
+        // postOpReverted with cost exceeding remaining solidarity — MUST NOT revert
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, MAX_COST + 1, 1);
+
+        // Solidarity should be fully drained
+        PaymasterHub.SolidarityFund memory fund = hub.getSolidarityFund();
+        assertEq(fund.balance, 0, "Solidarity should be fully drained");
+
+        // Per-account counter should be refunded (was incremented in validation)
+        assertEq(hub.getOrgDeployCount(sender), 0, "Per-account counter should be refunded");
+
+        // Daily counter should be refunded
+        PaymasterHub.OrgDeployConfig memory config = hub.getOrgDeployConfig();
+        assertEq(config.attemptsToday, 0, "Daily counter should be refunded");
+    }
+
+    /// @notice postOpReverted partial deduction — solidarity has some but not enough
+    function testOnboardingPostOpRevertedPartialDeduction() public {
+        uint256 partialAmount = 30_000;
+        hub.donateToSolidarity{value: MAX_COST + partialAmount}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOnboardingConfig(uint128(MAX_COST), 10, true, address(0));
+
+        address newAccount = address(0xbeef);
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_POA_ONBOARDING, bytes32(0), RULE_ID_GENERIC);
+        PackedUserOperation memory userOp = _buildUserOp(newAccount, "", pmData);
+        userOp.initCode = hex"01";
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+
+        // Validation consumed nothing from balance. Fund has MAX_COST + partialAmount.
+        // postOpReverted with cost = MAX_COST + partialAmount + 1 (exceeds fund)
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, uint256(MAX_COST) + partialAmount + 1, 1);
+
+        PaymasterHub.SolidarityFund memory fund = hub.getSolidarityFund();
+        assertEq(fund.balance, 0, "Solidarity should be drained to 0 (partial deduction)");
+    }
+
+    /// @notice postOpReverted partial deduction for org deploy
+    function testOrgDeployPostOpRevertedPartialDeduction() public {
+        address deployer = address(0xDE);
+        uint256 partialAmount = 30_000;
+        hub.donateToSolidarity{value: MAX_COST + partialAmount}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(uint128(MAX_COST), 100, 2, true, deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        (bytes memory context,) = hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, uint256(MAX_COST) + partialAmount + 1, 1);
+
+        PaymasterHub.SolidarityFund memory fund = hub.getSolidarityFund();
+        assertEq(fund.balance, 0, "Solidarity should be drained to 0 (partial deduction)");
+        assertEq(hub.getOrgDeployCount(sender), 0, "Per-account counter should be refunded");
+    }
+
+    /// @notice orgDeployer set to address(0) makes all deploys fail
+    function testOrgDeployRejectsZeroOrgDeployer() public {
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(uint128(MAX_COST), 100, 2, true, address(0));
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        // Target doesn't matter — address(0) check in _validateOrgDeployCallData fires first
+        bytes memory innerData = abi.encodeWithSelector(bytes4(0x12345678), "somedata");
+        bytes memory callData = abi.encodeWithSelector(bytes4(0xb61d27f6), address(0), uint256(0), innerData);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOrgDeployRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice maxDeploysPerAccount set to 0 blocks all deploys immediately
+    function testOrgDeployZeroMaxDeploysPerAccount() public {
+        address deployer = address(0xDE);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(uint128(MAX_COST), 100, 0, true, deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.OrgDeployLimitExceeded.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Non-generic ruleId rejected for org deploy
+    function testOrgDeployRejectsNonGenericRuleId() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_COARSE);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+        PackedUserOperation memory userOp = _buildUserOp(address(new DummySender()), callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOrgDeployRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Empty calldata rejected
+    function testOrgDeployRejectsEmptyCalldata() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        PackedUserOperation memory userOp = _buildUserOp(sender, "", pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOrgDeployRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Short calldata (valid selector but missing params) rejected
+    function testOrgDeployRejectsShortCalldata() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        // Only selector, no address/value params (< 0x64 bytes)
+        bytes memory callData = abi.encodeWithSelector(bytes4(0xb61d27f6));
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.InvalidOrgDeployRequest.selector);
+        hub.validatePaymasterUserOp(userOp, keccak256("hash"), MAX_COST);
+    }
+
+    /// @notice Per-account lifetime counters are independent across accounts
+    function testOrgDeployIndependentAccountCounters() public {
+        address deployer = address(0xDE);
+        _setupOrgDeploy(deployer);
+
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+
+        // sender1 uses both deploys
+        address sender1 = address(new DummySender());
+        for (uint256 i = 0; i < 2; i++) {
+            PackedUserOperation memory userOp = _buildUserOp(sender1, callData, pmData);
+            vm.prank(address(entryPoint));
+            (bytes memory ctx,) = hub.validatePaymasterUserOp(userOp, keccak256(abi.encode("s1", i)), MAX_COST);
+            vm.prank(address(entryPoint));
+            hub.postOp(IPaymaster.PostOpMode.opSucceeded, ctx, 50_000, 1);
+        }
+        assertEq(hub.getOrgDeployCount(sender1), 2);
+
+        // sender1 is blocked
+        PackedUserOperation memory blockedOp = _buildUserOp(sender1, callData, pmData);
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.OrgDeployLimitExceeded.selector);
+        hub.validatePaymasterUserOp(blockedOp, keccak256("blocked"), MAX_COST);
+
+        // sender2 should still succeed (independent counter)
+        address sender2 = address(new DummySender());
+        PackedUserOperation memory userOp2 = _buildUserOp(sender2, callData, pmData);
+        vm.prank(address(entryPoint));
+        hub.validatePaymasterUserOp(userOp2, keccak256("s2"), MAX_COST);
+
+        assertEq(
+            hub.getOrgDeployCount(sender2), 1, "sender2 counter should be 1 (optimistically incremented in validation)"
+        );
+    }
+
+    /// @notice Per-account counter is bundle-safe: two UserOps from same sender in one bundle
+    /// cannot bypass the lifetime limit because the counter is optimistically incremented in validation
+    function testOrgDeployBundleSafetyPerAccountCounter() public {
+        address deployer = address(0xDE);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        // Lifetime limit of 1, daily limit of 10
+        hub.setOrgDeployConfig(uint128(MAX_COST), 10, 1, true, deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+
+        // First validation succeeds (counter goes 0 -> 1)
+        PackedUserOperation memory userOp1 = _buildUserOp(sender, callData, pmData);
+        vm.prank(address(entryPoint));
+        hub.validatePaymasterUserOp(userOp1, keccak256("h1"), MAX_COST);
+
+        // Second validation from SAME sender should fail (counter is already 1 >= limit of 1)
+        PackedUserOperation memory userOp2 = _buildUserOp(sender, callData, pmData);
+        vm.prank(address(entryPoint));
+        vm.expectRevert(PaymasterHub.OrgDeployLimitExceeded.selector);
+        hub.validatePaymasterUserOp(userOp2, keccak256("h2"), MAX_COST);
+    }
+
+    /// @notice Failed op refunds the per-account counter (optimistic increment rollback)
+    function testOrgDeployFailedOpRefundsPerAccountCounter() public {
+        address deployer = address(0xDE);
+        hub.donateToSolidarity{value: 1 ether}();
+        vm.prank(poaManager);
+        hub.unpauseSolidarityDistribution();
+        vm.prank(poaManager);
+        hub.setOrgDeployConfig(uint128(MAX_COST), 10, 1, true, deployer);
+
+        address sender = address(new DummySender());
+        bytes memory pmData = _buildPaymasterData(bytes32(0), SUBJECT_TYPE_ORG_DEPLOY, bytes32(0), RULE_ID_GENERIC);
+        bytes memory callData = _buildOrgDeployCallData(deployer);
+
+        // Validate (counter goes 0 -> 1)
+        PackedUserOperation memory userOp = _buildUserOp(sender, callData, pmData);
+        vm.prank(address(entryPoint));
+        (bytes memory ctx,) = hub.validatePaymasterUserOp(userOp, keccak256("h1"), MAX_COST);
+
+        assertEq(hub.getOrgDeployCount(sender), 1, "Counter should be 1 after validation");
+
+        // PostOp with failure — counter should be refunded back to 0
+        vm.prank(address(entryPoint));
+        hub.postOp(IPaymaster.PostOpMode.opReverted, ctx, 50_000, 1);
+
+        assertEq(hub.getOrgDeployCount(sender), 0, "Counter should be refunded to 0 after failure");
+
+        // Same sender can try again
+        PackedUserOperation memory userOp2 = _buildUserOp(sender, callData, pmData);
+        vm.prank(address(entryPoint));
+        hub.validatePaymasterUserOp(userOp2, keccak256("h2"), MAX_COST);
+    }
+
+    /// @notice Initialize sets correct org deploy defaults
+    function testOrgDeployInitializeDefaults() public {
+        PaymasterHub.OrgDeployConfig memory config = hub.getOrgDeployConfig();
+        assertEq(config.maxGasPerDeploy, 0.05 ether, "Default maxGasPerDeploy should be 0.05 ether");
+        assertEq(config.dailyDeployLimit, 100, "Default dailyDeployLimit should be 100");
+        assertEq(config.maxDeploysPerAccount, 2, "Default maxDeploysPerAccount should be 2");
+        assertFalse(config.enabled, "Should be disabled by default (requires explicit setOrgDeployConfig)");
+        assertEq(config.orgDeployer, address(0), "orgDeployer should be unset initially");
     }
 
     /// @notice registerOrg must reject bytes32(0) as orgId

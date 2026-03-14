@@ -56,6 +56,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     error OnboardingDailyLimitExceeded();
     error Overflow();
     error InvalidOnboardingRequest();
+    error OrgDeployDisabled();
+    error OrgDeployLimitExceeded();
+    error OrgDeployDailyLimitExceeded();
+    error InvalidOrgDeployRequest();
     error InvalidOrgId();
     error ZeroAmount();
 
@@ -64,6 +68,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     uint8 private constant SUBJECT_TYPE_ACCOUNT = 0x00;
     uint8 private constant SUBJECT_TYPE_HAT = 0x01;
     uint8 private constant SUBJECT_TYPE_POA_ONBOARDING = 0x03;
+    uint8 private constant SUBJECT_TYPE_ORG_DEPLOY = 0x04;
+
+    // Sponsorship type flags for context encoding
+    uint8 private constant SPONSORSHIP_NONE = 0;
+    uint8 private constant SPONSORSHIP_ONBOARDING = 1;
+    uint8 private constant SPONSORSHIP_ORG_DEPLOY = 2;
 
     uint32 private constant RULE_ID_GENERIC = 0x00000000;
     uint32 private constant RULE_ID_EXECUTOR = 0x00000001;
@@ -103,6 +113,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         uint128 maxGasPerCreation, uint128 dailyCreationLimit, bool enabled, address accountRegistry
     );
     event OnboardingAccountCreated(address indexed account, uint256 gasCost);
+    event OrgDeployConfigUpdated(
+        uint128 maxGasPerDeploy, uint128 dailyDeployLimit, uint8 maxDeploysPerAccount, bool enabled, address orgDeployer
+    );
+    event OrgDeploymentSponsored(address indexed account, uint256 gasCost);
     event SolidarityDistributionPaused();
     event SolidarityDistributionUnpaused();
 
@@ -178,6 +192,19 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         address accountRegistry; // UniversalAccountRegistry — only allowed callData target during onboarding
     }
 
+    /**
+     * @dev Free org deployment configuration for solidarity-funded deployments
+     */
+    struct OrgDeployConfig {
+        uint128 maxGasPerDeploy; // Max gas cost (in wei) per deployment
+        uint128 dailyDeployLimit; // Max deployments globally per day
+        uint128 attemptsToday; // Validation attempts in current day window
+        uint32 currentDay; // Day tracker (timestamp / 1 days)
+        uint8 maxDeploysPerAccount; // Lifetime cap per sender address (e.g. 2)
+        bool enabled; // Whether org deploy sponsorship is active
+        address orgDeployer; // Authorized OrgDeployer contract address
+    }
+
     struct FeeCaps {
         uint256 maxFeePerGas;
         uint256 maxPriorityFeePerGas;
@@ -215,6 +242,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.graceperiod")) - 1));
     bytes32 private constant ONBOARDING_STORAGE_LOCATION =
         keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.onboarding")) - 1));
+    bytes32 private constant ORG_DEPLOY_STORAGE_LOCATION =
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.orgdeploy")) - 1));
+    bytes32 private constant ORG_DEPLOY_COUNTS_STORAGE_LOCATION =
+        keccak256(abi.encode(uint256(keccak256("poa.paymasterhub.orgdeploy.counts")) - 1));
 
     // ============ Constructor ============
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -270,6 +301,13 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         onboarding.maxGasPerCreation = 0.01 ether; // ~$30 worth of gas at typical L1 prices
         onboarding.dailyCreationLimit = 1000; // 1000 accounts per day
         onboarding.enabled = true;
+
+        // Initialize org deploy config (enabled, max cost per deploy, 100 deployments/day, 2 per account)
+        OrgDeployConfig storage orgDeploy = _getOrgDeployStorage();
+        orgDeploy.maxGasPerDeploy = 0.05 ether; // Org deployment is more expensive than account creation
+        orgDeploy.dailyDeployLimit = 100; // 100 free org deployments per day
+        orgDeploy.maxDeploysPerAccount = 2; // 2 free deployments per account lifetime
+        orgDeploy.enabled = false; // Requires explicit setOrgDeployConfig to activate
 
         emit PaymasterInitialized(_entryPoint, _hats, _poaManager);
     }
@@ -668,10 +706,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         bytes32 contextOrgId = orgId;
         uint256 reservedOrgBalance;
 
-        bool isOnboarding = subjectType == SUBJECT_TYPE_POA_ONBOARDING;
+        uint8 sponsorshipType = SPONSORSHIP_NONE;
 
-        // Handle POA onboarding separately (no org required)
-        if (isOnboarding) {
+        // Handle solidarity-funded sponsorship paths (no org required)
+        if (subjectType == SUBJECT_TYPE_POA_ONBOARDING) {
+            sponsorshipType = SPONSORSHIP_ONBOARDING;
             // Global-only onboarding path: never org-scoped billing.
             if (orgId != bytes32(0) || subjectId != bytes32(0) || ruleId != RULE_ID_GENERIC) {
                 revert InvalidOnboardingRequest();
@@ -684,6 +723,17 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
             // For onboarding, we don't validate org rules/caps/budgets
             // The onboarding config has its own limits
+        } else if (subjectType == SUBJECT_TYPE_ORG_DEPLOY) {
+            sponsorshipType = SPONSORSHIP_ORG_DEPLOY;
+            // Global-only org deploy path: never org-scoped billing.
+            if (orgId != bytes32(0) || subjectId != bytes32(0) || ruleId != RULE_ID_GENERIC) {
+                revert InvalidOrgDeployRequest();
+            }
+
+            // Validate free org deployment eligibility
+            subjectKey = _validateOrgDeployEligibility(userOp, maxCost);
+            currentEpochStart = uint32(block.timestamp);
+            contextOrgId = bytes32(0);
         } else {
             // Validate org is registered and not paused
             OrgConfig storage org = _getOrgsStorage()[orgId];
@@ -713,7 +763,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         // Prepare context for postOp
         // maxCost = budget reservation (always reserved), reservedOrgBalance = org deposit reservation (0 during grace)
-        context = abi.encode(isOnboarding, contextOrgId, subjectKey, currentEpochStart, maxCost, reservedOrgBalance);
+        // sender is needed for org deploy path to increment per-account counter in postOp
+        context = abi.encode(
+            sponsorshipType, contextOrgId, subjectKey, currentEpochStart, maxCost, reservedOrgBalance, userOp.sender
+        );
 
         // Return 0 for no signature failure and no time restrictions
         validationData = 0;
@@ -783,19 +836,28 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         nonReentrant
     {
         (
-            bool isOnboarding,
+            uint8 sponsorshipType,
             bytes32 orgId,
             bytes32 subjectKey,
             uint32 epochStart,
             uint256 reservedBudget,
-            uint256 reservedOrgBalance
-        ) = abi.decode(context, (bool, bytes32, bytes32, uint32, uint256, uint256));
+            uint256 reservedOrgBalance,
+            address sender
+        ) = abi.decode(context, (uint8, bytes32, bytes32, uint32, uint256, uint256, address));
 
-        // Onboarding uses a dedicated context flag (not orgId sentinel).
-        if (isOnboarding) {
-            // POA onboarding: deduct from solidarity fund.
-            // Count a created account only when the operation succeeded.
+        // Solidarity-funded sponsorship paths
+        if (sponsorshipType == SPONSORSHIP_ONBOARDING) {
+            if (mode == IPaymaster.PostOpMode.postOpReverted) {
+                _sponsorshipPostOpFallback(sponsorshipType, sender, actualGasCost);
+                return;
+            }
             _updateOnboardingUsage(actualGasCost, mode == IPaymaster.PostOpMode.opSucceeded);
+        } else if (sponsorshipType == SPONSORSHIP_ORG_DEPLOY) {
+            if (mode == IPaymaster.PostOpMode.postOpReverted) {
+                _sponsorshipPostOpFallback(sponsorshipType, sender, actualGasCost);
+                return;
+            }
+            _updateOrgDeployUsage(sender, actualGasCost, mode == IPaymaster.PostOpMode.opSucceeded);
         } else {
             // If the first postOp call reverted, EntryPoint calls again with postOpReverted.
             // Use a fallback that cannot revert: charge 100% from deposits, skip solidarity.
@@ -865,6 +927,45 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         if (solidarityFee > 0) {
             emit SolidarityFeeCollected(orgId, solidarityFee);
+        }
+    }
+
+    /**
+     * @notice Fallback accounting for solidarity-funded sponsorship when postOp reverts
+     * @dev Called with PostOpMode.postOpReverted for onboarding and org deploy paths.
+     *      MUST NOT revert — if this reverts, the paymaster is charged by EntryPoint
+     *      with zero accounting update, creating permanent balance drift.
+     *
+     *      Unlike the regular org fallback, there are no org deposits to charge.
+     *      Deducts min(solidarity.balance, actualGasCost) and refunds optimistic counters.
+     *
+     * @param sponsorshipType SPONSORSHIP_ONBOARDING or SPONSORSHIP_ORG_DEPLOY
+     * @param sender The account address (needed for org deploy per-account counter)
+     * @param actualGasCost Actual gas cost charged by EntryPoint
+     */
+    function _sponsorshipPostOpFallback(uint8 sponsorshipType, address sender, uint256 actualGasCost) private {
+        // Deduct from solidarity (clamped to available balance — never revert)
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+        uint128 deduction = solidarity.balance < uint128(actualGasCost) ? solidarity.balance : uint128(actualGasCost);
+        solidarity.balance -= deduction;
+
+        // Refund optimistic counters. The first postOp's refunds were rolled back by EntryPoint,
+        // so counters are still at their validation-incremented values.
+        if (sponsorshipType == SPONSORSHIP_ONBOARDING) {
+            OnboardingConfig storage onboarding = _getOnboardingStorage();
+            if (onboarding.attemptsToday > 0) {
+                onboarding.attemptsToday--;
+            }
+        } else {
+            // SPONSORSHIP_ORG_DEPLOY
+            mapping(address => uint8) storage counts = _getOrgDeployCountsStorage();
+            if (counts[sender] > 0) {
+                counts[sender]--;
+            }
+            OrgDeployConfig storage deployConfig = _getOrgDeployStorage();
+            if (deployConfig.attemptsToday > 0) {
+                deployConfig.attemptsToday--;
+            }
         }
     }
 
@@ -1303,6 +1404,34 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         emit OnboardingConfigUpdated(_maxGasPerCreation, _dailyCreationLimit, _enabled, _accountRegistry);
     }
 
+    /**
+     * @notice Configure free org deployment sponsorship from solidarity fund
+     * @dev Only PoaManager can modify org deploy parameters
+     * @param _maxGasPerDeploy Maximum cost in wei allowed per org deployment
+     * @param _dailyDeployLimit Maximum deployments that can be sponsored per day globally
+     * @param _maxDeploysPerAccount Lifetime cap per sender address
+     * @param _enabled Whether org deploy sponsorship is active
+     * @param _orgDeployer Authorized OrgDeployer contract address
+     */
+    function setOrgDeployConfig(
+        uint128 _maxGasPerDeploy,
+        uint128 _dailyDeployLimit,
+        uint8 _maxDeploysPerAccount,
+        bool _enabled,
+        address _orgDeployer
+    ) external {
+        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+
+        OrgDeployConfig storage deployConfig = _getOrgDeployStorage();
+        deployConfig.maxGasPerDeploy = _maxGasPerDeploy;
+        deployConfig.dailyDeployLimit = _dailyDeployLimit;
+        deployConfig.maxDeploysPerAccount = _maxDeploysPerAccount;
+        deployConfig.enabled = _enabled;
+        deployConfig.orgDeployer = _orgDeployer;
+
+        emit OrgDeployConfigUpdated(_maxGasPerDeploy, _dailyDeployLimit, _maxDeploysPerAccount, _enabled, _orgDeployer);
+    }
+
     // ============ Storage Getters (for Lens) ============
 
     /**
@@ -1374,6 +1503,23 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      */
     function getOnboardingConfig() external view returns (OnboardingConfig memory) {
         return _getOnboardingStorage();
+    }
+
+    /**
+     * @notice Get org deploy sponsorship configuration
+     * @return The OrgDeployConfig struct
+     */
+    function getOrgDeployConfig() external view returns (OrgDeployConfig memory) {
+        return _getOrgDeployStorage();
+    }
+
+    /**
+     * @notice Get number of sponsored deployments for a specific account
+     * @param account The account address to query
+     * @return Number of sponsored deployments used
+     */
+    function getOrgDeployCount(address account) external view returns (uint8) {
+        return _getOrgDeployCountsStorage()[account];
     }
 
     /**
@@ -1486,6 +1632,20 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
     function _getOnboardingStorage() private pure returns (OnboardingConfig storage $) {
         bytes32 slot = ONBOARDING_STORAGE_LOCATION;
+        assembly {
+            $.slot := slot
+        }
+    }
+
+    function _getOrgDeployStorage() private pure returns (OrgDeployConfig storage $) {
+        bytes32 slot = ORG_DEPLOY_STORAGE_LOCATION;
+        assembly {
+            $.slot := slot
+        }
+    }
+
+    function _getOrgDeployCountsStorage() private pure returns (mapping(address => uint8) storage $) {
+        bytes32 slot = ORG_DEPLOY_COUNTS_STORAGE_LOCATION;
         assembly {
             $.slot := slot
         }
@@ -1668,6 +1828,83 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         if (target != registry) revert InvalidOnboardingRequest();
         if (value != 0) revert InvalidOnboardingRequest();
         if (innerSelector != bytes4(0xbff6de20)) revert InvalidOnboardingRequest();
+    }
+
+    /**
+     * @notice Validate free org deployment eligibility
+     * @dev Checks deploy config, per-account lifetime limit, and daily rate limits
+     * @param userOp The user operation being validated
+     * @param maxCost Maximum gas cost for the operation
+     * @return subjectKey The subject key for tracking
+     */
+    function _validateOrgDeployEligibility(PackedUserOperation calldata userOp, uint256 maxCost)
+        private
+        returns (bytes32 subjectKey)
+    {
+        address account = userOp.sender;
+        OrgDeployConfig storage deployConfig = _getOrgDeployStorage();
+
+        // Check feature is enabled
+        if (!deployConfig.enabled) revert OrgDeployDisabled();
+
+        // No initCode for org deployment (account must already exist)
+        if (userOp.initCode.length != 0) revert InvalidOrgDeployRequest();
+
+        // Validate calldata: must be execute(orgDeployerAddress, 0, ...)
+        _validateOrgDeployCallData(userOp.callData, deployConfig.orgDeployer);
+
+        // Org deploy is paid from solidarity fund, so block when distribution is paused
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+        if (solidarity.distributionPaused) revert SolidarityDistributionIsPaused();
+
+        // Check gas cost limit
+        if (maxCost > deployConfig.maxGasPerDeploy) revert GasTooHigh();
+
+        // Check per-account lifetime limit (optimistic increment for bundle safety)
+        mapping(address => uint8) storage counts = _getOrgDeployCountsStorage();
+        if (counts[account] >= deployConfig.maxDeploysPerAccount) revert OrgDeployLimitExceeded();
+        counts[account]++;
+
+        // Check daily rate limit (same pattern as onboarding)
+        uint32 today = uint32(block.timestamp / 1 days);
+        if (today != deployConfig.currentDay) {
+            deployConfig.currentDay = today;
+            deployConfig.attemptsToday = 0;
+        }
+        if (deployConfig.attemptsToday >= deployConfig.dailyDeployLimit) {
+            revert OrgDeployDailyLimitExceeded();
+        }
+        deployConfig.attemptsToday++;
+
+        // Check solidarity fund has sufficient balance
+        if (solidarity.balance < maxCost) revert InsufficientFunds();
+
+        // Subject key based on account address
+        subjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_ORG_DEPLOY, bytes20(account)));
+    }
+
+    /// @dev Validates that org deploy callData is execute(orgDeployerAddress, 0, ...).
+    ///      Checks outer selector, target address, and value. Does NOT parse inner deployFullOrg
+    ///      params because the struct is complex and may change.
+    function _validateOrgDeployCallData(bytes calldata callData, address orgDeployer) private pure {
+        if (orgDeployer == address(0)) revert InvalidOrgDeployRequest();
+        if (callData.length < 4) revert InvalidOrgDeployRequest();
+
+        // Must be execute(address,uint256,bytes) = 0xb61d27f6
+        bytes4 outerSelector = bytes4(callData[0:4]);
+        if (outerSelector != bytes4(0xb61d27f6)) revert InvalidOrgDeployRequest();
+        if (callData.length < 0x64) revert InvalidOrgDeployRequest();
+
+        address target;
+        uint256 value;
+        assembly {
+            target := calldataload(add(callData.offset, 0x04))
+            value := calldataload(add(callData.offset, 0x24))
+        }
+
+        // Must target the orgDeployer with zero value (free deployment)
+        if (target != orgDeployer) revert InvalidOrgDeployRequest();
+        if (value != 0) revert InvalidOrgDeployRequest();
     }
 
     function _validateRules(PackedUserOperation calldata userOp, uint32 ruleId, bytes32 orgId) private view {
@@ -1889,6 +2126,37 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
 
         // Deduct from solidarity fund (validated during _validateOnboardingEligibility)
+        if (solidarity.balance < actualGasCost) revert InsufficientFunds();
+        solidarity.balance -= uint128(actualGasCost);
+    }
+
+    /**
+     * @notice Update org deploy usage and deduct from solidarity fund
+     * @dev Called in postOp for free org deployment operations
+     * @param sender The account that deployed the org
+     * @param actualGasCost Actual gas cost to deduct
+     * @param countAsDeployment Whether to count as successful deployment (true when op succeeded)
+     */
+    function _updateOrgDeployUsage(address sender, uint256 actualGasCost, bool countAsDeployment) private {
+        SolidarityFund storage solidarity = _getSolidarityStorage();
+
+        if (countAsDeployment) {
+            // Per-account counter already incremented during validation (bundle safety).
+            // Just emit the event.
+            emit OrgDeploymentSponsored(sender, actualGasCost);
+        } else {
+            // Refund both counters for failed operations (incremented during validation for bundle safety)
+            mapping(address => uint8) storage counts = _getOrgDeployCountsStorage();
+            if (counts[sender] > 0) {
+                counts[sender]--;
+            }
+            OrgDeployConfig storage deployConfig = _getOrgDeployStorage();
+            if (deployConfig.attemptsToday > 0) {
+                deployConfig.attemptsToday--;
+            }
+        }
+
+        // Deduct from solidarity fund (validated during _validateOrgDeployEligibility)
         if (solidarity.balance < actualGasCost) revert InsufficientFunds();
         solidarity.balance -= uint128(actualGasCost);
     }
