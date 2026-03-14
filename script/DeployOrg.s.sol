@@ -8,6 +8,7 @@ import {OrgDeployer, ITaskManagerBootstrap} from "../src/OrgDeployer.sol";
 import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
 import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
 import {ModulesFactory} from "../src/factories/ModulesFactory.sol";
+import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
 
 /**
  * @title DeployOrg
@@ -186,6 +187,16 @@ contract DeployOrg is Script {
         } else {
             console.log("\nDeploying org...");
             result = orgDeployer.deployFullOrg(params);
+        }
+
+        // Register deployer username on GlobalAccountRegistry
+        string memory deployerUsername = vm.envOr("DEPLOYER_USERNAME", string("hudsonhrh"));
+        if (bytes(deployerUsername).length > 0) {
+            UniversalAccountRegistry globalReg = UniversalAccountRegistry(globalAccountRegistry);
+            if (bytes(globalReg.getUsername(deployer)).length == 0) {
+                globalReg.registerAccount(deployerUsername);
+                console.log("Deployer registered as:", deployerUsername);
+            }
         }
 
         vm.stopBroadcast();
@@ -474,9 +485,7 @@ contract DeployOrg is Script {
         params.metadataHash = bytes32(0); // No metadata hash by default (can be set via env)
         params.registryAddr = globalAccountRegistry;
         params.deployerAddress = deployerAddress; // Address to receive ADMIN hat
-        params.deployerUsername = vm.envOr("DEPLOYER_USERNAME", string("")); // Optional username (empty = skip)
-        // Note: regDeadline/regNonce/regSignature left as default (0/"") = skip sig-based registration
-        // The frontend should provide these when deployerUsername is non-empty
+        params.deployerUsername = vm.envOr("DEPLOYER_USERNAME", string("hudsonhrh"));
         params.autoUpgrade = config.autoUpgrade;
         params.hybridThresholdPct = config.threshold.hybrid;
         params.ddThresholdPct = config.threshold.directDemocracy;

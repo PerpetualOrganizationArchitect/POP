@@ -118,9 +118,19 @@ contract DeployHomeChain is DeployHelper {
         require(sent, "Failed to fund executor");
         console.log("Executor funded with 0.1 ETH for Hyperlane fees");
 
+        // 6. Register deployer username on GlobalAccountRegistry
+        string memory deployerUsername = vm.envOr("DEPLOYER_USERNAME", string("hudsonhrh"));
+        if (bytes(deployerUsername).length > 0) {
+            UniversalAccountRegistry globalReg = UniversalAccountRegistry(infra.globalAccountRegistry);
+            if (bytes(globalReg.getUsername(deployer)).length == 0) {
+                globalReg.registerAccount(deployerUsername);
+                console.log("Deployer registered as:", deployerUsername);
+            }
+        }
+
         vm.stopBroadcast();
 
-        // 6. Write state JSON
+        // 7. Write state JSON
         _writeState(dd, infra, address(hub), orgResult, hubDomain);
 
         console.log("\n=== Home Chain Deployment Complete ===");
@@ -287,8 +297,7 @@ contract DeployHomeChain is DeployHelper {
         params.metadataHash = orgMetadata;
         params.registryAddr = infra.globalAccountRegistry;
         params.deployerAddress = deployer;
-        params.deployerUsername = "";
-        // regDeadline/regNonce/regSignature left as default (0/"") = skip registration
+        params.deployerUsername = vm.envOr("DEPLOYER_USERNAME", string("hudsonhrh"));
         params.autoUpgrade = true;
         params.hybridThresholdPct = 50;
         params.ddThresholdPct = 50;
