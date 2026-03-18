@@ -13,6 +13,7 @@ import {IPasskeyAccount} from "../src/interfaces/IPasskeyAccount.sol";
 
 // PaymasterHub
 import {PaymasterHub} from "../src/PaymasterHub.sol";
+import {PaymasterHubErrors} from "../src/libs/PaymasterHubErrors.sol";
 import {IPaymaster} from "../src/interfaces/IPaymaster.sol";
 import {IEntryPoint} from "../src/interfaces/IEntryPoint.sol";
 import {PackedUserOperation, UserOpLib} from "../src/interfaces/PackedUserOperation.sol";
@@ -84,7 +85,6 @@ contract PasskeyPaymasterIntegrationTest is Test {
     uint8 constant SUBJECT_TYPE_ACCOUNT = 0x00;
     uint8 constant SUBJECT_TYPE_HAT = 0x01;
     uint32 constant RULE_ID_GENERIC = 0x00000000;
-    uint32 constant RULE_ID_EXECUTOR = 0x00000001;
     uint32 constant RULE_ID_COARSE = 0x000000FF;
 
     // Function selectors
@@ -290,7 +290,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         vm.expectRevert(
             abi.encodeWithSelector(
-                PaymasterHub.RuleDenied.selector, address(mockTarget), MockTarget.doSomething.selector
+                PaymasterHubErrors.RuleDenied.selector, address(mockTarget), MockTarget.doSomething.selector
             )
         );
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
@@ -330,7 +330,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         vm.prank(address(entryPoint));
         vm.expectRevert(
-            abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(target2), MockTarget.doSomething.selector)
+            abi.encodeWithSelector(
+                PaymasterHubErrors.RuleDenied.selector, address(target2), MockTarget.doSomething.selector
+            )
         );
         hub.validatePaymasterUserOp(userOp2, bytes32(0), 0.001 ether);
     }
@@ -400,7 +402,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         vm.expectRevert(
             abi.encodeWithSelector(
-                PaymasterHub.RuleDenied.selector, address(mockTarget), MockTarget.doSomething.selector
+                PaymasterHubErrors.RuleDenied.selector, address(mockTarget), MockTarget.doSomething.selector
             )
         );
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
@@ -437,7 +439,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         vm.expectRevert(
             abi.encodeWithSelector(
-                PaymasterHub.RuleDenied.selector, address(mockTarget), MockTarget.doSomethingElse.selector
+                PaymasterHubErrors.RuleDenied.selector, address(mockTarget), MockTarget.doSomethingElse.selector
             )
         );
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
@@ -477,7 +479,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         vm.prank(address(entryPoint));
         vm.expectRevert(
-            abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(target2), MockTarget.doSomething.selector)
+            abi.encodeWithSelector(
+                PaymasterHubErrors.RuleDenied.selector, address(target2), MockTarget.doSomething.selector
+            )
         );
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
     }
@@ -619,7 +623,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         vm.expectRevert(
             abi.encodeWithSelector(
-                PaymasterHub.RuleDenied.selector, address(mockEligibility), MockEligibility.claimVouchedHat.selector
+                PaymasterHubErrors.RuleDenied.selector,
+                address(mockEligibility),
+                MockEligibility.claimVouchedHat.selector
             )
         );
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
@@ -693,7 +699,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         vm.expectRevert(
             abi.encodeWithSelector(
-                PaymasterHub.RuleDenied.selector, address(target2), MockTarget.doSomethingElse.selector
+                PaymasterHubErrors.RuleDenied.selector, address(target2), MockTarget.doSomethingElse.selector
             )
         );
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
@@ -749,7 +755,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         vm.expectRevert(
             abi.encodeWithSelector(
-                PaymasterHub.RuleDenied.selector, address(mockTarget), MockTarget.doSomething.selector
+                PaymasterHubErrors.RuleDenied.selector, address(mockTarget), MockTarget.doSomething.selector
             )
         );
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
@@ -776,7 +782,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         // Should be denied: (mockTarget, bytes4(0)) is not whitelisted
         vm.prank(address(entryPoint));
-        vm.expectRevert(abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(mockTarget), bytes4(0)));
+        vm.expectRevert(abi.encodeWithSelector(PaymasterHubErrors.RuleDenied.selector, address(mockTarget), bytes4(0)));
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
     }
 
@@ -800,7 +806,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(mockTarget), bytes4(0)));
+        vm.expectRevert(abi.encodeWithSelector(PaymasterHubErrors.RuleDenied.selector, address(mockTarget), bytes4(0)));
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
     }
 
@@ -867,7 +873,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Should be denied: (account, executeBatch_selector) is not whitelisted
         vm.prank(address(entryPoint));
         vm.expectRevert(
-            abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(account), EXECUTE_BATCH_SELECTOR)
+            abi.encodeWithSelector(PaymasterHubErrors.RuleDenied.selector, address(account), EXECUTE_BATCH_SELECTOR)
         );
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
     }
@@ -900,7 +906,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         // Should be denied: (account, execute_selector) is not whitelisted
         vm.prank(address(entryPoint));
-        vm.expectRevert(abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(account), EXECUTE_SELECTOR));
+        vm.expectRevert(
+            abi.encodeWithSelector(PaymasterHubErrors.RuleDenied.selector, address(account), EXECUTE_SELECTOR)
+        );
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
     }
 
@@ -929,7 +937,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         vm.prank(address(entryPoint));
         vm.expectRevert(
-            abi.encodeWithSelector(PaymasterHub.RuleDenied.selector, address(account), EXECUTE_BATCH_SELECTOR)
+            abi.encodeWithSelector(PaymasterHubErrors.RuleDenied.selector, address(account), EXECUTE_BATCH_SELECTOR)
         );
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
     }
@@ -992,35 +1000,6 @@ contract PasskeyPaymasterIntegrationTest is Test {
         (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
 
         assertEq(validationData, 0, "COARSE mode should still use account-level validation for batch");
-        assertTrue(context.length > 0);
-    }
-
-    function testExecuteBatch_ExecutorMode_StillUsesAccountLevel() public {
-        PasskeyAccount account = _createPasskeyAccount();
-        _setupDefaultBudget(address(account));
-
-        // With RULE_ID_EXECUTOR, executeBatch should still use (sender, executeBatch)
-        vm.prank(orgAdmin);
-        hub.setRule(ORG_ID, address(account), EXECUTE_BATCH_SELECTOR, true, 0);
-
-        address[] memory targets = new address[](1);
-        targets[0] = address(mockTarget);
-
-        uint256[] memory values = new uint256[](1);
-        bytes[] memory datas = new bytes[](1);
-        datas[0] = abi.encodeWithSelector(MockTarget.doSomething.selector);
-
-        bytes memory callData = _buildExecuteBatchCalldata(targets, values, datas);
-        bytes memory paymasterAndData = _buildPaymasterData(
-            ORG_ID, SUBJECT_TYPE_ACCOUNT, bytes32(uint256(uint160(address(account)))), RULE_ID_EXECUTOR
-        );
-
-        PackedUserOperation memory userOp = _createUserOp(address(account), callData, paymasterAndData, "");
-
-        vm.prank(address(entryPoint));
-        (bytes memory context, uint256 validationData) = hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
-
-        assertEq(validationData, 0, "EXECUTOR mode should still use account-level validation for batch");
         assertTrue(context.length > 0);
     }
 
@@ -1195,7 +1174,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         });
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.GasTooHigh.selector);
+        vm.expectRevert(PaymasterHubErrors.GasTooHigh.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
     }
 
@@ -1251,7 +1230,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         // Try to use more than budget allows
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.BudgetExceeded.selector);
+        vm.expectRevert(PaymasterHubErrors.BudgetExceeded.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.01 ether); // maxCost > budget
     }
 
@@ -1333,7 +1312,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, shortData, "");
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.InvalidPaymasterData.selector);
+        vm.expectRevert(PaymasterHubErrors.InvalidPaymasterData.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
     }
 
@@ -1394,7 +1373,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PackedUserOperation memory userOp = _createUserOp(ineligibleUser, callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.Ineligible.selector);
+        vm.expectRevert(PaymasterHubErrors.Ineligible.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.01 ether);
     }
 
@@ -1446,7 +1425,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PackedUserOperation memory userOp = _createUserOp(eligibleUser, callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.Ineligible.selector);
+        vm.expectRevert(PaymasterHubErrors.Ineligible.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.01 ether);
     }
 
@@ -1470,7 +1449,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PackedUserOperation memory userOp = _createUserOp(user, callData, paymasterAndData, "");
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.Ineligible.selector);
+        vm.expectRevert(PaymasterHubErrors.Ineligible.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.01 ether);
     }
 
@@ -1526,7 +1505,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         PackedUserOperation memory userOp = _createUserOp(address(account), callData, tooShort, "");
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.InvalidPaymasterData.selector);
+        vm.expectRevert(PaymasterHubErrors.InvalidPaymasterData.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.001 ether);
     }
 
@@ -1740,7 +1719,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // Op 2 validation: maxCost=0.005 ETH, but budget already has 0.005 reserved
         // Total would be 0.01 > 0.009 cap → must revert
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.BudgetExceeded.selector);
+        vm.expectRevert(PaymasterHubErrors.BudgetExceeded.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.005 ether);
     }
 
@@ -1791,7 +1770,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         // Op 2: maxCost=0.005, but only 0.003 remaining → must revert
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.InsufficientOrgBalance.selector);
+        vm.expectRevert(PaymasterHubErrors.InsufficientOrgBalance.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.005 ether);
     }
 
@@ -1999,7 +1978,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         // Op 3: 0.005 would make total 0.015 > cap (0.015 - 1), must revert
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.BudgetExceeded.selector);
+        vm.expectRevert(PaymasterHubErrors.BudgetExceeded.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(uint256(3)), 0.005 ether);
     }
 
@@ -2179,7 +2158,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
 
         // solidarityUsedThisPeriod is now 75_000. Next validate: 75_000 + 30_000 = 105_000 > 100_000
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.GracePeriodSpendLimitReached.selector);
+        vm.expectRevert(PaymasterHubErrors.GracePeriodSpendLimitReached.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(uint256(4)), 30_000);
     }
 
@@ -2641,7 +2620,7 @@ contract PasskeyPaymasterIntegrationTest is Test {
         // depositAvailable for op2's solidarity check = 0.005 - 0.004 = 0.001 ether
         // 0.001 ether < minDepositRequired (0.003 ether), so op2 should fail InsufficientDepositForSolidarity
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.InsufficientDepositForSolidarity.selector);
+        vm.expectRevert(PaymasterHubErrors.InsufficientDepositForSolidarity.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(uint256(2)), 0.004 ether);
 
         // But after op1's postOp settles, deposits are freed for the next validation

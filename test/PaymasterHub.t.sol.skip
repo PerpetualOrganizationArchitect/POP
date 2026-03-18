@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
+import {PaymasterHubErrors} from "../src/libs/PaymasterHubErrors.sol";
 import {PaymasterHubLens, Config, Budget, Rule, FeeCaps, Bounty} from "../src/PaymasterHubLens.sol";
 import {IPaymaster} from "../src/interfaces/IPaymaster.sol";
 import {IEntryPoint} from "../src/interfaces/IEntryPoint.sol";
@@ -351,7 +352,7 @@ contract PaymasterHubTest is Test {
     function testAdminAccessControl() public {
         // Non-admin should fail
         vm.prank(user);
-        vm.expectRevert(PaymasterHub.NotAdmin.selector);
+        vm.expectRevert(PaymasterHubErrors.NotAdmin.selector);
         hub.setPause(true);
 
         // Admin should succeed
@@ -445,7 +446,7 @@ contract PaymasterHubTest is Test {
 
         // Should revert when paused
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.Paused.selector);
+        vm.expectRevert(PaymasterHubErrors.Paused.selector);
         hub.validatePaymasterUserOp(userOp, userOpHash, 0.1 ether);
     }
 
@@ -466,7 +467,7 @@ contract PaymasterHubTest is Test {
         userOp.paymasterAndData = invalidPaymasterData;
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.InvalidVersion.selector);
+        vm.expectRevert(PaymasterHubErrors.InvalidVersion.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.1 ether);
     }
 
@@ -478,7 +479,7 @@ contract PaymasterHubTest is Test {
         uint256 maxCost = 2 ether; // Exceeds budget
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.BudgetExceeded.selector);
+        vm.expectRevert(PaymasterHubErrors.BudgetExceeded.selector);
         hub.validatePaymasterUserOp(userOp, userOpHash, maxCost);
     }
 
@@ -495,7 +496,7 @@ contract PaymasterHubTest is Test {
         // Contract extracts target from execute parameters (0x123) and uses execute selector
         vm.expectRevert(
             abi.encodeWithSelector(
-                PaymasterHub.RuleDenied.selector, address(0x123), bytes4(keccak256("execute(address,uint256,bytes)"))
+                PaymasterHubErrors.RuleDenied.selector, address(0x123), bytes4(keccak256("execute(address,uint256,bytes)"))
             )
         );
         hub.validatePaymasterUserOp(userOp, userOpHash, 0.1 ether);
@@ -612,7 +613,7 @@ contract PaymasterHubTest is Test {
         bytes32 userOpHash = keccak256(abi.encode(userOp));
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.FeeTooHigh.selector);
+        vm.expectRevert(PaymasterHubErrors.FeeTooHigh.selector);
         hub.validatePaymasterUserOp(userOp, userOpHash, 0.1 ether);
     }
 
@@ -639,7 +640,7 @@ contract PaymasterHubTest is Test {
         bytes32 expectedHash = keccak256(packedOp);
 
         vm.expectEmit(true, true, false, false);
-        emit PaymasterHub.UserOpPosted(expectedHash, user);
+        emit PaymasterHubErrors.UserOpPosted(expectedHash, user);
 
         vm.prank(user);
         bytes32 returnedHash = hub.postUserOp(packedOp);
@@ -771,7 +772,7 @@ contract PaymasterHubTest is Test {
 
         vm.prank(address(entryPoint));
         if (used + maxCost > cap) {
-            vm.expectRevert(PaymasterHub.BudgetExceeded.selector);
+            vm.expectRevert(PaymasterHubErrors.BudgetExceeded.selector);
             hub.validatePaymasterUserOp(userOp, userOpHash, maxCost);
         } else {
             (bytes memory context,) = hub.validatePaymasterUserOp(userOp, userOpHash, maxCost);
