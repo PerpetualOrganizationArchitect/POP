@@ -925,11 +925,10 @@ contract VerifyDeployment is Script {
 
         // Check PaymasterHub onboarding config
         address registryAddr = vm.parseJsonAddress(state, ".homeChain.globalAccountRegistry");
-        (uint128 maxGas, uint128 dailyLimit,, bool onboardingEnabled, address accountRegistry) =
-            abi.decode(
-                _staticCall(paymasterAddr, abi.encodeWithSignature("getOnboardingConfig()")),
-                (uint128, uint128, uint128, bool, address)
-            );
+        (uint128 maxGas, uint128 dailyLimit,, bool onboardingEnabled, address accountRegistry) = abi.decode(
+            _staticCall(paymasterAddr, abi.encodeWithSignature("getOnboardingConfig()")),
+            (uint128, uint128, uint128, bool, address)
+        );
         console.log("\nOnboarding enabled:", onboardingEnabled ? "true" : "false");
         bool onboardingCheck = onboardingEnabled && accountRegistry == registryAddr && accountRegistry != address(0);
         console.log("Onboarding registry:", accountRegistry);
@@ -939,11 +938,10 @@ contract VerifyDeployment is Script {
         if (onboardingCheck) passed++;
 
         // Check solidarity distribution is unpaused
-        (uint256 solBalance,,,bool distPaused) =
-            abi.decode(
-                _staticCall(paymasterAddr, abi.encodeWithSignature("getSolidarityFund()")),
-                (uint256, uint256, uint256, bool)
-            );
+        (uint256 solBalance,,, bool distPaused) = abi.decode(
+            _staticCall(paymasterAddr, abi.encodeWithSignature("getSolidarityFund()")),
+            (uint256, uint256, uint256, bool)
+        );
         console.log("\nSolidarity balance:", solBalance);
         bool solidarityCheck = solBalance > 0 && !distPaused;
         console.log("Distribution paused:", distPaused ? "true" : "false");
