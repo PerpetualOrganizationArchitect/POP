@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
+import {PaymasterHubErrors} from "../src/libs/PaymasterHubErrors.sol";
 import {PaymasterHubLens, Config, Budget, Rule, FeeCaps, Bounty} from "../src/PaymasterHubLens.sol";
 import {PackedUserOperation, UserOpLib} from "../src/interfaces/PackedUserOperation.sol";
 import {IPaymaster} from "../src/interfaces/IPaymaster.sol";
@@ -118,7 +119,7 @@ contract PaymasterHubInvariantsTest is Test {
             } else {
                 // Should fail
                 vm.prank(address(entryPoint));
-                vm.expectRevert(PaymasterHub.BudgetExceeded.selector);
+                vm.expectRevert(PaymasterHubErrors.BudgetExceeded.selector);
                 hub.validatePaymasterUserOp(userOp, userOpHash, maxCost);
             }
         }
@@ -136,7 +137,7 @@ contract PaymasterHubInvariantsTest is Test {
         PackedUserOperation memory userOp = _createUserOp(address(account));
 
         vm.prank(caller);
-        vm.expectRevert(PaymasterHub.EPOnly.selector);
+        vm.expectRevert(PaymasterHubErrors.EPOnly.selector);
         hub.validatePaymasterUserOp(userOp, bytes32(0), 0.1 ether);
     }
 
@@ -148,7 +149,7 @@ contract PaymasterHubInvariantsTest is Test {
         vm.assume(caller != address(0));
 
         vm.prank(caller);
-        vm.expectRevert(PaymasterHub.EPOnly.selector);
+        vm.expectRevert(PaymasterHubErrors.EPOnly.selector);
         hub.postOp(IPaymaster.PostOpMode.opSucceeded, context, 0.01 ether);
     }
 
@@ -271,30 +272,30 @@ contract PaymasterHubInvariantsTest is Test {
         vm.startPrank(caller);
 
         // Test operator function (setRule can be called by operator OR admin)
-        vm.expectRevert(PaymasterHub.NotOperator.selector);
+        vm.expectRevert(PaymasterHubErrors.NotOperator.selector);
         hub.setRule(address(0x1), bytes4(0x12345678), true, 100000);
 
-        vm.expectRevert(PaymasterHub.NotOperator.selector);
+        vm.expectRevert(PaymasterHubErrors.NotOperator.selector);
         hub.setBudget(bytes32(0), 1 ether, 1 days);
 
-        vm.expectRevert(PaymasterHub.NotOperator.selector);
+        vm.expectRevert(PaymasterHubErrors.NotOperator.selector);
         hub.setFeeCaps(100 gwei, 10 gwei, 1000000, 500000, 200000);
 
-        vm.expectRevert(PaymasterHub.NotAdmin.selector);
+        vm.expectRevert(PaymasterHubErrors.NotAdmin.selector);
         hub.setPause(true);
 
-        vm.expectRevert(PaymasterHub.NotAdmin.selector);
+        vm.expectRevert(PaymasterHubErrors.NotAdmin.selector);
         hub.setBounty(true, 0.1 ether, 1000);
 
         // Test depositToEntryPoint with a small amount that won't cause OutOfFunds
         vm.deal(caller, 0.01 ether);
-        vm.expectRevert(PaymasterHub.NotOperator.selector);
+        vm.expectRevert(PaymasterHubErrors.NotOperator.selector);
         hub.depositToEntryPoint{value: 0.01 ether}();
 
-        vm.expectRevert(PaymasterHub.NotAdmin.selector);
+        vm.expectRevert(PaymasterHubErrors.NotAdmin.selector);
         hub.withdrawFromEntryPoint(payable(caller), 1 ether);
 
-        vm.expectRevert(PaymasterHub.NotAdmin.selector);
+        vm.expectRevert(PaymasterHubErrors.NotAdmin.selector);
         hub.sweepBounty(payable(caller), 1 ether);
 
         vm.stopPrank();

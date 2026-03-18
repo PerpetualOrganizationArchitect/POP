@@ -6,12 +6,13 @@ import {IEntryPoint} from "./interfaces/IEntryPoint.sol";
 import {PackedUserOperation, UserOpLib} from "./interfaces/PackedUserOperation.sol";
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
 import {IERC165} from "lib/openzeppelin-contracts/contracts/utils/introspection/IERC165.sol";
+import {PaymasterHubErrors} from "./libs/PaymasterHubErrors.sol";
+import {PaymasterGraceLib} from "./libs/PaymasterGraceLib.sol";
 
 // Storage structs matching PaymasterHub
 struct OrgConfig {
     uint256 adminHatId;
     uint256 operatorHatId;
-    uint256 __deprecated_voucherHatId;
     bool paused;
     uint40 registeredAt;
     bool bannedFromSolidarity;
@@ -19,11 +20,9 @@ struct OrgConfig {
 
 struct OrgFinancials {
     uint128 deposited;
-    uint128 totalDeposited;
     uint128 spent;
     uint128 solidarityUsedThisPeriod;
     uint32 periodStart;
-    uint224 reserved;
 }
 
 struct SolidarityFund {
@@ -31,7 +30,6 @@ struct SolidarityFund {
     uint32 numActiveOrgs;
     uint16 feePercentageBps;
     bool distributionPaused;
-    uint200 reserved;
 }
 
 struct GracePeriodConfig {
@@ -79,10 +77,6 @@ interface IPaymasterHubStorage {
     function getOrgFinancials(bytes32 orgId) external view returns (OrgFinancials memory);
     function getSolidarityFund() external view returns (SolidarityFund memory);
     function getGracePeriodConfig() external view returns (GracePeriodConfig memory);
-    function getOrgGraceStatus(bytes32 orgId)
-        external
-        view
-        returns (bool inGrace, uint128 spendRemaining, bool requiresDeposit, uint256 solidarityLimit);
     function getOrgDeployConfig() external view returns (OrgDeployConfig memory);
     function getOrgDeployCount(address account) external view returns (uint8);
     function ENTRY_POINT() external view returns (address);
@@ -99,11 +93,6 @@ interface IPaymasterHubStorage {
 contract PaymasterHubLens {
     using UserOpLib for bytes32;
 
-    // ============ Custom Errors ============
-    error InvalidRuleId();
-    error InvalidPaymasterData();
-    error ZeroAddress();
-
     // ============ Constants ============
     uint8 private constant PAYMASTER_DATA_VERSION = 1;
     uint8 private constant SUBJECT_TYPE_ACCOUNT = 0x00;
@@ -112,7 +101,6 @@ contract PaymasterHubLens {
     uint8 private constant SUBJECT_TYPE_ORG_DEPLOY = 0x04;
 
     uint32 private constant RULE_ID_GENERIC = 0x00000000;
-    uint32 private constant RULE_ID_EXECUTOR = 0x00000001;
     uint32 private constant RULE_ID_COARSE = 0x000000FF;
 
     // ============ Immutable ============
@@ -120,7 +108,7 @@ contract PaymasterHubLens {
 
     // ============ Constructor ============
     constructor(address _hub) {
-        if (_hub == address(0)) revert ZeroAddress();
+        if (_hub == address(0)) revert PaymasterHubErrors.ZeroAddress();
         hub = IPaymasterHubStorage(_hub);
     }
 
@@ -174,6 +162,44 @@ contract PaymasterHubLens {
     function entryPointDeposit() external view returns (uint256) {
         address entryPoint = hub.ENTRY_POINT();
         return IEntryPoint(entryPoint).balanceOf(address(hub));
+    }
+
+    /**
+     * @notice Get org's grace period status and limits
+     * @dev Moved from PaymasterHub to reduce main contract bytecode size
+     * @param orgId The organization identifier
+     * @return inGrace True if in initial grace period
+     * @return spendRemaining Spending remaining during grace (0 if not in grace)
+     * @return requiresDeposit True if org needs to deposit to access solidarity
+     * @return solidarityLimit Current solidarity allocation for org (per 90-day period)
+     */
+    function getOrgGraceStatus(bytes32 orgId)
+        external
+        view
+        returns (bool inGrace, uint128 spendRemaining, bool requiresDeposit, uint256 solidarityLimit)
+    {
+        OrgConfig memory config = hub.getOrgConfig(orgId);
+        OrgFinancials memory org = hub.getOrgFinancials(orgId);
+        GracePeriodConfig memory grace = hub.getGracePeriodConfig();
+        SolidarityFund memory solidarity = hub.getSolidarityFund();
+
+        inGrace = PaymasterGraceLib.isInGracePeriod(config.registeredAt, grace.initialGraceDays);
+
+        // When distribution is paused, no solidarity is available regardless of grace/tier
+        if (solidarity.distributionPaused) {
+            return (inGrace, 0, true, 0);
+        }
+
+        if (inGrace) {
+            uint128 spendUsed = org.solidarityUsedThisPeriod;
+            spendRemaining = spendUsed < grace.maxSpendDuringGrace ? grace.maxSpendDuringGrace - spendUsed : 0;
+            requiresDeposit = false;
+            solidarityLimit = uint256(grace.maxSpendDuringGrace);
+        } else {
+            uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
+            requiresDeposit = depositAvailable < grace.minDepositRequired;
+            solidarityLimit = PaymasterGraceLib.calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
+        }
     }
 
     /**
@@ -273,7 +299,7 @@ contract PaymasterHubLens {
         // ERC-4337 v0.7 packed format (must match PaymasterHub._decodePaymasterData):
         // [paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(32) | ruleId(4)]
         // = 122 bytes total. Custom data starts at offset 52.
-        if (paymasterAndData.length < 122) revert InvalidPaymasterData();
+        if (paymasterAndData.length < 122) revert PaymasterHubErrors.InvalidPaymasterData();
 
         version = uint8(paymasterAndData[52]);
 
@@ -300,7 +326,7 @@ contract PaymasterHubLens {
     {
         bytes calldata callData = userOp.callData;
 
-        if (callData.length < 4) revert InvalidPaymasterData();
+        if (callData.length < 4) revert PaymasterHubErrors.InvalidPaymasterData();
 
         if (ruleId == RULE_ID_GENERIC) {
             // ERC-4337 account execute patterns (SimpleAccount, PasskeyAccount, etc.)
@@ -337,14 +363,11 @@ contract PaymasterHubLens {
             } else {
                 target = userOp.sender;
             }
-        } else if (ruleId == RULE_ID_EXECUTOR) {
-            target = userOp.sender;
-            selector = bytes4(callData[0:4]);
         } else if (ruleId == RULE_ID_COARSE) {
             target = userOp.sender;
             selector = bytes4(callData[0:4]);
         } else {
-            revert InvalidRuleId();
+            revert PaymasterHubErrors.InvalidRuleId();
         }
     }
 }

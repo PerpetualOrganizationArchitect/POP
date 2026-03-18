@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {PaymasterHub} from "../src/PaymasterHub.sol";
+import {PaymasterHubErrors} from "../src/libs/PaymasterHubErrors.sol";
 import {PaymasterHubLens, Config, Budget, Rule, FeeCaps, Bounty} from "../src/PaymasterHubLens.sol";
 import {IPaymaster} from "../src/interfaces/IPaymaster.sol";
 import {PackedUserOperation, UserOpLib} from "../src/interfaces/PackedUserOperation.sol";
@@ -267,7 +268,7 @@ contract PaymasterHubIntegrationTest is Test {
             _createUserOp(address(account1), targetContract, abi.encodeWithSignature("operation2()"), 0);
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(PaymasterHub.BudgetExceeded.selector);
+        vm.expectRevert(PaymasterHubErrors.BudgetExceeded.selector);
         hub.validatePaymasterUserOp(op2, keccak256(abi.encode(op2)), 0.3 ether);
 
         // Move to next epoch
