@@ -238,6 +238,21 @@ contract DeployInfrastructure is Script {
             );
         console.log("Onboarding config set: maxCost=0.01 ETH, dailyLimit=1000, registry:", globalAccountRegistry);
 
+        // Configure org deployment sponsorship (must come after OrgDeployer deployment)
+        PoaManager(poaManager)
+            .adminCall(
+                paymasterHub,
+                abi.encodeWithSignature(
+                    "setOrgDeployConfig(uint128,uint128,uint8,bool,address)",
+                    uint128(0.05 ether),
+                    uint128(100),
+                    uint8(2),
+                    true,
+                    orgDeployer
+                )
+            );
+        console.log("Org deploy config set: orgDeployer:", orgDeployer);
+
         // Deploy universal PasskeyAccountFactory (infrastructure singleton)
         address passkeyAccountBeacon = pm.getBeaconById(keccak256("PasskeyAccount"));
         address passkeyFactoryBeaconAddr = pm.getBeaconById(keccak256("PasskeyAccountFactory"));

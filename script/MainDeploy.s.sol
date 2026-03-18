@@ -207,6 +207,12 @@ contract DeployHomeChain is DeployHelper {
         PaymasterHub(payable(infra.paymasterHub)).donateToSolidarity{value: solidarityFund}();
         console.log("PaymasterHub:", infra.paymasterHub);
 
+        // Unpause solidarity distribution so onboarding can use the fund
+        // (initialize() sets distributionPaused=true for collection-only mode)
+        PoaManager(infra.poaManager)
+            .adminCall(infra.paymasterHub, abi.encodeWithSignature("unpauseSolidarityDistribution()"));
+        console.log("Solidarity distribution unpaused for onboarding");
+
         // Deploy OrgDeployer proxy
         address deployerBeacon = PoaManager(infra.poaManager).getBeaconById(keccak256("OrgDeployer"));
         bytes memory orgDeployerInit = abi.encodeWithSignature(
@@ -240,6 +246,35 @@ contract DeployHomeChain is DeployHelper {
         bytes memory accRegInit = abi.encodeWithSignature("initialize(address)", deployer);
         infra.globalAccountRegistry = address(new BeaconProxy(accRegBeacon, accRegInit));
         console.log("GlobalAccountRegistry:", infra.globalAccountRegistry);
+
+        // Configure onboarding with registry address (must come after registry deployment)
+        PoaManager(infra.poaManager)
+            .adminCall(
+                infra.paymasterHub,
+                abi.encodeWithSignature(
+                    "setOnboardingConfig(uint128,uint128,bool,address)",
+                    uint128(0.01 ether),
+                    uint128(1000),
+                    true,
+                    infra.globalAccountRegistry
+                )
+            );
+        console.log("Onboarding config set: registry:", infra.globalAccountRegistry);
+
+        // Configure org deployment sponsorship (must come after OrgDeployer deployment)
+        PoaManager(infra.poaManager)
+            .adminCall(
+                infra.paymasterHub,
+                abi.encodeWithSignature(
+                    "setOrgDeployConfig(uint128,uint128,uint8,bool,address)",
+                    uint128(0.05 ether),
+                    uint128(100),
+                    uint8(2),
+                    true,
+                    infra.orgDeployer
+                )
+            );
+        console.log("Org deploy config set: orgDeployer:", infra.orgDeployer);
 
         // Deploy universal PasskeyAccountFactory
         address passkeyAccountBeacon = pm.getBeaconById(keccak256("PasskeyAccount"));
@@ -594,6 +629,11 @@ contract DeploySatellite is DeployHelper {
         PaymasterHub(payable(infra.paymasterHub)).donateToSolidarity{value: solidarityFund}();
         console.log("PaymasterHub:", infra.paymasterHub);
 
+        // Unpause solidarity distribution so onboarding can use the fund
+        // (initialize() sets distributionPaused=true for collection-only mode)
+        pm.adminCall(infra.paymasterHub, abi.encodeWithSignature("unpauseSolidarityDistribution()"));
+        console.log("Solidarity distribution unpaused for onboarding");
+
         // --- OrgDeployer proxy ---
         address deployerBeacon = pm.getBeaconById(keccak256("OrgDeployer"));
         bytes memory orgDeployerInit = abi.encodeWithSignature(
@@ -622,6 +662,33 @@ contract DeploySatellite is DeployHelper {
         bytes memory accRegInit = abi.encodeWithSignature("initialize(address)", deployer);
         infra.globalAccountRegistry = address(new BeaconProxy(accRegBeacon, accRegInit));
         console.log("GlobalAccountRegistry:", infra.globalAccountRegistry);
+
+        // Configure onboarding with registry address (must come after registry deployment)
+        pm.adminCall(
+            infra.paymasterHub,
+            abi.encodeWithSignature(
+                "setOnboardingConfig(uint128,uint128,bool,address)",
+                uint128(0.01 ether),
+                uint128(1000),
+                true,
+                infra.globalAccountRegistry
+            )
+        );
+        console.log("Onboarding config set: registry:", infra.globalAccountRegistry);
+
+        // Configure org deployment sponsorship (must come after OrgDeployer deployment)
+        pm.adminCall(
+            infra.paymasterHub,
+            abi.encodeWithSignature(
+                "setOrgDeployConfig(uint128,uint128,uint8,bool,address)",
+                uint128(0.05 ether),
+                uint128(100),
+                uint8(2),
+                true,
+                infra.orgDeployer
+            )
+        );
+        console.log("Org deploy config set: orgDeployer:", infra.orgDeployer);
 
         // --- Deploy UniversalPasskeyFactory ---
         address passkeyAccountBeacon = pm.getBeaconById(keccak256("PasskeyAccount"));
@@ -795,6 +862,12 @@ contract RegisterAndTransfer is Script {
  *     --rpc-url $HOME_RPC
  */
 contract VerifyDeployment is Script {
+    function _staticCall(address target, bytes memory data) internal view returns (bytes memory) {
+        (bool ok, bytes memory ret) = target.staticcall(data);
+        require(ok, "staticcall failed");
+        return ret;
+    }
+
     function run() public view {
         string memory state = vm.readFile("script/main-deploy-state.json");
         address hubAddr = vm.parseJsonAddress(state, ".homeChain.hub");
@@ -849,6 +922,34 @@ contract VerifyDeployment is Script {
         console.log("\nOrgDeployer has code:", deployerCheck ? "PASS" : "FAIL");
         checks++;
         if (deployerCheck) passed++;
+
+        // Check PaymasterHub onboarding config
+        address registryAddr = vm.parseJsonAddress(state, ".homeChain.globalAccountRegistry");
+        (uint128 maxGas, uint128 dailyLimit,, bool onboardingEnabled, address accountRegistry) =
+            abi.decode(
+                _staticCall(paymasterAddr, abi.encodeWithSignature("getOnboardingConfig()")),
+                (uint128, uint128, uint128, bool, address)
+            );
+        console.log("\nOnboarding enabled:", onboardingEnabled ? "true" : "false");
+        bool onboardingCheck = onboardingEnabled && accountRegistry == registryAddr && accountRegistry != address(0);
+        console.log("Onboarding registry:", accountRegistry);
+        console.log("Expected registry:", registryAddr);
+        console.log("Onboarding config:", onboardingCheck ? "PASS" : "FAIL");
+        checks++;
+        if (onboardingCheck) passed++;
+
+        // Check solidarity distribution is unpaused
+        (uint256 solBalance,,,bool distPaused) =
+            abi.decode(
+                _staticCall(paymasterAddr, abi.encodeWithSignature("getSolidarityFund()")),
+                (uint256, uint256, uint256, bool)
+            );
+        console.log("\nSolidarity balance:", solBalance);
+        bool solidarityCheck = solBalance > 0 && !distPaused;
+        console.log("Distribution paused:", distPaused ? "true" : "false");
+        console.log("Solidarity fund:", solidarityCheck ? "PASS" : "FAIL");
+        checks++;
+        if (solidarityCheck) passed++;
 
         // Summary
         console.log("\n=== Verification Summary ===");
