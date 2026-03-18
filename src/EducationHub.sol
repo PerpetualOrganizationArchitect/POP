@@ -35,12 +35,23 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     error ModuleExists();
     error ModuleUnknown();
     error AlreadyCompleted();
+    error NoCommitFound();
+    error RevealTooEarly();
+    error CommitAlreadyExists();
+
+    /*────────── Constants ─────────*/
+    uint256 public constant COMMIT_REVEAL_DELAY = 1; // 1 block minimum between commit and reveal
 
     /*────────── Types ─────────*/
     struct Module {
         bytes32 answerHash;
         uint128 payout;
         bool exists;
+    }
+
+    struct Commit {
+        bytes32 commitHash;
+        uint256 blockNumber;
     }
 
     /*────────── ERC-7201 Storage ─────────*/
@@ -54,6 +65,7 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         IParticipationToken token;
         uint256[] creatorHatIds; // enumeration array for creator hats
         uint256[] memberHatIds; // enumeration array for member hats
+        mapping(address => mapping(uint256 => Commit)) _commits; // user => moduleId => commit
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.educationhub.storage");
@@ -70,6 +82,7 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
     event ModuleUpdated(uint256 indexed id, bytes title, bytes32 contentHash, uint256 payout);
     event ModuleRemoved(uint256 indexed id);
     event ModuleCompleted(uint256 indexed id, address indexed learner);
+    event AnswerCommitted(uint256 indexed id, address indexed learner);
     event CreatorHatSet(uint256 indexed hatId, bool enabled);
     event MemberHatSet(uint256 indexed hatId, bool enabled);
 
@@ -229,7 +242,53 @@ contract EducationHub is Initializable, ContextUpgradeable, ReentrancyGuardUpgra
         emit ModuleRemoved(id);
     }
 
-    /*────────── Learner path ───────*/
+    /*────────── Learner path (commit-reveal) ───────*/
+
+    /// @notice Step 1: Commit a hash of the answer. The hash binds the answer to the caller.
+    /// @param id Module ID
+    /// @param commitHash keccak256(abi.encodePacked(moduleId, answer, userSalt))
+    ///        where userSalt is a random value chosen by the learner.
+    function commitAnswer(uint256 id, bytes32 commitHash) external onlyMember whenNotPaused {
+        Layout storage l = _layout();
+        _module(l, id); // existence check
+        if (_isCompleted(l, _msgSender(), id)) revert AlreadyCompleted();
+        if (l._commits[_msgSender()][id].commitHash != bytes32(0)) revert CommitAlreadyExists();
+
+        l._commits[_msgSender()][id] = Commit({commitHash: commitHash, blockNumber: block.number});
+
+        emit AnswerCommitted(id, _msgSender());
+    }
+
+    /// @notice Step 2: Reveal the answer. Must be called at least COMMIT_REVEAL_DELAY blocks after commit.
+    /// @param id Module ID
+    /// @param answer The answer (uint8)
+    /// @param userSalt The random salt used in the commit
+    function revealAnswer(uint256 id, uint8 answer, bytes32 userSalt) external nonReentrant onlyMember whenNotPaused {
+        Layout storage l = _layout();
+        Module storage m = _module(l, id);
+        if (_isCompleted(l, _msgSender(), id)) revert AlreadyCompleted();
+
+        Commit storage c = l._commits[_msgSender()][id];
+        if (c.commitHash == bytes32(0)) revert NoCommitFound();
+        if (block.number < c.blockNumber + COMMIT_REVEAL_DELAY) revert RevealTooEarly();
+
+        // Verify the commit matches
+        bytes32 expectedCommit = keccak256(abi.encodePacked(uint256(id), answer, userSalt));
+        if (expectedCommit != c.commitHash) revert InvalidAnswer();
+
+        // Verify the answer is correct
+        if (keccak256(abi.encodePacked(uint48(id), answer)) != m.answerHash) revert InvalidAnswer();
+
+        // Clear commit and mark completed
+        delete l._commits[_msgSender()][id];
+        l.token.mint(_msgSender(), m.payout);
+        _setCompleted(l, _msgSender(), id);
+
+        emit ModuleCompleted(id, _msgSender());
+    }
+
+    /// @notice Legacy single-step completion (kept for backward compatibility)
+    /// @dev Can be removed in a future version. Subject to brute-force of uint8 answer.
     function completeModule(uint256 id, uint8 answer) external nonReentrant onlyMember whenNotPaused {
         Layout storage l = _layout();
         Module storage m = _module(l, id);

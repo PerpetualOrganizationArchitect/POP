@@ -396,14 +396,12 @@ contract DirectDemocracyVoting is Initializable {
         VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: p.options.length}));
 
         p.hasVoted[_msgSender()] = true;
-        unchecked {
-            p.totalWeight += 100;
-        }
+        p.totalWeight += 100;
 
         uint256 len = idxs.length;
         for (uint256 i; i < len;) {
+            p.options[idxs[i]].votes += uint96(weights[i]);
             unchecked {
-                p.options[idxs[i]].votes += uint96(weights[i]);
                 ++i;
             }
         }

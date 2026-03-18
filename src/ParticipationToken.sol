@@ -5,6 +5,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ContextUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 
 /*────────────── External Hats interface ─────────────*/
 import {IHats} from "lib/hats-protocol/src/Interfaces/IHats.sol";
@@ -167,28 +168,31 @@ contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyG
     function setTaskManager(address tm) external {
         if (tm == address(0)) revert InvalidAddress();
         Layout storage l = _layout();
-        if (l.taskManager == address(0)) {
-            l.taskManager = tm;
-            emit TaskManagerSet(tm);
-        } else {
-            if (_msgSender() != l.executor) revert Unauthorized();
-            l.taskManager = tm;
-            emit TaskManagerSet(tm);
-        }
+        _checkModuleSetter(l);
+        l.taskManager = tm;
+        emit TaskManagerSet(tm);
     }
 
     function setEducationHub(address eh) external {
         // Allow address(0) to support optional EducationHub deployment
         // and allow executor to clear it later
         Layout storage l = _layout();
-        if (l.educationHub == address(0)) {
-            l.educationHub = eh;
-            emit EducationHubSet(eh);
-        } else {
-            if (_msgSender() != l.executor) revert Unauthorized();
-            l.educationHub = eh;
-            emit EducationHubSet(eh);
-        }
+        _checkModuleSetter(l);
+        l.educationHub = eh;
+        emit EducationHubSet(eh);
+    }
+
+    /// @dev Checks authorization for setting module addresses.
+    /// During deployment (executor ownership not renounced), allows the executor's owner (OrgDeployer).
+    /// After deployment, only the executor (governance) can set module addresses.
+    function _checkModuleSetter(Layout storage l) private view {
+        if (_msgSender() == l.executor) return;
+        // During deployment, the Executor's owner is the OrgDeployer.
+        // After deployment, ownership is renounced (owner = address(0)), so this path is closed.
+        try OwnableUpgradeable(l.executor).owner() returns (address executorOwner) {
+            if (executorOwner != address(0) && _msgSender() == executorOwner) return;
+        } catch {}
+        revert Unauthorized();
     }
 
     function setMemberHatAllowed(uint256 h, bool ok) external onlyExecutor {

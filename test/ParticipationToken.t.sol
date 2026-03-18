@@ -50,6 +50,7 @@ contract ParticipationTokenTest is Test {
     }
 
     function testSetTaskManagerOnceAndByExecutor() public {
+        vm.prank(executor);
         token.setTaskManager(taskManager);
         assertEq(token.taskManager(), taskManager);
         vm.prank(executor);
@@ -58,6 +59,7 @@ contract ParticipationTokenTest is Test {
     }
 
     function testSetEducationHubOnceAndByExecutor() public {
+        vm.prank(executor);
         token.setEducationHub(educationHub);
         assertEq(token.educationHub(), educationHub);
         vm.prank(executor);
@@ -66,6 +68,7 @@ contract ParticipationTokenTest is Test {
     }
 
     function testMintOnlyAuthorized() public {
+        vm.prank(executor);
         token.setTaskManager(taskManager);
         vm.prank(taskManager);
         token.mint(member, 1 ether);

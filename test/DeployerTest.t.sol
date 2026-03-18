@@ -3945,8 +3945,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         ParticipationToken token = ParticipationToken(result.participationToken);
         assertEq(token.educationHub(), address(0), "EducationHub should initially be address(0)");
 
-        // Set EducationHub later (first setter can set it)
+        // Set EducationHub later via executor (only executor or executor's owner during bootstrap)
         address newEducationHub = address(0x456);
+        vm.prank(result.executor);
         token.setEducationHub(newEducationHub);
 
         assertEq(token.educationHub(), newEducationHub, "EducationHub should be set to new address");
