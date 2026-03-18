@@ -4748,7 +4748,6 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Verify deposit was credited
         PaymasterHub.OrgFinancials memory financials = paymasterHub.getOrgFinancials(orgId);
         assertEq(financials.deposited, 0.1 ether, "Org should have 0.1 ETH deposited");
-        assertEq(financials.totalDeposited, 0.1 ether, "Total deposited should be 0.1 ETH");
     }
 
     function testDeployFullOrgWithPaymasterAutoWhitelist() public {

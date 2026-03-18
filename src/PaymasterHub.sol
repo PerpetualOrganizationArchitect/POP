@@ -11,6 +11,10 @@ import {
     ReentrancyGuardUpgradeable
 } from "lib/openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC165} from "lib/openzeppelin-contracts/contracts/utils/introspection/IERC165.sol";
+import {PaymasterHubErrors} from "./libs/PaymasterHubErrors.sol";
+import {PaymasterGraceLib} from "./libs/PaymasterGraceLib.sol";
+import {PaymasterPostOpLib} from "./libs/PaymasterPostOpLib.sol";
+import {PaymasterCalldataLib} from "./libs/PaymasterCalldataLib.sol";
 
 /**
  * @title PaymasterHub
@@ -22,46 +26,6 @@ import {IERC165} from "lib/openzeppelin-contracts/contracts/utils/introspection/
  */
 contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyGuardUpgradeable, IERC165 {
     using UserOpLib for bytes32;
-
-    // ============ Custom Errors ============
-    error EPOnly();
-    error Paused();
-    error NotAdmin();
-    error NotOperator();
-    error NotPoaManager();
-    error RuleDenied(address target, bytes4 selector);
-    error FeeTooHigh();
-    error GasTooHigh();
-    error Ineligible();
-    error BudgetExceeded();
-    error InvalidRuleId();
-    error PaymentFailed();
-    error InvalidSubjectType();
-    error InvalidVersion();
-    error InvalidPaymasterData();
-    error ZeroAddress();
-    error InvalidEpochLength();
-    error ContractNotDeployed();
-    error ArrayLengthMismatch();
-    error OrgNotRegistered();
-    error OrgAlreadyRegistered();
-    error GracePeriodSpendLimitReached();
-    error InsufficientDepositForSolidarity();
-    error SolidarityLimitExceeded();
-    error InsufficientOrgBalance();
-    error OrgIsBanned();
-    error InsufficientFunds();
-    error SolidarityDistributionIsPaused();
-    error OnboardingDisabled();
-    error OnboardingDailyLimitExceeded();
-    error Overflow();
-    error InvalidOnboardingRequest();
-    error OrgDeployDisabled();
-    error OrgDeployLimitExceeded();
-    error OrgDeployDailyLimitExceeded();
-    error InvalidOrgDeployRequest();
-    error InvalidOrgId();
-    error ZeroAmount();
 
     // ============ Constants ============
     uint8 private constant PAYMASTER_DATA_VERSION = 1;
@@ -76,49 +40,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     uint8 private constant SPONSORSHIP_ORG_DEPLOY = 2;
 
     uint32 private constant RULE_ID_GENERIC = 0x00000000;
-    uint32 private constant RULE_ID_EXECUTOR = 0x00000001;
     uint32 private constant RULE_ID_COARSE = 0x000000FF;
 
     uint32 private constant MIN_EPOCH_LENGTH = 1 hours;
     uint32 private constant MAX_EPOCH_LENGTH = 365 days;
-    // ============ Events ============
-    event PaymasterInitialized(address indexed entryPoint, address indexed hats, address indexed poaManager);
-    event OrgRegistered(bytes32 indexed orgId, uint256 adminHatId, uint256 operatorHatId);
-    event RuleSet(
-        bytes32 indexed orgId, address indexed target, bytes4 indexed selector, bool allowed, uint32 maxCallGasHint
-    );
-    event BudgetSet(bytes32 indexed orgId, bytes32 subjectKey, uint128 capPerEpoch, uint32 epochLen, uint32 epochStart);
-    event FeeCapsSet(
-        bytes32 indexed orgId,
-        uint256 maxFeePerGas,
-        uint256 maxPriorityFeePerGas,
-        uint32 maxCallGas,
-        uint32 maxVerificationGas,
-        uint32 maxPreVerificationGas
-    );
-    event PauseSet(bytes32 indexed orgId, bool paused);
-    event OperatorHatSet(bytes32 indexed orgId, uint256 operatorHatId);
-    event DepositIncrease(uint256 amount, uint256 newDeposit);
-    event DepositWithdraw(address indexed to, uint256 amount);
-    event UsageIncreased(
-        bytes32 indexed orgId, bytes32 subjectKey, uint256 delta, uint128 usedInEpoch, uint32 epochStart
-    );
-    event EmergencyWithdraw(address indexed to, uint256 amount);
-    event OrgDepositReceived(bytes32 indexed orgId, address indexed from, uint256 amount);
-    event SolidarityFeeCollected(bytes32 indexed orgId, uint256 amount);
-    event SolidarityDonationReceived(address indexed from, uint256 amount);
-    event GracePeriodConfigUpdated(uint32 initialGraceDays, uint128 maxSpendDuringGrace, uint128 minDepositRequired);
-    event OrgBannedFromSolidarity(bytes32 indexed orgId, bool banned);
-    event OnboardingConfigUpdated(
-        uint128 maxGasPerCreation, uint128 dailyCreationLimit, bool enabled, address accountRegistry
-    );
-    event OnboardingAccountCreated(address indexed account, uint256 gasCost);
-    event OrgDeployConfigUpdated(
-        uint128 maxGasPerDeploy, uint128 dailyDeployLimit, uint8 maxDeploysPerAccount, bool enabled, address orgDeployer
-    );
-    event OrgDeploymentSponsored(address indexed account, uint256 gasCost);
-    event SolidarityDistributionPaused();
-    event SolidarityDistributionUnpaused();
 
     // ============ Storage Variables ============
     /// @custom:storage-location erc7201:poa.paymasterhub.main
@@ -139,13 +64,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * Storage optimization: registeredAt packed with paused to save gas
      */
     struct OrgConfig {
-        uint256 adminHatId; // Slot 0
-        uint256 operatorHatId; // Slot 1: Optional role for budget/rule management
-        uint256 __deprecated_voucherHatId; // Slot 2: Reserved for storage layout compatibility
-        bool paused; // Slot 3 (1 byte)
-        uint40 registeredAt; // Slot 3 (5 bytes): UNIX timestamp, good until year 36812
-        bool bannedFromSolidarity; // Slot 3 (1 byte)
-        // 25 bytes remaining in slot 3 for future use
+        uint256 adminHatId;
+        uint256 operatorHatId; // Optional role for budget/rule management
+        bool paused;
+        uint40 registeredAt; // UNIX timestamp, good until year 36812
+        bool bannedFromSolidarity;
     }
 
     /**
@@ -153,11 +76,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      */
     struct OrgFinancials {
         uint128 deposited; // Current balance deposited by org
-        uint128 totalDeposited; // Cumulative lifetime deposits (never decreases)
         uint128 spent; // Total spent from org's own deposits
         uint128 solidarityUsedThisPeriod; // Solidarity used in current 90-day period
         uint32 periodStart; // Timestamp when current 90-day period started
-        uint224 reserved; // Padding for future use
     }
 
     /**
@@ -168,7 +89,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         uint32 numActiveOrgs; // Number of orgs with deposits > 0
         uint16 feePercentageBps; // Fee as basis points (100 = 1%)
         bool distributionPaused; // When true, only collect fees, no payouts
-        uint200 reserved; // Padding
     }
 
     /**
@@ -262,16 +182,16 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param _poaManager PoaManager address for upgrade authorization
      */
     function initialize(address _entryPoint, address _hats, address _poaManager) public initializer {
-        if (_entryPoint == address(0)) revert ZeroAddress();
-        if (_hats == address(0)) revert ZeroAddress();
-        if (_poaManager == address(0)) revert ZeroAddress();
+        if (_entryPoint == address(0)) revert PaymasterHubErrors.ZeroAddress();
+        if (_hats == address(0)) revert PaymasterHubErrors.ZeroAddress();
+        if (_poaManager == address(0)) revert PaymasterHubErrors.ZeroAddress();
 
         // Verify entryPoint is a contract
         uint256 codeSize;
         assembly {
             codeSize := extcodesize(_entryPoint)
         }
-        if (codeSize == 0) revert ContractNotDeployed();
+        if (codeSize == 0) revert PaymasterHubErrors.ContractNotDeployed();
 
         // Initialize upgradeable contracts
         __ReentrancyGuard_init();
@@ -309,7 +229,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         orgDeploy.maxDeploysPerAccount = 2; // 2 free deployments per account lifetime
         orgDeploy.enabled = false; // Requires explicit setOrgDeployConfig to activate
 
-        emit PaymasterInitialized(_entryPoint, _hats, _poaManager);
+        emit PaymasterHubErrors.PaymasterInitialized(_entryPoint, _hats, _poaManager);
     }
 
     // ============ Deploy Config Struct ============
@@ -374,7 +294,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             feeCaps.maxVerificationGas = config.maxVerificationGas;
             feeCaps.maxPreVerificationGas = config.maxPreVerificationGas;
 
-            emit FeeCapsSet(
+            emit PaymasterHubErrors.FeeCapsSet(
                 orgId,
                 config.maxFeePerGas,
                 config.maxPriorityFeePerGas,
@@ -386,41 +306,16 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         // Set rules if arrays provided
         if (config.ruleTargets.length > 0) {
-            uint256 length = config.ruleTargets.length;
-            if (
-                length != config.ruleSelectors.length || length != config.ruleAllowed.length
-                    || length != config.ruleMaxCallGasHints.length
-            ) {
-                revert ArrayLengthMismatch();
-            }
-
-            mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
-
-            for (uint256 i; i < length;) {
-                if (config.ruleTargets[i] == address(0)) revert ZeroAddress();
-
-                rules[config.ruleTargets[i]][config.ruleSelectors[i]] =
-                    Rule({allowed: config.ruleAllowed[i], maxCallGasHint: config.ruleMaxCallGasHints[i]});
-
-                emit RuleSet(
-                    orgId,
-                    config.ruleTargets[i],
-                    config.ruleSelectors[i],
-                    config.ruleAllowed[i],
-                    config.ruleMaxCallGasHints[i]
-                );
-
-                unchecked {
-                    ++i;
-                }
-            }
+            _setRulesBatch(
+                orgId, config.ruleTargets, config.ruleSelectors, config.ruleAllowed, config.ruleMaxCallGasHints
+            );
         }
 
         // Set budgets if arrays provided
         if (config.budgetSubjectKeys.length > 0) {
             uint256 budgetLen = config.budgetSubjectKeys.length;
             if (budgetLen != config.budgetCapsPerEpoch.length || budgetLen != config.budgetEpochLens.length) {
-                revert ArrayLengthMismatch();
+                revert PaymasterHubErrors.ArrayLengthMismatch();
             }
 
             mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
@@ -428,7 +323,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             for (uint256 j; j < budgetLen;) {
                 uint32 epochLen = config.budgetEpochLens[j];
                 if (epochLen < MIN_EPOCH_LENGTH || epochLen > MAX_EPOCH_LENGTH) {
-                    revert InvalidEpochLength();
+                    revert PaymasterHubErrors.InvalidEpochLength();
                 }
 
                 Budget storage budget = budgets[config.budgetSubjectKeys[j]];
@@ -436,7 +331,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
                 budget.epochLen = epochLen;
                 budget.epochStart = uint32(block.timestamp);
 
-                emit BudgetSet(
+                emit PaymasterHubErrors.BudgetSet(
                     orgId, config.budgetSubjectKeys[j], config.budgetCapsPerEpoch[j], epochLen, uint32(block.timestamp)
                 );
 
@@ -454,56 +349,57 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
     function _onlyRegistrar() internal view {
         MainStorage storage main = _getMainStorage();
-        if (msg.sender != main.poaManager && msg.sender != main.orgRegistrar) revert NotPoaManager();
+        if (msg.sender != main.poaManager && msg.sender != main.orgRegistrar) {
+            revert PaymasterHubErrors.NotPoaManager();
+        }
     }
 
     function _registerOrg(bytes32 orgId, uint256 adminHatId, uint256 operatorHatId) internal {
-        if (orgId == bytes32(0)) revert InvalidOrgId();
-        if (adminHatId == 0) revert ZeroAddress();
+        if (orgId == bytes32(0)) revert PaymasterHubErrors.InvalidOrgId();
+        if (adminHatId == 0) revert PaymasterHubErrors.ZeroAddress();
 
         mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
-        if (orgs[orgId].adminHatId != 0) revert OrgAlreadyRegistered();
+        if (orgs[orgId].adminHatId != 0) revert PaymasterHubErrors.OrgAlreadyRegistered();
 
         orgs[orgId] = OrgConfig({
             adminHatId: adminHatId,
             operatorHatId: operatorHatId,
-            __deprecated_voucherHatId: 0,
             paused: false,
             registeredAt: uint40(block.timestamp),
             bannedFromSolidarity: false
         });
 
-        emit OrgRegistered(orgId, adminHatId, operatorHatId);
+        emit PaymasterHubErrors.OrgRegistered(orgId, adminHatId, operatorHatId);
     }
 
     // ============ Modifiers ============
     modifier onlyEntryPoint() {
-        if (msg.sender != _getMainStorage().entryPoint) revert EPOnly();
+        if (msg.sender != _getMainStorage().entryPoint) revert PaymasterHubErrors.EPOnly();
         _;
     }
 
     modifier onlyOrgAdmin(bytes32 orgId) {
         OrgConfig storage org = _getOrgsStorage()[orgId];
-        if (org.adminHatId == 0) revert OrgNotRegistered();
+        if (org.adminHatId == 0) revert PaymasterHubErrors.OrgNotRegistered();
         if (!IHats(_getMainStorage().hats).isWearerOfHat(msg.sender, org.adminHatId)) {
-            revert NotAdmin();
+            revert PaymasterHubErrors.NotAdmin();
         }
         _;
     }
 
     modifier onlyOrgOperator(bytes32 orgId) {
         OrgConfig storage org = _getOrgsStorage()[orgId];
-        if (org.adminHatId == 0) revert OrgNotRegistered();
+        if (org.adminHatId == 0) revert PaymasterHubErrors.OrgNotRegistered();
 
         bool isAdmin = IHats(_getMainStorage().hats).isWearerOfHat(msg.sender, org.adminHatId);
         bool isOperator =
             org.operatorHatId != 0 && IHats(_getMainStorage().hats).isWearerOfHat(msg.sender, org.operatorHatId);
-        if (!isAdmin && !isOperator) revert NotOperator();
+        if (!isAdmin && !isOperator) revert PaymasterHubErrors.NotOperator();
         _;
     }
 
     modifier whenOrgNotPaused(bytes32 orgId) {
-        if (_getOrgsStorage()[orgId].paused) revert Paused();
+        if (_getOrgsStorage()[orgId].paused) revert PaymasterHubErrors.Paused();
         _;
     }
 
@@ -546,42 +442,41 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
 
         // Check if org is banned from solidarity
-        if (config.bannedFromSolidarity) revert OrgIsBanned();
+        if (config.bannedFromSolidarity) revert PaymasterHubErrors.OrgIsBanned();
 
-        // Calculate grace period end time
-        uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
-        bool inInitialGrace = block.timestamp < graceEndTime;
+        // Check grace period
+        bool inInitialGrace = PaymasterGraceLib.isInGracePeriod(config.registeredAt, grace.initialGraceDays);
 
         if (inInitialGrace) {
             // Startup phase: can use solidarity even with zero deposits
             // Enforce spending limit only (configured to represent ~3000 tx worth of value)
             if (org.solidarityUsedThisPeriod + maxCost > grace.maxSpendDuringGrace) {
-                revert GracePeriodSpendLimitReached();
+                revert PaymasterHubErrors.GracePeriodSpendLimitReached();
             }
             // In initial grace period, operations are paid 100% from solidarity.
-            if (solidarity.balance < maxCost) revert InsufficientFunds();
+            if (solidarity.balance < maxCost) revert PaymasterHubErrors.InsufficientFunds();
         } else {
             // After startup: must MAINTAIN minimum deposit (like $10/month commitment)
-            // This checks deposited (current balance), not totalDeposited (cumulative)
             // Orgs must keep funds in reserve to access solidarity
             if (depositAvailable < grace.minDepositRequired) {
-                revert InsufficientDepositForSolidarity();
+                revert PaymasterHubErrors.InsufficientDepositForSolidarity();
             }
 
             // Check against tier-based allowance (calculated in payment logic)
             // Tier 1: deposit 0.003 ETH → 0.006 ETH match → 0.009 ETH total per 90 days
             // Tier 2: deposit 0.006 ETH → 0.009 ETH match → 0.015 ETH total per 90 days
             // Tier 3: deposit >= 0.017 ETH → no match, self-funded
-            uint256 matchAllowance = _calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
+            uint256 matchAllowance =
+                PaymasterGraceLib.calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
             uint256 solidarityRemaining =
                 matchAllowance > org.solidarityUsedThisPeriod ? matchAllowance - org.solidarityUsedThisPeriod : 0;
 
             // Minimum solidarity needed after using available deposits.
             uint256 requiredSolidarity = maxCost > depositAvailable ? maxCost - depositAvailable : 0;
             if (requiredSolidarity > solidarityRemaining) {
-                revert SolidarityLimitExceeded();
+                revert PaymasterHubErrors.SolidarityLimitExceeded();
             }
-            if (solidarity.balance < requiredSolidarity) revert InsufficientFunds();
+            if (solidarity.balance < requiredSolidarity) revert PaymasterHubErrors.InsufficientFunds();
         }
     }
 
@@ -596,10 +491,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param orgId The organization to deposit for
      */
     function depositForOrg(bytes32 orgId) external payable {
-        if (msg.value == 0) revert ZeroAmount();
+        if (msg.value == 0) revert PaymasterHubErrors.ZeroAmount();
 
         // Verify org exists
-        if (_getOrgsStorage()[orgId].adminHatId == 0) revert OrgNotRegistered();
+        if (_getOrgsStorage()[orgId].adminHatId == 0) revert PaymasterHubErrors.OrgNotRegistered();
 
         _depositForOrg(orgId, msg.value);
     }
@@ -634,11 +529,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         bool wasUnfunded = org.deposited == 0;
 
         // Safe cast check
-        if (amount > type(uint128).max) revert Overflow();
+        if (amount > type(uint128).max) revert PaymasterHubErrors.Overflow();
 
         // Update org financials
         org.deposited += uint128(amount);
-        org.totalDeposited += uint128(amount);
 
         // Reset period when triggered
         if (shouldResetPeriod) {
@@ -658,7 +552,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Deposit to EntryPoint
         IEntryPoint(_getMainStorage().entryPoint).depositTo{value: amount}(address(this));
 
-        emit OrgDepositReceived(orgId, msg.sender, amount);
+        emit PaymasterHubErrors.OrgDepositReceived(orgId, msg.sender, amount);
     }
 
     /**
@@ -666,8 +560,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @dev Anyone can donate to support all orgs
      */
     function donateToSolidarity() external payable {
-        if (msg.value == 0) revert ZeroAmount();
-        if (msg.value > type(uint128).max) revert Overflow();
+        if (msg.value == 0) revert PaymasterHubErrors.ZeroAmount();
+        if (msg.value > type(uint128).max) revert PaymasterHubErrors.Overflow();
 
         SolidarityFund storage solidarity = _getSolidarityStorage();
         solidarity.balance += uint128(msg.value);
@@ -675,7 +569,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Deposit to EntryPoint
         IEntryPoint(_getMainStorage().entryPoint).depositTo{value: msg.value}(address(this));
 
-        emit SolidarityDonationReceived(msg.sender, msg.value);
+        emit PaymasterHubErrors.SolidarityDonationReceived(msg.sender, msg.value);
     }
 
     // ============ ERC-4337 Paymaster Functions ============
@@ -699,7 +593,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         (uint8 version, bytes32 orgId, uint8 subjectType, bytes32 subjectId, uint32 ruleId) =
             _decodePaymasterData(userOp.paymasterAndData);
 
-        if (version != PAYMASTER_DATA_VERSION) revert InvalidVersion();
+        if (version != PAYMASTER_DATA_VERSION) revert PaymasterHubErrors.InvalidVersion();
 
         bytes32 subjectKey;
         uint32 currentEpochStart;
@@ -713,7 +607,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             sponsorshipType = SPONSORSHIP_ONBOARDING;
             // Global-only onboarding path: never org-scoped billing.
             if (orgId != bytes32(0) || subjectId != bytes32(0) || ruleId != RULE_ID_GENERIC) {
-                revert InvalidOnboardingRequest();
+                revert PaymasterHubErrors.InvalidOnboardingRequest();
             }
 
             // Validate POA onboarding eligibility
@@ -727,7 +621,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             sponsorshipType = SPONSORSHIP_ORG_DEPLOY;
             // Global-only org deploy path: never org-scoped billing.
             if (orgId != bytes32(0) || subjectId != bytes32(0) || ruleId != RULE_ID_GENERIC) {
-                revert InvalidOrgDeployRequest();
+                revert PaymasterHubErrors.InvalidOrgDeployRequest();
             }
 
             // Validate free org deployment eligibility
@@ -737,8 +631,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         } else {
             // Validate org is registered and not paused
             OrgConfig storage org = _getOrgsStorage()[orgId];
-            if (org.adminHatId == 0) revert OrgNotRegistered();
-            if (org.paused) revert Paused();
+            if (org.adminHatId == 0) revert PaymasterHubErrors.OrgNotRegistered();
+            if (org.paused) revert PaymasterHubErrors.Paused();
 
             // Validate subject eligibility
             subjectKey = _validateSubjectEligibility(userOp.sender, subjectType, subjectId);
@@ -793,7 +687,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         if (solidarity.distributionPaused) {
             // When distribution is paused, org must cover 100% from deposits
             if (depositAvailable < maxCost) {
-                revert InsufficientOrgBalance();
+                revert PaymasterHubErrors.InsufficientOrgBalance();
             }
             org.spent += uint128(maxCost); // Reserve for bundle safety
             return maxCost;
@@ -801,14 +695,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         // Deposits are fully exhausted — check if grace period allows solidarity-only coverage
         if (depositAvailable == 0) {
-            mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
+            OrgConfig storage config = _getOrgsStorage()[orgId];
             GracePeriodConfig storage grace = _getGracePeriodStorage();
-            OrgConfig storage config = orgs[orgId];
-            uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
-            if (block.timestamp < graceEndTime) {
+            if (PaymasterGraceLib.isInGracePeriod(config.registeredAt, grace.initialGraceDays)) {
                 return 0; // Grace period with zero deposits: no reservation needed
             }
-            revert InsufficientOrgBalance();
+            revert PaymasterHubErrors.InsufficientOrgBalance();
         }
 
         // Deposits cover fully or partially — solidarity covers the rest
@@ -893,8 +785,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
         Budget storage budget = budgets[subjectKey];
         if (budget.epochStart == epochStart) {
-            budget.usedInEpoch = budget.usedInEpoch - uint128(reservedBudget) + uint128(actualGasCost);
-            emit UsageIncreased(orgId, subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
+            budget.usedInEpoch = PaymasterPostOpLib.adjustBudget(budget.usedInEpoch, reservedBudget, actualGasCost);
+            emit PaymasterHubErrors.UsageIncreased(orgId, subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
         }
 
         // Unreserve org balance, then charge actual + fee from deposits only (no solidarity)
@@ -907,15 +799,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Zero the fee during grace — same as _updateOrgFinancials.
         // Grace orgs have no deposits; charging a fee would create phantom debt
         // and circular solidarity accounting (solidarity pays itself).
-        uint256 solidarityFee;
-        mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
         GracePeriodConfig storage grace = _getGracePeriodStorage();
-        uint256 graceEndTime = orgs[orgId].registeredAt + (uint256(grace.initialGraceDays) * 1 days);
-        if (block.timestamp < graceEndTime) {
-            solidarityFee = 0;
-        } else {
-            solidarityFee = (actualGasCost * uint256(solidarity.feePercentageBps)) / 10000;
-        }
+        uint256 solidarityFee = PaymasterGraceLib.solidarityFee(
+            actualGasCost, solidarity.feePercentageBps, _getOrgsStorage()[orgId].registeredAt, grace.initialGraceDays
+        );
 
         org.spent += uint128(actualGasCost + solidarityFee);
         solidarity.balance += uint128(solidarityFee);
@@ -926,7 +813,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         org.solidarityUsedThisPeriod += uint128(actualGasCost);
 
         if (solidarityFee > 0) {
-            emit SolidarityFeeCollected(orgId, solidarityFee);
+            emit PaymasterHubErrors.SolidarityFeeCollected(orgId, solidarityFee);
         }
     }
 
@@ -946,8 +833,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     function _sponsorshipPostOpFallback(uint8 sponsorshipType, address sender, uint256 actualGasCost) private {
         // Deduct from solidarity (clamped to available balance — never revert)
         SolidarityFund storage solidarity = _getSolidarityStorage();
-        uint128 deduction = solidarity.balance < uint128(actualGasCost) ? solidarity.balance : uint128(actualGasCost);
-        solidarity.balance -= deduction;
+        (solidarity.balance,) = PaymasterPostOpLib.clampedDeduction(solidarity.balance, actualGasCost);
 
         // Refund optimistic counters. The first postOp's refunds were rolled back by EntryPoint,
         // so counters are still at their validation-incremented values.
@@ -967,42 +853,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
                 deployConfig.attemptsToday--;
             }
         }
-    }
-
-    /**
-     * @notice Calculate solidarity match allowance based on deposit tier
-     * @dev Progressive tier system with declining marginal match rates
-     *
-     * Tier 1: deposit = 1x min → match = 2x → total budget = 3x (e.g. 0.003 ETH → 0.009 ETH)
-     * Tier 2: deposit = 2x min → match = 3x → total budget = 5x (e.g. 0.006 ETH → 0.015 ETH)
-     * Tier 3: deposit >= 5x min → no match, self-funded
-     *
-     * @param deposited Current deposit balance
-     * @param minDeposit Minimum deposit requirement (from grace config)
-     * @return matchAllowance How much solidarity can be used per 90-day period
-     */
-    function _calculateMatchAllowance(uint256 deposited, uint256 minDeposit) internal pure returns (uint256) {
-        if (minDeposit == 0 || deposited < minDeposit) {
-            return 0;
-        }
-        // Tier 1: deposit <= 1x minimum -> 2x match
-        if (deposited <= minDeposit) {
-            return deposited * 2;
-        }
-        // Tier 2: deposit <= 2x minimum -> first tier at 2x, remainder at 1x
-        if (deposited <= minDeposit * 2) {
-            uint256 firstTierMatch = minDeposit * 2;
-            uint256 secondTierMatch = deposited - minDeposit;
-            return firstTierMatch + secondTierMatch;
-        }
-        // Tier 3: deposit < 5x minimum -> capped match from first two tiers
-        if (deposited < minDeposit * 5) {
-            uint256 firstTierMatch = minDeposit * 2;
-            uint256 secondTierMatch = minDeposit;
-            return firstTierMatch + secondTierMatch;
-        }
-        // Tier 4: >= 5x minimum -> self-sufficient, no match
-        return 0;
     }
 
     /**
@@ -1036,13 +886,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         if (solidarity.distributionPaused) {
             org.spent += uint128(actualGasCost + solidarityFee);
             solidarity.balance += uint128(solidarityFee);
-            emit SolidarityFeeCollected(orgId, solidarityFee);
+            emit PaymasterHubErrors.SolidarityFeeCollected(orgId, solidarityFee);
             return;
         }
 
         // Check if in initial grace period
-        uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
-        bool inInitialGrace = block.timestamp < graceEndTime;
+        bool inInitialGrace = PaymasterGraceLib.isInGracePeriod(config.registeredAt, grace.initialGraceDays);
 
         // Determine how much comes from org's deposits vs solidarity
         uint256 fromDeposits = 0;
@@ -1051,7 +900,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         if (inInitialGrace) {
             // Grace period: 100% from solidarity (deposits untouched)
-            if (solidarityLiquidity < actualGasCost) revert InsufficientFunds();
+            if (solidarityLiquidity < actualGasCost) revert PaymasterHubErrors.InsufficientFunds();
             fromSolidarity = actualGasCost;
             // No fee during grace — would be circular (solidarity pays itself)
             solidarityFee = 0;
@@ -1061,7 +910,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
 
             // Match allowance based on CURRENT BALANCE, not lifetime deposits
-            uint256 matchAllowance = _calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
+            uint256 matchAllowance =
+                PaymasterGraceLib.calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
             uint256 solidarityRemaining =
                 matchAllowance > org.solidarityUsedThisPeriod ? matchAllowance - org.solidarityUsedThisPeriod : 0;
             if (solidarityRemaining > solidarityLiquidity) {
@@ -1099,7 +949,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
                 // If still can't cover, revert
                 if (shortfall > 0) {
-                    revert InsufficientFunds();
+                    revert PaymasterHubErrors.InsufficientFunds();
                 }
             }
         }
@@ -1112,7 +962,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         solidarity.balance -= uint128(fromSolidarity);
         solidarity.balance += uint128(solidarityFee);
 
-        emit SolidarityFeeCollected(orgId, solidarityFee);
+        emit PaymasterHubErrors.SolidarityFeeCollected(orgId, solidarityFee);
     }
 
     // ============ Admin Functions ============
@@ -1125,11 +975,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         external
         onlyOrgOperator(orgId)
     {
-        if (target == address(0)) revert ZeroAddress();
+        if (target == address(0)) revert PaymasterHubErrors.ZeroAddress();
 
         mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
         rules[target][selector] = Rule({allowed: allowed, maxCallGasHint: maxCallGasHint});
-        emit RuleSet(orgId, target, selector, allowed, maxCallGasHint);
+        emit PaymasterHubErrors.RuleSet(orgId, target, selector, allowed, maxCallGasHint);
     }
 
     /**
@@ -1142,19 +992,29 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         bool[] calldata allowed,
         uint32[] calldata maxCallGasHints
     ) external onlyOrgOperator(orgId) {
+        _setRulesBatch(orgId, targets, selectors, allowed, maxCallGasHints);
+    }
+
+    function _setRulesBatch(
+        bytes32 orgId,
+        address[] calldata targets,
+        bytes4[] calldata selectors,
+        bool[] calldata allowed,
+        uint32[] calldata maxCallGasHints
+    ) internal {
         uint256 length = targets.length;
         if (length != selectors.length || length != allowed.length || length != maxCallGasHints.length) {
-            revert ArrayLengthMismatch();
+            revert PaymasterHubErrors.ArrayLengthMismatch();
         }
 
         mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
 
         for (uint256 i; i < length;) {
-            if (targets[i] == address(0)) revert ZeroAddress();
+            if (targets[i] == address(0)) revert PaymasterHubErrors.ZeroAddress();
 
             rules[targets[i]][selectors[i]] = Rule({allowed: allowed[i], maxCallGasHint: maxCallGasHints[i]});
 
-            emit RuleSet(orgId, targets[i], selectors[i], allowed[i], maxCallGasHints[i]);
+            emit PaymasterHubErrors.RuleSet(orgId, targets[i], selectors[i], allowed[i], maxCallGasHints[i]);
 
             unchecked {
                 ++i;
@@ -1168,7 +1028,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     function clearRule(bytes32 orgId, address target, bytes4 selector) external onlyOrgOperator(orgId) {
         mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
         delete rules[target][selector];
-        emit RuleSet(orgId, target, selector, false, 0);
+        emit PaymasterHubErrors.RuleSet(orgId, target, selector, false, 0);
     }
 
     /**
@@ -1180,7 +1040,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         onlyOrgOperator(orgId)
     {
         if (epochLen < MIN_EPOCH_LENGTH || epochLen > MAX_EPOCH_LENGTH) {
-            revert InvalidEpochLength();
+            revert PaymasterHubErrors.InvalidEpochLength();
         }
 
         mapping(bytes32 => Budget) storage budgets = _getBudgetsStorage()[orgId];
@@ -1199,7 +1059,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             budget.epochStart = uint32(block.timestamp);
         }
 
-        emit BudgetSet(orgId, subjectKey, capPerEpoch, epochLen, budget.epochStart);
+        emit PaymasterHubErrors.BudgetSet(orgId, subjectKey, capPerEpoch, epochLen, budget.epochStart);
     }
 
     /**
@@ -1212,7 +1072,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         budget.epochStart = epochStart;
         budget.usedInEpoch = 0; // Reset usage when manually setting epoch
 
-        emit BudgetSet(orgId, subjectKey, budget.capPerEpoch, budget.epochLen, epochStart);
+        emit PaymasterHubErrors.BudgetSet(orgId, subjectKey, budget.capPerEpoch, budget.epochLen, epochStart);
     }
 
     /**
@@ -1234,7 +1094,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         feeCaps.maxVerificationGas = maxVerificationGas;
         feeCaps.maxPreVerificationGas = maxPreVerificationGas;
 
-        emit FeeCapsSet(
+        emit PaymasterHubErrors.FeeCapsSet(
             orgId, maxFeePerGas, maxPriorityFeePerGas, maxCallGas, maxVerificationGas, maxPreVerificationGas
         );
     }
@@ -1245,7 +1105,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      */
     function setPause(bytes32 orgId, bool paused) external onlyOrgAdmin(orgId) {
         _getOrgsStorage()[orgId].paused = paused;
-        emit PauseSet(orgId, paused);
+        emit PaymasterHubErrors.PauseSet(orgId, paused);
     }
 
     /**
@@ -1253,7 +1113,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      */
     function setOperatorHat(bytes32 orgId, uint256 operatorHatId) external onlyOrgAdmin(orgId) {
         _getOrgsStorage()[orgId].operatorHatId = operatorHatId;
-        emit OperatorHatSet(orgId, operatorHatId);
+        emit PaymasterHubErrors.OperatorHatSet(orgId, operatorHatId);
     }
 
     /**
@@ -1265,26 +1125,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         IEntryPoint(entryPoint).depositTo{value: msg.value}(address(this));
 
         uint256 newDeposit = IEntryPoint(entryPoint).balanceOf(address(this));
-        emit DepositIncrease(msg.value, newDeposit);
-    }
-
-    /**
-     * @notice Withdraw funds from EntryPoint deposit (requires global admin)
-     * @dev Withdrawals affect shared pool, so restricted to prevent abuse
-     */
-    function withdrawFromEntryPoint(address payable to, uint256 amount) external {
-        // TODO: Add global admin mechanism or require multi-org consensus
-        // For now, disabled to protect shared pool
-        revert NotAdmin();
-    }
-
-    /**
-     * @notice Emergency withdrawal in case of critical issues
-     * @dev Requires global admin - affects all orgs
-     */
-    function emergencyWithdraw(address payable to) external {
-        // TODO: Add global admin mechanism
-        revert NotAdmin();
+        emit PaymasterHubErrors.DepositIncrease(msg.value, newDeposit);
     }
 
     /**
@@ -1297,17 +1138,17 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     function setGracePeriodConfig(uint32 _initialGraceDays, uint128 _maxSpendDuringGrace, uint128 _minDepositRequired)
         external
     {
-        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
-        if (_initialGraceDays == 0) revert InvalidEpochLength();
-        if (_maxSpendDuringGrace == 0) revert InvalidEpochLength();
-        if (_minDepositRequired == 0) revert InvalidEpochLength();
+        if (msg.sender != _getMainStorage().poaManager) revert PaymasterHubErrors.NotPoaManager();
+        if (_initialGraceDays == 0) revert PaymasterHubErrors.InvalidEpochLength();
+        if (_maxSpendDuringGrace == 0) revert PaymasterHubErrors.InvalidEpochLength();
+        if (_minDepositRequired == 0) revert PaymasterHubErrors.InvalidEpochLength();
 
         GracePeriodConfig storage grace = _getGracePeriodStorage();
         grace.initialGraceDays = _initialGraceDays;
         grace.maxSpendDuringGrace = _maxSpendDuringGrace;
         grace.minDepositRequired = _minDepositRequired;
 
-        emit GracePeriodConfigUpdated(_initialGraceDays, _maxSpendDuringGrace, _minDepositRequired);
+        emit PaymasterHubErrors.GracePeriodConfigUpdated(_initialGraceDays, _maxSpendDuringGrace, _minDepositRequired);
     }
 
     /**
@@ -1316,7 +1157,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param registrar Address authorized to call registerOrg
      */
     function setOrgRegistrar(address registrar) external {
-        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+        if (msg.sender != _getMainStorage().poaManager) revert PaymasterHubErrors.NotPoaManager();
         _getMainStorage().orgRegistrar = registrar;
     }
 
@@ -1327,14 +1168,14 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param banned True to ban, false to unban
      */
     function setBanFromSolidarity(bytes32 orgId, bool banned) external {
-        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+        if (msg.sender != _getMainStorage().poaManager) revert PaymasterHubErrors.NotPoaManager();
 
         mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
-        if (orgs[orgId].adminHatId == 0) revert OrgNotRegistered();
+        if (orgs[orgId].adminHatId == 0) revert PaymasterHubErrors.OrgNotRegistered();
 
         orgs[orgId].bannedFromSolidarity = banned;
 
-        emit OrgBannedFromSolidarity(orgId, banned);
+        emit PaymasterHubErrors.OrgBannedFromSolidarity(orgId, banned);
     }
 
     /**
@@ -1343,8 +1184,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param feePercentageBps Fee as basis points (100 = 1%)
      */
     function setSolidarityFee(uint16 feePercentageBps) external {
-        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
-        if (feePercentageBps > 1000) revert FeeTooHigh(); // Cap at 10%
+        if (msg.sender != _getMainStorage().poaManager) revert PaymasterHubErrors.NotPoaManager();
+        if (feePercentageBps > 1000) revert PaymasterHubErrors.FeeTooHigh(); // Cap at 10%
 
         SolidarityFund storage solidarity = _getSolidarityStorage();
         solidarity.feePercentageBps = feePercentageBps;
@@ -1357,11 +1198,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      *      Only PoaManager can pause/unpause.
      */
     function pauseSolidarityDistribution() external {
-        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+        if (msg.sender != _getMainStorage().poaManager) revert PaymasterHubErrors.NotPoaManager();
         SolidarityFund storage solidarity = _getSolidarityStorage();
         if (!solidarity.distributionPaused) {
             solidarity.distributionPaused = true;
-            emit SolidarityDistributionPaused();
+            emit PaymasterHubErrors.SolidarityDistributionPaused();
         }
     }
 
@@ -1371,11 +1212,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      *      Only PoaManager can pause/unpause.
      */
     function unpauseSolidarityDistribution() external {
-        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+        if (msg.sender != _getMainStorage().poaManager) revert PaymasterHubErrors.NotPoaManager();
         SolidarityFund storage solidarity = _getSolidarityStorage();
         if (solidarity.distributionPaused) {
             solidarity.distributionPaused = false;
-            emit SolidarityDistributionUnpaused();
+            emit PaymasterHubErrors.SolidarityDistributionUnpaused();
         }
     }
 
@@ -1393,7 +1234,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         bool _enabled,
         address _accountRegistry
     ) external {
-        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+        if (msg.sender != _getMainStorage().poaManager) revert PaymasterHubErrors.NotPoaManager();
 
         OnboardingConfig storage onboarding = _getOnboardingStorage();
         onboarding.maxGasPerCreation = _maxGasPerCreation;
@@ -1401,7 +1242,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         onboarding.enabled = _enabled;
         onboarding.accountRegistry = _accountRegistry;
 
-        emit OnboardingConfigUpdated(_maxGasPerCreation, _dailyCreationLimit, _enabled, _accountRegistry);
+        emit PaymasterHubErrors.OnboardingConfigUpdated(
+            _maxGasPerCreation, _dailyCreationLimit, _enabled, _accountRegistry
+        );
     }
 
     /**
@@ -1420,7 +1263,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         bool _enabled,
         address _orgDeployer
     ) external {
-        if (msg.sender != _getMainStorage().poaManager) revert NotPoaManager();
+        if (msg.sender != _getMainStorage().poaManager) {
+            revert PaymasterHubErrors.NotPoaManager();
+        }
 
         OrgDeployConfig storage deployConfig = _getOrgDeployStorage();
         deployConfig.maxGasPerDeploy = _maxGasPerDeploy;
@@ -1429,7 +1274,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         deployConfig.enabled = _enabled;
         deployConfig.orgDeployer = _orgDeployer;
 
-        emit OrgDeployConfigUpdated(_maxGasPerDeploy, _dailyDeployLimit, _maxDeploysPerAccount, _enabled, _orgDeployer);
+        emit PaymasterHubErrors.OrgDeployConfigUpdated(
+            _maxGasPerDeploy, _dailyDeployLimit, _maxDeploysPerAccount, _enabled, _orgDeployer
+        );
     }
 
     // ============ Storage Getters (for Lens) ============
@@ -1520,53 +1367,6 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      */
     function getOrgDeployCount(address account) external view returns (uint8) {
         return _getOrgDeployCountsStorage()[account];
-    }
-
-    /**
-     * @notice Get org's grace period status and limits
-     * @param orgId The organization identifier
-     * @return inGrace True if in initial grace period
-     * @return spendRemaining Spending remaining during grace (0 if not in grace)
-     * @return requiresDeposit True if org needs to deposit to access solidarity
-     * @return solidarityLimit Current solidarity allocation for org (per 90-day period)
-     */
-    function getOrgGraceStatus(bytes32 orgId)
-        external
-        view
-        returns (bool inGrace, uint128 spendRemaining, bool requiresDeposit, uint256 solidarityLimit)
-    {
-        mapping(bytes32 => OrgConfig) storage orgs = _getOrgsStorage();
-        mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
-        GracePeriodConfig storage grace = _getGracePeriodStorage();
-        SolidarityFund storage solidarity = _getSolidarityStorage();
-
-        OrgConfig storage config = orgs[orgId];
-        OrgFinancials storage org = financials[orgId];
-
-        uint256 graceEndTime = config.registeredAt + (uint256(grace.initialGraceDays) * 1 days);
-        inGrace = block.timestamp < graceEndTime;
-
-        // When distribution is paused, no solidarity is available regardless of grace/tier
-        if (solidarity.distributionPaused) {
-            spendRemaining = 0;
-            requiresDeposit = true;
-            solidarityLimit = 0;
-            return (inGrace, spendRemaining, requiresDeposit, solidarityLimit);
-        }
-
-        if (inGrace) {
-            // During grace: track spending limit
-            uint128 spendUsed = org.solidarityUsedThisPeriod;
-            spendRemaining = spendUsed < grace.maxSpendDuringGrace ? grace.maxSpendDuringGrace - spendUsed : 0;
-            requiresDeposit = false;
-            solidarityLimit = uint256(grace.maxSpendDuringGrace);
-        } else {
-            // After grace: check current balance (not cumulative deposits)
-            spendRemaining = 0;
-            uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
-            requiresDeposit = depositAvailable < grace.minDepositRequired;
-            solidarityLimit = _calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
-        }
     }
 
     // ============ Storage Accessors ============
@@ -1686,9 +1486,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      */
     function _authorizeUpgrade(address newImplementation) internal override {
         MainStorage storage main = _getMainStorage();
-        if (msg.sender != main.poaManager) revert NotPoaManager();
-        if (newImplementation == address(0)) revert ZeroAddress();
-        if (newImplementation.code.length == 0) revert ContractNotDeployed();
+        if (msg.sender != main.poaManager) revert PaymasterHubErrors.NotPoaManager();
+        if (newImplementation == address(0)) revert PaymasterHubErrors.ZeroAddress();
+        if (newImplementation.code.length == 0) revert PaymasterHubErrors.ContractNotDeployed();
     }
 
     // ============ Internal Functions ============
@@ -1701,7 +1501,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // ERC-4337 v0.7 packed format:
         // [paymaster(20) | verificationGasLimit(16) | postOpGasLimit(16) | version(1) | orgId(32) | subjectType(1) | subjectId(32) | ruleId(4)]
         // = 122 bytes total. Custom data starts at offset 52.
-        if (paymasterAndData.length < 122) revert InvalidPaymasterData();
+        if (paymasterAndData.length < 122) revert PaymasterHubErrors.InvalidPaymasterData();
 
         // Skip first 52 bytes (paymaster address + v0.7 gas limits) and decode the rest
         version = uint8(paymasterAndData[52]);
@@ -1723,22 +1523,22 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         returns (bytes32 subjectKey)
     {
         if (subjectType == SUBJECT_TYPE_ACCOUNT) {
-            if (address(uint160(uint256(subjectId))) != sender) revert Ineligible();
+            if (address(uint160(uint256(subjectId))) != sender) revert PaymasterHubErrors.Ineligible();
             subjectKey = keccak256(abi.encodePacked(subjectType, subjectId));
         } else if (subjectType == SUBJECT_TYPE_HAT) {
             uint256 hatId = uint256(subjectId);
             IHats hatsContract = IHats(_getMainStorage().hats);
             if (!hatsContract.isEligible(sender, hatId)) {
-                revert Ineligible();
+                revert PaymasterHubErrors.Ineligible();
             }
             // Ensure the hat itself is still active (toggle module check)
             (,,,,,,,, bool active) = hatsContract.viewHat(hatId);
             if (!active) {
-                revert Ineligible();
+                revert PaymasterHubErrors.Ineligible();
             }
             subjectKey = keccak256(abi.encodePacked(subjectType, subjectId));
         } else {
-            revert InvalidSubjectType();
+            revert PaymasterHubErrors.InvalidSubjectType();
         }
     }
 
@@ -1757,10 +1557,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         OnboardingConfig storage onboarding = _getOnboardingStorage();
 
         // Check onboarding is enabled
-        if (!onboarding.enabled) revert OnboardingDisabled();
+        if (!onboarding.enabled) revert PaymasterHubErrors.OnboardingDisabled();
 
         // Onboarding must only sponsor account creation, not arbitrary operations.
-        if (userOp.initCode.length == 0) revert InvalidOnboardingRequest();
+        if (userOp.initCode.length == 0) revert PaymasterHubErrors.InvalidOnboardingRequest();
         // NOTE: We intentionally do NOT check `account.code.length != 0` here.
         // In ERC-4337 v0.7, the EntryPoint deploys the account via _createSenderIfNeeded()
         // BEFORE calling validatePaymasterUserOp(), so the account already has code by the
@@ -1773,10 +1573,10 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         // Onboarding is paid from solidarity fund, so block when distribution is paused
         SolidarityFund storage solidarity = _getSolidarityStorage();
-        if (solidarity.distributionPaused) revert SolidarityDistributionIsPaused();
+        if (solidarity.distributionPaused) revert PaymasterHubErrors.SolidarityDistributionIsPaused();
 
         // Check gas cost limit
-        if (maxCost > onboarding.maxGasPerCreation) revert GasTooHigh();
+        if (maxCost > onboarding.maxGasPerCreation) revert PaymasterHubErrors.GasTooHigh();
 
         // Check daily rate limit
         uint32 today = uint32(block.timestamp / 1 days);
@@ -1785,49 +1585,24 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             onboarding.attemptsToday = 0;
         }
         if (onboarding.attemptsToday >= onboarding.dailyCreationLimit) {
-            revert OnboardingDailyLimitExceeded();
+            revert PaymasterHubErrors.OnboardingDailyLimitExceeded();
         }
         onboarding.attemptsToday++;
 
         // Check solidarity fund has sufficient balance
-        if (solidarity.balance < maxCost) revert InsufficientFunds();
+        if (solidarity.balance < maxCost) revert PaymasterHubErrors.InsufficientFunds();
 
         // Subject key for onboarding is based on the account address (natural nonce)
         subjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_POA_ONBOARDING, bytes20(account)));
     }
 
     /// @dev Validates that onboarding callData is execute(registryAddress, 0, registerAccount(...)).
-    ///      Reuses the same ABI layout parsing as _extractTargetSelector.
     function _validateOnboardingCallData(bytes calldata callData, address registry) private pure {
-        if (registry == address(0)) revert InvalidOnboardingRequest();
-        if (callData.length < 4) revert InvalidOnboardingRequest();
-
-        // Must be execute(address,uint256,bytes) = 0xb61d27f6
-        bytes4 outerSelector = bytes4(callData[0:4]);
-        if (outerSelector != bytes4(0xb61d27f6)) revert InvalidOnboardingRequest();
-        if (callData.length < 0x64) revert InvalidOnboardingRequest();
-
-        address target;
-        uint256 value;
-        bytes4 innerSelector;
-        assembly {
-            target := calldataload(add(callData.offset, 0x04))
-            value := calldataload(add(callData.offset, 0x24))
-            // Read inner bytes data (offset at 0x44, must be standard 0x60)
-            let dataOffset := calldataload(add(callData.offset, 0x44))
-            if eq(dataOffset, 0x60) {
-                let dataStart := add(add(0x04, dataOffset), 0x20)
-                if lt(dataStart, callData.length) {
-                    innerSelector := calldataload(add(callData.offset, dataStart))
-                }
-            }
-        }
-        innerSelector = bytes4(innerSelector);
-
-        // Must target the registry with zero value and registerAccount(string) = 0xbff6de20
-        if (target != registry) revert InvalidOnboardingRequest();
-        if (value != 0) revert InvalidOnboardingRequest();
-        if (innerSelector != bytes4(0xbff6de20)) revert InvalidOnboardingRequest();
+        if (registry == address(0)) revert PaymasterHubErrors.InvalidOnboardingRequest();
+        (bool valid, bytes4 innerSelector) = PaymasterCalldataLib.parseExecuteCall(callData, registry);
+        if (!valid) revert PaymasterHubErrors.InvalidOnboardingRequest();
+        // Must call registerAccount(string) = 0xbff6de20
+        if (innerSelector != bytes4(0xbff6de20)) revert PaymasterHubErrors.InvalidOnboardingRequest();
     }
 
     /**
@@ -1845,24 +1620,24 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         OrgDeployConfig storage deployConfig = _getOrgDeployStorage();
 
         // Check feature is enabled
-        if (!deployConfig.enabled) revert OrgDeployDisabled();
+        if (!deployConfig.enabled) revert PaymasterHubErrors.OrgDeployDisabled();
 
         // No initCode for org deployment (account must already exist)
-        if (userOp.initCode.length != 0) revert InvalidOrgDeployRequest();
+        if (userOp.initCode.length != 0) revert PaymasterHubErrors.InvalidOrgDeployRequest();
 
         // Validate calldata: must be execute(orgDeployerAddress, 0, ...)
         _validateOrgDeployCallData(userOp.callData, deployConfig.orgDeployer);
 
         // Org deploy is paid from solidarity fund, so block when distribution is paused
         SolidarityFund storage solidarity = _getSolidarityStorage();
-        if (solidarity.distributionPaused) revert SolidarityDistributionIsPaused();
+        if (solidarity.distributionPaused) revert PaymasterHubErrors.SolidarityDistributionIsPaused();
 
         // Check gas cost limit
-        if (maxCost > deployConfig.maxGasPerDeploy) revert GasTooHigh();
+        if (maxCost > deployConfig.maxGasPerDeploy) revert PaymasterHubErrors.GasTooHigh();
 
         // Check per-account lifetime limit (optimistic increment for bundle safety)
         mapping(address => uint8) storage counts = _getOrgDeployCountsStorage();
-        if (counts[account] >= deployConfig.maxDeploysPerAccount) revert OrgDeployLimitExceeded();
+        if (counts[account] >= deployConfig.maxDeploysPerAccount) revert PaymasterHubErrors.OrgDeployLimitExceeded();
         counts[account]++;
 
         // Check daily rate limit (same pattern as onboarding)
@@ -1872,44 +1647,28 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             deployConfig.attemptsToday = 0;
         }
         if (deployConfig.attemptsToday >= deployConfig.dailyDeployLimit) {
-            revert OrgDeployDailyLimitExceeded();
+            revert PaymasterHubErrors.OrgDeployDailyLimitExceeded();
         }
         deployConfig.attemptsToday++;
 
         // Check solidarity fund has sufficient balance
-        if (solidarity.balance < maxCost) revert InsufficientFunds();
+        if (solidarity.balance < maxCost) revert PaymasterHubErrors.InsufficientFunds();
 
         // Subject key based on account address
         subjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_ORG_DEPLOY, bytes20(account)));
     }
 
     /// @dev Validates that org deploy callData is execute(orgDeployerAddress, 0, ...).
-    ///      Checks outer selector, target address, and value. Does NOT parse inner deployFullOrg
-    ///      params because the struct is complex and may change.
+    ///      Does NOT parse inner deployFullOrg params because the struct is complex and may change.
     function _validateOrgDeployCallData(bytes calldata callData, address orgDeployer) private pure {
-        if (orgDeployer == address(0)) revert InvalidOrgDeployRequest();
-        if (callData.length < 4) revert InvalidOrgDeployRequest();
-
-        // Must be execute(address,uint256,bytes) = 0xb61d27f6
-        bytes4 outerSelector = bytes4(callData[0:4]);
-        if (outerSelector != bytes4(0xb61d27f6)) revert InvalidOrgDeployRequest();
-        if (callData.length < 0x64) revert InvalidOrgDeployRequest();
-
-        address target;
-        uint256 value;
-        assembly {
-            target := calldataload(add(callData.offset, 0x04))
-            value := calldataload(add(callData.offset, 0x24))
-        }
-
-        // Must target the orgDeployer with zero value (free deployment)
-        if (target != orgDeployer) revert InvalidOrgDeployRequest();
-        if (value != 0) revert InvalidOrgDeployRequest();
+        if (orgDeployer == address(0)) revert PaymasterHubErrors.InvalidOrgDeployRequest();
+        (bool valid,) = PaymasterCalldataLib.parseExecuteCall(callData, orgDeployer);
+        if (!valid) revert PaymasterHubErrors.InvalidOrgDeployRequest();
     }
 
     function _validateRules(PackedUserOperation calldata userOp, uint32 ruleId, bytes32 orgId) private view {
         bytes calldata callData = userOp.callData;
-        if (callData.length < 4) revert InvalidPaymasterData();
+        if (callData.length < 4) revert PaymasterHubErrors.InvalidPaymasterData();
 
         // For RULE_ID_GENERIC, executeBatch needs per-inner-call validation
         if (ruleId == RULE_ID_GENERIC) {
@@ -1927,12 +1686,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
         Rule storage rule = rules[target][selector];
 
-        if (!rule.allowed) revert RuleDenied(target, selector);
+        if (!rule.allowed) revert PaymasterHubErrors.RuleDenied(target, selector);
 
         // Check gas hint if set
         if (rule.maxCallGasHint > 0) {
             (, uint128 callGasLimit) = UserOpLib.unpackAccountGasLimits(userOp.accountGasLimits);
-            if (callGasLimit > rule.maxCallGasHint) revert GasTooHigh();
+            if (callGasLimit > rule.maxCallGasHint) revert PaymasterHubErrors.GasTooHigh();
         }
     }
 
@@ -1943,38 +1702,30 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     function _validateBatchRules(bytes calldata callData, bytes4 outerSelector, bytes32 orgId) private view {
         mapping(address => mapping(bytes4 => Rule)) storage rules = _getRulesStorage()[orgId];
 
+        // Decode targets and datas from either batch format
+        address[] memory targets;
+        bytes[] memory datas;
         if (outerSelector == bytes4(0x47e1da2a)) {
             // executeBatch(address[],uint256[],bytes[]) — PasskeyAccount pattern
-            (address[] memory targets,, bytes[] memory datas) =
-                abi.decode(callData[4:], (address[], uint256[], bytes[]));
-            if (targets.length != datas.length) revert ArrayLengthMismatch();
-            for (uint256 i = 0; i < targets.length;) {
-                bytes4 innerSelector;
-                if (datas[i].length >= 4) {
-                    bytes memory d = datas[i];
-                    assembly { innerSelector := mload(add(d, 0x20)) }
-                }
-                Rule storage rule = rules[targets[i]][innerSelector];
-                if (!rule.allowed) revert RuleDenied(targets[i], innerSelector);
-                unchecked {
-                    ++i;
-                }
-            }
+            (targets,, datas) = abi.decode(callData[4:], (address[], uint256[], bytes[]));
         } else {
             // executeBatch(address[],bytes[]) — SimpleAccount pattern (0x18dfb3c7)
-            (address[] memory targets, bytes[] memory datas) = abi.decode(callData[4:], (address[], bytes[]));
-            if (targets.length != datas.length) revert ArrayLengthMismatch();
-            for (uint256 i = 0; i < targets.length;) {
-                bytes4 innerSelector;
-                if (datas[i].length >= 4) {
-                    bytes memory d = datas[i];
-                    assembly { innerSelector := mload(add(d, 0x20)) }
+            (targets, datas) = abi.decode(callData[4:], (address[], bytes[]));
+        }
+
+        if (targets.length != datas.length) revert PaymasterHubErrors.ArrayLengthMismatch();
+        for (uint256 i = 0; i < targets.length;) {
+            bytes4 innerSelector;
+            if (datas[i].length >= 4) {
+                bytes memory d = datas[i];
+                assembly {
+                    innerSelector := mload(add(d, 0x20))
                 }
-                Rule storage rule = rules[targets[i]][innerSelector];
-                if (!rule.allowed) revert RuleDenied(targets[i], innerSelector);
-                unchecked {
-                    ++i;
-                }
+            }
+            Rule storage rule = rules[targets[i]][innerSelector];
+            if (!rule.allowed) revert PaymasterHubErrors.RuleDenied(targets[i], innerSelector);
+            unchecked {
+                ++i;
             }
         }
     }
@@ -1986,7 +1737,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
     {
         bytes calldata callData = userOp.callData;
 
-        if (callData.length < 4) revert InvalidPaymasterData();
+        if (callData.length < 4) revert PaymasterHubErrors.InvalidPaymasterData();
 
         if (ruleId == RULE_ID_GENERIC) {
             // ERC-4337 account execute patterns (SimpleAccount, PasskeyAccount, etc.)
@@ -2021,16 +1772,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             else {
                 target = userOp.sender;
             }
-        } else if (ruleId == RULE_ID_EXECUTOR) {
-            // Custom Executor pattern
-            target = userOp.sender;
-            selector = bytes4(callData[0:4]);
         } else if (ruleId == RULE_ID_COARSE) {
             // Coarse mode: only check account's selector
             target = userOp.sender;
             selector = bytes4(callData[0:4]);
         } else {
-            revert InvalidRuleId();
+            revert PaymasterHubErrors.InvalidRuleId();
         }
     }
 
@@ -2039,22 +1786,22 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         (uint128 maxPriorityFeePerGas, uint128 maxFeePerGas) = UserOpLib.unpackGasFees(userOp.gasFees);
         if (caps.maxFeePerGas > 0 && maxFeePerGas > caps.maxFeePerGas) {
-            revert FeeTooHigh();
+            revert PaymasterHubErrors.FeeTooHigh();
         }
         if (caps.maxPriorityFeePerGas > 0 && maxPriorityFeePerGas > caps.maxPriorityFeePerGas) {
-            revert FeeTooHigh();
+            revert PaymasterHubErrors.FeeTooHigh();
         }
 
         (uint128 verificationGasLimit, uint128 callGasLimit) = UserOpLib.unpackAccountGasLimits(userOp.accountGasLimits);
 
         if (caps.maxCallGas > 0 && callGasLimit > caps.maxCallGas) {
-            revert GasTooHigh();
+            revert PaymasterHubErrors.GasTooHigh();
         }
         if (caps.maxVerificationGas > 0 && verificationGasLimit > caps.maxVerificationGas) {
-            revert GasTooHigh();
+            revert PaymasterHubErrors.GasTooHigh();
         }
         if (caps.maxPreVerificationGas > 0 && userOp.preVerificationGas > caps.maxPreVerificationGas) {
-            revert GasTooHigh();
+            revert PaymasterHubErrors.GasTooHigh();
         }
     }
 
@@ -2076,7 +1823,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
 
         // Check budget capacity (safe conversion as maxCost is bounded by EntryPoint)
         if (budget.usedInEpoch + uint128(maxCost) > budget.capPerEpoch) {
-            revert BudgetExceeded();
+            revert PaymasterHubErrors.BudgetExceeded();
         }
 
         // Reserve maxCost for bundle safety — ensures a second UserOp for the same
@@ -2100,8 +1847,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Only update if we're still in the same epoch
         if (budget.epochStart == epochStart) {
             // Replace reservation (maxCost) with actual cost (actualGasCost <= maxCost)
-            budget.usedInEpoch = budget.usedInEpoch - uint128(reservedMaxCost) + uint128(actualGasCost);
-            emit UsageIncreased(orgId, subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
+            budget.usedInEpoch = PaymasterPostOpLib.adjustBudget(budget.usedInEpoch, reservedMaxCost, actualGasCost);
+            emit PaymasterHubErrors.UsageIncreased(orgId, subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
         }
         // If epoch rolled since validation, reservation was already cleared by epoch reset
     }
@@ -2116,7 +1863,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         SolidarityFund storage solidarity = _getSolidarityStorage();
 
         if (countAsCreation) {
-            emit OnboardingAccountCreated(address(0), actualGasCost);
+            emit PaymasterHubErrors.OnboardingAccountCreated(address(0), actualGasCost);
         } else {
             // Refund the daily counter slot for failed operations (incremented during validation for bundle safety)
             OnboardingConfig storage onboarding = _getOnboardingStorage();
@@ -2126,7 +1873,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
 
         // Deduct from solidarity fund (validated during _validateOnboardingEligibility)
-        if (solidarity.balance < actualGasCost) revert InsufficientFunds();
+        if (solidarity.balance < actualGasCost) revert PaymasterHubErrors.InsufficientFunds();
         solidarity.balance -= uint128(actualGasCost);
     }
 
@@ -2143,7 +1890,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         if (countAsDeployment) {
             // Per-account counter already incremented during validation (bundle safety).
             // Just emit the event.
-            emit OrgDeploymentSponsored(sender, actualGasCost);
+            emit PaymasterHubErrors.OrgDeploymentSponsored(sender, actualGasCost);
         } else {
             // Refund both counters for failed operations (incremented during validation for bundle safety)
             mapping(address => uint8) storage counts = _getOrgDeployCountsStorage();
@@ -2157,7 +1904,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         }
 
         // Deduct from solidarity fund (validated during _validateOrgDeployEligibility)
-        if (solidarity.balance < actualGasCost) revert InsufficientFunds();
+        if (solidarity.balance < actualGasCost) revert PaymasterHubErrors.InsufficientFunds();
         solidarity.balance -= uint128(actualGasCost);
     }
 }
