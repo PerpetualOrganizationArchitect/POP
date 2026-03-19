@@ -862,8 +862,8 @@ contract OrgDeployer is Initializable {
         pure
         returns (address[] memory targets, bytes4[] memory selectors, bool[] memory allowed, uint32[] memory gasHints)
     {
-        // Count: QuickJoin(3) + TaskManager(10) + HybridVoting(3) + DDVoting(3) + PaymentManager(3) + EligibilityModule(5) + EducationHub(0 or 1)
-        uint256 count = 27;
+        // Count: QuickJoin(3) + TaskManager(12) + HybridVoting(3) + DDVoting(3) + PaymentManager(5) + EligibilityModule(5) + ParticipationToken(3) + EducationHub(0 or 1)
+        uint256 count = 34;
         if (educationEnabled) count += 1;
 
         targets = new address[](count);
@@ -932,6 +932,15 @@ contract OrgDeployer is Initializable {
             bytes4(keccak256("createAndAssignTask(uint256,bytes,bytes32,bytes32,address,address,uint256,bool)"));
         i++;
 
+        targets[i] = result.taskManager;
+        selectors[i] =
+            bytes4(keccak256("createProject(bytes,bytes32,uint256,address[],uint256[],uint256[],uint256[],uint256[])"));
+        i++;
+
+        targets[i] = result.taskManager;
+        selectors[i] = bytes4(keccak256("deleteProject(bytes32)"));
+        i++;
+
         // ── HybridVoting ──
         targets[i] = result.hybridVoting;
         selectors[i] = bytes4(keccak256("vote(uint256,uint8[],uint8[])"));
@@ -973,6 +982,14 @@ contract OrgDeployer is Initializable {
         selectors[i] = bytes4(keccak256("optOut(bool)"));
         i++;
 
+        targets[i] = result.paymentManager;
+        selectors[i] = bytes4(keccak256("createDistribution(address,uint256,bytes32,uint256)"));
+        i++;
+
+        targets[i] = result.paymentManager;
+        selectors[i] = bytes4(keccak256("finalizeDistribution(uint256,uint256)"));
+        i++;
+
         // ── EligibilityModule ──
         targets[i] = result.eligibilityModule;
         selectors[i] = bytes4(keccak256("claimVouchedHat(uint256)"));
@@ -992,6 +1009,19 @@ contract OrgDeployer is Initializable {
 
         targets[i] = result.eligibilityModule;
         selectors[i] = bytes4(keccak256("withdrawApplication(uint256)"));
+        i++;
+
+        // ── ParticipationToken ──
+        targets[i] = result.participationToken;
+        selectors[i] = bytes4(keccak256("requestTokens(uint96,string)"));
+        i++;
+
+        targets[i] = result.participationToken;
+        selectors[i] = bytes4(keccak256("approveRequest(uint256)"));
+        i++;
+
+        targets[i] = result.participationToken;
+        selectors[i] = bytes4(keccak256("cancelRequest(uint256)"));
         i++;
 
         // ── EducationHub (conditional) ──
