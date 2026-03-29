@@ -94,7 +94,7 @@ abstract contract DeployHelper is Script {
     function _deployAndRegisterTypesDD(PoaManager pm, DeterministicDeployer dd) internal {
         ContractType[] memory types = _contractTypes();
         for (uint256 i = 0; i < types.length; i++) {
-            bytes32 salt = dd.computeSalt(types[i].name, "v1");
+            bytes32 salt = dd.computeSalt(types[i].name, "v3");
             address predicted = dd.computeAddress(salt);
             if (predicted.code.length == 0) {
                 dd.deploy(salt, types[i].creationCode);
@@ -110,7 +110,7 @@ abstract contract DeployHelper is Script {
     function _deployAndRegisterInfraTypesDD(PoaManager pm, DeterministicDeployer dd) internal {
         ContractType[] memory types = _infraContractTypes();
         for (uint256 i = 0; i < types.length; i++) {
-            bytes32 salt = dd.computeSalt(types[i].name, "v1");
+            bytes32 salt = dd.computeSalt(types[i].name, "v3");
             address predicted = dd.computeAddress(salt);
             if (predicted.code.length == 0) {
                 dd.deploy(salt, types[i].creationCode);

@@ -607,7 +607,9 @@ contract DeployOrg is Script {
                 createHats: bootstrapJson.projects[i].createRoles,
                 claimHats: bootstrapJson.projects[i].claimRoles,
                 reviewHats: bootstrapJson.projects[i].reviewRoles,
-                assignHats: bootstrapJson.projects[i].assignRoles
+                assignHats: bootstrapJson.projects[i].assignRoles,
+                bountyTokens: new address[](0),
+                bountyCaps: new uint256[](0)
             });
         }
 
