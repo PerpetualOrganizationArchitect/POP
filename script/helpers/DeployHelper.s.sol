@@ -43,7 +43,7 @@ abstract contract DeployHelper is Script {
     address public constant HATS_PROTOCOL = 0x3bc1A0Ad72417f2d411118085256fC53CBdDd137;
     address public constant ENTRY_POINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     address public constant POA_GUARDIAN = address(0);
-    uint256 public constant INITIAL_SOLIDARITY_FUND = 0.1 ether;
+    uint256 public constant INITIAL_SOLIDARITY_FUND = 0.005 ether;
 
     /// @notice Canonical list of the 13 application contract types.
     ///         Infrastructure types (ImplementationRegistry, OrgRegistry,

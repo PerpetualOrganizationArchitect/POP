@@ -114,9 +114,9 @@ contract DeployHomeChain is DeployHelper {
         OrgDeployer.DeploymentResult memory orgResult = _deployGovernanceOrg(infra, deployer);
 
         // 5. Fund Executor with ETH for Hyperlane fees
-        (bool sent,) = payable(orgResult.executor).call{value: 0.1 ether}("");
+        (bool sent,) = payable(orgResult.executor).call{value: 0.005 ether}("");
         require(sent, "Failed to fund executor");
-        console.log("Executor funded with 0.1 ETH for Hyperlane fees");
+        console.log("Executor funded with 0.005 ETH for Hyperlane fees");
 
         // 6. Register deployer username on GlobalAccountRegistry
         string memory deployerUsername = vm.envOr("DEPLOYER_USERNAME", string("hudsonhrh"));

@@ -369,7 +369,7 @@ step2_deploy_satellite() {
 
     MAILBOX="$mailbox" \
     SATELLITE_DOMAIN="$domain" \
-    SOLIDARITY_FUND="20000000000000000" \
+    SOLIDARITY_FUND="5000000000000000" \
     run_forge_script DeploySatellite "$rpc"
 
     if [ ! -f "$sat_state_file" ]; then
