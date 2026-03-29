@@ -551,14 +551,18 @@ contract RunOrgActionsAdvanced is Script {
 
         vm.broadcast(memberKeys.coordinator);
         bytes32 projectId = tm.createProject(
-            abi.encode("metadata", "Building core governance infrastructure for the cooperative"),
-            bytes32(0), // metadataHash
-            1000 ether, // Project cap
-            managers,
-            emptyHats, // createHats
-            claimHats, // claimHats - MEMBER, COORDINATOR, ADMIN can claim
-            emptyHats, // reviewHats
-            emptyHats // assignHats
+            TaskManager.BootstrapProjectConfig({
+                title: abi.encode("metadata", "Building core governance infrastructure for the cooperative"),
+                metadataHash: bytes32(0),
+                cap: 1000 ether,
+                managers: managers,
+                createHats: emptyHats,
+                claimHats: claimHats,
+                reviewHats: emptyHats,
+                assignHats: emptyHats,
+                bountyTokens: new address[](0),
+                bountyCaps: new uint256[](0)
+            })
         );
 
         console.log("  [OK] Project Created");
@@ -1133,7 +1137,9 @@ contract RunOrgActionsAdvanced is Script {
                 createHats: bootstrapJson.projects[i].createRoles,
                 claimHats: bootstrapJson.projects[i].claimRoles,
                 reviewHats: bootstrapJson.projects[i].reviewRoles,
-                assignHats: bootstrapJson.projects[i].assignRoles
+                assignHats: bootstrapJson.projects[i].assignRoles,
+                bountyTokens: new address[](0),
+                bountyCaps: new uint256[](0)
             });
         }
 

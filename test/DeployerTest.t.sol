@@ -308,7 +308,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             createHats: createRoles,
             claimHats: claimRoles,
             reviewHats: reviewRoles,
-            assignHats: assignRoles
+            assignHats: assignRoles,
+            bountyTokens: new address[](0),
+            bountyCaps: new uint256[](0)
         });
 
         ITaskManagerBootstrap.BootstrapTaskConfig[] memory tasks = new ITaskManagerBootstrap.BootstrapTaskConfig[](2);
@@ -1028,7 +1030,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             createHats: createRoles,
             claimHats: claimRoles,
             reviewHats: createRoles,
-            assignHats: createRoles
+            assignHats: createRoles,
+            bountyTokens: new address[](0),
+            bountyCaps: new uint256[](0)
         });
 
         ITaskManagerBootstrap.BootstrapTaskConfig[] memory moreTasks =
@@ -3884,7 +3888,18 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         vm.prank(result.executor);
         bytes32 projectId = tm.createProject(
-            abi.encode("Test Project"), bytes32(0), 1000 ether, managers, emptyHats, emptyHats, emptyHats, emptyHats
+            TaskManager.BootstrapProjectConfig({
+                title: abi.encode("Test Project"),
+                metadataHash: bytes32(0),
+                cap: 1000 ether,
+                managers: managers,
+                createHats: emptyHats,
+                claimHats: emptyHats,
+                reviewHats: emptyHats,
+                assignHats: emptyHats,
+                bountyTokens: new address[](0),
+                bountyCaps: new uint256[](0)
+            })
         );
 
         // Mint directly via executor (which is allowed)

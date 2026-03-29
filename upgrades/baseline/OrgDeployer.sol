@@ -3588,6 +3588,8 @@ interface ITaskManagerBootstrap {
         uint256[] claimHats;
         uint256[] reviewHats;
         uint256[] assignHats;
+        address[] bountyTokens;
+        uint256[] bountyCaps;
     }
 
     struct BootstrapTaskConfig {
@@ -4241,7 +4243,9 @@ contract OrgDeployer is Initializable {
                 createHats: _resolveRoleIndicesToHatIds(projects[i].createHats, roleHatIds),
                 claimHats: _resolveRoleIndicesToHatIds(projects[i].claimHats, roleHatIds),
                 reviewHats: _resolveRoleIndicesToHatIds(projects[i].reviewHats, roleHatIds),
-                assignHats: _resolveRoleIndicesToHatIds(projects[i].assignHats, roleHatIds)
+                assignHats: _resolveRoleIndicesToHatIds(projects[i].assignHats, roleHatIds),
+                bountyTokens: projects[i].bountyTokens,
+                bountyCaps: projects[i].bountyCaps
             });
         }
 

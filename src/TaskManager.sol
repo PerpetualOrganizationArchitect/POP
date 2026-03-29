@@ -42,6 +42,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
     error NoApplicationRequired();
     error InvalidIndex();
     error SelfReviewNotAllowed();
+    error ArrayLengthMismatch();
 
     /*──────── Constants ─────*/
     bytes4 public constant MODULE_ID = 0x54534b32; // "TSK2"
@@ -82,10 +83,11 @@ contract TaskManager is Initializable, ContextUpgradeable {
 
     struct Project {
         mapping(address => bool) managers; // slot 0: mapping (full slot)
-        uint128 cap; // slot 1: 16 bytes (participation token cap)
-        uint128 spent; // slot 1: 16 bytes (participation token spent)
+        uint128 cap; // slot 1: 16 bytes — PT cap (0 = unlimited, minted tokens)
+        uint128 spent; // slot 1: 16 bytes — PT committed spend
         bool exists; // slot 2: 1 byte (separate slot for cleaner access)
-        mapping(address => BudgetLib.Budget) bountyBudgets; // slot 2: rest of slot & beyond
+        // Bounty budgets use BudgetLib semantics: cap 0 = DISABLED, UNLIMITED = no limit
+        mapping(address => BudgetLib.Budget) bountyBudgets; // per-token ERC-20 budget
     }
 
     /*──────── Bootstrap Config Structs ───────*/
@@ -98,6 +100,8 @@ contract TaskManager is Initializable, ContextUpgradeable {
         uint256[] claimHats;
         uint256[] reviewHats;
         uint256[] assignHats;
+        address[] bountyTokens;
+        uint256[] bountyCaps;
     }
 
     struct BootstrapTaskConfig {
@@ -235,32 +239,30 @@ contract TaskManager is Initializable, ContextUpgradeable {
     }
 
     /*──────── Project Logic ─────*/
+
     /**
-     * @param title           Project title (required, raw UTF-8)
-     * @param metadataHash    IPFS CID sha256 digest (optional, bytes32(0) valid)
-     * @param managers        initial manager addresses (auto-adds msg.sender)
-     * @param createHats      hat IDs allowed to CREATE tasks in this project
-     * @param claimHats       hat IDs allowed to CLAIM
-     * @param reviewHats      hat IDs allowed to REVIEW / COMPLETE / UPDATE
-     * @param assignHats      hat IDs allowed to ASSIGN tasks
+     * @notice Create a new project
+     * @dev Uses BootstrapProjectConfig struct to avoid stack-too-deep with 10+ calldata arrays.
+     *      The caller (msg.sender) is automatically added as a project manager.
+     * @param p  Project configuration (title, metadataHash, cap, managers, hat arrays, bounty budgets)
      */
-    function createProject(
-        bytes calldata title,
-        bytes32 metadataHash,
-        uint256 cap,
-        address[] calldata managers,
-        uint256[] calldata createHats,
-        uint256[] calldata claimHats,
-        uint256[] calldata reviewHats,
-        uint256[] calldata assignHats
-    ) external returns (bytes32 projectId) {
+    function createProject(BootstrapProjectConfig calldata p) external returns (bytes32 projectId) {
         _requireCreator();
-        projectId = _createProjectInternal(
-            title, metadataHash, cap, managers, createHats, claimHats, reviewHats, assignHats, _msgSender()
+        projectId = _createProjectCore(
+            p.title,
+            p.metadataHash,
+            p.cap,
+            p.managers,
+            p.createHats,
+            p.claimHats,
+            p.reviewHats,
+            p.assignHats,
+            _msgSender()
         );
+        _initBountyBudgets(projectId, p.bountyTokens, p.bountyCaps);
     }
 
-    function _createProjectInternal(
+    function _createProjectCore(
         bytes calldata title,
         bytes32 metadataHash,
         uint256 cap,
@@ -301,6 +303,24 @@ contract TaskManager is Initializable, ContextUpgradeable {
         _setBatchHatPerm(projectId, claimHats, TaskPerm.CLAIM);
         _setBatchHatPerm(projectId, reviewHats, TaskPerm.REVIEW);
         _setBatchHatPerm(projectId, assignHats, TaskPerm.ASSIGN);
+    }
+
+    function _initBountyBudgets(bytes32 projectId, address[] calldata bountyTokens, uint256[] calldata bountyCaps)
+        internal
+    {
+        if (bountyTokens.length != bountyCaps.length) revert ArrayLengthMismatch();
+        if (bountyTokens.length == 0) return;
+
+        Project storage p = _layout()._projects[projectId];
+        for (uint256 i; i < bountyTokens.length;) {
+            bountyTokens[i].requireNonZeroAddress();
+            ValidationLib.requireValidCapAmount(bountyCaps[i]);
+            p.bountyBudgets[bountyTokens[i]].cap = uint128(bountyCaps[i]);
+            emit BountyCapSet(projectId, bountyTokens[i], 0, bountyCaps[i]);
+            unchecked {
+                ++i;
+            }
+        }
     }
 
     function deleteProject(bytes32 pid) external {
@@ -353,7 +373,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
 
         // Create all projects (executor is not auto-added as manager, use managers array)
         for (uint256 i; i < projects.length;) {
-            projectIds[i] = _createProjectInternal(
+            projectIds[i] = _createProjectCore(
                 projects[i].title,
                 projects[i].metadataHash,
                 projects[i].cap,
@@ -364,6 +384,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
                 projects[i].assignHats,
                 address(0) // No default manager - use explicit managers array
             );
+            _initBountyBudgets(projectIds[i], projects[i].bountyTokens, projects[i].bountyCaps);
             unchecked {
                 ++i;
             }
@@ -430,13 +451,13 @@ contract TaskManager is Initializable, ContextUpgradeable {
         Project storage p = l._projects[pid];
         if (!p.exists) revert NotFound();
 
-        // Update participation token budget
+        // Update participation token budget (PT cap: 0 = unlimited, since PT is minted)
         uint256 newSpent = p.spent + payout;
         if (newSpent > type(uint128).max) revert BudgetLib.BudgetExceeded();
         if (p.cap != 0 && newSpent > p.cap) revert BudgetLib.BudgetExceeded();
         p.spent = uint128(newSpent);
 
-        // Check and update bounty budget if applicable
+        // Check bounty budget (BudgetLib: cap 0 = DISABLED, must be explicitly enabled)
         if (bountyToken != address(0) && bountyPayout > 0) {
             BudgetLib.Budget storage bb = p.bountyBudgets[bountyToken];
             bb.addSpent(bountyPayout);
@@ -469,6 +490,7 @@ contract TaskManager is Initializable, ContextUpgradeable {
         Project storage p = l._projects[t.projectId];
 
         // Update participation token budget
+        // PT cap: 0 = unlimited (minted tokens)
         uint256 tentative = p.spent - t.payout + newPayout;
         if (p.cap != 0 && tentative > p.cap) revert BudgetLib.BudgetExceeded();
         p.spent = uint128(tentative);
@@ -690,11 +712,12 @@ contract TaskManager is Initializable, ContextUpgradeable {
         Project storage p = l._projects[pid];
         if (!p.exists) revert NotFound();
 
+        // PT cap: 0 = unlimited (minted tokens)
         uint256 newSpent = p.spent + payout;
         if (p.cap != 0 && newSpent > p.cap) revert BudgetLib.BudgetExceeded();
         p.spent = uint128(newSpent);
 
-        // Check and update bounty budget if applicable
+        // Check bounty budget (BudgetLib: cap 0 = DISABLED, must be explicitly enabled)
         if (bountyToken != address(0) && bountyPayout > 0) {
             BudgetLib.Budget storage bb = p.bountyBudgets[bountyToken];
             bb.addSpent(bountyPayout);
