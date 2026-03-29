@@ -12,9 +12,14 @@ library BudgetLib {
     error SpentUnderflow();
     error CapBelowCommitted();
 
+    /* ─────────── Constants ─────────── */
+    /// @notice Sentinel value meaning "unlimited budget" (no cap enforced).
+    /// cap = 0 means DISABLED (no spending allowed); cap = UNLIMITED means no limit.
+    uint128 internal constant UNLIMITED = type(uint128).max;
+
     /* ─────────── Data Types ─────────── */
     struct Budget {
-        uint128 cap; // 16 bytes
+        uint128 cap; // 16 bytes  (0 = disabled, UNLIMITED = no limit, other = capped)
         uint128 spent; // 16 bytes (total 32 bytes)
     }
 
@@ -24,12 +29,12 @@ library BudgetLib {
      * @notice Add spent amount to budget with cap checking
      * @param budget The budget struct to modify
      * @param delta Amount to add to spent
-     * @param cap The budget cap (0 means unlimited)
+     * @param cap The budget cap (0 = disabled, UNLIMITED = no limit)
      */
     function addSpent(Budget storage budget, uint256 delta, uint256 cap) internal {
         uint256 newSpent = budget.spent + delta;
         if (newSpent > type(uint128).max) revert BudgetExceeded();
-        if (cap != 0 && newSpent > cap) revert BudgetExceeded();
+        if (cap != UNLIMITED && newSpent > cap) revert BudgetExceeded();
         budget.spent = uint128(newSpent);
     }
 
@@ -90,7 +95,7 @@ library BudgetLib {
      * @return bool True if the addition would not exceed cap
      */
     function canAddSpent(Budget storage budget, uint256 delta) internal view returns (bool) {
-        if (budget.cap == 0) return true; // Unlimited
+        if (budget.cap == UNLIMITED) return true;
         return budget.spent + delta <= budget.cap;
     }
 
@@ -100,7 +105,7 @@ library BudgetLib {
      * @return uint256 Remaining capacity (returns max uint256 if unlimited)
      */
     function remainingCapacity(Budget storage budget) internal view returns (uint256) {
-        if (budget.cap == 0) return type(uint256).max; // Unlimited
+        if (budget.cap == UNLIMITED) return type(uint256).max;
         if (budget.spent >= budget.cap) return 0;
         return budget.cap - budget.spent;
     }
@@ -112,7 +117,9 @@ library BudgetLib {
      * @return bool True if the new cap is valid
      */
     function isValidCap(Budget storage budget, uint256 newCap) internal view returns (bool) {
-        return newCap == 0 || newCap >= budget.spent;
+        // Disabled (0) and unlimited are always valid
+        if (newCap == 0 || newCap == UNLIMITED) return true;
+        return newCap >= budget.spent;
     }
 
     /**

@@ -93,7 +93,9 @@ library ValidationLib {
      * @param committed The currently committed/spent amount
      */
     function requireValidCap(uint256 newCap, uint256 committed) internal pure {
-        if (newCap != 0 && newCap < committed) revert CapBelowCommitted();
+        // 0 (disabled) and type(uint128).max (unlimited) are always valid
+        if (newCap == 0 || newCap == type(uint128).max) return;
+        if (newCap < committed) revert CapBelowCommitted();
     }
 
     /**
@@ -101,6 +103,7 @@ library ValidationLib {
      * @param cap The cap amount to validate
      */
     function requireValidCapAmount(uint256 cap) internal pure {
+        if (cap == type(uint128).max) return; // unlimited sentinel is always valid
         if (cap > MAX_PAYOUT) revert InvalidPayout();
     }
 
