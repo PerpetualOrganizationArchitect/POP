@@ -866,8 +866,8 @@ contract OrgDeployer is Initializable {
         pure
         returns (address[] memory targets, bytes4[] memory selectors, bool[] memory allowed, uint32[] memory gasHints)
     {
-        // Count: QuickJoin(3) + TaskManager(12) + HybridVoting(3) + DDVoting(3) + PaymentManager(5) + EligibilityModule(5) + ParticipationToken(3) + EducationHub(0 or 1)
-        uint256 count = 34;
+        // Count: QuickJoin(6) + TaskManager(12) + HybridVoting(3) + DDVoting(3) + PaymentManager(5) + EligibilityModule(5) + ParticipationToken(3) + EducationHub(0 or 1)
+        uint256 count = 37;
         if (educationEnabled) count += 1;
 
         targets = new address[](count);
@@ -890,6 +890,23 @@ contract OrgDeployer is Initializable {
         selectors[i] = bytes4(
             keccak256(
                 "registerAndQuickJoinWithPasskey((bytes32,bytes32,bytes32,uint256),string,uint256,uint256,(bytes,bytes,uint256,uint256,bytes32,bytes32))"
+            )
+        );
+        i++;
+
+        // ── QuickJoin vouch-claim paths ──
+        targets[i] = result.quickJoin;
+        selectors[i] = bytes4(keccak256("claimHatsWithUser(uint256[])"));
+        i++;
+
+        targets[i] = result.quickJoin;
+        selectors[i] = bytes4(keccak256("registerAndClaimHats(address,string,uint256,uint256,bytes,uint256[])"));
+        i++;
+
+        targets[i] = result.quickJoin;
+        selectors[i] = bytes4(
+            keccak256(
+                "registerAndClaimHatsWithPasskey((bytes32,bytes32,bytes32,uint256),string,uint256,uint256,(bytes,bytes,uint256,uint256,bytes32,bytes32),uint256[])"
             )
         );
         i++;
