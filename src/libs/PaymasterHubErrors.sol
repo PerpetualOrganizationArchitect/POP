@@ -183,6 +183,11 @@ library PaymasterHubErrors {
     /// @notice Emitted when solidarity fee is collected from an org's operation
     event SolidarityFeeCollected(bytes32 indexed orgId, uint256 amount);
 
+    /// @notice Emitted when an org operation is processed, showing the funding breakdown
+    event OrgSpendingRecorded(
+        bytes32 indexed orgId, uint256 fromDeposits, uint256 fromSolidarity, uint256 solidarityFee
+    );
+
     /// @notice Emitted when a direct donation is made to the solidarity fund
     event SolidarityDonationReceived(address indexed from, uint256 amount);
 

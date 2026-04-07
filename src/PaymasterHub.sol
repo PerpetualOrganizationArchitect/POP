@@ -391,10 +391,13 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         OrgConfig storage org = _getOrgsStorage()[orgId];
         if (org.adminHatId == 0) revert PaymasterHubErrors.OrgNotRegistered();
 
-        bool isAdmin = IHats(_getMainStorage().hats).isWearerOfHat(msg.sender, org.adminHatId);
-        bool isOperator =
-            org.operatorHatId != 0 && IHats(_getMainStorage().hats).isWearerOfHat(msg.sender, org.operatorHatId);
-        if (!isAdmin && !isOperator) revert PaymasterHubErrors.NotOperator();
+        // PoaManager can manage any org's config (enables adminCall for migrations)
+        if (msg.sender != _getMainStorage().poaManager) {
+            bool isAdmin = IHats(_getMainStorage().hats).isWearerOfHat(msg.sender, org.adminHatId);
+            bool isOperator =
+                org.operatorHatId != 0 && IHats(_getMainStorage().hats).isWearerOfHat(msg.sender, org.operatorHatId);
+            if (!isAdmin && !isOperator) revert PaymasterHubErrors.NotOperator();
+        }
         _;
     }
 
@@ -447,25 +450,22 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Check grace period
         bool inInitialGrace = PaymasterGraceLib.isInGracePeriod(config.registeredAt, grace.initialGraceDays);
 
-        if (inInitialGrace) {
-            // Startup phase: can use solidarity even with zero deposits
-            // Enforce spending limit only (configured to represent ~3000 tx worth of value)
+        if (inInitialGrace && depositAvailable < grace.minDepositRequired) {
+            // Grace subsidy: unfunded orgs can use solidarity up to maxSpendDuringGrace.
+            // Only applies during the initial grace period when org hasn't deposited
+            // the minimum. Once they deposit enough, they use the tier system below.
             if (org.solidarityUsedThisPeriod + maxCost > grace.maxSpendDuringGrace) {
                 revert PaymasterHubErrors.GracePeriodSpendLimitReached();
             }
-            // In initial grace period, operations are paid 100% from solidarity.
             if (solidarity.balance < maxCost) revert PaymasterHubErrors.InsufficientFunds();
         } else {
-            // After startup: must MAINTAIN minimum deposit (like $10/month commitment)
-            // Orgs must keep funds in reserve to access solidarity
+            // Tier-based matching: applies to funded grace orgs AND all post-grace orgs.
+            // Funded orgs use deposits first; solidarity provides tier-based matching.
+            // Self-funded orgs (tier 4, deposit >= 5x min) need zero solidarity.
             if (depositAvailable < grace.minDepositRequired) {
                 revert PaymasterHubErrors.InsufficientDepositForSolidarity();
             }
 
-            // Check against tier-based allowance (calculated in payment logic)
-            // Tier 1: deposit 0.003 ETH → 0.006 ETH match → 0.009 ETH total per 90 days
-            // Tier 2: deposit 0.006 ETH → 0.009 ETH match → 0.015 ETH total per 90 days
-            // Tier 3: deposit >= 0.017 ETH → no match, self-funded
             uint256 matchAllowance =
                 PaymasterGraceLib.calculateMatchAllowance(depositAvailable, grace.minDepositRequired);
             uint256 solidarityRemaining =
@@ -518,9 +518,12 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             shouldResetPeriod = true;
         }
 
-        // Trigger 2: Crossing minimum threshold
-        bool wasBelowMinimum = org.deposited < grace.minDepositRequired;
-        bool willBeAboveMinimum = org.deposited + amount >= grace.minDepositRequired;
+        // Trigger 2: Crossing minimum threshold (based on available balance, not lifetime deposits,
+        // to stay consistent with _checkSolidarityAccess and _updateOrgFinancials)
+        uint256 availableBefore = org.deposited > org.spent ? org.deposited - org.spent : 0;
+        uint256 availableAfter = availableBefore + amount;
+        bool wasBelowMinimum = availableBefore < grace.minDepositRequired;
+        bool willBeAboveMinimum = availableAfter >= grace.minDepositRequired;
         if (wasBelowMinimum && willBeAboveMinimum) {
             shouldResetPeriod = true;
         }
@@ -789,32 +792,51 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
             emit PaymasterHubErrors.UsageIncreased(orgId, subjectKey, actualGasCost, budget.usedInEpoch, epochStart);
         }
 
-        // Unreserve org balance, then charge actual + fee from deposits only (no solidarity)
+        // Unreserve org balance reserved during validation
         mapping(bytes32 => OrgFinancials) storage financials = _getFinancialsStorage();
         OrgFinancials storage org = financials[orgId];
         org.spent -= uint128(reservedOrgBalance);
 
         SolidarityFund storage solidarity = _getSolidarityStorage();
-
-        // Zero the fee during grace — same as _updateOrgFinancials.
-        // Grace orgs have no deposits; charging a fee would create phantom debt
-        // and circular solidarity accounting (solidarity pays itself).
         GracePeriodConfig storage grace = _getGracePeriodStorage();
-        uint256 solidarityFee = PaymasterGraceLib.solidarityFee(
-            actualGasCost, solidarity.feePercentageBps, _getOrgsStorage()[orgId].registeredAt, grace.initialGraceDays
-        );
+        OrgConfig storage config = _getOrgsStorage()[orgId];
+        bool inGrace = PaymasterGraceLib.isInGracePeriod(config.registeredAt, grace.initialGraceDays);
 
-        org.spent += uint128(actualGasCost + solidarityFee);
-        solidarity.balance += uint128(solidarityFee);
+        // No fee during grace (would be circular — solidarity pays itself)
+        uint256 solidarityFee = inGrace ? 0 : (actualGasCost * uint256(solidarity.feePercentageBps)) / 10000;
 
-        // Count this op against the org's solidarity spending limit.
-        // Even though solidarity didn't pay, the op consumed paymaster resources
-        // and should count toward maxSpendDuringGrace to prevent repeated fallbacks.
-        org.solidarityUsedThisPeriod += uint128(actualGasCost);
+        uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
+
+        uint256 fallbackFromDeposits;
+        uint256 fallbackFromSolidarity;
+
+        if (depositAvailable >= actualGasCost + solidarityFee) {
+            // Fully funded: charge actualGasCost + fee from deposits, credit fee to solidarity.
+            org.spent += uint128(actualGasCost + solidarityFee);
+            solidarity.balance += uint128(solidarityFee);
+            fallbackFromDeposits = actualGasCost;
+            fallbackFromSolidarity = 0;
+        } else if (depositAvailable > 0) {
+            // Partially funded: deposits cover what they can, solidarity absorbs the rest.
+            fallbackFromDeposits = depositAvailable < actualGasCost ? depositAvailable : actualGasCost;
+            fallbackFromSolidarity = actualGasCost - fallbackFromDeposits;
+            org.spent += uint128(fallbackFromDeposits);
+            (solidarity.balance,) = PaymasterPostOpLib.clampedDeduction(solidarity.balance, fallbackFromSolidarity);
+            org.solidarityUsedThisPeriod += uint128(fallbackFromSolidarity);
+            solidarityFee = 0;
+        } else {
+            // Unfunded: 100% solidarity.
+            (solidarity.balance,) = PaymasterPostOpLib.clampedDeduction(solidarity.balance, actualGasCost);
+            org.solidarityUsedThisPeriod += uint128(actualGasCost);
+            fallbackFromDeposits = 0;
+            fallbackFromSolidarity = actualGasCost;
+        }
 
         if (solidarityFee > 0) {
             emit PaymasterHubErrors.SolidarityFeeCollected(orgId, solidarityFee);
         }
+
+        emit PaymasterHubErrors.OrgSpendingRecorded(orgId, fallbackFromDeposits, fallbackFromSolidarity, solidarityFee);
     }
 
     /**
@@ -860,8 +882,9 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @dev Called in postOp after actual gas cost is known
      *
      * Payment Priority:
-     * - Initial grace period (first 90 days): 100% from solidarity
-     * - After grace period: 50/50 split between deposits and solidarity
+     * - Unfunded grace orgs (deposit < minRequired): 100% from solidarity (grace subsidy)
+     * - Funded grace orgs (deposit >= minRequired): tier-based split, no solidarity fee
+     * - After grace period: tier-based 50/50 split between deposits and solidarity
      *
      * @param orgId The organization identifier
      * @param actualGasCost Actual gas cost paid
@@ -898,16 +921,17 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         uint256 fromSolidarity = 0;
         uint256 solidarityLiquidity = solidarity.balance;
 
-        if (inInitialGrace) {
-            // Grace period: 100% from solidarity (deposits untouched)
+        // Calculate deposit available (after unreserving)
+        uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
+
+        if (inInitialGrace && depositAvailable < grace.minDepositRequired) {
+            // Grace subsidy: unfunded orgs get 100% from solidarity, no fee.
             if (solidarityLiquidity < actualGasCost) revert PaymasterHubErrors.InsufficientFunds();
             fromSolidarity = actualGasCost;
-            // No fee during grace — would be circular (solidarity pays itself)
             solidarityFee = 0;
         } else {
-            // Post-grace: 50/50 split with tier-based solidarity allowance
-            // Calculate available balance (not cumulative deposits)
-            uint256 depositAvailable = org.deposited > org.spent ? org.deposited - org.spent : 0;
+            // Tier-based split: funded grace orgs AND all post-grace orgs.
+            // Fee is collected from deposits — not circular since org is self-funding.
 
             // Match allowance based on CURRENT BALANCE, not lifetime deposits
             uint256 matchAllowance =
@@ -962,7 +986,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         solidarity.balance -= uint128(fromSolidarity);
         solidarity.balance += uint128(solidarityFee);
 
-        emit PaymasterHubErrors.SolidarityFeeCollected(orgId, solidarityFee);
+        if (solidarityFee > 0) {
+            emit PaymasterHubErrors.SolidarityFeeCollected(orgId, solidarityFee);
+        }
+
+        emit PaymasterHubErrors.OrgSpendingRecorded(orgId, fromDeposits, fromSolidarity, solidarityFee);
     }
 
     // ============ Admin Functions ============
