@@ -826,7 +826,7 @@ contract OrgDeployer is Initializable {
         if (hasConfig) {
             // Build rules for auto-whitelisting deployed contracts
             (address[] memory targets, bytes4[] memory selectors, bool[] memory allowed, uint32[] memory gasHints) = pmCfg.autoWhitelistContracts
-                ? _buildDefaultPaymasterRules(result, params.educationHubConfig.enabled)
+                ? _buildDefaultPaymasterRules(result, params.educationHubConfig.enabled, params.registryAddr)
                 : (new address[](0), new bytes4[](0), new bool[](0), new uint32[](0));
 
             // Build per-role-hat budgets if configured
@@ -861,13 +861,13 @@ contract OrgDeployer is Initializable {
      * @notice Build default paymaster whitelist rules for deployed org contracts
      * @dev Whitelists common user-facing functions on QuickJoin, TaskManager, Voting, etc.
      */
-    function _buildDefaultPaymasterRules(DeploymentResult memory result, bool educationEnabled)
+    function _buildDefaultPaymasterRules(DeploymentResult memory result, bool educationEnabled, address registryAddr)
         internal
         pure
         returns (address[] memory targets, bytes4[] memory selectors, bool[] memory allowed, uint32[] memory gasHints)
     {
-        // Count: QuickJoin(6) + TaskManager(12) + HybridVoting(3) + DDVoting(3) + PaymentManager(5) + EligibilityModule(5) + ParticipationToken(3) + EducationHub(0 or 1)
-        uint256 count = 37;
+        // Count: QuickJoin(6) + TaskManager(12) + HybridVoting(3) + DDVoting(3) + PaymentManager(5) + EligibilityModule(5) + ParticipationToken(3) + Registry(1) + EducationHub(0 or 1)
+        uint256 count = 38;
         if (educationEnabled) count += 1;
 
         targets = new address[](count);
@@ -1046,6 +1046,11 @@ contract OrgDeployer is Initializable {
 
         targets[i] = result.participationToken;
         selectors[i] = bytes4(keccak256("cancelRequest(uint256)"));
+        i++;
+
+        // ── UniversalAccountRegistry (profile updates) ──
+        targets[i] = registryAddr;
+        selectors[i] = bytes4(keccak256("setProfileMetadata(bytes32)"));
         i++;
 
         // ── EducationHub (conditional) ──

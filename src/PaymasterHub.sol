@@ -52,6 +52,7 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         address hats;
         address poaManager;
         address orgRegistrar; // authorized contract that can register orgs (e.g. OrgDeployer)
+        address protocolAdmin; // protocol-level admin for cross-chain rule management
     }
 
     bytes32 private constant MAIN_STORAGE_LOCATION =
@@ -230,6 +231,11 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         orgDeploy.enabled = false; // Requires explicit setOrgDeployConfig to activate
 
         emit PaymasterHubErrors.PaymasterInitialized(_entryPoint, _hats, _poaManager);
+    }
+
+    /// @notice Set protocol admin (one-time v2 reinitializer).
+    function reinitializeProtocolAdmin(address _admin) external reinitializer(2) {
+        _getMainStorage().protocolAdmin = _admin;
     }
 
     // ============ Deploy Config Struct ============
@@ -1023,6 +1029,22 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         _setRulesBatch(orgId, targets, selectors, allowed, maxCallGasHints);
     }
 
+    /// @notice Batch-add rules across orgs. Skips unregistered orgs.
+    function adminBatchAddRules(bytes32[] calldata orgIds, address[] calldata targets, bytes4[] calldata selectors)
+        external
+    {
+        MainStorage storage m = _getMainStorage();
+        if (msg.sender != m.poaManager && msg.sender != m.protocolAdmin) revert PaymasterHubErrors.NotOperator();
+        for (uint256 i; i < orgIds.length;) {
+            if (_getOrgsStorage()[orgIds[i]].adminHatId != 0) {
+                _getRulesStorage()[orgIds[i]][targets[i]][selectors[i]] = Rule({allowed: true, maxCallGasHint: 0});
+            }
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
     function _setRulesBatch(
         bytes32 orgId,
         address[] calldata targets,
@@ -1212,7 +1234,8 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
      * @param feePercentageBps Fee as basis points (100 = 1%)
      */
     function setSolidarityFee(uint16 feePercentageBps) external {
-        if (msg.sender != _getMainStorage().poaManager) revert PaymasterHubErrors.NotPoaManager();
+        MainStorage storage m = _getMainStorage();
+        if (msg.sender != m.poaManager && msg.sender != m.protocolAdmin) revert PaymasterHubErrors.NotPoaManager();
         if (feePercentageBps > 1000) revert PaymasterHubErrors.FeeTooHigh(); // Cap at 10%
 
         SolidarityFund storage solidarity = _getSolidarityStorage();
@@ -1587,16 +1610,18 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         // Check onboarding is enabled
         if (!onboarding.enabled) revert PaymasterHubErrors.OnboardingDisabled();
 
-        // Onboarding must only sponsor account creation, not arbitrary operations.
-        if (userOp.initCode.length == 0) revert PaymasterHubErrors.InvalidOnboardingRequest();
-        // NOTE: We intentionally do NOT check `account.code.length != 0` here.
-        // In ERC-4337 v0.7, the EntryPoint deploys the account via _createSenderIfNeeded()
-        // BEFORE calling validatePaymasterUserOp(), so the account already has code by the
-        // time this runs. The EntryPoint itself reverts with AA10 if initCode is provided
-        // for an already-constructed sender.
-        // Allow empty callData (bare deploy) or execute(registryAddress, 0, registerAccount(...))
+        // Validate callData targets the account registry with an allowed function.
+        // Allowed: registerAccount (account creation) or setProfileMetadata (profile update).
+        bytes4 innerSelector;
         if (userOp.callData.length != 0) {
-            _validateOnboardingCallData(userOp.callData, onboarding.accountRegistry);
+            innerSelector = _validateOnboardingCallData(userOp.callData, onboarding.accountRegistry);
+        }
+
+        // Account creation (registerAccount) requires initCode for deploying the smart account.
+        // Profile updates (setProfileMetadata) do NOT require initCode — account already exists.
+        bool isProfileUpdate = innerSelector == bytes4(0xde6808b6);
+        if (!isProfileUpdate && userOp.initCode.length == 0) {
+            revert PaymasterHubErrors.InvalidOnboardingRequest();
         }
 
         // Onboarding is paid from solidarity fund, so block when distribution is paused
@@ -1624,13 +1649,21 @@ contract PaymasterHub is IPaymaster, Initializable, UUPSUpgradeable, ReentrancyG
         subjectKey = keccak256(abi.encodePacked(SUBJECT_TYPE_POA_ONBOARDING, bytes20(account)));
     }
 
-    /// @dev Validates that onboarding callData is execute(registryAddress, 0, registerAccount(...)).
-    function _validateOnboardingCallData(bytes calldata callData, address registry) private pure {
+    /// @dev Validates that onboarding callData is execute(registryAddress, 0, registerAccount(...) | setProfileMetadata(...)).
+    /// @return innerSelector The validated inner function selector.
+    function _validateOnboardingCallData(bytes calldata callData, address registry)
+        private
+        pure
+        returns (bytes4 innerSelector)
+    {
         if (registry == address(0)) revert PaymasterHubErrors.InvalidOnboardingRequest();
-        (bool valid, bytes4 innerSelector) = PaymasterCalldataLib.parseExecuteCall(callData, registry);
+        bool valid;
+        (valid, innerSelector) = PaymasterCalldataLib.parseExecuteCall(callData, registry);
         if (!valid) revert PaymasterHubErrors.InvalidOnboardingRequest();
-        // Must call registerAccount(string) = 0xbff6de20
-        if (innerSelector != bytes4(0xbff6de20)) revert PaymasterHubErrors.InvalidOnboardingRequest();
+        // Must call registerAccount(string) = 0xbff6de20 OR setProfileMetadata(bytes32) = 0xde6808b6
+        if (innerSelector != bytes4(0xbff6de20) && innerSelector != bytes4(0xde6808b6)) {
+            revert PaymasterHubErrors.InvalidOnboardingRequest();
+        }
     }
 
     /**

@@ -131,15 +131,9 @@ library HybridVotingProposals {
         }
     }
 
-    function _validateTargets(IExecutor.Call[] calldata batch) internal view {
+    function _validateTargets(IExecutor.Call[] calldata batch) internal pure {
         uint256 batchLen = batch.length;
         if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
-        for (uint256 j; j < batchLen;) {
-            if (batch[j].target == address(this)) revert VotingErrors.TargetSelf();
-            unchecked {
-                ++j;
-            }
-        }
     }
 
     function _snapshotClasses(HybridVoting.Proposal storage p, HybridVoting.Layout storage l) internal {

@@ -63,6 +63,14 @@ interface IPaymentManager {
      */
     event DistributionFinalized(uint256 indexed distributionId, uint256 unclaimedAmount);
 
+    /**
+     * @notice Emitted when the owner withdraws funds
+     * @param to The recipient address
+     * @param amount The amount withdrawn
+     * @param token The token address (address(0) for ETH)
+     */
+    event FundsWithdrawn(address indexed to, uint256 amount, address indexed token);
+
     /*──────────────────────────────────────────────────────────────────────────
                                     ERRORS
     ──────────────────────────────────────────────────────────────────────────*/
@@ -247,6 +255,15 @@ interface IPaymentManager {
      * @param revenueShareToken The new revenue share token address
      */
     function setRevenueShareToken(address revenueShareToken) external;
+
+    /**
+     * @notice Withdraw funds to any address
+     * @dev Only callable by owner (Executor). Cannot withdraw funds committed to active distributions.
+     * @param token The token to withdraw (address(0) for ETH)
+     * @param to The recipient address
+     * @param amount The amount to withdraw
+     */
+    function withdraw(address token, address to, uint256 amount) external;
 
     /*──────────────────────────────────────────────────────────────────────────
                                     VIEW FUNCTIONS
