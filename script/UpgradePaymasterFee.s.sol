@@ -27,7 +27,7 @@ contract Step1_DeployOnGnosis is Script {
         uint256 deployerKey = vm.envOr("PRIVATE_KEY", vm.envUint("DEPLOYER_PRIVATE_KEY"));
         DeterministicDeployer dd = DeterministicDeployer(DD);
 
-        bytes32 salt = dd.computeSalt("PaymasterHub", "v8");
+        bytes32 salt = dd.computeSalt("PaymasterHub", "v11");
         address predicted = dd.computeAddress(salt);
 
         console.log("\n=== Step 1: Deploy PaymasterHub v8 on Gnosis ===");
@@ -65,7 +65,7 @@ contract Step2_UpgradeFromArbitrum is Script {
         PoaManagerHub hub = PoaManagerHub(payable(HUB));
         DeterministicDeployer dd = DeterministicDeployer(DD);
 
-        bytes32 salt = dd.computeSalt("PaymasterHub", "v8");
+        bytes32 salt = dd.computeSalt("PaymasterHub", "v11");
         address predicted = dd.computeAddress(salt);
 
         console.log("\n=== Step 2: Upgrade PaymasterHub v8 from Arbitrum ===");
@@ -78,7 +78,7 @@ contract Step2_UpgradeFromArbitrum is Script {
             console.log("Deployed on Arbitrum");
         }
 
-        hub.upgradeBeaconCrossChain{value: 0.005 ether}("PaymasterHub", predicted, "v8");
+        hub.upgradeBeaconCrossChain{value: 0.005 ether}("PaymasterHub", predicted, "v11");
         console.log("Upgraded cross-chain:", predicted);
 
         vm.stopBroadcast();
@@ -94,9 +94,8 @@ contract Step3_Verify is Script {
     address constant GNOSIS_PM = 0x794fD39e75140ee1545B1B022E5486B7c863789b;
 
     function run() public view {
-        address expected = DeterministicDeployer(DD).computeAddress(
-            DeterministicDeployer(DD).computeSalt("PaymasterHub", "v8")
-        );
+        address expected =
+            DeterministicDeployer(DD).computeAddress(DeterministicDeployer(DD).computeSalt("PaymasterHub", "v11"));
         address current = PoaManager(GNOSIS_PM).getCurrentImplementationById(keccak256("PaymasterHub"));
 
         console.log("Expected:", expected);

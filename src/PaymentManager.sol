@@ -321,6 +321,28 @@ contract PaymentManager is IPaymentManager, Initializable, OwnableUpgradeable, R
     /**
      * @inheritdoc IPaymentManager
      */
+    function withdraw(address token, address to, uint256 amount) external override onlyOwner nonReentrant {
+        if (to == address(0)) revert ZeroAddress();
+        if (amount == 0) revert ZeroAmount();
+
+        Layout storage s = _layout();
+
+        // Ensure we don't withdraw funds committed to active distributions
+        if (token == address(0)) {
+            if (address(this).balance < s.totalCommitted[address(0)] + amount) revert InsufficientFunds();
+            (bool success,) = to.call{value: amount}("");
+            if (!success) revert TransferFailed();
+        } else {
+            if (IERC20(token).balanceOf(address(this)) < s.totalCommitted[token] + amount) revert InsufficientFunds();
+            IERC20(token).safeTransfer(to, amount);
+        }
+
+        emit FundsWithdrawn(to, amount, token);
+    }
+
+    /**
+     * @inheritdoc IPaymentManager
+     */
     function setRevenueShareToken(address _revenueShareToken) external override onlyOwner {
         if (_revenueShareToken == address(0)) revert ZeroAddress();
         Layout storage s = _layout();

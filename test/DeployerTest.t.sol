@@ -2366,6 +2366,158 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         EligibilityModule(eligibilityModuleAddr).vouchFor(candidate, defaultRoleHat);
     }
 
+    /*══════════════════════════════════════════════════════════════════════
+                    MAX DAILY VOUCHES CONFIGURABLE LIMIT
+    ══════════════════════════════════════════════════════════════════════*/
+
+    function testMaxDailyVouches_DefaultIs20() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        assertEq(EligibilityModule(setup.eligibilityModule).getMaxDailyVouches(), 20, "Default should be 20");
+    }
+
+    function testMaxDailyVouches_SetBySuperAdmin() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        vm.prank(setup.exec);
+        em.setMaxDailyVouches(50);
+
+        assertEq(em.getMaxDailyVouches(), 50, "Should be updated to 50");
+    }
+
+    function testMaxDailyVouches_ZeroReverts() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        vm.prank(setup.exec);
+        vm.expectRevert(EligibilityModule.InvalidMaxDailyVouches.selector);
+        em.setMaxDailyVouches(0);
+    }
+
+    function testMaxDailyVouches_NonAdminReverts() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(EligibilityModule.NotSuperAdmin.selector);
+        em.setMaxDailyVouches(10);
+    }
+
+    function testMaxDailyVouches_EnforcedDuringVouching() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        // Set limit to 2 for easy testing
+        vm.prank(setup.exec);
+        em.setMaxDailyVouches(2);
+
+        // Set up voucher
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter1);
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+
+        // Configure vouching: require 1 vouch from MEMBER hat
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 1, setup.memberRoleHat, false, true
+        );
+
+        // Vouch 1 — should succeed
+        address candidate1 = address(0x301);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate1);
+        vm.prank(voter1);
+        em.vouchFor(candidate1, setup.defaultRoleHat);
+
+        // Vouch 2 — should succeed (at limit)
+        address candidate2 = address(0x302);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate2);
+        vm.prank(voter1);
+        em.vouchFor(candidate2, setup.defaultRoleHat);
+
+        // Vouch 3 — should revert (over limit of 2)
+        address candidate3 = address(0x303);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate3);
+        vm.prank(voter1);
+        vm.expectRevert(EligibilityModule.VouchingRateLimitExceeded.selector);
+        em.vouchFor(candidate3, setup.defaultRoleHat);
+
+        // canUserVouch should return false
+        assertFalse(em.canUserVouch(voter1), "canUserVouch should return false at limit");
+    }
+
+    function testMaxDailyVouches_CanIncreaseToUnblock() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        // Set limit to 1
+        vm.prank(setup.exec);
+        em.setMaxDailyVouches(1);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter1);
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 1, setup.memberRoleHat, false, true
+        );
+
+        // Use up the 1 vouch
+        address candidate1 = address(0x401);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate1);
+        vm.prank(voter1);
+        em.vouchFor(candidate1, setup.defaultRoleHat);
+
+        // Blocked
+        assertFalse(em.canUserVouch(voter1), "Should be blocked");
+
+        // Admin increases limit
+        vm.prank(setup.exec);
+        em.setMaxDailyVouches(5);
+
+        // Now unblocked
+        assertTrue(em.canUserVouch(voter1), "Should be unblocked after limit increase");
+
+        // Can vouch again
+        address candidate2 = address(0x402);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate2);
+        vm.prank(voter1);
+        em.vouchFor(candidate2, setup.defaultRoleHat);
+    }
+
+    function testMaxDailyVouches_ResetsNextDay() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        // Set limit to 1
+        vm.prank(setup.exec);
+        em.setMaxDailyVouches(1);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter1);
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 1, setup.memberRoleHat, false, true
+        );
+
+        // Use up today's vouch
+        address candidate1 = address(0x501);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate1);
+        vm.prank(voter1);
+        em.vouchFor(candidate1, setup.defaultRoleHat);
+
+        assertFalse(em.canUserVouch(voter1), "Should be blocked today");
+
+        // Warp to next day
+        vm.warp(block.timestamp + 1 days);
+
+        assertTrue(em.canUserVouch(voter1), "Should be unblocked next day");
+    }
+
+    function testMaxDailyVouches_EmitsEvent() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        vm.prank(setup.exec);
+        vm.expectEmit(false, false, false, true);
+        emit EligibilityModule.MaxDailyVouchesSet(42);
+        em.setMaxDailyVouches(42);
+    }
+
     function testVouchEpochInvalidatesStaleDataAfterReset() public {
         vm.startPrank(orgOwner);
         string[] memory names = new string[](3);

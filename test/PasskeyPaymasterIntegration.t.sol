@@ -2101,9 +2101,9 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, gasCost, 1);
 
-        // Verify: org was charged actual cost + fee (creates deficit, but doesn't revert)
+        // Verify: unfunded grace org uses clamped solidarity deduction (no phantom debt)
         PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(graceOrg);
-        assertTrue(fin.spent > 0, "Fallback should charge org even with zero deposits");
+        assertLe(fin.spent, fin.deposited, "Fallback should not create phantom debt for unfunded grace org");
 
         // Budget should reflect actual cost
         PaymasterHub.Budget memory b = hub.getBudget(graceOrg, subjectKey);
@@ -2484,13 +2484,17 @@ contract PasskeyPaymasterIntegrationTest is Test {
         vm.prank(address(entryPoint));
         hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, gasCost, 1);
 
-        // Verify: no fee collected during grace fallback
+        // Verify: unfunded grace fallback uses clamped solidarity deduction (no fee, solidarity pays)
         PaymasterHub.SolidarityFund memory solAfter = hub.getSolidarityFund();
-        assertEq(solAfter.balance, solBefore.balance, "Solidarity balance unchanged - no fee during grace fallback");
+        assertLt(
+            solAfter.balance,
+            solBefore.balance,
+            "Solidarity balance should decrease - clamped deduction pays for unfunded grace org"
+        );
 
-        // Verify: org.spent = actualGasCost only (no fee component)
+        // Verify: org.spent unchanged (unfunded — solidarity paid, no deposits charged)
         PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(graceOrg);
-        assertEq(fin.spent, gasCost, "Org charged actual cost only, no fee during grace");
+        assertEq(fin.spent, 0, "Unfunded grace org spent stays 0 (solidarity covered via clamped deduction)");
     }
 
     /*══════════════════════════════════════════════════════════════════════
@@ -2692,15 +2696,14 @@ contract PasskeyPaymasterIntegrationTest is Test {
         hub.postOp(IPaymaster.PostOpMode.postOpReverted, context, gasCost, 1);
 
         PaymasterHub.OrgFinancials memory fin = hub.getOrgFinancials(debtOrg);
-        PaymasterHub.SolidarityFund memory sol = hub.getSolidarityFund();
-        uint256 fee = (gasCost * uint256(sol.feePercentageBps)) / 10000;
 
-        // Phantom debt: spent > deposited
-        assertTrue(fin.spent > fin.deposited, "Fallback should create phantom debt when actual > deposits");
-        assertEq(fin.spent, gasCost + fee, "Spent = actualGasCost + fee");
+        // No phantom debt: deposits cover what they can, solidarity covers the rest via clamped deduction
+        assertLe(fin.spent, fin.deposited, "No phantom debt - spent should not exceed deposited");
+
+        // Solidarity should have covered the excess via clamped deduction
+        assertGt(fin.solidarityUsedThisPeriod, 0, "Solidarity should cover excess via clamped deduction");
 
         // Fallback does NOT revert - this is the key invariant
-        // The phantom debt is the cost of the gas consumed. The paymaster was already charged by EntryPoint.
     }
 
     /*══════════════════════════════════════════════════════════════════════

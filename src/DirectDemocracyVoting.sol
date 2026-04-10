@@ -261,7 +261,6 @@ contract DirectDemocracyVoting is Initializable {
         if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
         for (uint256 j; j < batchLen;) {
             if (!l.allowedTarget[batch[j].target]) revert VotingErrors.TargetNotAllowed();
-            if (batch[j].target == address(this)) revert VotingErrors.TargetSelf();
             unchecked {
                 ++j;
             }
@@ -430,7 +429,6 @@ contract DirectDemocracyVoting is Initializable {
         if (valid && batch.length > 0) {
             uint256 len = batch.length;
             for (uint256 i; i < len;) {
-                if (batch[i].target == address(this)) revert VotingErrors.TargetSelf();
                 if (!l.allowedTarget[batch[i].target]) revert VotingErrors.TargetNotAllowed();
                 unchecked {
                     ++i;

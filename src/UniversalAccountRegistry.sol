@@ -41,6 +41,8 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         keccak256("RegisterAccount(address user,string username,uint256 nonce,uint256 deadline)");
     bytes32 private constant _REGISTER_PASSKEY_TYPEHASH =
         keccak256("RegisterPasskeyAccount(address user,string username,uint256 nonce,uint256 deadline)");
+    bytes32 private constant _SET_PROFILE_TYPEHASH =
+        keccak256("SetProfileMetadata(address user,bytes32 metadataHash,uint256 nonce,uint256 deadline)");
 
     /*──────────────────────── ERC-7201 Storage ──────────────────────────*/
     /// @custom:storage-location erc7201:poa.universalaccountregistry.storage
@@ -52,6 +54,8 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         // Cached EIP-712 domain separator (recomputed on chain ID change, e.g. hard forks)
         bytes32 cachedDomainSeparator;
         uint256 cachedChainId;
+        // Profile metadata (IPFS CID sha256 digest, added in v2)
+        mapping(address => bytes32) profileMetadataHash;
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.universalaccountregistry.storage");
@@ -69,6 +73,7 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
     event UserDeleted(address indexed user, string oldUsername);
     event BatchRegistered(uint256 count);
     event PasskeyFactoryUpdated(address indexed factory);
+    event ProfileMetadataUpdated(address indexed user, bytes32 metadataHash);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -226,8 +231,73 @@ contract UniversalAccountRegistry is Initializable, OwnableUpgradeable {
         bytes32 oldHash = keccak256(bytes(_toLower(oldName)));
         delete l.ownerOfUsernameHash[oldHash];
         delete l.addressToUsername[msg.sender];
+        delete l.profileMetadataHash[msg.sender];
 
         emit UserDeleted(msg.sender, oldName);
+    }
+
+    /*──────────────────── Profile Metadata ─────────────────────────────*/
+
+    /// @notice Set profile metadata (IPFS CID hash) for the caller's account.
+    function setProfileMetadata(bytes32 metadataHash) external {
+        if (bytes(_layout().addressToUsername[msg.sender]).length == 0) revert AccountUnknown();
+        _layout().profileMetadataHash[msg.sender] = metadataHash;
+        emit ProfileMetadataUpdated(msg.sender, metadataHash);
+    }
+
+    /// @notice Set profile metadata via EIP-712 ECDSA signature (EOA, gas-sponsored).
+    function setProfileMetadataBySig(
+        address user,
+        bytes32 metadataHash,
+        uint256 deadline,
+        uint256 nonce,
+        bytes calldata signature
+    ) external {
+        if (block.timestamp > deadline) revert SignatureExpired();
+        Layout storage l = _layout();
+        if (nonce != l.nonces[user]) revert InvalidNonce();
+        if (bytes(l.addressToUsername[user]).length == 0) revert AccountUnknown();
+
+        bytes32 structHash = keccak256(abi.encode(_SET_PROFILE_TYPEHASH, user, metadataHash, nonce, deadline));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparator(), structHash));
+        if (ECDSA.recover(digest, signature) != user) revert InvalidSigner();
+
+        l.nonces[user] = nonce + 1;
+        l.profileMetadataHash[user] = metadataHash;
+        emit ProfileMetadataUpdated(user, metadataHash);
+    }
+
+    /// @notice Set profile metadata via WebAuthn passkey signature (gas-sponsored).
+    function setProfileMetadataByPasskeySig(
+        bytes32 credentialId,
+        bytes32 pubKeyX,
+        bytes32 pubKeyY,
+        uint256 salt,
+        bytes32 metadataHash,
+        uint256 deadline,
+        uint256 nonce,
+        WebAuthnLib.WebAuthnAuth calldata auth
+    ) external {
+        if (block.timestamp > deadline) revert SignatureExpired();
+        Layout storage l = _layout();
+        if (l.passkeyFactory == address(0)) revert PasskeyFactoryNotSet();
+
+        address user = IPasskeyFactory(l.passkeyFactory).getAddress(credentialId, pubKeyX, pubKeyY, salt);
+        if (nonce != l.nonces[user]) revert InvalidNonce();
+        if (bytes(l.addressToUsername[user]).length == 0) revert AccountUnknown();
+
+        bytes32 structHash = keccak256(abi.encode(_SET_PROFILE_TYPEHASH, user, metadataHash, nonce, deadline));
+        bytes32 challenge = keccak256(abi.encodePacked("\x19\x01", _domainSeparator(), structHash));
+        if (!WebAuthnLib.verify(auth, challenge, pubKeyX, pubKeyY, false)) revert InvalidSigner();
+
+        l.nonces[user] = nonce + 1;
+        l.profileMetadataHash[user] = metadataHash;
+        emit ProfileMetadataUpdated(user, metadataHash);
+    }
+
+    /// @notice Get profile metadata hash for a user.
+    function getProfileMetadata(address user) external view returns (bytes32) {
+        return _layout().profileMetadataHash[user];
     }
 
     /*────────────────────────── View Helpers ──────────────────────────*/
