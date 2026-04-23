@@ -21,6 +21,7 @@ library HybridVotingCore {
     );
     event Winner(uint256 indexed id, uint256 indexed winningIdx, bool valid, bool executed, uint64 timestamp);
     event ProposalExecuted(uint256 indexed id, uint256 indexed winningIdx, uint256 numCalls);
+    event ProposalExecutionFailed(uint256 indexed id, uint256 indexed winningIdx, bytes reason);
 
     function _layout() private pure returns (HybridVoting.Layout storage s) {
         bytes32 slot = _STORAGE_SLOT;
@@ -220,11 +221,12 @@ library HybridVotingCore {
         IExecutor.Call[] storage batch = p.batches[winner];
         bool didExecute = false;
         if (valid && batch.length > 0) {
-            // No target validation needed - Executor has onlyExecutor permission on all org contracts
-            // and handles the actual calls. HybridVoting just passes the batch through.
-            l.executor.execute(id, batch);
-            didExecute = true;
-            emit ProposalExecuted(id, winner, batch.length);
+            try l.executor.execute(id, batch) {
+                didExecute = true;
+                emit ProposalExecuted(id, winner, batch.length);
+            } catch (bytes memory reason) {
+                emit ProposalExecutionFailed(id, winner, reason);
+            }
         }
         emit Winner(id, winner, valid, didExecute, uint64(block.timestamp));
     }

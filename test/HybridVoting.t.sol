@@ -72,6 +72,7 @@ contract MockERC20 is IERC20 {
 
     /* ────────────────────────────────   TEST  ──────────────────────────────── */
     contract HybridVotingTest is Test {
+        event ProposalExecutionFailed(uint256 indexed id, uint256 indexed winningIdx, bytes reason);
         /* actors */
         address owner = vm.addr(1);
         address alice = vm.addr(2); // has executive hat (voting + DD power), some tokens
@@ -1590,5 +1591,45 @@ contract MockERC20 is IERC20 {
             vm.expectRevert(VotingErrors.AlreadyExecuted.selector);
             vm.prank(alice);
             hv.announceWinner(id);
+        }
+
+        function testAnnounceWinnerExecutionFailDoesNotRevert() public {
+            // Deploy a reverting executor
+            RevertingExecutor revertExec = new RevertingExecutor();
+
+            // Swap the executor via setConfig (must be called by current executor)
+            vm.prank(address(exec));
+            hv.setConfig(HybridVoting.ConfigKey.EXECUTOR, abi.encode(address(revertExec)));
+
+            // Create a proposal with a batch (targets the allowed address)
+            uint256 id = _create();
+
+            _voteYES(alice);
+            _voteYES(carol);
+
+            vm.warp(block.timestamp + 16 minutes);
+
+            // announceWinner should NOT revert even though execution fails
+            // Expect ProposalExecutionFailed event
+            vm.expectEmit(true, true, false, false);
+            emit ProposalExecutionFailed(id, 0, "");
+
+            vm.prank(alice);
+            (uint256 winner, bool valid) = hv.announceWinner(id);
+
+            assertTrue(valid, "Proposal should be valid");
+            assertEq(winner, 0, "Option 0 should win");
+
+            // Cannot re-announce (executed flag is set)
+            vm.expectRevert(VotingErrors.AlreadyExecuted.selector);
+            vm.prank(alice);
+            hv.announceWinner(id);
+        }
+    }
+
+    /// @dev Executor that always reverts on execute
+    contract RevertingExecutor is IExecutor {
+        function execute(uint256, Call[] calldata) external pure {
+            revert("Execution deliberately failed");
         }
     }
