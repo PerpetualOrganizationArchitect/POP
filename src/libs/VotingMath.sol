@@ -25,6 +25,14 @@ library VotingMath {
     /* ─────────── Constants ─────────── */
     uint256 private constant MAX_UINT256 = type(uint256).max;
 
+    /// @notice Fixed-point multiplier for N-slice score accumulation.
+    /// @dev Keeps 4 decimal digits of precision when summing per-class
+    ///      contributions `(optRaw × slice / classTotal)` across classes.
+    ///      Without this, integer truncation can collapse distinct option
+    ///      scores to the same value (e.g., when an ERC20-balance class
+    ///      has a very large `classTotal` and `slice ≤ 100`).
+    uint256 internal constant N_SLICE_PRECISION = 10000;
+
     /* ─────────── Structs ─────────── */
     struct Weights {
         uint8[] idxs;
@@ -334,10 +342,12 @@ library VotingMath {
         uint256 sliceDD = ddSharePct; // out of 100
         uint256 slicePT = 100 - ddSharePct;
 
+        // Use N_SLICE_PRECISION to avoid the same truncation bug as
+        // pickWinnerNSlices — see that function's NatSpec for details.
         for (uint256 i; i < len; ++i) {
-            uint256 sDD = (ddTotalRaw == 0) ? 0 : (ddRaw[i] * sliceDD) / ddTotalRaw;
-            uint256 sPT = (ptTotalRaw == 0) ? 0 : (ptRaw[i] * slicePT) / ptTotalRaw;
-            uint256 tot = sDD + sPT; // both scaled to [0..100]
+            uint256 sDD = (ddTotalRaw == 0) ? 0 : (ddRaw[i] * sliceDD * N_SLICE_PRECISION) / ddTotalRaw;
+            uint256 sPT = (ptTotalRaw == 0) ? 0 : (ptRaw[i] * slicePT * N_SLICE_PRECISION) / ptTotalRaw;
+            uint256 tot = sDD + sPT; // both scaled to [0..100 × PRECISION]
 
             if (tot > hi) {
                 second = hi;
@@ -348,9 +358,9 @@ library VotingMath {
             }
         }
 
-        // Threshold on the final scaled total (max 100)
-        // Requires strict margin for hybrid voting
-        ok = (hi > second) && (hi >= thresholdPct);
+        // Threshold on the final scaled total (max 100 × PRECISION).
+        // Requires strict margin for hybrid voting.
+        ok = (hi > second) && (hi >= uint256(thresholdPct) * N_SLICE_PRECISION);
     }
 
     /**
@@ -362,8 +372,25 @@ library VotingMath {
      * @param strict Whether to require strict majority (winner > second)
      * @return win Winning option index
      * @return ok Whether threshold is met and winner is valid
-     * @return hi Highest combined score
-     * @return second Second highest combined score
+     * @return hi Highest combined score (scaled by N_SLICE_PRECISION)
+     * @return second Second highest combined score (scaled by N_SLICE_PRECISION)
+     *
+     * @dev Scores accumulate per-class contributions as fixed-point fractions
+     *      scaled by `N_SLICE_PRECISION`:
+     *
+     *          classContribution = (optRaw × slice × PRECISION) / classTotal
+     *          score = Σ classContribution
+     *
+     *      Before scaling, contributions truncated to integers — an ERC20
+     *      class with `classTotal ~ 10^12` and `slice ≤ 100` collapsed
+     *      meaningfully different option tallies to equal integer scores.
+     *      With PRECISION = 10000 we get 4 decimal digits of resolution,
+     *      which is sufficient to distinguish realistic vote tallies and
+     *      matches the cross-multiplication precision used elsewhere in
+     *      this library (see `meetsThreshold`, `pickWinnerMajority`).
+     *
+     *      The returned `hi`/`second` are also scaled; the threshold
+     *      comparison scales `thresholdPct` to match.
      */
     function pickWinnerNSlices(
         uint256[][] memory perOptionPerClassRaw,
@@ -377,14 +404,18 @@ library VotingMath {
 
         uint256 numClasses = slices.length;
 
-        // Calculate combined scores for each option
+        // Calculate combined scores for each option (scaled by N_SLICE_PRECISION)
         for (uint256 opt; opt < numOptions; ++opt) {
             uint256 score;
 
             for (uint256 cls; cls < numClasses; ++cls) {
                 if (totalsRaw[cls] > 0) {
-                    // Calculate this class's contribution to the option's score
-                    uint256 classContribution = (perOptionPerClassRaw[opt][cls] * slices[cls]) / totalsRaw[cls];
+                    // Scale numerator before dividing to preserve precision.
+                    // Overflow headroom: optRaw ≤ uint128.max (2^128), slice ≤ 100,
+                    // PRECISION = 10^4 → product ≤ 2^128 × 10^6 ≈ 3.4×10^44,
+                    // well under uint256.max (~1.15×10^77).
+                    uint256 classContribution =
+                        (perOptionPerClassRaw[opt][cls] * slices[cls] * N_SLICE_PRECISION) / totalsRaw[cls];
                     score += classContribution;
                 }
             }
@@ -399,8 +430,8 @@ library VotingMath {
             }
         }
 
-        // Check threshold and margin requirements
-        bool thresholdMet = hi >= thresholdPct;
+        // Check threshold (scaled to match hi/second) and margin requirements
+        bool thresholdMet = hi >= uint256(thresholdPct) * N_SLICE_PRECISION;
         bool meetsMargin = strict ? (hi > second) : (hi >= second);
         ok = thresholdMet && meetsMargin;
     }
