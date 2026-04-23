@@ -860,15 +860,16 @@ contract OrgDeployer is Initializable {
     /**
      * @notice Build default paymaster whitelist rules for deployed org contracts
      * @dev Whitelists common user-facing functions on QuickJoin, TaskManager, Voting, etc.
+     *      Split into per-contract helpers to stay under stack-depth limits with via_ir.
      */
     function _buildDefaultPaymasterRules(DeploymentResult memory result, bool educationEnabled, address registryAddr)
         internal
         pure
         returns (address[] memory targets, bytes4[] memory selectors, bool[] memory allowed, uint32[] memory gasHints)
     {
-        // Count: QuickJoin(6) + TaskManager(12) + HybridVoting(3) + DDVoting(3) + PaymentManager(5) + EligibilityModule(5) + ParticipationToken(3) + Registry(1) + EducationHub(0 or 1)
+        // Count: QuickJoin(6) + TaskManager(12) + HybridVoting(3) + DDVoting(3) + PaymentManager(5) + EligibilityModule(5) + ParticipationToken(3) + Registry(1) + EducationHub(0 or 4)
         uint256 count = 38;
-        if (educationEnabled) count += 1;
+        if (educationEnabled) count += 4;
 
         targets = new address[](count);
         selectors = new bytes4[](count);
@@ -876,195 +877,219 @@ contract OrgDeployer is Initializable {
         gasHints = new uint32[](count);
 
         uint256 i = 0;
+        i = _appendQuickJoinRules(targets, selectors, result.quickJoin, i);
+        i = _appendTaskManagerRules(targets, selectors, result.taskManager, i);
+        i = _appendVotingRules(targets, selectors, result.hybridVoting, result.directDemocracyVoting, i);
+        i = _appendPaymentManagerRules(targets, selectors, result.paymentManager, i);
+        i = _appendEligibilityRules(targets, selectors, result.eligibilityModule, i);
+        i = _appendParticipationTokenRules(targets, selectors, result.participationToken, i);
 
-        // ── QuickJoin ──
-        targets[i] = result.quickJoin;
+        targets[i] = registryAddr;
+        selectors[i] = bytes4(keccak256("setProfileMetadata(bytes32)"));
+        i++;
+
+        if (educationEnabled) {
+            _appendEducationHubRules(targets, selectors, result.educationHub, i);
+            i += 4;
+        }
+
+        // Set all rules to allowed with 0 gas hint (use default)
+        for (uint256 j = 0; j < count; j++) {
+            allowed[j] = true;
+        }
+    }
+
+    function _appendQuickJoinRules(address[] memory targets, bytes4[] memory selectors, address qj, uint256 i)
+        private
+        pure
+        returns (uint256)
+    {
+        targets[i] = qj;
         selectors[i] = bytes4(keccak256("quickJoinWithUser()"));
         i++;
-
-        targets[i] = result.quickJoin;
+        targets[i] = qj;
         selectors[i] = bytes4(keccak256("registerAndQuickJoin(address,string,uint256,uint256,bytes)"));
         i++;
-
-        targets[i] = result.quickJoin;
+        targets[i] = qj;
         selectors[i] = bytes4(
             keccak256(
                 "registerAndQuickJoinWithPasskey((bytes32,bytes32,bytes32,uint256),string,uint256,uint256,(bytes,bytes,uint256,uint256,bytes32,bytes32))"
             )
         );
         i++;
-
-        // ── QuickJoin vouch-claim paths ──
-        targets[i] = result.quickJoin;
+        targets[i] = qj;
         selectors[i] = bytes4(keccak256("claimHatsWithUser(uint256[])"));
         i++;
-
-        targets[i] = result.quickJoin;
+        targets[i] = qj;
         selectors[i] = bytes4(keccak256("registerAndClaimHats(address,string,uint256,uint256,bytes,uint256[])"));
         i++;
-
-        targets[i] = result.quickJoin;
+        targets[i] = qj;
         selectors[i] = bytes4(
             keccak256(
                 "registerAndClaimHatsWithPasskey((bytes32,bytes32,bytes32,uint256),string,uint256,uint256,(bytes,bytes,uint256,uint256,bytes32,bytes32),uint256[])"
             )
         );
         i++;
+        return i;
+    }
 
-        // ── TaskManager ──
-        targets[i] = result.taskManager;
+    function _appendTaskManagerRules(address[] memory targets, bytes4[] memory selectors, address tm, uint256 i)
+        private
+        pure
+        returns (uint256)
+    {
+        targets[i] = tm;
         selectors[i] = bytes4(keccak256("createTask(uint256,bytes,bytes32,bytes32,address,uint256,bool)"));
         i++;
-
-        targets[i] = result.taskManager;
+        targets[i] = tm;
         selectors[i] = bytes4(keccak256("claimTask(uint256)"));
         i++;
-
-        targets[i] = result.taskManager;
+        targets[i] = tm;
         selectors[i] = bytes4(keccak256("submitTask(uint256,bytes32)"));
         i++;
-
-        targets[i] = result.taskManager;
+        targets[i] = tm;
         selectors[i] = bytes4(keccak256("completeTask(uint256)"));
         i++;
-
-        targets[i] = result.taskManager;
+        targets[i] = tm;
         selectors[i] = bytes4(keccak256("applyForTask(uint256,bytes32)"));
         i++;
-
-        targets[i] = result.taskManager;
+        targets[i] = tm;
         selectors[i] = bytes4(keccak256("approveApplication(uint256,address)"));
         i++;
-
-        targets[i] = result.taskManager;
+        targets[i] = tm;
         selectors[i] = bytes4(keccak256("assignTask(uint256,address)"));
         i++;
-
-        targets[i] = result.taskManager;
+        targets[i] = tm;
         selectors[i] = bytes4(keccak256("rejectTask(uint256,bytes32)"));
         i++;
-
-        targets[i] = result.taskManager;
+        targets[i] = tm;
         selectors[i] = bytes4(keccak256("cancelTask(uint256)"));
         i++;
-
-        targets[i] = result.taskManager;
+        targets[i] = tm;
         selectors[i] =
             bytes4(keccak256("createAndAssignTask(uint256,bytes,bytes32,bytes32,address,address,uint256,bool)"));
         i++;
-
-        targets[i] = result.taskManager;
+        targets[i] = tm;
         selectors[i] = bytes4(
             keccak256(
                 "createProject((bytes,bytes32,uint256,address[],uint256[],uint256[],uint256[],uint256[],address[],uint256[]))"
             )
         );
         i++;
-
-        targets[i] = result.taskManager;
+        targets[i] = tm;
         selectors[i] = bytes4(keccak256("deleteProject(bytes32)"));
         i++;
+        return i;
+    }
 
-        // ── HybridVoting ──
-        targets[i] = result.hybridVoting;
-        selectors[i] = bytes4(keccak256("vote(uint256,uint8[],uint8[])"));
-        i++;
-
-        targets[i] = result.hybridVoting;
-        selectors[i] = bytes4(keccak256("announceWinner(uint256)"));
-        i++;
-
-        targets[i] = result.hybridVoting;
-        selectors[i] =
+    function _appendVotingRules(address[] memory targets, bytes4[] memory selectors, address hv, address ddv, uint256 i)
+        private
+        pure
+        returns (uint256)
+    {
+        bytes4 voteSel = bytes4(keccak256("vote(uint256,uint8[],uint8[])"));
+        bytes4 announceSel = bytes4(keccak256("announceWinner(uint256)"));
+        bytes4 proposalSel =
             bytes4(keccak256("createProposal(bytes,bytes32,uint32,uint8,(address,uint256,bytes)[][],uint256[])"));
-        i++;
 
-        // ── DirectDemocracyVoting ──
-        targets[i] = result.directDemocracyVoting;
-        selectors[i] = bytes4(keccak256("vote(uint256,uint8[],uint8[])"));
+        targets[i] = hv;
+        selectors[i] = voteSel;
         i++;
-
-        targets[i] = result.directDemocracyVoting;
-        selectors[i] = bytes4(keccak256("announceWinner(uint256)"));
+        targets[i] = hv;
+        selectors[i] = announceSel;
         i++;
-
-        targets[i] = result.directDemocracyVoting;
-        selectors[i] =
-            bytes4(keccak256("createProposal(bytes,bytes32,uint32,uint8,(address,uint256,bytes)[][],uint256[])"));
+        targets[i] = hv;
+        selectors[i] = proposalSel;
         i++;
+        targets[i] = ddv;
+        selectors[i] = voteSel;
+        i++;
+        targets[i] = ddv;
+        selectors[i] = announceSel;
+        i++;
+        targets[i] = ddv;
+        selectors[i] = proposalSel;
+        i++;
+        return i;
+    }
 
-        // ── PaymentManager ──
-        targets[i] = result.paymentManager;
+    function _appendPaymentManagerRules(address[] memory targets, bytes4[] memory selectors, address pm, uint256 i)
+        private
+        pure
+        returns (uint256)
+    {
+        targets[i] = pm;
         selectors[i] = bytes4(keccak256("claimDistribution(uint256,uint256,bytes32[])"));
         i++;
-
-        targets[i] = result.paymentManager;
+        targets[i] = pm;
         selectors[i] = bytes4(keccak256("claimMultiple(uint256[],uint256[],bytes32[][])"));
         i++;
-
-        targets[i] = result.paymentManager;
+        targets[i] = pm;
         selectors[i] = bytes4(keccak256("optOut(bool)"));
         i++;
-
-        targets[i] = result.paymentManager;
+        targets[i] = pm;
         selectors[i] = bytes4(keccak256("createDistribution(address,uint256,bytes32,uint256)"));
         i++;
-
-        targets[i] = result.paymentManager;
+        targets[i] = pm;
         selectors[i] = bytes4(keccak256("finalizeDistribution(uint256,uint256)"));
         i++;
+        return i;
+    }
 
-        // ── EligibilityModule ──
-        targets[i] = result.eligibilityModule;
+    function _appendEligibilityRules(address[] memory targets, bytes4[] memory selectors, address em, uint256 i)
+        private
+        pure
+        returns (uint256)
+    {
+        targets[i] = em;
         selectors[i] = bytes4(keccak256("claimVouchedHat(uint256)"));
         i++;
-
-        targets[i] = result.eligibilityModule;
+        targets[i] = em;
         selectors[i] = bytes4(keccak256("vouchFor(address,uint256)"));
         i++;
-
-        targets[i] = result.eligibilityModule;
+        targets[i] = em;
         selectors[i] = bytes4(keccak256("revokeVouch(address,uint256)"));
         i++;
-
-        targets[i] = result.eligibilityModule;
+        targets[i] = em;
         selectors[i] = bytes4(keccak256("applyForRole(uint256,bytes32)"));
         i++;
-
-        targets[i] = result.eligibilityModule;
+        targets[i] = em;
         selectors[i] = bytes4(keccak256("withdrawApplication(uint256)"));
         i++;
+        return i;
+    }
 
-        // ── ParticipationToken ──
-        targets[i] = result.participationToken;
+    function _appendParticipationTokenRules(address[] memory targets, bytes4[] memory selectors, address pt, uint256 i)
+        private
+        pure
+        returns (uint256)
+    {
+        targets[i] = pt;
         selectors[i] = bytes4(keccak256("requestTokens(uint96,string)"));
         i++;
-
-        targets[i] = result.participationToken;
+        targets[i] = pt;
         selectors[i] = bytes4(keccak256("approveRequest(uint256)"));
         i++;
-
-        targets[i] = result.participationToken;
+        targets[i] = pt;
         selectors[i] = bytes4(keccak256("cancelRequest(uint256)"));
         i++;
+        return i;
+    }
 
-        // ── UniversalAccountRegistry (profile updates) ──
-        targets[i] = registryAddr;
-        selectors[i] = bytes4(keccak256("setProfileMetadata(bytes32)"));
-        i++;
-
-        // ── EducationHub (conditional) ──
-        if (educationEnabled) {
-            targets[i] = result.educationHub;
-            selectors[i] = bytes4(keccak256("completeModule(uint256,uint8)"));
-            i++;
-        }
-
-        // Set all rules to allowed with 0 gas hint (use default)
-        for (uint256 j = 0; j < count; j++) {
-            allowed[j] = true;
-            // gasHints[j] already 0
-        }
+    function _appendEducationHubRules(
+        address[] memory targets,
+        bytes4[] memory selectors,
+        address educationHub,
+        uint256 startIdx
+    ) private pure {
+        targets[startIdx] = educationHub;
+        selectors[startIdx] = bytes4(keccak256("completeModule(uint256,uint8)"));
+        targets[startIdx + 1] = educationHub;
+        selectors[startIdx + 1] = bytes4(keccak256("createModule(bytes,bytes32,uint256,uint8)"));
+        targets[startIdx + 2] = educationHub;
+        selectors[startIdx + 2] = bytes4(keccak256("updateModule(uint256,bytes,bytes32,uint256)"));
+        targets[startIdx + 3] = educationHub;
+        selectors[startIdx + 3] = bytes4(keccak256("removeModule(uint256)"));
     }
 
     /**
