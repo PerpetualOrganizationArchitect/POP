@@ -122,6 +122,7 @@ contract DirectDemocracyVoting is Initializable {
     );
     event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
+    event ProposalExecutionFailed(uint256 indexed id, uint256 indexed winningIdx, bytes reason);
     event ExecutorUpdated(address newExecutor);
     event TargetAllowed(address target, bool allowed);
     event ProposalCleaned(uint256 id, uint256 cleaned);
@@ -434,7 +435,10 @@ contract DirectDemocracyVoting is Initializable {
                     ++i;
                 }
             }
-            l.executor.execute(id, batch);
+            try l.executor.execute(id, batch) {}
+            catch (bytes memory reason) {
+                emit ProposalExecutionFailed(id, winner, reason);
+            }
         }
         emit Winner(id, winner, valid);
     }
