@@ -11,7 +11,7 @@ import {DeterministicDeployer} from "../src/crosschain/DeterministicDeployer.sol
 
 /**
  * @title Step1_DeployVotingImplsOnGnosis
- * @notice Deploy HybridVoting v6 and DirectDemocracyVoting v6 impls on Gnosis via DD.
+ * @notice Deploy HybridVoting v10 and DirectDemocracyVoting v10 impls on Gnosis via DD.
  *         Must run BEFORE the Arbitrum upgrade so impls exist when Hyperlane arrives.
  *
  * Usage:
@@ -32,26 +32,26 @@ contract Step1_DeployVotingImplsOnGnosis is Script {
 
         vm.startBroadcast(deployerKey);
 
-        // HybridVoting v6
-        bytes32 hvSalt = dd.computeSalt("HybridVoting", "v8");
+        // HybridVoting v10
+        bytes32 hvSalt = dd.computeSalt("HybridVoting", "v10");
         address hvPredicted = dd.computeAddress(hvSalt);
         if (hvPredicted.code.length == 0) {
             address hvDeployed = dd.deploy(hvSalt, type(HybridVoting).creationCode);
             require(hvDeployed == hvPredicted, "HV address mismatch");
-            console.log("HybridVoting v6:", hvDeployed);
+            console.log("HybridVoting v10:", hvDeployed);
         } else {
-            console.log("HybridVoting v6 already deployed:", hvPredicted);
+            console.log("HybridVoting v10 already deployed:", hvPredicted);
         }
 
-        // DirectDemocracyVoting v6
-        bytes32 ddvSalt = dd.computeSalt("DirectDemocracyVoting", "v8");
+        // DirectDemocracyVoting v10
+        bytes32 ddvSalt = dd.computeSalt("DirectDemocracyVoting", "v10");
         address ddvPredicted = dd.computeAddress(ddvSalt);
         if (ddvPredicted.code.length == 0) {
             address ddvDeployed = dd.deploy(ddvSalt, type(DirectDemocracyVoting).creationCode);
             require(ddvDeployed == ddvPredicted, "DDV address mismatch");
-            console.log("DirectDemocracyVoting v6:", ddvDeployed);
+            console.log("DirectDemocracyVoting v10:", ddvDeployed);
         } else {
-            console.log("DirectDemocracyVoting v6 already deployed:", ddvPredicted);
+            console.log("DirectDemocracyVoting v10 already deployed:", ddvPredicted);
         }
 
         vm.stopBroadcast();
@@ -87,13 +87,13 @@ contract Step2_UpgradeFromArbitrum is Script {
         require(!hub.paused(), "Hub is paused");
 
         // Compute DD addresses
-        bytes32 hvSalt = dd.computeSalt("HybridVoting", "v8");
+        bytes32 hvSalt = dd.computeSalt("HybridVoting", "v10");
         address hvImpl = dd.computeAddress(hvSalt);
-        bytes32 ddvSalt = dd.computeSalt("DirectDemocracyVoting", "v8");
+        bytes32 ddvSalt = dd.computeSalt("DirectDemocracyVoting", "v10");
         address ddvImpl = dd.computeAddress(ddvSalt);
 
-        console.log("HybridVoting v6 impl:", hvImpl);
-        console.log("DirectDemocracyVoting v6 impl:", ddvImpl);
+        console.log("HybridVoting v10 impl:", hvImpl);
+        console.log("DirectDemocracyVoting v10 impl:", ddvImpl);
 
         vm.startBroadcast(deployerKey);
 
@@ -113,11 +113,11 @@ contract Step2_UpgradeFromArbitrum is Script {
         }
 
         // Upgrade HybridVoting beacon cross-chain
-        hub.upgradeBeaconCrossChain{value: HYPERLANE_FEE}("HybridVoting", hvImpl, "v8");
+        hub.upgradeBeaconCrossChain{value: HYPERLANE_FEE}("HybridVoting", hvImpl, "v10");
         console.log("HybridVoting beacon upgraded cross-chain");
 
         // Upgrade DirectDemocracyVoting beacon cross-chain
-        hub.upgradeBeaconCrossChain{value: HYPERLANE_FEE}("DirectDemocracyVoting", ddvImpl, "v8");
+        hub.upgradeBeaconCrossChain{value: HYPERLANE_FEE}("DirectDemocracyVoting", ddvImpl, "v10");
         console.log("DirectDemocracyVoting beacon upgraded cross-chain");
 
         vm.stopBroadcast();
@@ -143,8 +143,8 @@ contract Step3_Verify is Script {
     function run() public view {
         DeterministicDeployer dd = DeterministicDeployer(DD);
 
-        address hvExpected = dd.computeAddress(dd.computeSalt("HybridVoting", "v8"));
-        address ddvExpected = dd.computeAddress(dd.computeSalt("DirectDemocracyVoting", "v8"));
+        address hvExpected = dd.computeAddress(dd.computeSalt("HybridVoting", "v10"));
+        address ddvExpected = dd.computeAddress(dd.computeSalt("DirectDemocracyVoting", "v10"));
 
         PoaManager pm = PoaManager(GNOSIS_PM);
         address hvCurrent = pm.getCurrentImplementationById(keccak256("HybridVoting"));
