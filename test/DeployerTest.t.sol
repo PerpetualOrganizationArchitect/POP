@@ -1838,6 +1838,84 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         );
     }
 
+    function testClearWearerVouches_invalidatesOnlyTargetWearer() public {
+        TestOrgSetup memory setup = _createTestOrg("Clear Wearer Vouches Test DAO");
+        address loser = address(0x5C0E1);
+        address bystander = address(0x5C0E2);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter1);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter2);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, loser);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, bystander);
+
+        // Vouching: quorum=1, combineWithHierarchy=false (so vouch alone gates eligibility)
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 1, setup.memberRoleHat, false, true
+        );
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+
+        // voter1 vouches for both candidates → both eligible.
+        _vouchFor(voter1, setup.eligibilityModule, loser, setup.defaultRoleHat);
+        _vouchFor(voter1, setup.eligibilityModule, bystander, setup.defaultRoleHat);
+        _assertVouchStatus(setup.eligibilityModule, loser, setup.defaultRoleHat, 1, true, "loser vouched");
+        _assertVouchStatus(setup.eligibilityModule, bystander, setup.defaultRoleHat, 1, true, "bystander vouched");
+        _assertEligibilityStatus(setup.eligibilityModule, loser, setup.defaultRoleHat, true, true, "loser pre-clear");
+
+        // Surgical clear for loser only.
+        vm.prank(setup.exec);
+        EligibilityModule(setup.eligibilityModule).clearWearerVouches(loser, setup.defaultRoleHat);
+
+        // Loser: effective vouch count is 0 → ineligible.
+        _assertEligibilityStatus(setup.eligibilityModule, loser, setup.defaultRoleHat, false, false, "loser post-clear");
+
+        // Bystander: untouched, still vouched, still eligible.
+        _assertVouchStatus(setup.eligibilityModule, bystander, setup.defaultRoleHat, 1, true, "bystander preserved");
+        _assertEligibilityStatus(
+            setup.eligibilityModule, bystander, setup.defaultRoleHat, true, true, "bystander still eligible"
+        );
+
+        // Org-wide vouching is still ENABLED — new vouches still work.
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, address(0x5C0E3));
+        _vouchFor(voter1, setup.eligibilityModule, address(0x5C0E3), setup.defaultRoleHat);
+        _assertEligibilityStatus(
+            setup.eligibilityModule, address(0x5C0E3), setup.defaultRoleHat, true, true, "vouching still works"
+        );
+
+        // The loser CAN be re-vouched in by a DIFFERENT voucher (or after the
+        // org bumps the vouch config epoch). Bonus check: voter2 (different
+        // voucher than voter1 who already vouched in the prior epoch) can
+        // vouch the loser back to eligible. Demonstrates the clear isn't a
+        // permanent ban.
+        _mintHat(setup.exec, setup.memberRoleHat, voter2);
+        _vouchFor(voter2, setup.eligibilityModule, loser, setup.defaultRoleHat);
+        _assertEligibilityStatus(
+            setup.eligibilityModule, loser, setup.defaultRoleHat, true, true, "loser re-vouchable by different voucher"
+        );
+    }
+
+    function testClearWearerVouches_onlySuperAdmin() public {
+        TestOrgSetup memory setup = _createTestOrg("ClearWearerVouches Auth Test");
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(EligibilityModule.NotSuperAdmin.selector);
+        EligibilityModule(setup.eligibilityModule).clearWearerVouches(address(0x123), setup.defaultRoleHat);
+    }
+
+    function testClearWearerVouches_zeroAddressReverts() public {
+        TestOrgSetup memory setup = _createTestOrg("ClearWearerVouches Zero Test");
+        vm.prank(setup.exec);
+        vm.expectRevert(EligibilityModule.ZeroAddress.selector);
+        EligibilityModule(setup.eligibilityModule).clearWearerVouches(address(0), setup.defaultRoleHat);
+    }
+
+    function testClearWearerVouches_emitsEvent() public {
+        TestOrgSetup memory setup = _createTestOrg("ClearWearerVouches Event Test");
+        address target = address(0xC1EA1);
+        vm.prank(setup.exec);
+        vm.expectEmit(true, true, true, false);
+        emit EligibilityModule.WearerVouchesCleared(target, setup.defaultRoleHat, setup.exec);
+        EligibilityModule(setup.eligibilityModule).clearWearerVouches(target, setup.defaultRoleHat);
+    }
+
     function testVouchingEvents() public {
         vm.startPrank(orgOwner);
         string[] memory names = new string[](3);
@@ -3050,17 +3128,17 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         uint256 marketingHatId = EligibilityModule(setup.eligibilityModule)
             .createHatWithEligibility(
                 EligibilityModule.CreateHatParams({
-                    parentHatId: setup.defaultRoleHat,
-                    details: "Marketing Team",
-                    maxSupply: 10,
-                    _mutable: true,
-                    imageURI: "ipfs://marketing-hat-image",
-                    defaultEligible: true,
-                    defaultStanding: true,
-                    mintToAddresses: new address[](0),
-                    wearerEligibleFlags: new bool[](0),
-                    wearerStandingFlags: new bool[](0)
-                })
+                parentHatId: setup.defaultRoleHat,
+                details: "Marketing Team",
+                maxSupply: 10,
+                _mutable: true,
+                imageURI: "ipfs://marketing-hat-image",
+                defaultEligible: true,
+                defaultStanding: true,
+                mintToAddresses: new address[](0),
+                wearerEligibleFlags: new bool[](0),
+                wearerStandingFlags: new bool[](0)
+            })
             );
 
         // Verify the marketing hat was created
@@ -3157,17 +3235,17 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         uint256 campaignHatId = EligibilityModule(setup.eligibilityModule)
             .createHatWithEligibility(
                 EligibilityModule.CreateHatParams({
-                    parentHatId: setup.defaultRoleHat,
-                    details: "Campaign Team",
-                    maxSupply: 5,
-                    _mutable: true,
-                    imageURI: "ipfs://campaign-hat-image",
-                    defaultEligible: false,
-                    defaultStanding: true,
-                    mintToAddresses: initialMembers,
-                    wearerEligibleFlags: initialEligible,
-                    wearerStandingFlags: initialStanding
-                })
+                parentHatId: setup.defaultRoleHat,
+                details: "Campaign Team",
+                maxSupply: 5,
+                _mutable: true,
+                imageURI: "ipfs://campaign-hat-image",
+                defaultEligible: false,
+                defaultStanding: true,
+                mintToAddresses: initialMembers,
+                wearerEligibleFlags: initialEligible,
+                wearerStandingFlags: initialStanding
+            })
             );
 
         // Verify the campaign hat was created
@@ -3195,17 +3273,17 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         EligibilityModule(setup.eligibilityModule)
             .createHatWithEligibility(
                 EligibilityModule.CreateHatParams({
-                    parentHatId: setup.defaultRoleHat,
-                    details: "Unauthorized Hat",
-                    maxSupply: 1,
-                    _mutable: true,
-                    imageURI: "",
-                    defaultEligible: true,
-                    defaultStanding: true,
-                    mintToAddresses: new address[](0),
-                    wearerEligibleFlags: new bool[](0),
-                    wearerStandingFlags: new bool[](0)
-                })
+                parentHatId: setup.defaultRoleHat,
+                details: "Unauthorized Hat",
+                maxSupply: 1,
+                _mutable: true,
+                imageURI: "",
+                defaultEligible: true,
+                defaultStanding: true,
+                mintToAddresses: new address[](0),
+                wearerEligibleFlags: new bool[](0),
+                wearerStandingFlags: new bool[](0)
+            })
             );
 
         // Test that marketing executive can manage eligibility of their created hats
@@ -3270,17 +3348,17 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         uint256 teamHatId = EligibilityModule(setup.eligibilityModule)
             .createHatWithEligibility(
                 EligibilityModule.CreateHatParams({
-                    parentHatId: setup.defaultRoleHat,
-                    details: "Team Hat",
-                    maxSupply: 10,
-                    _mutable: true,
-                    imageURI: "ipfs://team-image",
-                    defaultEligible: false,
-                    defaultStanding: true,
-                    mintToAddresses: initialMembers,
-                    wearerEligibleFlags: initialEligible,
-                    wearerStandingFlags: initialStanding
-                })
+                parentHatId: setup.defaultRoleHat,
+                details: "Team Hat",
+                maxSupply: 10,
+                _mutable: true,
+                imageURI: "ipfs://team-image",
+                defaultEligible: false,
+                defaultStanding: true,
+                mintToAddresses: initialMembers,
+                wearerEligibleFlags: initialEligible,
+                wearerStandingFlags: initialStanding
+            })
             );
 
         // Verify both members are immediately wearing the hat
