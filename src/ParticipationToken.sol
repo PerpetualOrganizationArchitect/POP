@@ -24,6 +24,23 @@ contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyG
     error ZeroAmount();
     error TransfersDisabled();
     error Unauthorized();
+    error EmptyString();
+    error StringTooLong();
+
+    /*──────────── Constants ───────────*/
+    uint256 private constant MAX_NAME_LENGTH = 64;
+    uint256 private constant MAX_SYMBOL_LENGTH = 16;
+
+    /// @dev ERC-7201 storage slot for OZ ERC20Upgradeable. Hardcoded against OZ
+    ///      v5.3 layout (`erc7201:openzeppelin.storage.ERC20`). The
+    ///      testStorageSlotMatchesOZ test asserts this matches what OZ derives
+    ///      so accidental dependency upgrades don't silently break renames.
+    bytes32 private constant ERC20_STORAGE_SLOT = 0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace00;
+
+    /// @dev Field offsets within ERC20Storage struct
+    /// (see OZ ERC20Upgradeable.sol: _balances, _allowances, _totalSupply, _name, _symbol).
+    uint256 private constant ERC20_NAME_OFFSET = 3;
+    uint256 private constant ERC20_SYMBOL_OFFSET = 4;
 
     /*──────────── Types ───────────*/
     struct Request {
@@ -69,6 +86,8 @@ contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyG
     event RequestCancelled(uint256 indexed id, address indexed caller);
     event MemberHatSet(uint256 hat, bool allowed);
     event ApproverHatSet(uint256 hat, bool allowed);
+    event NameSet(string newName);
+    event SymbolSet(string newSymbol);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -201,6 +220,76 @@ contract ParticipationToken is Initializable, ERC20VotesUpgradeable, ReentrancyG
         Layout storage l = _layout();
         HatManager.setHatInArray(l.approverHatIds, h, ok);
         emit ApproverHatSet(h, ok);
+    }
+
+    /// @notice Update the ERC20 token name. Executor-only — typically called via
+    ///         a passed governance proposal that targets this function.
+    /// @dev OZ ERC20Upgradeable's `_name` is private and unset post-init, so we
+    ///      write directly to its ERC-7201 storage slot. Length-bounded to 64.
+    function setName(string calldata newName) external onlyExecutor {
+        uint256 len = bytes(newName).length;
+        if (len == 0) revert EmptyString();
+        if (len > MAX_NAME_LENGTH) revert StringTooLong();
+        _writeERC20String(ERC20_NAME_OFFSET, newName);
+        emit NameSet(newName);
+    }
+
+    /// @notice Update the ERC20 token symbol. Executor-only.
+    /// @dev See `setName`. Length-bounded to 16 to match common wallet UIs.
+    function setSymbol(string calldata newSymbol) external onlyExecutor {
+        uint256 len = bytes(newSymbol).length;
+        if (len == 0) revert EmptyString();
+        if (len > MAX_SYMBOL_LENGTH) revert StringTooLong();
+        _writeERC20String(ERC20_SYMBOL_OFFSET, newSymbol);
+        emit SymbolSet(newSymbol);
+    }
+
+    /// @dev Writes a Solidity string to the OZ ERC20 storage struct at `offset`.
+    ///      Replicates Solidity's string storage encoding:
+    ///        - len < 32:  single slot, packed = (data << (32-len)*8) | (len*2)
+    ///        - len >= 32: slot stores (len*2 + 1); data lives at keccak256(slot),
+    ///                     with the last chunk zero-padded beyond `len`.
+    ///      Inputs are length-bounded by callers so the long-string branch is
+    ///      bounded and predictable.
+    function _writeERC20String(uint256 offset, string calldata s) private {
+        bytes32 baseSlot = bytes32(uint256(ERC20_STORAGE_SLOT) + offset);
+        bytes calldata b = bytes(s);
+        uint256 len = b.length;
+
+        if (len < 32) {
+            assembly {
+                // Load up to 32 bytes from calldata starting at b.offset.
+                // calldatacopy guarantees zero-fill beyond actual length, but
+                // Solidity calldata bytes are followed by their next ABI item,
+                // so we mask explicitly to be safe.
+                calldatacopy(0x00, b.offset, len)
+                let raw := mload(0x00)
+                // Mask: keep top `len` bytes, zero the rest.
+                let mask := not(shr(mul(len, 8), not(0)))
+                let packed := or(and(raw, mask), mul(len, 2))
+                sstore(baseSlot, packed)
+            }
+        } else {
+            assembly {
+                // Header slot: len*2 + 1 (long-string flag).
+                sstore(baseSlot, add(mul(len, 2), 1))
+                // Data starts at keccak256(baseSlot).
+                mstore(0x00, baseSlot)
+                let dataSlot := keccak256(0x00, 0x20)
+
+                // Copy in 32-byte chunks; zero-pad the final chunk past `len`.
+                for { let i := 0 } lt(i, len) { i := add(i, 32) } {
+                    calldatacopy(0x00, add(b.offset, i), 32)
+                    let chunk := mload(0x00)
+                    let remaining := sub(len, i)
+                    if lt(remaining, 32) {
+                        let bits := mul(sub(32, remaining), 8)
+                        chunk := and(chunk, shl(bits, not(0)))
+                    }
+                    sstore(add(dataSlot, div(i, 32)), chunk)
+                }
+            }
+        }
     }
 
     /*────── Mint by authorised modules ─────*/
