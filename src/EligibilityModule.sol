@@ -168,6 +168,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     event EligibilityModuleInitialized(address indexed superAdmin, address indexed hatsContract);
     event Vouched(address indexed voucher, address indexed wearer, uint256 indexed hatId, uint32 newCount);
     event VouchRevoked(address indexed voucher, address indexed wearer, uint256 indexed hatId, uint32 newCount);
+    event WearerVouchesCleared(address indexed wearer, uint256 indexed hatId, address indexed admin);
     event VouchConfigSet(
         uint256 indexed hatId, uint32 quorum, uint256 membershipHatId, bool enabled, bool combineWithHierarchy
     );
@@ -843,6 +844,31 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         // Increment epoch to invalidate all stale vouch counts and AlreadyVouched records
         l.vouchConfigEpoch[hatId]++;
         emit VouchConfigSet(hatId, 0, 0, false, false);
+    }
+
+    /**
+     * @notice Surgical per-wearer vouch invalidation for a single hat.
+     * @dev Sets `wearerVouchEpoch` to a sentinel value that will never match
+     *      `vouchConfigEpoch`, so the wearer's effective vouch count for this
+     *      hat is permanently 0 from this point forward (until they get
+     *      re-vouched, which writes a fresh epoch via `vouchFor`).
+     *      Combined with `setWearerEligibility(wearer, hatId, false, false)`
+     *      this is the surgical equivalent of `resetVouches` for one wearer
+     *      — does NOT touch other wearers' vouches and does NOT disable
+     *      vouching org-wide. Designed for the election-loser case on
+     *      vouching-gated hats with available supply.
+     * @param wearer The address whose vouch state to clear for this hat
+     * @param hatId The hat for which to clear vouches
+     */
+    function clearWearerVouches(address wearer, uint256 hatId) external onlySuperAdmin whenNotPaused {
+        if (wearer == address(0)) revert ZeroAddress();
+        Layout storage l = _layout();
+        // type(uint256).max guarantees wearerVouchEpoch != vouchConfigEpoch for
+        // any future epoch (epoch is incremented one-at-a-time by ~25 lines of
+        // code; reaching uint256.max would take 2^256 admin calls).
+        l.wearerVouchEpoch[hatId][wearer] = type(uint256).max;
+        delete l.currentVouchCount[hatId][wearer];
+        emit WearerVouchesCleared(wearer, hatId, msg.sender);
     }
 
     /**
