@@ -196,4 +196,200 @@ contract ParticipationTokenTest is Test {
         vm.expectRevert(ParticipationToken.TransfersDisabled.selector);
         token.transfer(address(1), 1);
     }
+
+    /*══════════════════════════════════════════════════════
+     * setName / setSymbol — metadata setters via governance
+     *══════════════════════════════════════════════════════*/
+
+    // Re-declare events for vm.expectEmit (Foundry needs them in test scope)
+    event NameSet(string newName);
+    event SymbolSet(string newSymbol);
+
+    // ---------- setName ----------
+
+    function testSetName_AsExecutor_Short() public {
+        vm.prank(executor);
+        token.setName("Reputation Points");
+        assertEq(token.name(), "Reputation Points");
+    }
+
+    function testSetName_AsExecutor_LongString() public {
+        // 40-char string forces the long-string storage branch (>= 32 bytes)
+        string memory longName = "Argus Reputation Reward Token Long Name!";
+        assertEq(bytes(longName).length, 40, "test setup: expected 40 bytes");
+
+        vm.prank(executor);
+        token.setName(longName);
+        assertEq(token.name(), longName);
+    }
+
+    function testSetName_AsExecutor_ExactlyMaxLength() public {
+        // 64 chars (MAX_NAME_LENGTH) should pass
+        string memory s64 = "0123456789012345678901234567890123456789012345678901234567890123";
+        assertEq(bytes(s64).length, 64);
+        vm.prank(executor);
+        token.setName(s64);
+        assertEq(token.name(), s64);
+    }
+
+    function testSetName_RevertsWhenNotExecutor() public {
+        vm.prank(member);
+        vm.expectRevert(ParticipationToken.Unauthorized.selector);
+        token.setName("Hijacked");
+
+        vm.prank(taskManager);
+        vm.expectRevert(ParticipationToken.Unauthorized.selector);
+        token.setName("Hijacked");
+
+        vm.prank(approver);
+        vm.expectRevert(ParticipationToken.Unauthorized.selector);
+        token.setName("Hijacked");
+
+        // Default sender (not pranked) — also not executor
+        vm.expectRevert(ParticipationToken.Unauthorized.selector);
+        token.setName("Hijacked");
+    }
+
+    function testSetName_RevertsOnEmpty() public {
+        vm.prank(executor);
+        vm.expectRevert(ParticipationToken.EmptyString.selector);
+        token.setName("");
+    }
+
+    function testSetName_RevertsOnTooLong() public {
+        // 65 chars — one over MAX_NAME_LENGTH
+        string memory tooLong = "01234567890123456789012345678901234567890123456789012345678901234";
+        assertEq(bytes(tooLong).length, 65);
+        vm.prank(executor);
+        vm.expectRevert(ParticipationToken.StringTooLong.selector);
+        token.setName(tooLong);
+    }
+
+    function testSetName_EmitsEvent() public {
+        vm.expectEmit(true, true, true, true, address(token));
+        emit NameSet("FOO");
+        vm.prank(executor);
+        token.setName("FOO");
+    }
+
+    // ---------- setSymbol ----------
+
+    function testSetSymbol_AsExecutor() public {
+        vm.prank(executor);
+        token.setSymbol("REP");
+        assertEq(token.symbol(), "REP");
+    }
+
+    function testSetSymbol_AsExecutor_ExactlyMaxLength() public {
+        // 16 chars (MAX_SYMBOL_LENGTH)
+        string memory s16 = "ABCDEFGHIJKLMNOP";
+        assertEq(bytes(s16).length, 16);
+        vm.prank(executor);
+        token.setSymbol(s16);
+        assertEq(token.symbol(), s16);
+    }
+
+    function testSetSymbol_RevertsWhenNotExecutor() public {
+        vm.prank(member);
+        vm.expectRevert(ParticipationToken.Unauthorized.selector);
+        token.setSymbol("HIJ");
+    }
+
+    function testSetSymbol_RevertsOnEmpty() public {
+        vm.prank(executor);
+        vm.expectRevert(ParticipationToken.EmptyString.selector);
+        token.setSymbol("");
+    }
+
+    function testSetSymbol_RevertsOnTooLong() public {
+        // 17 chars — one over MAX_SYMBOL_LENGTH
+        string memory tooLong = "ABCDEFGHIJKLMNOPQ";
+        assertEq(bytes(tooLong).length, 17);
+        vm.prank(executor);
+        vm.expectRevert(ParticipationToken.StringTooLong.selector);
+        token.setSymbol(tooLong);
+    }
+
+    function testSetSymbol_EmitsEvent() public {
+        vm.expectEmit(true, true, true, true, address(token));
+        emit SymbolSet("ARG");
+        vm.prank(executor);
+        token.setSymbol("ARG");
+    }
+
+    // ---------- Storage layout invariants ----------
+
+    /// @notice Belt-and-suspenders: confirm the hardcoded ERC20 storage slot
+    ///         in ParticipationToken matches what OZ derives from
+    ///         `erc7201:openzeppelin.storage.ERC20`. If OZ ever changes the
+    ///         namespace path, this catches it before the assembly write
+    ///         silently corrupts unrelated storage.
+    function testStorageSlot_MatchesOZNamespace() public {
+        bytes32 expected =
+            keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.ERC20")) - 1)) & ~bytes32(uint256(0xff));
+
+        // _name lives at expected + 3. After init, it should hold "PToken"
+        // (length 6, encoding = "PToken" + (6*2) = 0x50546f6b656e0c in upper bytes)
+        bytes32 nameSlot = bytes32(uint256(expected) + 3);
+        bytes32 raw = vm.load(address(token), nameSlot);
+
+        // Lowest byte = length × 2 for short strings
+        assertEq(uint8(uint256(raw) & 0xff), 12, "expected len*2 = 12 for 'PToken'");
+    }
+
+    /// @notice Critical: the assembly write hits ONLY _name / _symbol slots,
+    ///         not the adjacent _balances / _allowances / _totalSupply.
+    function testSetName_DoesNotCorruptBalances() public {
+        // Set up taskManager + mint to member
+        token.setTaskManager(taskManager);
+        vm.prank(taskManager);
+        token.mint(member, 100 ether);
+        uint256 balBefore = token.balanceOf(member);
+        uint256 supplyBefore = token.totalSupply();
+        assertEq(balBefore, 100 ether);
+        assertEq(supplyBefore, 100 ether);
+
+        vm.prank(executor);
+        token.setName("Different");
+
+        assertEq(token.balanceOf(member), balBefore, "balance changed after setName");
+        assertEq(token.totalSupply(), supplyBefore, "supply changed after setName");
+        assertEq(token.name(), "Different");
+        // Symbol should still be the original
+        assertEq(token.symbol(), "PTK");
+    }
+
+    function testSetSymbol_DoesNotCorruptName() public {
+        vm.prank(executor);
+        token.setSymbol("NEW");
+        assertEq(token.symbol(), "NEW");
+        assertEq(token.name(), "PToken", "name was modified by setSymbol");
+    }
+
+    /// @notice Both setters in sequence work (covers slot offset correctness).
+    function testSetNameAndSymbol_Sequential() public {
+        vm.startPrank(executor);
+        token.setName("First Name");
+        token.setSymbol("FST");
+        token.setName("Second Name");
+        token.setSymbol("SND");
+        vm.stopPrank();
+
+        assertEq(token.name(), "Second Name");
+        assertEq(token.symbol(), "SND");
+    }
+
+    /// @notice Long-string write followed by short-string write — verifies
+    ///         the length prefix is updated correctly when shrinking.
+    function testSetName_LongThenShort() public {
+        string memory long = "Argus Reputation Reward Token Long Name!"; // 40 bytes
+        vm.prank(executor);
+        token.setName(long);
+        assertEq(token.name(), long);
+
+        // Now write a shorter name — should overwrite cleanly
+        vm.prank(executor);
+        token.setName("Short");
+        assertEq(token.name(), "Short");
+    }
 }
