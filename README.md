@@ -96,32 +96,45 @@ Read [`docs/POP_OVERVIEW.md`](docs/POP_OVERVIEW.md) for the long version.
 
 POP organizations are deployed atomically by composing three layers of contracts. The protocol layer is shared across all orgs on a chain; the deployment layer creates new orgs in a single transaction; each organization owns its own per-org instances of the modules.
 
-```
-                    ┌─────────────────────────────────────────────┐
-                    │              Protocol Layer                  │
-                    │   PoaManager · ImplementationRegistry        │
-                    │   PaymasterHub · UniversalAccountRegistry    │
-                    │   OrgRegistry                                │
-                    └──────────────────────┬──────────────────────┘
-                                           │
-                    ┌──────────────────────┴──────────────────────┐
-                    │             Deployment Layer                 │
-                    │          OrgDeployer (orchestrator)          │
-                    │   GovernanceFactory · AccessFactory          │
-                    │           ModulesFactory                     │
-                    └──────────────────────┬──────────────────────┘
-                                           │
-         ┌─────────────────────────────────┼─────────────────────────────────┐
-         │                                 │                                 │
-         ▼                                 ▼                                 ▼
-┌───────────────────┐            ┌───────────────────┐            ┌───────────────────┐
-│    Governance     │            │      Access       │            │    Operations     │
-│                   │            │                   │            │                   │
-│ • DirectDemocracy │            │ • QuickJoin       │            │ • TaskManager     │
-│ • HybridVoting    │            │ • Participation   │            │ • EducationHub    │
-│ • Executor        │            │   Token           │            │ • PaymentManager  │
-│ • Hats Tree       │            │                   │            │                   │
-└───────────────────┘            └───────────────────┘            └───────────────────┘
+```mermaid
+flowchart TD
+    subgraph Protocol["Protocol Layer (shared, once per chain)"]
+        PoaManager
+        ImplementationRegistry
+        PaymasterHub
+        UniversalAccountRegistry
+        OrgRegistry
+    end
+
+    subgraph Deployment["Deployment Layer (orchestration)"]
+        OrgDeployer
+        GovernanceFactory
+        AccessFactory
+        ModulesFactory
+    end
+
+    subgraph Org["Organization Layer (per-org instances behind BeaconProxy + SwitchableBeacon)"]
+        subgraph Governance
+            DirectDemocracyVoting
+            HybridVoting
+            Executor
+            HatsTree["Hats Tree"]
+        end
+        subgraph Access
+            QuickJoin
+            ParticipationToken
+        end
+        subgraph Operations
+            TaskManager
+            EducationHub
+            PaymentManager
+        end
+    end
+
+    Protocol --> Deployment
+    Deployment --> Governance
+    Deployment --> Access
+    Deployment --> Operations
 ```
 
 **Protocol Layer** (deployed once per chain, persistent, upgradeable, shared):
@@ -180,8 +193,12 @@ Beyond the headline contracts, the source tree contains:
 
 POP gives every organization explicit, on-chain control over when (and whether) it upgrades. **Org-level modules** (Executor, voting, TaskManager, etc.) use a beacon chain:
 
-```
-PoaManager > UpgradeableBeacon (global, per type) > SwitchableBeacon (per org/module) > BeaconProxy > Implementation
+```mermaid
+flowchart LR
+    PoaManager --> UB["UpgradeableBeacon<br/>(global, per type)"]
+    UB --> SB["SwitchableBeacon<br/>(per org/module)"]
+    SB --> BP["BeaconProxy"]
+    BP --> Impl["Implementation"]
 ```
 
 The protocol-layer `PaymasterHub` is upgradeable via UUPS (proxy-internal upgrade authorization), governed by `PoaManager`. `PoaManager` itself is a non-upgradeable contract that owns the global `UpgradeableBeacon` instances and authorizes UUPS upgrades on the protocol contracts it manages.
@@ -250,17 +267,12 @@ The CI workflow runs [`script/upgrades/ValidateUpgrade.s.sol`](script/upgrades/V
 
 POP does not use OpenZeppelin's `AccessControl`. All role-based access is mediated by [Hats Protocol](https://docs.hatsprotocol.xyz). Each org owns its own hat tree:
 
-```
-              ┌──────────────┐
-              │   Top Hat    │  ← organization root (held by Executor)
-              └──────┬───────┘
-                     │
-        ┌────────────┼────────────┐
-        │            │            │
-        ▼            ▼            ▼
-   ┌─────────┐  ┌─────────┐  ┌─────────┐
-   │ Member  │  │ Worker  │  │Reviewer │
-   └─────────┘  └─────────┘  └─────────┘
+```mermaid
+flowchart TD
+    TopHat["Top Hat<br/>(organization root, held by Executor)"]
+    TopHat --> Member
+    TopHat --> Worker
+    TopHat --> Reviewer
 ```
 
 Permission checks should go through [`src/libs/HatManager.sol`](src/libs/HatManager.sol) helpers like `hasAnyHat()` rather than calling `IHats.isWearerOfHat()` directly; `HatManager` handles batched, eligibility-aware lookups. Role assignments (which hats unlock which abilities, e.g. `taskCreatorRoles`, `ddVotingRoles`, `tokenApproverRoles`) are configured per-org in the deployment JSON; see [`script/config/org-config-example.json`](script/config/org-config-example.json).
