@@ -4,13 +4,13 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![CI](https://github.com/poa-box/POP/actions/workflows/ci.yml/badge.svg)](https://github.com/poa-box/POP/actions/workflows/ci.yml)
-[![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20–%5E0.8.30-363636.svg)](https://soliditylang.org)
+[![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.17–%5E0.8.30-363636.svg)](https://soliditylang.org)
 [![Foundry](https://img.shields.io/badge/Built%20with-Foundry-yellow)](https://getfoundry.sh)
 [![Slither](https://img.shields.io/badge/Slither-high--severity%20enforced-success)](slither.config.json)
 
 POP is the contract layer for **Poa**, a no-code DAO builder for community- and worker-owned organizations. Members earn governance through contribution, not capital: every approved task mints non-transferable participation tokens to the worker who did the work. Decisions happen on-chain across multiple weighted voting classes, role assignments use [Hats Protocol](https://hatsprotocol.xyz), and gas is sponsored via a multi-tenant ERC-4337 paymaster with a built-in solidarity fund.
 
-This repository is the Solidity protocol: ~9.2K LOC of core contracts, 40+ test suites, mainnet on Arbitrum and Gnosis. If you're new here, start with [`docs/POP_OVERVIEW.md`](docs/POP_OVERVIEW.md) for the protocol philosophy, then come back here for the technical map.
+This repository is the Solidity protocol: ~17K LOC across `src/`, 40+ test suites, mainnet on Arbitrum and Gnosis. If you're new here, start with [`docs/POP_OVERVIEW.md`](docs/POP_OVERVIEW.md) for the protocol philosophy, then come back here for the technical map.
 
 ---
 
@@ -46,7 +46,7 @@ POP is split across four repositories. Changes to event signatures or storage la
 
 | Repo | Role | Tech |
 |------|------|------|
-| **[poa-box/POP](https://github.com/poa-box/POP)** *(this repo)* | Solidity protocol contracts | Foundry · Solidity `^0.8.20`–`^0.8.30` |
+| **[poa-box/POP](https://github.com/poa-box/POP)** *(this repo)* | Solidity protocol contracts | Foundry · Solidity `^0.8.17`–`^0.8.30` |
 | **[poa-box/subgraph-pop](https://github.com/poa-box/subgraph-pop)** | The Graph indexer turning POP events into a GraphQL API | TypeScript · AssemblyScript · Graph CLI |
 | **[poa-box/Poa-frontend](https://github.com/poa-box/Poa-frontend)** | Next.js web app at [poa.box](https://poa.box) | Next.js 14 · wagmi · RainbowKit · viem · Apollo · Pimlico |
 | **[poa-box/poa-cli](https://github.com/poa-box/poa-cli)** | CLI and autonomous-agent framework | TypeScript |
@@ -186,6 +186,15 @@ Beyond the headline contracts, the source tree contains:
 - **[`src/cashout/`](src/cashout)** holds `CashOutRelay.sol` and helpers for member-initiated treasury exits.
 - **[`src/crosschain/`](src/crosschain)** holds the Hyperlane Hub/Satellite contracts. See [Cross-Chain](#cross-chain-hyperlane).
 - **[`src/interfaces/`](src/interfaces)** holds interface declarations and shared types.
+
+A handful of additional root-level contracts are worth knowing about:
+
+| Contract | Path | Purpose |
+|----------|------|---------|
+| `EligibilityModule` | [`src/EligibilityModule.sol`](src/EligibilityModule.sol) | Hats Protocol eligibility module wired in by `HatsTreeSetup`; gates who is allowed to wear a given hat. |
+| `ToggleModule` | [`src/ToggleModule.sol`](src/ToggleModule.sol) | Hats Protocol toggle module; lets governance enable or disable a hat without revoking it. |
+| `EOADelegation` | [`src/EOADelegation.sol`](src/EOADelegation.sol) | EIP-7702 delegation target so EOAs can act as ERC-4337 smart accounts in-place. |
+| `HatsTreeSetup` | [`src/HatsTreeSetup.sol`](src/HatsTreeSetup.sol) | Mints the org's top hat and role hats during deployment; called by `GovernanceFactory`. |
 
 ---
 
