@@ -20,6 +20,6 @@ docs/book.toml
 script/e2e/e2e-state.json
 
 # Deployment state files (contain deployment-specific addresses)
-script/main-deploy-state.json
-script/satellite-state-*.json
-script/deploy-*.log
+script/config/main-deploy-state.json
+script/config/satellite-state-*.json
+script/logs/deploy-*.log

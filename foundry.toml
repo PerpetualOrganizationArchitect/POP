@@ -9,7 +9,7 @@ bytecode_hash = "none"
 # osaka EVM enables P256 precompile at 0x100 for testing passkey signatures
 evm_version = "osaka"
 ignored_error_codes = ["unused-var"]
-fs_permissions = [{ access = "read-write", path = "./script/infrastructure.json" }, { access = "read-write", path = "./script/org-config-example.json" }, {access = "read-write", path = "./script/org-config-governance-demo.json"}, {access = "read-write", path = "./script/org-config-advanced-demo.json"}, { access = "read-write", path = "./script/e2e/e2e-state.json" }, { access = "read-write", path = "./script/" }]
+fs_permissions = [{ access = "read-write", path = "./script/config/" }, { access = "read-write", path = "./script/e2e/" }, { access = "read-write", path = "./script/" }]
 extra_output_files = ["abi"]
 
 # Production: optimizer enabled for 37% smaller contracts
