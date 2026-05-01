@@ -867,8 +867,8 @@ contract OrgDeployer is Initializable {
         pure
         returns (address[] memory targets, bytes4[] memory selectors, bool[] memory allowed, uint32[] memory gasHints)
     {
-        // Count: QuickJoin(6) + TaskManager(12) + HybridVoting(3) + DDVoting(3) + PaymentManager(5) + EligibilityModule(5) + ParticipationToken(3) + Registry(1) + EducationHub(0 or 4)
-        uint256 count = 38;
+        // Count: QuickJoin(6) + TaskManager(12) + HybridVoting(3) + DDVoting(3) + PaymentManager(5) + EligibilityModule(5) + ParticipationToken(3) + Registry(2) + EducationHub(0 or 4)
+        uint256 count = 39;
         if (educationEnabled) count += 4;
 
         targets = new address[](count);
@@ -886,6 +886,9 @@ contract OrgDeployer is Initializable {
 
         targets[i] = registryAddr;
         selectors[i] = bytes4(keccak256("setProfileMetadata(bytes32)"));
+        i++;
+        targets[i] = registryAddr;
+        selectors[i] = bytes4(keccak256("updateOrgMetaAsAdmin(bytes32,bytes,bytes32)"));
         i++;
 
         if (educationEnabled) {
