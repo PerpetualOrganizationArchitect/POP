@@ -204,10 +204,10 @@ POP gives every organization explicit, on-chain control over when (and whether) 
 
 ```mermaid
 flowchart LR
-    PoaManager --> UB["UpgradeableBeacon<br/>(global, per type)"]
-    UB --> SB["SwitchableBeacon<br/>(per org/module)"]
-    SB --> BP["BeaconProxy"]
-    BP --> Impl["Implementation"]
+    PoaManager --> UB["UpgradeableBeacon (global, per type)"]
+    UB --> SB["SwitchableBeacon (per org/module)"]
+    SB --> BP[BeaconProxy]
+    BP --> Impl[Implementation]
 ```
 
 The protocol-layer `PaymasterHub` is upgradeable via UUPS (proxy-internal upgrade authorization), governed by `PoaManager`. `PoaManager` itself is a non-upgradeable contract that owns the global `UpgradeableBeacon` instances and authorizes UUPS upgrades on the protocol contracts it manages.
@@ -278,7 +278,7 @@ POP does not use OpenZeppelin's `AccessControl`. All role-based access is mediat
 
 ```mermaid
 flowchart TD
-    TopHat["Top Hat<br/>(organization root, held by Executor)"]
+    TopHat["Top Hat (organization root, held by Executor)"]
     TopHat --> Member
     TopHat --> Worker
     TopHat --> Reviewer
