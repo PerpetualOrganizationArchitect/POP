@@ -23,7 +23,7 @@ const PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY;
 const RELAY_ADDRESS = process.env.CASHOUT_RELAY_ADDRESS;
 const VENMO_USERNAME = process.env.VENMO_USERNAME || 'hudsonhrh';
 const CASHOUT_AMOUNT = process.env.CASHOUT_AMOUNT || '10';
-const ARB_RPC = process.env.ARB_RPC || 'https://arb-mainnet.g.alchemy.com/v2/REDACTED_ALCHEMY_KEY';
+const ARB_RPC = process.env.ARB_RPC || 'https://arb1.arbitrum.io/rpc';
 const BASE_RPC = process.env.BASE_RPC || 'https://base.drpc.org';
 
 // ── Addresses ──
