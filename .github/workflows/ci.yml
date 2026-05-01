@@ -30,7 +30,7 @@ jobs:
       # Automatic Deployments
       deploy-on-pr: false
       deploy-on-main: false
-      deploy-script: 'script/DeployInfrastructure.s.sol:DeployInfrastructure'
+      deploy-script: 'script/deploy/DeployInfrastructure.s.sol:DeployInfrastructure'
       deployment-foundry-profile: 'production'
       network-config-path: '.github/deploy-networks.json'
       indexing-wait: 90
