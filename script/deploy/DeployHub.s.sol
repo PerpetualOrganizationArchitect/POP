@@ -3,8 +3,8 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
 import "forge-std/console.sol";
-import {PoaManager} from "../src/PoaManager.sol";
-import {PoaManagerHub} from "../src/crosschain/PoaManagerHub.sol";
+import {PoaManager} from "../../src/PoaManager.sol";
+import {PoaManagerHub} from "../../src/crosschain/PoaManagerHub.sol";
 
 /**
  * @title DeployHub

@@ -6,32 +6,32 @@ import "forge-std/console.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 
 // Implementation contracts
-import {HybridVoting} from "../src/HybridVoting.sol";
-import {DirectDemocracyVoting} from "../src/DirectDemocracyVoting.sol";
-import {Executor} from "../src/Executor.sol";
-import {QuickJoin} from "../src/QuickJoin.sol";
-import {ParticipationToken} from "../src/ParticipationToken.sol";
-import {TaskManager} from "../src/TaskManager.sol";
-import {EducationHub} from "../src/EducationHub.sol";
-import {PaymentManager} from "../src/PaymentManager.sol";
-import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
-import {EligibilityModule} from "../src/EligibilityModule.sol";
-import {ToggleModule} from "../src/ToggleModule.sol";
-import {PasskeyAccount} from "../src/PasskeyAccount.sol";
-import {PasskeyAccountFactory} from "../src/PasskeyAccountFactory.sol";
+import {HybridVoting} from "../../src/HybridVoting.sol";
+import {DirectDemocracyVoting} from "../../src/DirectDemocracyVoting.sol";
+import {Executor} from "../../src/Executor.sol";
+import {QuickJoin} from "../../src/QuickJoin.sol";
+import {ParticipationToken} from "../../src/ParticipationToken.sol";
+import {TaskManager} from "../../src/TaskManager.sol";
+import {EducationHub} from "../../src/EducationHub.sol";
+import {PaymentManager} from "../../src/PaymentManager.sol";
+import {UniversalAccountRegistry} from "../../src/UniversalAccountRegistry.sol";
+import {EligibilityModule} from "../../src/EligibilityModule.sol";
+import {ToggleModule} from "../../src/ToggleModule.sol";
+import {PasskeyAccount} from "../../src/PasskeyAccount.sol";
+import {PasskeyAccountFactory} from "../../src/PasskeyAccountFactory.sol";
 
 // Infrastructure
-import {ImplementationRegistry} from "../src/ImplementationRegistry.sol";
-import {PoaManager} from "../src/PoaManager.sol";
-import {OrgRegistry} from "../src/OrgRegistry.sol";
-import {OrgDeployer} from "../src/OrgDeployer.sol";
-import {PaymasterHub} from "../src/PaymasterHub.sol";
+import {ImplementationRegistry} from "../../src/ImplementationRegistry.sol";
+import {PoaManager} from "../../src/PoaManager.sol";
+import {OrgRegistry} from "../../src/OrgRegistry.sol";
+import {OrgDeployer} from "../../src/OrgDeployer.sol";
+import {PaymasterHub} from "../../src/PaymasterHub.sol";
 
 // Factories
-import {GovernanceFactory} from "../src/factories/GovernanceFactory.sol";
-import {AccessFactory} from "../src/factories/AccessFactory.sol";
-import {ModulesFactory} from "../src/factories/ModulesFactory.sol";
-import {HatsTreeSetup} from "../src/HatsTreeSetup.sol";
+import {GovernanceFactory} from "../../src/factories/GovernanceFactory.sol";
+import {AccessFactory} from "../../src/factories/AccessFactory.sol";
+import {ModulesFactory} from "../../src/factories/ModulesFactory.sol";
+import {HatsTreeSetup} from "../../src/HatsTreeSetup.sol";
 
 /**
  * @title DeployInfrastructure
@@ -373,7 +373,7 @@ contract DeployInfrastructure is Script {
 
         string memory addressesJson = string.concat(part1, part2, part3);
 
-        vm.writeFile("script/infrastructure.json", addressesJson);
+        vm.writeFile("script/config/infrastructure.json", addressesJson);
 
         console.log("\n=== Addresses saved to script/infrastructure.json ===");
         console.log("\nTo deploy an org, simply run:");

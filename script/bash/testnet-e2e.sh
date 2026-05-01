@@ -16,8 +16,8 @@ set -euo pipefail
 #   - jq (for JSON parsing: brew install jq)
 #
 # Usage:
-#   ./script/testnet-e2e.sh                # Full deploy + all tests
-#   ./script/testnet-e2e.sh --skip-deploy  # Skip infrastructure, run tests only
+#   ./script/bash/testnet-e2e.sh                # Full deploy + all tests
+#   ./script/bash/testnet-e2e.sh --skip-deploy  # Skip infrastructure, run tests only
 #############################################################################
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -82,7 +82,7 @@ if [ "${1:-}" != "--skip-deploy" ]; then
 # STEP 1: Deploy DeterministicDeployer on BOTH chains
 ###########################################################################
 echo ">>> STEP 1a: Deploy DeterministicDeployer on Sepolia..."
-forge script script/DeployDeterministicDeployer.s.sol:DeployDeterministicDeployer \
+forge script script/deploy/DeployDeterministicDeployer.s.sol:DeployDeterministicDeployer \
     --rpc-url $HOME_RPC \
     --broadcast \
     --slow \
@@ -90,7 +90,7 @@ forge script script/DeployDeterministicDeployer.s.sol:DeployDeterministicDeploye
 echo ""
 
 echo ">>> STEP 1b: Deploy DeterministicDeployer on Base Sepolia..."
-forge script script/DeployDeterministicDeployer.s.sol:DeployDeterministicDeployer \
+forge script script/deploy/DeployDeterministicDeployer.s.sol:DeployDeterministicDeployer \
     --rpc-url $SAT_RPC \
     --broadcast \
     --slow \

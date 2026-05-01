@@ -4,20 +4,20 @@ pragma solidity ^0.8.20;
 import "forge-std/Script.sol";
 import "forge-std/console.sol";
 
-import {OrgDeployer, ITaskManagerBootstrap} from "../src/OrgDeployer.sol";
-import {TaskManager} from "../src/TaskManager.sol";
-import {HybridVoting} from "../src/HybridVoting.sol";
-import {ParticipationToken} from "../src/ParticipationToken.sol";
-import {QuickJoin} from "../src/QuickJoin.sol";
+import {OrgDeployer, ITaskManagerBootstrap} from "../../src/OrgDeployer.sol";
+import {TaskManager} from "../../src/TaskManager.sol";
+import {HybridVoting} from "../../src/HybridVoting.sol";
+import {ParticipationToken} from "../../src/ParticipationToken.sol";
+import {QuickJoin} from "../../src/QuickJoin.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
-import {Executor, IExecutor} from "../src/Executor.sol";
-import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
-import {OrgRegistry} from "../src/OrgRegistry.sol";
-import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
-import {IEligibilityModule} from "../src/interfaces/IHatsModules.sol";
-import {ModuleTypes} from "../src/libs/ModuleTypes.sol";
-import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
-import {ModulesFactory} from "../src/factories/ModulesFactory.sol";
+import {Executor, IExecutor} from "../../src/Executor.sol";
+import {IHybridVotingInit} from "../../src/libs/ModuleDeploymentLib.sol";
+import {OrgRegistry} from "../../src/OrgRegistry.sol";
+import {UniversalAccountRegistry} from "../../src/UniversalAccountRegistry.sol";
+import {IEligibilityModule} from "../../src/interfaces/IHatsModules.sol";
+import {ModuleTypes} from "../../src/libs/ModuleTypes.sol";
+import {RoleConfigStructs} from "../../src/libs/RoleConfigStructs.sol";
+import {ModulesFactory} from "../../src/factories/ModulesFactory.sol";
 
 /**
  * @title RunOrgActionsAdvanced
@@ -235,7 +235,7 @@ contract RunOrgActionsAdvanced is Script {
         console.log("=======================================================\n");
 
         // Read infrastructure addresses
-        string memory infraJson = vm.readFile("script/infrastructure.json");
+        string memory infraJson = vm.readFile("script/config/infrastructure.json");
         address orgDeployerAddr = vm.parseJsonAddress(infraJson, ".orgDeployer");
         address globalAccountRegistry = vm.parseJsonAddress(infraJson, ".globalAccountRegistry");
         address hatsAddr = vm.parseJsonAddress(infraJson, ".hatsProtocol");
@@ -246,7 +246,7 @@ contract RunOrgActionsAdvanced is Script {
         hats = IHats(hatsAddr);
 
         // Get org config path
-        string memory configPath = vm.envOr("ORG_CONFIG_PATH", string("script/org-config-advanced-demo.json"));
+        string memory configPath = vm.envOr("ORG_CONFIG_PATH", string("script/config/org-config-advanced-demo.json"));
 
         // Load member addresses
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");

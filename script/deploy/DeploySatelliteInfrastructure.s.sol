@@ -6,25 +6,25 @@ import "forge-std/console.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 
 // Infrastructure
-import {PoaManager} from "../src/PoaManager.sol";
-import {ImplementationRegistry} from "../src/ImplementationRegistry.sol";
-import {PoaManagerSatellite} from "../src/crosschain/PoaManagerSatellite.sol";
-import {DeterministicDeployer} from "../src/crosschain/DeterministicDeployer.sol";
+import {PoaManager} from "../../src/PoaManager.sol";
+import {ImplementationRegistry} from "../../src/ImplementationRegistry.sol";
+import {PoaManagerSatellite} from "../../src/crosschain/PoaManagerSatellite.sol";
+import {DeterministicDeployer} from "../../src/crosschain/DeterministicDeployer.sol";
 
 // Implementations
-import {HybridVoting} from "../src/HybridVoting.sol";
-import {DirectDemocracyVoting} from "../src/DirectDemocracyVoting.sol";
-import {Executor} from "../src/Executor.sol";
-import {QuickJoin} from "../src/QuickJoin.sol";
-import {ParticipationToken} from "../src/ParticipationToken.sol";
-import {TaskManager} from "../src/TaskManager.sol";
-import {EducationHub} from "../src/EducationHub.sol";
-import {PaymentManager} from "../src/PaymentManager.sol";
-import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
-import {EligibilityModule} from "../src/EligibilityModule.sol";
-import {ToggleModule} from "../src/ToggleModule.sol";
-import {PasskeyAccount} from "../src/PasskeyAccount.sol";
-import {PasskeyAccountFactory} from "../src/PasskeyAccountFactory.sol";
+import {HybridVoting} from "../../src/HybridVoting.sol";
+import {DirectDemocracyVoting} from "../../src/DirectDemocracyVoting.sol";
+import {Executor} from "../../src/Executor.sol";
+import {QuickJoin} from "../../src/QuickJoin.sol";
+import {ParticipationToken} from "../../src/ParticipationToken.sol";
+import {TaskManager} from "../../src/TaskManager.sol";
+import {EducationHub} from "../../src/EducationHub.sol";
+import {PaymentManager} from "../../src/PaymentManager.sol";
+import {UniversalAccountRegistry} from "../../src/UniversalAccountRegistry.sol";
+import {EligibilityModule} from "../../src/EligibilityModule.sol";
+import {ToggleModule} from "../../src/ToggleModule.sol";
+import {PasskeyAccount} from "../../src/PasskeyAccount.sol";
+import {PasskeyAccountFactory} from "../../src/PasskeyAccountFactory.sol";
 
 /**
  * @title DeploySatelliteInfrastructure

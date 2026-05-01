@@ -102,6 +102,11 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
     event RegisterAndQuickJoinedWithPasskeyByMaster(
         address indexed master, address indexed account, bytes32 indexed credentialId, string username, uint256[] hatIds
     );
+    event HatsClaimed(address indexed user, uint256[] claimHatIds);
+    event RegisterAndClaimedHats(address indexed user, string username, uint256[] claimHatIds);
+    event RegisterAndClaimedHatsWithPasskey(
+        address indexed account, bytes32 indexed credentialId, string username, uint256[] claimHatIds
+    );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -320,6 +325,99 @@ contract QuickJoin is Initializable, ContextUpgradeable, ReentrancyGuardUpgradea
         }
 
         emit RegisterAndQuickJoinedWithPasskey(account, passkey.credentialId, username, l.memberHatIds);
+    }
+
+    /* ───────── Vouch-claim paths: mint caller-specified hats ─────── */
+
+    /// @notice Claim specific hats for an EOA user who already has a username.
+    /// @dev Used by vouch-first flow: user was vouched, now claims the specific hat(s).
+    ///      Hats Protocol enforces eligibility via EligibilityModule — if the user
+    ///      isn't vouched/eligible for a hat, mintHat reverts with NotEligible.
+    /// @param claimHatIds Hat IDs to mint (e.g., the Executive hat the user was vouched for)
+    function claimHatsWithUser(uint256[] calldata claimHatIds) external nonReentrant {
+        Layout storage l = _layout();
+        string memory existing = l.accountRegistry.getUsername(_msgSender());
+        if (bytes(existing).length == 0) revert NoUsername();
+
+        if (claimHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(_msgSender(), claimHatIds);
+        }
+
+        emit HatsClaimed(_msgSender(), claimHatIds);
+    }
+
+    /// @notice Register username + claim specific hats for an EOA user.
+    /// @param user       The EOA address to register and mint hats to.
+    /// @param username   The desired username.
+    /// @param deadline   EIP-712 signature deadline.
+    /// @param nonce      User's current nonce on the registry.
+    /// @param signature  EIP-712 ECDSA signature for registration.
+    /// @param claimHatIds Hat IDs to mint.
+    function registerAndClaimHats(
+        address user,
+        string calldata username,
+        uint256 deadline,
+        uint256 nonce,
+        bytes calldata signature,
+        uint256[] calldata claimHatIds
+    ) external nonReentrant {
+        if (user == address(0)) revert ZeroUser();
+
+        Layout storage l = _layout();
+
+        // 1. Register username
+        l.accountRegistry.registerAccountBySig(user, username, deadline, nonce, signature);
+
+        // 2. Mint claimed hats
+        if (claimHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(user, claimHatIds);
+        }
+
+        emit RegisterAndClaimedHats(user, username, claimHatIds);
+    }
+
+    /// @notice Create passkey account, register username, and claim specific hats.
+    /// @param passkey    Passkey enrollment data.
+    /// @param username   The desired username.
+    /// @param deadline   Assertion expiration timestamp.
+    /// @param nonce      Account's current nonce on the registry.
+    /// @param auth       WebAuthn assertion data proving passkey ownership.
+    /// @param claimHatIds Hat IDs to mint.
+    /// @return account   The created/existing passkey account address.
+    function registerAndClaimHatsWithPasskey(
+        PasskeyEnrollment calldata passkey,
+        string calldata username,
+        uint256 deadline,
+        uint256 nonce,
+        WebAuthnLib.WebAuthnAuth calldata auth,
+        uint256[] calldata claimHatIds
+    ) external nonReentrant returns (address account) {
+        Layout storage l = _layout();
+        if (address(l.universalFactory) == address(0)) revert PasskeyFactoryNotSet();
+
+        // 1. Register username via passkey sig
+        l.accountRegistry
+            .registerAccountByPasskeySig(
+                passkey.credentialId,
+                passkey.publicKeyX,
+                passkey.publicKeyY,
+                passkey.salt,
+                username,
+                deadline,
+                nonce,
+                auth
+            );
+
+        // 2. Create PasskeyAccount (returns existing if already deployed)
+        account = l.universalFactory
+            .createAccount(passkey.credentialId, passkey.publicKeyX, passkey.publicKeyY, passkey.salt);
+
+        // 3. Mint claimed hats
+        if (claimHatIds.length > 0) {
+            IExecutorHatMinter(l.executor).mintHatsForUser(account, claimHatIds);
+        }
+
+        emit RegisterAndClaimedHatsWithPasskey(account, passkey.credentialId, username, claimHatIds);
     }
 
     /// @notice Master-deploy path: create passkey account, register username, and join.

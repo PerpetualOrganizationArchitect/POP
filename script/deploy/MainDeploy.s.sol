@@ -6,30 +6,30 @@ import "forge-std/console.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 
 // Shared contract type registry (single source of truth for the 13 application types)
-import {DeployHelper} from "./helpers/DeployHelper.s.sol";
+import {DeployHelper} from "../helpers/DeployHelper.s.sol";
 
 // Infrastructure
-import {ImplementationRegistry} from "../src/ImplementationRegistry.sol";
-import {PoaManager} from "../src/PoaManager.sol";
-import {OrgRegistry} from "../src/OrgRegistry.sol";
-import {OrgDeployer, ITaskManagerBootstrap} from "../src/OrgDeployer.sol";
-import {PaymasterHub} from "../src/PaymasterHub.sol";
-import {UniversalAccountRegistry} from "../src/UniversalAccountRegistry.sol";
+import {ImplementationRegistry} from "../../src/ImplementationRegistry.sol";
+import {PoaManager} from "../../src/PoaManager.sol";
+import {OrgRegistry} from "../../src/OrgRegistry.sol";
+import {OrgDeployer, ITaskManagerBootstrap} from "../../src/OrgDeployer.sol";
+import {PaymasterHub} from "../../src/PaymasterHub.sol";
+import {UniversalAccountRegistry} from "../../src/UniversalAccountRegistry.sol";
 
 // Factories
-import {GovernanceFactory} from "../src/factories/GovernanceFactory.sol";
-import {AccessFactory} from "../src/factories/AccessFactory.sol";
-import {ModulesFactory} from "../src/factories/ModulesFactory.sol";
-import {HatsTreeSetup} from "../src/HatsTreeSetup.sol";
+import {GovernanceFactory} from "../../src/factories/GovernanceFactory.sol";
+import {AccessFactory} from "../../src/factories/AccessFactory.sol";
+import {ModulesFactory} from "../../src/factories/ModulesFactory.sol";
+import {HatsTreeSetup} from "../../src/HatsTreeSetup.sol";
 
 // Cross-chain
-import {DeterministicDeployer} from "../src/crosschain/DeterministicDeployer.sol";
-import {PoaManagerHub} from "../src/crosschain/PoaManagerHub.sol";
-import {PoaManagerSatellite} from "../src/crosschain/PoaManagerSatellite.sol";
+import {DeterministicDeployer} from "../../src/crosschain/DeterministicDeployer.sol";
+import {PoaManagerHub} from "../../src/crosschain/PoaManagerHub.sol";
+import {PoaManagerSatellite} from "../../src/crosschain/PoaManagerSatellite.sol";
 
 // Config structs
-import {IHybridVotingInit} from "../src/libs/ModuleDeploymentLib.sol";
-import {RoleConfigStructs} from "../src/libs/RoleConfigStructs.sol";
+import {IHybridVotingInit} from "../../src/libs/ModuleDeploymentLib.sol";
+import {RoleConfigStructs} from "../../src/libs/RoleConfigStructs.sol";
 
 // ════════════════════════════════════════════════════════════════
 //  STEP 1: Deploy Home Chain
@@ -488,8 +488,8 @@ contract DeployHomeChain is DeployHelper {
         string memory rootJson = vm.serializeString(root, "homeChain", homeJson);
 
         // Write main JSON, then add empty satellites array
-        vm.writeJson(rootJson, "script/main-deploy-state.json");
-        vm.writeJson("[]", "script/main-deploy-state.json", ".satellites");
+        vm.writeJson(rootJson, "script/config/main-deploy-state.json");
+        vm.writeJson("[]", "script/config/main-deploy-state.json", ".satellites");
         console.log("\nState written to script/main-deploy-state.json");
     }
 }
@@ -534,7 +534,7 @@ contract DeploySatellite is DeployHelper {
         address deployer = vm.addr(deployerKey);
 
         // Read hub address and domain from state file
-        string memory state = vm.readFile("script/main-deploy-state.json");
+        string memory state = vm.readFile("script/config/main-deploy-state.json");
         address hubAddress = vm.parseJsonAddress(state, ".homeChain.hub");
         uint32 hubDomain = uint32(vm.parseJsonUint(state, ".homeChain.hubDomain"));
 
@@ -741,7 +741,8 @@ contract DeploySatellite is DeployHelper {
         vm.serializeAddress(satObj, "modulesFactory", infra.modulesFactory);
         string memory satJson = vm.serializeAddress(satObj, "hatsTreeSetup", infra.hatsTreeSetup);
 
-        string memory filename = string.concat("script/satellite-state-", vm.toString(uint256(satDomain)), ".json");
+        string memory filename =
+            string.concat("script/config/satellite-state-", vm.toString(uint256(satDomain)), ".json");
         vm.writeJson(satJson, filename);
         console.log("Satellite state written to", filename);
     }
@@ -791,7 +792,7 @@ contract RegisterAndTransfer is Script {
         uint256 numSatellites = vm.envUint("NUM_SATELLITES");
 
         // Read state
-        string memory state = vm.readFile("script/main-deploy-state.json");
+        string memory state = vm.readFile("script/config/main-deploy-state.json");
         address hubAddr = vm.parseJsonAddress(state, ".homeChain.hub");
         address executorAddr = vm.parseJsonAddress(state, ".homeChain.governance.executor");
 
@@ -828,7 +829,8 @@ contract RegisterAndTransfer is Script {
             }
 
             // Read satellite address from its state file
-            string memory filename = string.concat("script/satellite-state-", vm.toString(uint256(domain)), ".json");
+            string memory filename =
+                string.concat("script/config/satellite-state-", vm.toString(uint256(domain)), ".json");
             string memory satState = vm.readFile(filename);
             address satAddr = vm.parseJsonAddress(satState, ".satellite");
 
@@ -869,7 +871,7 @@ contract VerifyDeployment is Script {
     }
 
     function run() public view {
-        string memory state = vm.readFile("script/main-deploy-state.json");
+        string memory state = vm.readFile("script/config/main-deploy-state.json");
         address hubAddr = vm.parseJsonAddress(state, ".homeChain.hub");
         address executorAddr = vm.parseJsonAddress(state, ".homeChain.governance.executor");
         address pmAddr = vm.parseJsonAddress(state, ".homeChain.poaManager");

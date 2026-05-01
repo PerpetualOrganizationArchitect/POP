@@ -122,6 +122,7 @@ contract DirectDemocracyVoting is Initializable {
     );
     event VoteCast(uint256 id, address voter, uint8[] idxs, uint8[] weights);
     event Winner(uint256 id, uint256 winningIdx, bool valid);
+    event ProposalExecutionFailed(uint256 indexed id, uint256 indexed winningIdx, bytes reason);
     event ExecutorUpdated(address newExecutor);
     event TargetAllowed(address target, bool allowed);
     event ProposalCleaned(uint256 id, uint256 cleaned);
@@ -261,7 +262,6 @@ contract DirectDemocracyVoting is Initializable {
         if (batchLen > MAX_CALLS) revert VotingErrors.TooManyCalls();
         for (uint256 j; j < batchLen;) {
             if (!l.allowedTarget[batch[j].target]) revert VotingErrors.TargetNotAllowed();
-            if (batch[j].target == address(this)) revert VotingErrors.TargetSelf();
             unchecked {
                 ++j;
             }
@@ -430,13 +430,15 @@ contract DirectDemocracyVoting is Initializable {
         if (valid && batch.length > 0) {
             uint256 len = batch.length;
             for (uint256 i; i < len;) {
-                if (batch[i].target == address(this)) revert VotingErrors.TargetSelf();
                 if (!l.allowedTarget[batch[i].target]) revert VotingErrors.TargetNotAllowed();
                 unchecked {
                     ++i;
                 }
             }
-            l.executor.execute(id, batch);
+            try l.executor.execute(id, batch) {}
+            catch (bytes memory reason) {
+                emit ProposalExecutionFailed(id, winner, reason);
+            }
         }
         emit Winner(id, winner, valid);
     }

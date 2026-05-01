@@ -323,6 +323,370 @@ contract VotingMathTest is Test {
         assertEq(second, 0, "Second should be 0");
     }
 
+    /* ─────────── Test pickWinnerNSlices ─────────── */
+
+    // ---------- Helpers ----------
+
+    /// @dev Build a uint8[] slice array inline.
+    function _slices1(uint8 a) internal pure returns (uint8[] memory s) {
+        s = new uint8[](1);
+        s[0] = a;
+    }
+
+    function _slices2(uint8 a, uint8 b) internal pure returns (uint8[] memory s) {
+        s = new uint8[](2);
+        s[0] = a;
+        s[1] = b;
+    }
+
+    function _slices3(uint8 a, uint8 b, uint8 c) internal pure returns (uint8[] memory s) {
+        s = new uint8[](3);
+        s[0] = a;
+        s[1] = b;
+        s[2] = c;
+    }
+
+    /// @dev Build a 2-D option×class raw matrix with the given dimensions.
+    function _matrix(uint256 numOptions, uint256 numClasses) internal pure returns (uint256[][] memory m) {
+        m = new uint256[][](numOptions);
+        for (uint256 i; i < numOptions; ++i) {
+            m[i] = new uint256[](numClasses);
+        }
+    }
+
+    function _totals(uint256 a) internal pure returns (uint256[] memory t) {
+        t = new uint256[](1);
+        t[0] = a;
+    }
+
+    function _totals2(uint256 a, uint256 b) internal pure returns (uint256[] memory t) {
+        t = new uint256[](2);
+        t[0] = a;
+        t[1] = b;
+    }
+
+    /// @dev Expected scaled score for an option given its raw matrix row.
+    ///      Mirrors the library's integer math at the test level so we can
+    ///      reason about expected outputs without reimplementing the loop.
+    function _expectedScore(uint256[] memory optRow, uint256[] memory totals, uint8[] memory slices)
+        internal
+        pure
+        returns (uint256 score)
+    {
+        for (uint256 c; c < slices.length; ++c) {
+            if (totals[c] > 0) {
+                score += (optRow[c] * slices[c] * VotingMath.N_SLICE_PRECISION) / totals[c];
+            }
+        }
+    }
+
+    // ---------- Basic behavior ----------
+
+    /// @notice Empty options array returns (0, false, 0, 0) — defensive path.
+    function testPickWinnerNSlices_EmptyOptions() public {
+        uint256[][] memory m = new uint256[][](0);
+        (uint256 win, bool ok, uint256 hi, uint256 second) =
+            VotingMath.pickWinnerNSlices(m, _totals(0), _slices1(100), 51, true);
+        assertEq(win, 0);
+        assertFalse(ok);
+        assertEq(hi, 0);
+        assertEq(second, 0);
+    }
+
+    /// @notice Single class, clear winner above threshold.
+    function testPickWinnerNSlices_SingleClassSimple() public {
+        uint256[][] memory m = _matrix(3, 1);
+        m[0][0] = 60; // option 0 : 60/100
+        m[1][0] = 30;
+        m[2][0] = 10;
+
+        (uint256 win, bool ok, uint256 hi, uint256 second) =
+            VotingMath.pickWinnerNSlices(m, _totals(100), _slices1(100), 51, true);
+
+        assertEq(win, 0);
+        assertTrue(ok);
+        // 60/100 × 100 × PRECISION = 600_000
+        assertEq(hi, 60 * VotingMath.N_SLICE_PRECISION);
+        // 30/100 × 100 × PRECISION = 300_000
+        assertEq(second, 30 * VotingMath.N_SLICE_PRECISION);
+    }
+
+    /// @notice Scaled return values match thresholdPct scaled by PRECISION.
+    function testPickWinnerNSlices_ThresholdScaling() public {
+        uint256[][] memory m = _matrix(2, 1);
+        m[0][0] = 51;
+        m[1][0] = 49;
+
+        // Exactly-at-threshold: 51/100 × 100 = 51 scaled. Threshold = 51 scaled.
+        (, bool ok,,) = VotingMath.pickWinnerNSlices(m, _totals(100), _slices1(100), 51, true);
+        assertTrue(ok, "51% should meet 51% threshold exactly");
+
+        // One point below threshold: 50/100 × 100 = 50 scaled.
+        m[0][0] = 50;
+        m[1][0] = 50;
+        (, ok,,) = VotingMath.pickWinnerNSlices(m, _totals(100), _slices1(100), 51, true);
+        assertFalse(ok, "50% should NOT meet 51% threshold");
+    }
+
+    // ---------- The bug this fix targets ----------
+
+    /// @notice The Argus proposal 65 case: options 0 and 1 have different
+    ///         on-chain raw totals in the ERC20 class; pre-fix integer math
+    ///         collapsed them to a tie. With PRECISION scaling, the higher
+    ///         raw-total option correctly wins.
+    function testPickWinnerNSlices_LargeTokenBalances_PrecisionMatters() public {
+        // Real-world-shaped inputs from Argus proposal 65.
+        uint256[][] memory m = _matrix(6, 2);
+        // Class 0 (DIRECT): 65, 65, 30, 60, 40, 40 (sum = 300)
+        m[0][0] = 65;
+        m[1][0] = 65;
+        m[2][0] = 30;
+        m[3][0] = 60;
+        m[4][0] = 40;
+        m[5][0] = 40;
+        // Class 1 (ERC20): two ~3.2e12 values that differ at 11th digit
+        m[0][1] = 3_162_353_072_405;
+        m[1][1] = 3_196_948_421_670;
+        m[2][1] = 1_451_588_543_205;
+        m[3][1] = 2_940_384_589_460;
+        m[4][1] = 1_983_319_959_150;
+        m[5][1] = 1_967_328_361_410;
+
+        uint256[] memory totals = _totals2(300, 14_701_922_947_300);
+        uint8[] memory slices = _slices2(80, 20);
+
+        (uint256 win, bool ok, uint256 hi, uint256 second) = VotingMath.pickWinnerNSlices(m, totals, slices, 51, true);
+
+        // Pre-fix: both options would score 21 exactly and option 0 would win
+        // the tie by iteration order with ok=false (strict margin fails).
+        // Post-fix: option 1 actually has the higher raw-weighted score.
+        assertEq(win, 1, "Option 1 has higher ERC20 class weighted support");
+        assertTrue(hi > second, "Scores must now distinguish cleanly");
+
+        // Threshold still not met (21.68% < 51%), so ok is false, but for the
+        // correct reason — threshold, not spurious tie.
+        assertFalse(ok, "51% threshold not met regardless of precision");
+    }
+
+    /// @notice Genuine equal-score tie behaves the same before and after fix:
+    ///         first iterated option wins, strict-majority fails.
+    function testPickWinnerNSlices_ExactTie_FirstWinsStrictFails() public {
+        uint256[][] memory m = _matrix(2, 1);
+        m[0][0] = 50;
+        m[1][0] = 50;
+
+        (uint256 win, bool ok, uint256 hi, uint256 second) =
+            VotingMath.pickWinnerNSlices(m, _totals(100), _slices1(100), 40, true);
+
+        assertEq(win, 0, "First iterated option wins the tie");
+        assertEq(hi, second, "True tie: hi == second");
+        assertFalse(ok, "Strict majority fails on tie");
+    }
+
+    /// @notice Non-strict mode accepts ties.
+    function testPickWinnerNSlices_Tie_NonStrictPasses() public {
+        uint256[][] memory m = _matrix(2, 1);
+        m[0][0] = 50;
+        m[1][0] = 50;
+
+        (, bool ok,,) = VotingMath.pickWinnerNSlices(m, _totals(100), _slices1(100), 40, false);
+
+        assertTrue(ok, "Non-strict allows the tie, threshold met");
+    }
+
+    // ---------- Multi-class correctness ----------
+
+    /// @notice Two classes with equal slices — each class contributes up to
+    ///         its slice; option 0 wins both classes.
+    function testPickWinnerNSlices_TwoClasses_BothContribute() public {
+        uint256[][] memory m = _matrix(2, 2);
+        m[0][0] = 80; // 80% of class 0
+        m[1][0] = 20;
+        m[0][1] = 70; // 70% of class 1
+        m[1][1] = 30;
+
+        (uint256 win, bool ok,,) = VotingMath.pickWinnerNSlices(m, _totals2(100, 100), _slices2(50, 50), 51, true);
+
+        assertEq(win, 0);
+        // score opt 0 = (80 × 50)/100 + (70 × 50)/100 = 40 + 35 = 75 (scaled)
+        // score opt 1 = (20 × 50)/100 + (30 × 50)/100 = 10 + 15 = 25 (scaled)
+        // Threshold 51 met.
+        assertTrue(ok);
+    }
+
+    /// @notice Class with zero voters contributes zero to every option,
+    ///         preserving correct ordering on the remaining class.
+    function testPickWinnerNSlices_ZeroClassTotalContributesZero() public {
+        uint256[][] memory m = _matrix(2, 2);
+        m[0][0] = 60;
+        m[1][0] = 40;
+        // Class 1 has all zeros (nobody voted in this class)
+        m[0][1] = 0;
+        m[1][1] = 0;
+
+        (uint256 win, bool ok, uint256 hi,) =
+            VotingMath.pickWinnerNSlices(m, _totals2(100, 0), _slices2(70, 30), 40, true);
+
+        assertEq(win, 0);
+        // opt 0 raw score = (60 × 70) / 100 = 42, class 1 contributes 0
+        // hi scaled = 42 × PRECISION
+        assertEq(hi, 42 * VotingMath.N_SLICE_PRECISION);
+        // Threshold 40 met, strict margin passes.
+        assertTrue(ok);
+    }
+
+    /// @notice Three classes with non-uniform slices.
+    function testPickWinnerNSlices_ThreeClasses() public {
+        uint256[][] memory m = _matrix(3, 3);
+        // Class 0 (slice 50): opt 0 dominates
+        m[0][0] = 100;
+        m[1][0] = 0;
+        m[2][0] = 0;
+        // Class 1 (slice 30): opt 1 dominates
+        m[0][1] = 0;
+        m[1][1] = 100;
+        m[2][1] = 0;
+        // Class 2 (slice 20): opt 2 dominates
+        m[0][2] = 0;
+        m[1][2] = 0;
+        m[2][2] = 100;
+
+        uint256[] memory t3 = new uint256[](3);
+        t3[0] = 100;
+        t3[1] = 100;
+        t3[2] = 100;
+
+        (uint256 win, bool ok,,) = VotingMath.pickWinnerNSlices(m, t3, _slices3(50, 30, 20), 51, true);
+
+        // opt 0 = 50 × PRECISION, opt 1 = 30 × PRECISION, opt 2 = 20 × PRECISION.
+        // Threshold 51 NOT met (50 < 51).
+        assertEq(win, 0);
+        assertFalse(ok, "50% < 51% threshold");
+    }
+
+    // ---------- Vote-weight distribution ----------
+
+    /// @notice A voter splitting weight across multiple options reduces each
+    ///         option's share proportionally — correctness check for the
+    ///         common "rank priorities" voting pattern.
+    function testPickWinnerNSlices_WeightSplit() public {
+        // Simulate the state the contract's vote() would produce if a voter
+        // distributed 70/30 between two options with a single class of 100 raw.
+        uint256[][] memory m = _matrix(2, 1);
+        m[0][0] = 70; // (100 × 70)/100 = 70
+        m[1][0] = 30;
+
+        (uint256 win, bool ok, uint256 hi, uint256 second) =
+            VotingMath.pickWinnerNSlices(m, _totals(100), _slices1(100), 51, true);
+
+        assertEq(win, 0);
+        assertEq(hi, 70 * VotingMath.N_SLICE_PRECISION);
+        assertEq(second, 30 * VotingMath.N_SLICE_PRECISION);
+        assertTrue(ok);
+    }
+
+    // ---------- Overflow / edge bounds ----------
+
+    /// @notice Max-sized inputs don't overflow uint256. classRaw is bounded
+    ///         by uint128 on-chain (see HybridVoting.PollOption.classRaw),
+    ///         slice by 100, PRECISION by 10000. Product <= 2^128 × 10^6.
+    function testPickWinnerNSlices_NoOverflowAtUint128Max() public {
+        uint256[][] memory m = _matrix(2, 1);
+        m[0][0] = type(uint128).max;
+        m[1][0] = type(uint128).max / 2;
+
+        (uint256 win, bool ok,,) = VotingMath.pickWinnerNSlices(
+            m, _totals(uint256(type(uint128).max) + uint256(type(uint128).max) / 2), _slices1(100), 10, true
+        );
+
+        assertEq(win, 0, "Larger value wins even at uint128 max");
+        assertTrue(ok);
+    }
+
+    /// @notice When all options get zero from every class (e.g., no votes),
+    ///         score is zero and threshold fails.
+    function testPickWinnerNSlices_AllZeroScores() public {
+        uint256[][] memory m = _matrix(3, 1);
+        // m already zero-initialized. Class total is zero → skipped.
+        (, bool ok, uint256 hi,) = VotingMath.pickWinnerNSlices(m, _totals(0), _slices1(100), 1, true);
+
+        assertEq(hi, 0);
+        assertFalse(ok);
+    }
+
+    // ---------- Fuzz ----------
+
+    /// @notice Fuzz: for arbitrary bounded inputs, the returned winner is
+    ///         always an option with the maximum computed score. No option
+    ///         has a strictly higher score than the reported winner.
+    function testFuzz_PickWinnerNSlices_WinnerHasMaxScore(
+        uint256[6] memory rawsA,
+        uint256[6] memory rawsB,
+        uint8 sliceA,
+        uint8 thresholdPct,
+        bool strict
+    ) public {
+        vm.assume(sliceA > 0 && sliceA <= 100);
+        vm.assume(thresholdPct > 0 && thresholdPct <= 100);
+
+        uint256[][] memory m = _matrix(6, 2);
+        uint256[] memory totals = new uint256[](2);
+        for (uint256 i; i < 6; ++i) {
+            // Bound to uint128 max / 10 to keep totals bounded.
+            m[i][0] = bound(rawsA[i], 0, uint256(type(uint128).max) / 10);
+            m[i][1] = bound(rawsB[i], 0, uint256(type(uint128).max) / 10);
+            totals[0] += m[i][0];
+            totals[1] += m[i][1];
+        }
+
+        uint8[] memory slices = _slices2(sliceA, 100 - sliceA);
+
+        (uint256 win,, uint256 hi, uint256 second) =
+            VotingMath.pickWinnerNSlices(m, totals, slices, thresholdPct, strict);
+
+        // Recompute every score and check winner has the max.
+        uint256 maxScore;
+        uint256 secondMax;
+        for (uint256 opt; opt < 6; ++opt) {
+            uint256 s = _expectedScore(m[opt], totals, slices);
+            if (s > maxScore) {
+                secondMax = maxScore;
+                maxScore = s;
+            } else if (s > secondMax) {
+                secondMax = s;
+            }
+        }
+
+        assertEq(hi, maxScore, "hi should equal max score");
+        assertEq(second, secondMax, "second should equal second-max score");
+        assertEq(_expectedScore(m[win], totals, slices), maxScore, "winner option has max score");
+    }
+
+    /// @notice Fuzz: `ok` correctly reflects (threshold met && margin met).
+    function testFuzz_PickWinnerNSlices_OkInvariant(
+        uint256[4] memory rawsA,
+        uint8 sliceA,
+        uint8 thresholdPct,
+        bool strict
+    ) public {
+        vm.assume(sliceA > 0 && sliceA <= 100);
+        vm.assume(thresholdPct > 0 && thresholdPct <= 100);
+
+        uint256[][] memory m = _matrix(4, 1);
+        uint256[] memory totals = new uint256[](1);
+        for (uint256 i; i < 4; ++i) {
+            m[i][0] = bound(rawsA[i], 0, uint256(type(uint128).max) / 10);
+            totals[0] += m[i][0];
+        }
+
+        uint8[] memory slices = _slices1(sliceA);
+        (, bool ok, uint256 hi, uint256 second) = VotingMath.pickWinnerNSlices(m, totals, slices, thresholdPct, strict);
+
+        bool expectedThresholdMet = hi >= uint256(thresholdPct) * VotingMath.N_SLICE_PRECISION;
+        bool expectedMargin = strict ? (hi > second) : (hi >= second);
+        assertEq(ok, expectedThresholdMet && expectedMargin, "ok matches invariant");
+    }
+
     /* ─────────── Test Math Utilities ─────────── */
 
     function testSqrt() public {

@@ -1838,6 +1838,84 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         );
     }
 
+    function testClearWearerVouches_invalidatesOnlyTargetWearer() public {
+        TestOrgSetup memory setup = _createTestOrg("Clear Wearer Vouches Test DAO");
+        address loser = address(0x5C0E1);
+        address bystander = address(0x5C0E2);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter1);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter2);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, loser);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, bystander);
+
+        // Vouching: quorum=1, combineWithHierarchy=false (so vouch alone gates eligibility)
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 1, setup.memberRoleHat, false, true
+        );
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+
+        // voter1 vouches for both candidates → both eligible.
+        _vouchFor(voter1, setup.eligibilityModule, loser, setup.defaultRoleHat);
+        _vouchFor(voter1, setup.eligibilityModule, bystander, setup.defaultRoleHat);
+        _assertVouchStatus(setup.eligibilityModule, loser, setup.defaultRoleHat, 1, true, "loser vouched");
+        _assertVouchStatus(setup.eligibilityModule, bystander, setup.defaultRoleHat, 1, true, "bystander vouched");
+        _assertEligibilityStatus(setup.eligibilityModule, loser, setup.defaultRoleHat, true, true, "loser pre-clear");
+
+        // Surgical clear for loser only.
+        vm.prank(setup.exec);
+        EligibilityModule(setup.eligibilityModule).clearWearerVouches(loser, setup.defaultRoleHat);
+
+        // Loser: effective vouch count is 0 → ineligible.
+        _assertEligibilityStatus(setup.eligibilityModule, loser, setup.defaultRoleHat, false, false, "loser post-clear");
+
+        // Bystander: untouched, still vouched, still eligible.
+        _assertVouchStatus(setup.eligibilityModule, bystander, setup.defaultRoleHat, 1, true, "bystander preserved");
+        _assertEligibilityStatus(
+            setup.eligibilityModule, bystander, setup.defaultRoleHat, true, true, "bystander still eligible"
+        );
+
+        // Org-wide vouching is still ENABLED — new vouches still work.
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, address(0x5C0E3));
+        _vouchFor(voter1, setup.eligibilityModule, address(0x5C0E3), setup.defaultRoleHat);
+        _assertEligibilityStatus(
+            setup.eligibilityModule, address(0x5C0E3), setup.defaultRoleHat, true, true, "vouching still works"
+        );
+
+        // The loser CAN be re-vouched in by a DIFFERENT voucher (or after the
+        // org bumps the vouch config epoch). Bonus check: voter2 (different
+        // voucher than voter1 who already vouched in the prior epoch) can
+        // vouch the loser back to eligible. Demonstrates the clear isn't a
+        // permanent ban.
+        _mintHat(setup.exec, setup.memberRoleHat, voter2);
+        _vouchFor(voter2, setup.eligibilityModule, loser, setup.defaultRoleHat);
+        _assertEligibilityStatus(
+            setup.eligibilityModule, loser, setup.defaultRoleHat, true, true, "loser re-vouchable by different voucher"
+        );
+    }
+
+    function testClearWearerVouches_onlySuperAdmin() public {
+        TestOrgSetup memory setup = _createTestOrg("ClearWearerVouches Auth Test");
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(EligibilityModule.NotSuperAdmin.selector);
+        EligibilityModule(setup.eligibilityModule).clearWearerVouches(address(0x123), setup.defaultRoleHat);
+    }
+
+    function testClearWearerVouches_zeroAddressReverts() public {
+        TestOrgSetup memory setup = _createTestOrg("ClearWearerVouches Zero Test");
+        vm.prank(setup.exec);
+        vm.expectRevert(EligibilityModule.ZeroAddress.selector);
+        EligibilityModule(setup.eligibilityModule).clearWearerVouches(address(0), setup.defaultRoleHat);
+    }
+
+    function testClearWearerVouches_emitsEvent() public {
+        TestOrgSetup memory setup = _createTestOrg("ClearWearerVouches Event Test");
+        address target = address(0xC1EA1);
+        vm.prank(setup.exec);
+        vm.expectEmit(true, true, true, false);
+        emit EligibilityModule.WearerVouchesCleared(target, setup.defaultRoleHat, setup.exec);
+        EligibilityModule(setup.eligibilityModule).clearWearerVouches(target, setup.defaultRoleHat);
+    }
+
     function testVouchingEvents() public {
         vm.startPrank(orgOwner);
         string[] memory names = new string[](3);
@@ -2364,6 +2442,158 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         vm.prank(voter1);
         vm.expectRevert(abi.encodeWithSelector(EligibilityModule.VouchingNotEnabled.selector));
         EligibilityModule(eligibilityModuleAddr).vouchFor(candidate, defaultRoleHat);
+    }
+
+    /*══════════════════════════════════════════════════════════════════════
+                    MAX DAILY VOUCHES CONFIGURABLE LIMIT
+    ══════════════════════════════════════════════════════════════════════*/
+
+    function testMaxDailyVouches_DefaultIs20() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        assertEq(EligibilityModule(setup.eligibilityModule).getMaxDailyVouches(), 20, "Default should be 20");
+    }
+
+    function testMaxDailyVouches_SetBySuperAdmin() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        vm.prank(setup.exec);
+        em.setMaxDailyVouches(50);
+
+        assertEq(em.getMaxDailyVouches(), 50, "Should be updated to 50");
+    }
+
+    function testMaxDailyVouches_ZeroReverts() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        vm.prank(setup.exec);
+        vm.expectRevert(EligibilityModule.InvalidMaxDailyVouches.selector);
+        em.setMaxDailyVouches(0);
+    }
+
+    function testMaxDailyVouches_NonAdminReverts() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(EligibilityModule.NotSuperAdmin.selector);
+        em.setMaxDailyVouches(10);
+    }
+
+    function testMaxDailyVouches_EnforcedDuringVouching() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        // Set limit to 2 for easy testing
+        vm.prank(setup.exec);
+        em.setMaxDailyVouches(2);
+
+        // Set up voucher
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter1);
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+
+        // Configure vouching: require 1 vouch from MEMBER hat
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 1, setup.memberRoleHat, false, true
+        );
+
+        // Vouch 1 — should succeed
+        address candidate1 = address(0x301);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate1);
+        vm.prank(voter1);
+        em.vouchFor(candidate1, setup.defaultRoleHat);
+
+        // Vouch 2 — should succeed (at limit)
+        address candidate2 = address(0x302);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate2);
+        vm.prank(voter1);
+        em.vouchFor(candidate2, setup.defaultRoleHat);
+
+        // Vouch 3 — should revert (over limit of 2)
+        address candidate3 = address(0x303);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate3);
+        vm.prank(voter1);
+        vm.expectRevert(EligibilityModule.VouchingRateLimitExceeded.selector);
+        em.vouchFor(candidate3, setup.defaultRoleHat);
+
+        // canUserVouch should return false
+        assertFalse(em.canUserVouch(voter1), "canUserVouch should return false at limit");
+    }
+
+    function testMaxDailyVouches_CanIncreaseToUnblock() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        // Set limit to 1
+        vm.prank(setup.exec);
+        em.setMaxDailyVouches(1);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter1);
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 1, setup.memberRoleHat, false, true
+        );
+
+        // Use up the 1 vouch
+        address candidate1 = address(0x401);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate1);
+        vm.prank(voter1);
+        em.vouchFor(candidate1, setup.defaultRoleHat);
+
+        // Blocked
+        assertFalse(em.canUserVouch(voter1), "Should be blocked");
+
+        // Admin increases limit
+        vm.prank(setup.exec);
+        em.setMaxDailyVouches(5);
+
+        // Now unblocked
+        assertTrue(em.canUserVouch(voter1), "Should be unblocked after limit increase");
+
+        // Can vouch again
+        address candidate2 = address(0x402);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate2);
+        vm.prank(voter1);
+        em.vouchFor(candidate2, setup.defaultRoleHat);
+    }
+
+    function testMaxDailyVouches_ResetsNextDay() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        // Set limit to 1
+        vm.prank(setup.exec);
+        em.setMaxDailyVouches(1);
+
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, voter1);
+        _mintHat(setup.exec, setup.memberRoleHat, voter1);
+        _configureVouching(
+            setup.eligibilityModule, setup.exec, setup.defaultRoleHat, 1, setup.memberRoleHat, false, true
+        );
+
+        // Use up today's vouch
+        address candidate1 = address(0x501);
+        _setupUserForVouching(setup.eligibilityModule, setup.exec, candidate1);
+        vm.prank(voter1);
+        em.vouchFor(candidate1, setup.defaultRoleHat);
+
+        assertFalse(em.canUserVouch(voter1), "Should be blocked today");
+
+        // Warp to next day
+        vm.warp(block.timestamp + 1 days);
+
+        assertTrue(em.canUserVouch(voter1), "Should be unblocked next day");
+    }
+
+    function testMaxDailyVouches_EmitsEvent() public {
+        TestOrgSetup memory setup = _createTestOrg("VouchLimit DAO");
+        EligibilityModule em = EligibilityModule(setup.eligibilityModule);
+
+        vm.prank(setup.exec);
+        vm.expectEmit(false, false, false, true);
+        emit EligibilityModule.MaxDailyVouchesSet(42);
+        em.setMaxDailyVouches(42);
     }
 
     function testVouchEpochInvalidatesStaleDataAfterReset() public {
@@ -2898,17 +3128,17 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         uint256 marketingHatId = EligibilityModule(setup.eligibilityModule)
             .createHatWithEligibility(
                 EligibilityModule.CreateHatParams({
-                    parentHatId: setup.defaultRoleHat,
-                    details: "Marketing Team",
-                    maxSupply: 10,
-                    _mutable: true,
-                    imageURI: "ipfs://marketing-hat-image",
-                    defaultEligible: true,
-                    defaultStanding: true,
-                    mintToAddresses: new address[](0),
-                    wearerEligibleFlags: new bool[](0),
-                    wearerStandingFlags: new bool[](0)
-                })
+                parentHatId: setup.defaultRoleHat,
+                details: "Marketing Team",
+                maxSupply: 10,
+                _mutable: true,
+                imageURI: "ipfs://marketing-hat-image",
+                defaultEligible: true,
+                defaultStanding: true,
+                mintToAddresses: new address[](0),
+                wearerEligibleFlags: new bool[](0),
+                wearerStandingFlags: new bool[](0)
+            })
             );
 
         // Verify the marketing hat was created
@@ -3005,17 +3235,17 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         uint256 campaignHatId = EligibilityModule(setup.eligibilityModule)
             .createHatWithEligibility(
                 EligibilityModule.CreateHatParams({
-                    parentHatId: setup.defaultRoleHat,
-                    details: "Campaign Team",
-                    maxSupply: 5,
-                    _mutable: true,
-                    imageURI: "ipfs://campaign-hat-image",
-                    defaultEligible: false,
-                    defaultStanding: true,
-                    mintToAddresses: initialMembers,
-                    wearerEligibleFlags: initialEligible,
-                    wearerStandingFlags: initialStanding
-                })
+                parentHatId: setup.defaultRoleHat,
+                details: "Campaign Team",
+                maxSupply: 5,
+                _mutable: true,
+                imageURI: "ipfs://campaign-hat-image",
+                defaultEligible: false,
+                defaultStanding: true,
+                mintToAddresses: initialMembers,
+                wearerEligibleFlags: initialEligible,
+                wearerStandingFlags: initialStanding
+            })
             );
 
         // Verify the campaign hat was created
@@ -3043,17 +3273,17 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         EligibilityModule(setup.eligibilityModule)
             .createHatWithEligibility(
                 EligibilityModule.CreateHatParams({
-                    parentHatId: setup.defaultRoleHat,
-                    details: "Unauthorized Hat",
-                    maxSupply: 1,
-                    _mutable: true,
-                    imageURI: "",
-                    defaultEligible: true,
-                    defaultStanding: true,
-                    mintToAddresses: new address[](0),
-                    wearerEligibleFlags: new bool[](0),
-                    wearerStandingFlags: new bool[](0)
-                })
+                parentHatId: setup.defaultRoleHat,
+                details: "Unauthorized Hat",
+                maxSupply: 1,
+                _mutable: true,
+                imageURI: "",
+                defaultEligible: true,
+                defaultStanding: true,
+                mintToAddresses: new address[](0),
+                wearerEligibleFlags: new bool[](0),
+                wearerStandingFlags: new bool[](0)
+            })
             );
 
         // Test that marketing executive can manage eligibility of their created hats
@@ -3118,17 +3348,17 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         uint256 teamHatId = EligibilityModule(setup.eligibilityModule)
             .createHatWithEligibility(
                 EligibilityModule.CreateHatParams({
-                    parentHatId: setup.defaultRoleHat,
-                    details: "Team Hat",
-                    maxSupply: 10,
-                    _mutable: true,
-                    imageURI: "ipfs://team-image",
-                    defaultEligible: false,
-                    defaultStanding: true,
-                    mintToAddresses: initialMembers,
-                    wearerEligibleFlags: initialEligible,
-                    wearerStandingFlags: initialStanding
-                })
+                parentHatId: setup.defaultRoleHat,
+                details: "Team Hat",
+                maxSupply: 10,
+                _mutable: true,
+                imageURI: "ipfs://team-image",
+                defaultEligible: false,
+                defaultStanding: true,
+                mintToAddresses: initialMembers,
+                wearerEligibleFlags: initialEligible,
+                wearerStandingFlags: initialStanding
+            })
             );
 
         // Verify both members are immediately wearing the hat
@@ -5987,5 +6217,410 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         assertEq(validationData, 0, "validation should succeed");
         assertTrue(context.length > 0, "context should be populated");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  VOUCHING BOOTSTRAP: defaults.eligible=false + combineWithHierarchy=true
+    //  Tests the recommended 2-tier org config that solves the chicken-and-egg
+    //  problem without governance votes:
+    //    - Deployer gets roles automatically (per-address eligibility set by HatsTreeSetup)
+    //    - Everyone else MUST be vouched (defaults.eligible=false enforces this)
+    //    - Attackers who call QuickJoin directly get hat minted but can't wear it
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// @notice Full E2E test: deploy org with vouching, verify deployer bootstrap, verify
+    ///         non-vouched users are blocked, verify vouch flow enables membership.
+    function testVouchingBootstrapWithDefaultsEligibleFalse() public {
+        // ─── 1. Build org config with vouching enabled at deploy time ───
+        vm.startPrank(orgOwner);
+
+        // Two tiers: MEMBER (index 0) and ADMIN (index 1)
+        RoleConfigStructs.RoleConfig[] memory roles = new RoleConfigStructs.RoleConfig[](2);
+        address[] memory noWearers = new address[](0);
+
+        // Role 0: MEMBER — needs 1 vouch from another MEMBER, defaults NOT eligible
+        roles[0] = RoleConfigStructs.RoleConfig({
+            name: "MEMBER",
+            image: "ipfs://member",
+            metadataCID: bytes32(0),
+            canVote: true,
+            vouching: RoleConfigStructs.RoleVouchingConfig({
+                enabled: true,
+                quorum: 1,
+                voucherRoleIndex: 0, // MEMBER vouches for MEMBER
+                combineWithHierarchy: true
+            }),
+            defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: false, standing: true}),
+            hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: 1}),
+            distribution: RoleConfigStructs.RoleDistributionConfig({
+                mintToDeployer: true, // Deployer gets MEMBER
+                additionalWearers: noWearers
+            }),
+            hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
+        });
+
+        // Role 1: ADMIN — needs 1 vouch from another ADMIN, defaults NOT eligible
+        roles[1] = RoleConfigStructs.RoleConfig({
+            name: "ADMIN",
+            image: "ipfs://admin",
+            metadataCID: bytes32(0),
+            canVote: true,
+            vouching: RoleConfigStructs.RoleVouchingConfig({
+                enabled: true,
+                quorum: 1,
+                voucherRoleIndex: 1, // ADMIN vouches for ADMIN
+                combineWithHierarchy: true
+            }),
+            defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: false, standing: true}),
+            hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}),
+            distribution: RoleConfigStructs.RoleDistributionConfig({
+                mintToDeployer: true, // Deployer gets ADMIN
+                additionalWearers: noWearers
+            }),
+            hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
+        });
+
+        IHybridVotingInit.ClassConfig[] memory classes = _buildLegacyClasses(50, 50, false, 4 ether);
+        address[] memory ddTargets = new address[](0);
+
+        bytes32 vouchOrgId = keccak256("VOUCH-BOOTSTRAP-ORG");
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: vouchOrgId,
+            orgName: "Vouch Bootstrap DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridThresholdPct: 50,
+            ddThresholdPct: 50,
+            hybridClasses: classes,
+            ddInitialTargets: ddTargets,
+            roles: roles,
+            roleAssignments: OrgDeployer.RoleAssignments({
+                quickJoinRolesBitmap: 1, // Only MEMBER via QuickJoin
+                tokenMemberRolesBitmap: 3,
+                tokenApproverRolesBitmap: 2,
+                taskCreatorRolesBitmap: 2,
+                educationCreatorRolesBitmap: 2,
+                educationMemberRolesBitmap: 1,
+                hybridProposalCreatorRolesBitmap: 2,
+                ddVotingRolesBitmap: 1,
+                ddCreatorRolesBitmap: 2
+            }),
+            metadataAdminRoleIndex: 1, // ADMIN manages metadata
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
+        });
+
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
+        vm.stopPrank();
+
+        // Get module addresses and hat IDs
+        address eligMod = orgRegistry.getOrgContract(vouchOrgId, ModuleTypes.ELIGIBILITY_MODULE_ID);
+        uint256 memberHat = orgRegistry.getRoleHat(vouchOrgId, 0);
+        uint256 adminHat = orgRegistry.getRoleHat(vouchOrgId, 1);
+        address exec = result.executor;
+
+        // ─── 2. Verify deployer is eligible and wears both hats ───
+
+        // Deployer has specific wearer rules set by HatsTreeSetup
+        _assertEligibilityStatus(eligMod, orgOwner, memberHat, true, true, "Deployer MEMBER eligibility");
+        _assertEligibilityStatus(eligMod, orgOwner, adminHat, true, true, "Deployer ADMIN eligibility");
+
+        // Deployer actually wears the hats
+        _assertWearingHat(orgOwner, memberHat, true, "Deployer wears MEMBER");
+        _assertWearingHat(orgOwner, adminHat, true, "Deployer wears ADMIN");
+
+        // ─── 3. Verify vouching is correctly configured ───
+
+        assertTrue(EligibilityModule(eligMod).isVouchingEnabled(memberHat), "MEMBER vouching should be enabled");
+        assertTrue(EligibilityModule(eligMod).combinesWithHierarchy(memberHat), "MEMBER should combine with hierarchy");
+        assertTrue(EligibilityModule(eligMod).isVouchingEnabled(adminHat), "ADMIN vouching should be enabled");
+        assertTrue(EligibilityModule(eligMod).combinesWithHierarchy(adminHat), "ADMIN should combine with hierarchy");
+
+        // ─── 4. Verify non-vouched user is NOT eligible (defaults.eligible=false) ───
+
+        address attacker = address(0xA7AC);
+        _assertEligibilityStatus(eligMod, attacker, memberHat, false, true, "Attacker NOT eligible before QuickJoin");
+
+        // Attacker registers a username so QuickJoin doesn't revert on username check
+        vm.prank(attacker);
+        UniversalAccountRegistry(accountRegProxy).registerAccount("attacker");
+
+        // Attacker calls QuickJoin directly (bypassing frontend vouch check)
+        // Hats Protocol checks eligibility during mintHat and REVERTS — attacker can't even get the hat
+        vm.prank(attacker);
+        vm.expectRevert(); // NotEligible() from Hats Protocol
+        QuickJoin(result.quickJoin).quickJoinWithUser();
+
+        // Attacker still not eligible and does not wear the hat
+        _assertEligibilityStatus(
+            eligMod, attacker, memberHat, false, true, "Attacker NOT eligible after QuickJoin attempt"
+        );
+        _assertWearingHat(attacker, memberHat, false, "Attacker does NOT wear MEMBER");
+
+        // ─── 5. Verify legitimate vouch flow works ───
+
+        address newMember = address(0xBEE);
+
+        // Set up join times for vouching (3+ days ago)
+        _setupUserForVouching(eligMod, exec, orgOwner);
+        _setupUserForVouching(eligMod, exec, newMember);
+
+        // newMember is NOT eligible initially
+        _assertEligibilityStatus(eligMod, newMember, memberHat, false, true, "New member NOT eligible initially");
+
+        // Deployer (who wears MEMBER hat) vouches for newMember
+        _vouchFor(orgOwner, eligMod, newMember, memberHat);
+
+        // Now newMember IS eligible (quorum=1, got 1 vouch)
+        _assertEligibilityStatus(eligMod, newMember, memberHat, true, true, "New member eligible after vouch");
+
+        // newMember claims the hat
+        vm.prank(newMember);
+        EligibilityModule(eligMod).claimVouchedHat(memberHat);
+        _assertWearingHat(newMember, memberHat, true, "New member wears MEMBER after claim");
+
+        // ─── 6. Verify the vouched member can vouch for others (chain of trust) ───
+
+        address secondMember = address(0xCEE);
+        _setupUserForVouching(eligMod, exec, secondMember);
+
+        // newMember vouches for secondMember
+        _vouchFor(newMember, eligMod, secondMember, memberHat);
+        _assertEligibilityStatus(eligMod, secondMember, memberHat, true, true, "Second member eligible via chain");
+
+        // ─── 7. Verify ADMIN tier vouch works separately ───
+
+        address newAdmin = address(0xADD);
+        _setupUserForVouching(eligMod, exec, newAdmin);
+
+        // newAdmin is NOT eligible for ADMIN role
+        _assertEligibilityStatus(eligMod, newAdmin, adminHat, false, true, "New admin NOT eligible initially");
+
+        // Deployer (wears ADMIN) vouches for newAdmin on ADMIN hat
+        _vouchFor(orgOwner, eligMod, newAdmin, adminHat);
+        _assertEligibilityStatus(eligMod, newAdmin, adminHat, true, true, "New admin eligible after vouch");
+
+        // Verify a MEMBER cannot vouch for ADMIN (wrong hat)
+        address fakeAdmin = address(0xFAD);
+        _setupUserForVouching(eligMod, exec, fakeAdmin);
+        vm.expectRevert();
+        vm.prank(newMember);
+        EligibilityModule(eligMod).vouchFor(fakeAdmin, adminHat);
+
+        // ─── 8. Verify deployer can actually DO admin actions (the real test) ───
+        // This is what breaks when eligibility is wrong — hat appears assigned but
+        // isWearerOfHat returns false, so createProject/createProposal revert.
+
+        // 8a. Deployer creates a project on TaskManager (requires taskCreator hat = ADMIN)
+        TaskManager tm = TaskManager(result.taskManager);
+        address[] memory managers = new address[](0);
+        uint256[] memory emptyHats = new uint256[](0);
+
+        // This call will revert with NotCreator() if deployer isn't a real hat wearer
+        vm.prank(orgOwner);
+        tm.createProject(
+            TaskManager.BootstrapProjectConfig({
+                title: abi.encode("Bootstrap Project"),
+                metadataHash: bytes32(0),
+                cap: 100 ether,
+                managers: managers,
+                createHats: emptyHats,
+                claimHats: emptyHats,
+                reviewHats: emptyHats,
+                assignHats: emptyHats,
+                bountyTokens: new address[](0),
+                bountyCaps: new uint256[](0)
+            })
+        );
+        // If we reach here, deployer successfully created a project (hat is functional)
+
+        // 8b. Deployer creates a governance proposal (requires hybridProposalCreator hat = ADMIN)
+        HybridVoting hybrid = HybridVoting(result.hybridVoting);
+        IExecutor.Call[][] memory batches = new IExecutor.Call[][](2);
+        batches[0] = new IExecutor.Call[](0);
+        batches[1] = new IExecutor.Call[](0);
+        uint256[] memory hatIds = new uint256[](0);
+
+        vm.prank(orgOwner);
+        hybrid.createProposal(
+            abi.encode("Test Proposal"),
+            bytes32(0),
+            60, // 60 minutes
+            2, // 2 options (for/against)
+            batches,
+            hatIds
+        );
+        // If we get here without reverting, the deployer successfully exercised admin powers
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  VOUCH-CLAIM: claimHatsWithUser mints specific hats for vouched users
+    // ════════════════════════════════════════════════════════════════════════
+
+    function testClaimHatsWithVouching() public {
+        // Deploy org with vouching: defaults.eligible=false, combineWithHierarchy=true
+        vm.startPrank(orgOwner);
+
+        RoleConfigStructs.RoleConfig[] memory roles = new RoleConfigStructs.RoleConfig[](2);
+        address[] memory noWearers = new address[](0);
+
+        // Role 0: MEMBER
+        roles[0] = RoleConfigStructs.RoleConfig({
+            name: "MEMBER",
+            image: "",
+            metadataCID: bytes32(0),
+            canVote: true,
+            vouching: RoleConfigStructs.RoleVouchingConfig({
+                enabled: true, quorum: 1, voucherRoleIndex: 1, combineWithHierarchy: true
+            }),
+            defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: false, standing: true}),
+            hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: 1}),
+            distribution: RoleConfigStructs.RoleDistributionConfig({
+                mintToDeployer: true, additionalWearers: noWearers
+            }),
+            hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
+        });
+
+        // Role 1: EXECUTIVE — vouched by other executives
+        roles[1] = RoleConfigStructs.RoleConfig({
+            name: "EXECUTIVE",
+            image: "",
+            metadataCID: bytes32(0),
+            canVote: true,
+            vouching: RoleConfigStructs.RoleVouchingConfig({
+                enabled: true, quorum: 1, voucherRoleIndex: 1, combineWithHierarchy: true
+            }),
+            defaults: RoleConfigStructs.RoleEligibilityDefaults({eligible: false, standing: true}),
+            hierarchy: RoleConfigStructs.RoleHierarchyConfig({adminRoleIndex: type(uint256).max}),
+            distribution: RoleConfigStructs.RoleDistributionConfig({
+                mintToDeployer: true, additionalWearers: noWearers
+            }),
+            hatConfig: RoleConfigStructs.HatConfig({maxSupply: type(uint32).max, mutableHat: true})
+        });
+
+        bytes32 claimOrgId = keccak256("CLAIM-HATS-ORG");
+
+        OrgDeployer.DeploymentParams memory params = OrgDeployer.DeploymentParams({
+            orgId: claimOrgId,
+            orgName: "Claim Hats DAO",
+            metadataHash: bytes32(0),
+            registryAddr: accountRegProxy,
+            deployerAddress: orgOwner,
+            deployerUsername: "",
+            regDeadline: 0,
+            regNonce: 0,
+            regSignature: "",
+            autoUpgrade: true,
+            hybridThresholdPct: 50,
+            ddThresholdPct: 50,
+            hybridClasses: _buildLegacyClasses(50, 50, false, 4 ether),
+            ddInitialTargets: new address[](0),
+            roles: roles,
+            roleAssignments: OrgDeployer.RoleAssignments({
+                quickJoinRolesBitmap: 1,
+                tokenMemberRolesBitmap: 3,
+                tokenApproverRolesBitmap: 2,
+                taskCreatorRolesBitmap: 2,
+                educationCreatorRolesBitmap: 2,
+                educationMemberRolesBitmap: 1,
+                hybridProposalCreatorRolesBitmap: 2,
+                ddVotingRolesBitmap: 1,
+                ddCreatorRolesBitmap: 2
+            }),
+            metadataAdminRoleIndex: type(uint256).max,
+            passkeyEnabled: false,
+            educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
+            bootstrap: _emptyBootstrap(),
+            paymasterConfig: _defaultPaymasterConfig()
+        });
+
+        OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
+        vm.stopPrank();
+
+        address eligMod = orgRegistry.getOrgContract(claimOrgId, ModuleTypes.ELIGIBILITY_MODULE_ID);
+        uint256 memberHat = orgRegistry.getRoleHat(claimOrgId, 0);
+        uint256 execHat = orgRegistry.getRoleHat(claimOrgId, 1);
+        address exec = result.executor;
+        address qj = result.quickJoin;
+
+        // Deployer wears both hats (bootstrap via HatsTreeSetup)
+        _assertWearingHat(orgOwner, execHat, true, "Deployer wears EXECUTIVE");
+
+        // ─── Test 1: Vouched user claims Executive hat via claimHatsWithUser ───
+
+        address candidate = address(0xCAFE);
+        _setupUserForVouching(eligMod, exec, orgOwner);
+        _setupUserForVouching(eligMod, exec, candidate);
+
+        // Register candidate username (required by claimHatsWithUser)
+        vm.prank(candidate);
+        UniversalAccountRegistry(accountRegProxy).registerAccount("candidate");
+
+        // Deployer vouches for candidate on Executive hat
+        _vouchFor(orgOwner, eligMod, candidate, execHat);
+
+        // Candidate is now eligible but doesn't wear the hat
+        _assertEligibilityStatus(eligMod, candidate, execHat, true, true, "Candidate eligible after vouch");
+        _assertWearingHat(candidate, execHat, false, "Candidate doesn't wear hat yet");
+
+        // Candidate calls claimHatsWithUser with the Executive hat
+        uint256[] memory claimIds = new uint256[](1);
+        claimIds[0] = execHat;
+        vm.prank(candidate);
+        QuickJoin(qj).claimHatsWithUser(claimIds);
+
+        // Candidate now wears Executive hat
+        _assertWearingHat(candidate, execHat, true, "Candidate wears EXECUTIVE after claim");
+
+        // ─── Test 2: Non-vouched user gets NotEligible ───
+
+        address attacker = address(0xBAD1);
+        vm.prank(attacker);
+        UniversalAccountRegistry(accountRegProxy).registerAccount("attacker");
+
+        uint256[] memory attackIds = new uint256[](1);
+        attackIds[0] = execHat;
+        vm.prank(attacker);
+        vm.expectRevert();
+        QuickJoin(qj).claimHatsWithUser(attackIds);
+
+        // ─── Test 3: Empty claimHatIds succeeds (no-op) ───
+
+        address emptyUser = address(0xE001);
+        vm.prank(emptyUser);
+        UniversalAccountRegistry(accountRegProxy).registerAccount("emptyuser");
+
+        uint256[] memory emptyIds = new uint256[](0);
+        vm.prank(emptyUser);
+        QuickJoin(qj).claimHatsWithUser(emptyIds);
+
+        // ─── Test 4: Vouched user claims multiple hats at once ───
+
+        address multiUser = address(0xABC1);
+        _setupUserForVouching(eligMod, exec, multiUser);
+        vm.prank(multiUser);
+        UniversalAccountRegistry(accountRegProxy).registerAccount("multiuser");
+
+        // Vouch for both Member and Executive
+        _vouchFor(orgOwner, eligMod, multiUser, memberHat);
+        _vouchFor(orgOwner, eligMod, multiUser, execHat);
+
+        uint256[] memory multiIds = new uint256[](2);
+        multiIds[0] = memberHat;
+        multiIds[1] = execHat;
+        vm.prank(multiUser);
+        QuickJoin(qj).claimHatsWithUser(multiIds);
+
+        _assertWearingHat(multiUser, memberHat, true, "Multi-user wears MEMBER");
+        _assertWearingHat(multiUser, execHat, true, "Multi-user wears EXECUTIVE");
     }
 }

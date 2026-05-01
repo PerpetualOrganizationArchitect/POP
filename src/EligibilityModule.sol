@@ -36,6 +36,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     error AlreadyVouched();
     error HasNotVouched();
     error VouchingRateLimitExceeded();
+    error InvalidMaxDailyVouches();
     error NewUserVouchingRestricted();
     error ApplicationAlreadyExists();
     error NoActiveApplication();
@@ -99,6 +100,8 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         mapping(uint256 => uint256) vouchConfigEpoch; // hatId => epoch counter
         mapping(uint256 => mapping(address => uint256)) wearerVouchEpoch; // hatId => wearer => epoch of their count
         mapping(uint256 => mapping(address => mapping(address => uint256))) voucherRecordEpoch; // hatId => wearer => voucher => epoch
+        // Configurable daily vouch limit (0 = use DEFAULT_MAX_DAILY_VOUCHES)
+        uint32 maxDailyVouches;
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.eligibilitymodule.storage");
@@ -109,6 +112,14 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         assembly {
             s.slot := slot
         }
+    }
+
+    /// @dev Returns the effective max daily vouches. Uses storage value if set, otherwise the default.
+    /// This provides backward compatibility: existing deployments with maxDailyVouches = 0 (unset)
+    /// automatically get DEFAULT_MAX_DAILY_VOUCHES.
+    function _getMaxDailyVouches() internal view returns (uint32) {
+        uint32 stored = _layout().maxDailyVouches;
+        return stored > 0 ? stored : DEFAULT_MAX_DAILY_VOUCHES;
     }
 
     /*═══════════════════════════════════════ REENTRANCY PROTECTION ═══════════════════════════════════*/
@@ -139,7 +150,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
     /*═══════════════════════════════════ RATE LIMITING CONSTANTS ═══════════════════════════════════*/
 
-    uint32 private constant MAX_DAILY_VOUCHES = 3;
+    uint32 private constant DEFAULT_MAX_DAILY_VOUCHES = 20;
     uint256 private constant NEW_USER_RESTRICTION_DAYS = 0; // Removed wait period for immediate vouching
     uint256 private constant SECONDS_PER_DAY = 86400;
 
@@ -157,6 +168,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     event EligibilityModuleInitialized(address indexed superAdmin, address indexed hatsContract);
     event Vouched(address indexed voucher, address indexed wearer, uint256 indexed hatId, uint32 newCount);
     event VouchRevoked(address indexed voucher, address indexed wearer, uint256 indexed hatId, uint32 newCount);
+    event WearerVouchesCleared(address indexed wearer, uint256 indexed hatId, address indexed admin);
     event VouchConfigSet(
         uint256 indexed hatId, uint32 quorum, uint256 membershipHatId, bool enabled, bool combineWithHierarchy
     );
@@ -178,6 +190,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
     event HatMetadataUpdated(uint256 indexed hatId, string name, bytes32 metadataCID);
     event RoleApplicationSubmitted(uint256 indexed hatId, address indexed applicant, bytes32 applicationHash);
     event RoleApplicationWithdrawn(uint256 indexed hatId, address indexed applicant);
+    event MaxDailyVouchesSet(uint32 maxDailyVouches);
 
     /*═════════════════════════════════════════ MODIFIERS ═════════════════════════════════════════*/
 
@@ -602,6 +615,19 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         emit UserJoinTimeSet(user, block.timestamp);
     }
 
+    /// @notice Set the maximum number of vouches a user can give per day
+    /// @param maxVouches New daily vouch limit (must be > 0)
+    function setMaxDailyVouches(uint32 maxVouches) external onlySuperAdmin {
+        if (maxVouches == 0) revert InvalidMaxDailyVouches();
+        _layout().maxDailyVouches = maxVouches;
+        emit MaxDailyVouchesSet(maxVouches);
+    }
+
+    /// @notice Get the current max daily vouch limit
+    function getMaxDailyVouches() external view returns (uint32) {
+        return _getMaxDailyVouches();
+    }
+
     /*═══════════════════════════════════ METADATA MANAGEMENT ═══════════════════════════════════════*/
 
     /**
@@ -774,7 +800,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
         // Check daily vouch limit
         uint256 currentDay = block.timestamp / SECONDS_PER_DAY;
-        if (l.dailyVouchCount[user][currentDay] >= MAX_DAILY_VOUCHES) {
+        if (l.dailyVouchCount[user][currentDay] >= _getMaxDailyVouches()) {
             revert VouchingRateLimitExceeded();
         }
     }
@@ -818,6 +844,31 @@ contract EligibilityModule is Initializable, IHatsEligibility {
         // Increment epoch to invalidate all stale vouch counts and AlreadyVouched records
         l.vouchConfigEpoch[hatId]++;
         emit VouchConfigSet(hatId, 0, 0, false, false);
+    }
+
+    /**
+     * @notice Surgical per-wearer vouch invalidation for a single hat.
+     * @dev Sets `wearerVouchEpoch` to a sentinel value that will never match
+     *      `vouchConfigEpoch`, so the wearer's effective vouch count for this
+     *      hat is permanently 0 from this point forward (until they get
+     *      re-vouched, which writes a fresh epoch via `vouchFor`).
+     *      Combined with `setWearerEligibility(wearer, hatId, false, false)`
+     *      this is the surgical equivalent of `resetVouches` for one wearer
+     *      — does NOT touch other wearers' vouches and does NOT disable
+     *      vouching org-wide. Designed for the election-loser case on
+     *      vouching-gated hats with available supply.
+     * @param wearer The address whose vouch state to clear for this hat
+     * @param hatId The hat for which to clear vouches
+     */
+    function clearWearerVouches(address wearer, uint256 hatId) external onlySuperAdmin whenNotPaused {
+        if (wearer == address(0)) revert ZeroAddress();
+        Layout storage l = _layout();
+        // type(uint256).max guarantees wearerVouchEpoch != vouchConfigEpoch for
+        // any future epoch (epoch is incremented one-at-a-time by ~25 lines of
+        // code; reaching uint256.max would take 2^256 admin calls).
+        l.wearerVouchEpoch[hatId][wearer] = type(uint256).max;
+        delete l.currentVouchCount[hatId][wearer];
+        emit WearerVouchesCleared(wearer, hatId, msg.sender);
     }
 
     /**
@@ -990,7 +1041,7 @@ contract EligibilityModule is Initializable, IHatsEligibility {
 
         // Check daily vouch limit
         uint256 currentDay = block.timestamp / SECONDS_PER_DAY;
-        return l.dailyVouchCount[user][currentDay] < MAX_DAILY_VOUCHES;
+        return l.dailyVouchCount[user][currentDay] < _getMaxDailyVouches();
     }
 
     function hasSpecificWearerRules(address wearer, uint256 hatId) external view returns (bool) {
