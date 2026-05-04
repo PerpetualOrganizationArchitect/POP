@@ -159,6 +159,16 @@ contract CashOutRelay is Initializable, UUPSUpgradeable, ReentrancyGuardUpgradea
 
     /// @notice Called via try/catch from executeData. External so try/catch works.
     /// @dev Not intended for direct calls — guarded by msg.sender == address(this).
+    ///      Pins `intentAmountRange.min == max == amount` so the deposit can only
+    ///      be filled in full. Prevents partial fills from leaving sub-min dust
+    ///      that no taker is incentivized to clear (gas + per-Venmo-tx overhead
+    ///      makes <$1 fills uneconomical and the residue gets stuck until the
+    ///      depositor manually withdraws it).
+    ///      `params.minIntentAmount` and `params.maxIntentAmount` are deliberately
+    ///      ignored here — the relay is the only thing that knows the actual
+    ///      delivered amount post-bridge slippage and is the only place that can
+    ///      pin the range correctly. The fields remain in CashOutParams for ABI
+    ///      compatibility with frontends that haven't redeployed yet.
     function createZkp2pDeposit(CashOutParams calldata params, uint256 amount) external {
         require(msg.sender == address(this), "only self");
 
@@ -190,7 +200,7 @@ contract CashOutRelay is Initializable, UUPSUpgradeable, ReentrancyGuardUpgradea
         CreateDepositParams memory depositParams = CreateDepositParams({
             token: token,
             amount: amount,
-            intentAmountRange: Range({min: params.minIntentAmount, max: params.maxIntentAmount}),
+            intentAmountRange: Range({min: amount, max: amount}), // full-fill only — see fn-level dev note
             paymentMethods: paymentMethods,
             paymentMethodData: paymentMethodData,
             currencies: currencies,
