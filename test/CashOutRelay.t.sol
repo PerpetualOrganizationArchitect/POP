@@ -14,6 +14,8 @@ contract MockEscrow {
         uint256 amount;
         bytes32 paymentMethod;
         bytes32 payeeDetails;
+        uint256 minIntent;
+        uint256 maxIntent;
     }
 
     DepositRecord[] public deposits;
@@ -36,7 +38,9 @@ contract MockEscrow {
                 depositor: _depositor,
                 amount: _params.amount,
                 paymentMethod: _params.paymentMethods[0],
-                payeeDetails: _params.paymentMethodData[0].payeeDetails
+                payeeDetails: _params.paymentMethodData[0].payeeDetails,
+                minIntent: _params.intentAmountRange.min,
+                maxIntent: _params.intentAmountRange.max
             })
         );
     }
@@ -147,6 +151,16 @@ contract CashOutRelayTest is Test {
     /*═══════════════════════ HELPERS ═══════════════════════*/
 
     function _encodeCashOutParams(address depositor, uint256 amount) internal pure returns (bytes memory) {
+        return _encodeCashOutParamsWithRange(depositor, 1e6, amount);
+    }
+
+    /// @dev Encode CashOutParams with a caller-specified intent range. Used by tests
+    ///      that verify the relay ignores the range fields and pins min==max==delivered.
+    function _encodeCashOutParamsWithRange(address depositor, uint256 minIntent, uint256 maxIntent)
+        internal
+        pure
+        returns (bytes memory)
+    {
         return abi.encode(
             CashOutRelay.CashOutParams({
                 depositor: depositor,
@@ -154,8 +168,8 @@ contract CashOutRelayTest is Test {
                 payeeDetailsHash: PAYEE_HASH,
                 fiatCurrency: USD_CURRENCY,
                 conversionRate: CONVERSION_RATE,
-                minIntentAmount: 1e6, // $1 min
-                maxIntentAmount: amount // max = full amount
+                minIntentAmount: minIntent,
+                maxIntentAmount: maxIntent
             })
         );
     }
@@ -186,11 +200,17 @@ contract CashOutRelayTest is Test {
 
         // Verify: escrow received the deposit
         assertEq(escrow.depositCount(), 1, "Should have 1 deposit");
-        (address depositor, uint256 depAmount, bytes32 method, bytes32 payee) = escrow.deposits(0);
+        (address depositor, uint256 depAmount, bytes32 method, bytes32 payee, uint256 minIntent, uint256 maxIntent) =
+            escrow.deposits(0);
         assertEq(depositor, USER, "Deposit should be owned by user");
         assertEq(depAmount, amount, "Deposit amount should match");
         assertEq(method, VENMO_METHOD, "Payment method should be venmo");
         assertEq(payee, PAYEE_HASH, "Payee hash should match");
+
+        // Full-fill only: intent range is pinned to the deposit amount so partial
+        // fills are impossible (no sub-min dust can be left stranded).
+        assertEq(minIntent, amount, "min intent should equal full deposit amount");
+        assertEq(maxIntent, amount, "max intent should equal full deposit amount");
 
         // Verify: relay has no remaining USDC
         assertEq(usdc.balanceOf(address(relay)), 0, "Relay should have 0 USDC after deposit");
@@ -223,6 +243,60 @@ contract CashOutRelayTest is Test {
 
         assertEq(escrow.depositCount(), 2, "Should have 2 deposits");
         assertEq(usdc.balanceOf(address(relay)), 0, "Relay should be empty");
+    }
+
+    /*═══════════════════════ FULL-FILL ONLY ═══════════════════════*/
+
+    /// @notice Even when params carry a wide intent range, the relay pins the
+    ///         deposit's intent range to the actually-delivered amount. ZKP2P
+    ///         then enforces full-fill-only at intent time, so dust can't be
+    ///         left behind by a partial fill.
+    function testFullFill_RangePinnedToDeliveredAmount_IgnoresParams() public {
+        uint256 amount = 50e6;
+        _mintAndDeliver(amount);
+
+        // Caller asks for a wide range $1..$50; relay must override.
+        bytes memory callData = _encodeCashOutParamsWithRange(USER, 1e6, 50e6);
+        _callExecuteData(keccak256("wide-range"), amount, callData);
+
+        (,,,, uint256 minIntent, uint256 maxIntent) = escrow.deposits(0);
+        assertEq(minIntent, amount, "min must be pinned to delivered amount, not params.min");
+        assertEq(maxIntent, amount, "max must be pinned to delivered amount, not params.max");
+    }
+
+    /// @notice Adversarial range params (zero min, type(uint256).max max) must
+    ///         not weaken the on-deposit constraint — relay overrides regardless.
+    function testFullFill_RangePinned_AdversarialParams() public {
+        uint256 amount = 25e6;
+        _mintAndDeliver(amount);
+
+        bytes memory callData = _encodeCashOutParamsWithRange(USER, 0, type(uint256).max);
+        _callExecuteData(keccak256("adversarial-range"), amount, callData);
+
+        (,,,, uint256 minIntent, uint256 maxIntent) = escrow.deposits(0);
+        assertEq(minIntent, amount, "min must be pinned to delivered, not 0");
+        assertEq(maxIntent, amount, "max must be pinned to delivered, not uint256.max");
+    }
+
+    /// @notice Bungee solvers in production deliver `minOutputAmount`, which is
+    ///         lower than the user's `inputAmount` due to slippage. The deposit
+    ///         range must reflect what actually arrived, not what the user asked
+    ///         for in CashOutParams.maxIntentAmount.
+    function testFullFill_DeliveredAmountMatchesActualBridgeSlippage() public {
+        uint256 inputAmount = 7_000_000; // $7.00 — what the user submitted on Arb
+        uint256 deliveredAmount = 6_948_895; // ~0.73% slippage — real fill from prod
+
+        _mintAndDeliver(deliveredAmount);
+
+        // Frontend encoded params with maxIntentAmount = inputAmount (what user
+        // asked for), but relay sees only deliveredAmount on the destination side.
+        bytes memory callData = _encodeCashOutParamsWithRange(USER, 1e6, inputAmount);
+        _callExecuteData(keccak256("post-slippage"), deliveredAmount, callData);
+
+        (, uint256 depAmount,,, uint256 minIntent, uint256 maxIntent) = escrow.deposits(0);
+        assertEq(depAmount, deliveredAmount, "deposit funded with delivered, not requested");
+        assertEq(minIntent, deliveredAmount, "min tracks actual delivery (post-slippage)");
+        assertEq(maxIntent, deliveredAmount, "max tracks actual delivery (post-slippage)");
     }
 
     /*═══════════════════════ FAILURE & RECOVERY ═══════════════════════*/
@@ -603,9 +677,12 @@ contract CashOutRelayTest is Test {
 
         // Escrow should have the deposit, owned by USER
         assertEq(escrow.depositCount(), 1, "Deposit created");
-        (address depositor, uint256 depAmount,,) = escrow.deposits(0);
+        (address depositor, uint256 depAmount,,, uint256 minIntent, uint256 maxIntent) = escrow.deposits(0);
         assertEq(depositor, USER, "Owned by user");
         assertEq(depAmount, amount, "Correct amount");
+        // CCTP path also pins range to delivered (full-fill only)
+        assertEq(minIntent, amount, "min pinned to delivered (CCTP)");
+        assertEq(maxIntent, amount, "max pinned to delivered (CCTP)");
     }
 
     function testCCTP_NonOwnerReverts() public {
