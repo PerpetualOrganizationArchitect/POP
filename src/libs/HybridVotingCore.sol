@@ -59,6 +59,14 @@ library HybridVotingCore {
         // Validate weights
         VotingMath.validateWeights(VotingMath.Weights({idxs: idxs, weights: weights, optionsLen: p.options.length}));
 
+        // Effects-before-Interactions: flip hasVoted BEFORE any external call
+        // (IERC20.balanceOf inside _calculateClassPower can land on an
+        // attacker-controlled token contract). A re-entry into vote() here
+        // would now hit the AlreadyVoted check above and revert. Reverting
+        // the outer tx (e.g. via the zero-power check below) rolls hasVoted
+        // back atomically, so honest callers are unaffected.
+        p.hasVoted[voter] = true;
+
         // Calculate raw power for each class
         uint256 classCount = p.classesSnapshot.length;
         uint256[] memory classRawPowers = new uint256[](classCount);
@@ -112,11 +120,44 @@ library HybridVotingCore {
             }
         }
 
-        p.hasVoted[voter] = true;
         unchecked {
             p.voterCount++;
         }
         emit VoteCast(id, voter, idxs, weights, classRawPowers, uint64(block.timestamp));
+    }
+
+    /// Async-majority early-close gate (Proposal #60). True iff turnout has
+    /// reached ceil(snapshotEligibleVoters/2) AND a single option holds strict
+    /// majority of total score. snapshotEligibleVoters of 0 (legacy proposals
+    /// pre-upgrade) or type(uint64).max (explicit timer-only opt-out at create
+    /// time) short-circuit to false.
+    function _isEarlyCloseEligible(uint256 id) internal view returns (bool) {
+        HybridVoting.Layout storage l = _layout();
+        if (id >= l._proposals.length) return false;
+        HybridVoting.Proposal storage p = l._proposals[id];
+
+        if (p.snapshotEligibleVoters == 0) return false;
+        if (p.snapshotEligibleVoters == type(uint64).max) return false;
+
+        uint64 threshold = (p.snapshotEligibleVoters + 1) / 2;
+        if (p.voterCount < threshold) return false;
+
+        uint256 totalScore;
+        uint256 winningScore;
+        uint256 optionCount = p.options.length;
+        uint256 classCount = p.classTotalsRaw.length;
+        for (uint256 opt; opt < optionCount;) {
+            uint256 score;
+            for (uint256 cls; cls < classCount;) {
+                score += p.options[opt].classRaw[cls];
+                unchecked { ++cls; }
+            }
+            totalScore += score;
+            if (score > winningScore) winningScore = score;
+            unchecked { ++opt; }
+        }
+
+        return totalScore > 0 && winningScore * 2 > totalScore;
     }
 
     function _calculateClassPower(address voter, HybridVoting.ClassConfig memory cls, HybridVoting.Layout storage l)

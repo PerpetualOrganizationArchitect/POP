@@ -35,6 +35,9 @@ library HybridVotingProposals {
         }
     }
 
+    /// Default proposal creation. Snapshots on-chain eligibility from the
+    /// effective hat array (pollHatIds when restricted, creatorHatIds when
+    /// not) so async-majority early-close is enabled out of the box.
     function createProposal(
         bytes calldata title,
         bytes32 descriptionHash,
@@ -43,7 +46,57 @@ library HybridVotingProposals {
         IExecutor.Call[][] calldata batches,
         uint256[] calldata hatIds
     ) external {
-        uint256 id = _initProposal(title, descriptionHash, minutesDuration, numOptions, batches, hatIds);
+        uint256 id = _initProposal(title, descriptionHash, minutesDuration, numOptions, batches, hatIds, 0);
+
+        uint64 endTs = _layout()._proposals[id].endTimestamp;
+
+        if (hatIds.length > 0) {
+            emit NewHatProposal(id, title, descriptionHash, numOptions, endTs, uint64(block.timestamp), hatIds);
+        } else {
+            emit NewProposal(id, title, descriptionHash, numOptions, endTs, uint64(block.timestamp));
+        }
+    }
+
+    /// Variant that lets the caller supply a higher eligibility hint than
+    /// on-chain truth. Useful when the proposer expects hats to be granted
+    /// (or transferred in) before the proposal closes and wants to keep the
+    /// early-close threshold conservative. The stored snapshot is
+    /// max(callerEligibleHint, on-chain hatSupply sum) — under-count is
+    /// impossible by construction; over-count makes early-close stricter.
+    function createProposalWithEligibleSnapshot(
+        bytes calldata title,
+        bytes32 descriptionHash,
+        uint32 minutesDuration,
+        uint8 numOptions,
+        IExecutor.Call[][] calldata batches,
+        uint256[] calldata hatIds,
+        uint64 callerEligibleHint
+    ) external {
+        uint256 id = _initProposal(title, descriptionHash, minutesDuration, numOptions, batches, hatIds, callerEligibleHint);
+
+        uint64 endTs = _layout()._proposals[id].endTimestamp;
+
+        if (hatIds.length > 0) {
+            emit NewHatProposal(id, title, descriptionHash, numOptions, endTs, uint64(block.timestamp), hatIds);
+        } else {
+            emit NewProposal(id, title, descriptionHash, numOptions, endTs, uint64(block.timestamp));
+        }
+    }
+
+    /// Variant that explicitly opts out of async-majority early-close, even
+    /// when the timer is unexpired. snapshotEligibleVoters is set to
+    /// type(uint64).max so the early-close gate can never be satisfied. Use
+    /// for proposals that should always run their full duration (e.g., sprint
+    /// priority votes).
+    function createProposalLegacyTimerOnly(
+        bytes calldata title,
+        bytes32 descriptionHash,
+        uint32 minutesDuration,
+        uint8 numOptions,
+        IExecutor.Call[][] calldata batches,
+        uint256[] calldata hatIds
+    ) external {
+        uint256 id = _initProposal(title, descriptionHash, minutesDuration, numOptions, batches, hatIds, type(uint64).max);
 
         uint64 endTs = _layout()._proposals[id].endTimestamp;
 
@@ -60,7 +113,8 @@ library HybridVotingProposals {
         uint32 minutesDuration,
         uint8 numOptions,
         IExecutor.Call[][] calldata batches,
-        uint256[] calldata hatIds
+        uint256[] calldata hatIds,
+        uint64 callerEligibleHint
     ) internal returns (uint256) {
         ValidationLib.requireValidTitle(title);
         if (numOptions == 0) revert VotingErrors.LengthMismatch();
@@ -122,7 +176,51 @@ library HybridVotingProposals {
             }
         }
 
+        // Snapshot eligibility. type(uint64).max is the explicit timer-only
+        // opt-out sentinel; otherwise sum on-chain hatSupply across the
+        // effective hat array (pollHatIds when restricted, creatorHatIds
+        // when not) and take the max with the caller's hint.
+        if (callerEligibleHint == type(uint64).max) {
+            p.snapshotEligibleVoters = type(uint64).max;
+        } else {
+            uint256[] memory eligibleHatIds;
+            if (p.restricted) {
+                eligibleHatIds = new uint256[](hatIds.length);
+                for (uint256 i; i < hatIds.length;) {
+                    eligibleHatIds[i] = hatIds[i];
+                    unchecked { ++i; }
+                }
+            } else {
+                uint256 ccLen = l.creatorHatIds.length;
+                eligibleHatIds = new uint256[](ccLen);
+                for (uint256 i; i < ccLen;) {
+                    eligibleHatIds[i] = l.creatorHatIds[i];
+                    unchecked { ++i; }
+                }
+            }
+            uint64 onChainUpperBound = _eligibleVotersUpperBound(eligibleHatIds);
+            p.snapshotEligibleVoters = callerEligibleHint > onChainUpperBound
+                ? callerEligibleHint
+                : onChainUpperBound;
+        }
+
         return id;
+    }
+
+    /// Sum of IHats.hatSupply across hatIds, capped at uint64.max. Used at
+    /// createProposal to seed the early-close eligibility snapshot. NOTE:
+    /// addresses wearing multiple eligible hats are double-counted; this is
+    /// acceptable because over-counting raises the threshold (i.e. requires
+    /// more voters before early-close fires) which is the safer direction.
+    function _eligibleVotersUpperBound(uint256[] memory hatIds) internal view returns (uint64) {
+        HybridVoting.Layout storage l = _layout();
+        uint256 total;
+        uint256 len = hatIds.length;
+        for (uint256 i; i < len;) {
+            total += l.hats.hatSupply(hatIds[i]);
+            unchecked { ++i; }
+        }
+        return total > type(uint64).max ? type(uint64).max : uint64(total);
     }
 
     function _validateDuration(uint32 minutesDuration) internal pure {
