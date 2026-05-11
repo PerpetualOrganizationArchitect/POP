@@ -322,4 +322,385 @@ contract EligibilityModuleTest is Test {
         bytes32 superAdminSlot = vm.load(address(eligibility), bytes32(uint256(base) + 1));
         assertEq(address(uint160(uint256(superAdminSlot))), superAdmin, "superAdmin at base+1");
     }
+
+    /*══════════════════════════════════════ setWearerEligibility ══════════════════════════════════════*/
+
+    function test_SetWearerEligibility_superAdminHappyPath() public {
+        vm.prank(superAdmin);
+        eligibility.setWearerEligibility(wearerA, HAT_X, true, true);
+        (bool eligible, bool standing) = eligibility.getWearerStatus(wearerA, HAT_X);
+        assertTrue(eligible);
+        assertTrue(standing);
+    }
+
+    function test_SetWearerEligibility_zeroWearerReverts() public {
+        vm.expectRevert(EligibilityModule.ZeroAddress.selector);
+        vm.prank(superAdmin);
+        eligibility.setWearerEligibility(address(0), HAT_X, true, true);
+    }
+
+    function test_SetWearerEligibility_strangerReverts() public {
+        vm.expectRevert(EligibilityModule.NotAuthorizedAdmin.selector);
+        vm.prank(stranger);
+        eligibility.setWearerEligibility(wearerA, HAT_X, true, true);
+    }
+
+    function test_SetWearerEligibility_pausedReverts() public {
+        vm.prank(superAdmin);
+        eligibility.pause();
+        vm.expectRevert(bytes("Contract is paused"));
+        vm.prank(superAdmin);
+        eligibility.setWearerEligibility(wearerA, HAT_X, true, true);
+    }
+
+    /*══════════════════════════════════════ clearWearerEligibility ══════════════════════════════════════*/
+
+    function test_ClearWearerEligibility_revertsToDefault() public {
+        // Set a specific eligibility, then clear it and verify the default applies
+        vm.prank(superAdmin);
+        eligibility.setDefaultEligibility(HAT_X, true, true);
+
+        vm.prank(superAdmin);
+        eligibility.setWearerEligibility(wearerA, HAT_X, false, false);
+        (bool e1,) = eligibility.getWearerStatus(wearerA, HAT_X);
+        assertFalse(e1, "specific overrides default");
+
+        vm.prank(superAdmin);
+        eligibility.clearWearerEligibility(wearerA, HAT_X);
+        (bool e2, bool s2) = eligibility.getWearerStatus(wearerA, HAT_X);
+        assertTrue(e2, "default re-applies after clear");
+        assertTrue(s2);
+    }
+
+    function test_ClearWearerEligibility_zeroWearerReverts() public {
+        vm.expectRevert(EligibilityModule.ZeroAddress.selector);
+        vm.prank(superAdmin);
+        eligibility.clearWearerEligibility(address(0), HAT_X);
+    }
+
+    function test_ClearWearerEligibility_strangerReverts() public {
+        vm.expectRevert(EligibilityModule.NotAuthorizedAdmin.selector);
+        vm.prank(stranger);
+        eligibility.clearWearerEligibility(wearerA, HAT_X);
+    }
+
+    /*══════════════════════════════════════ configureVouching + vouchFor ══════════════════════════════════════*/
+
+    function test_ConfigureVouching_superAdminEnables() public {
+        // membershipHatId = HAT_Y; wearers of HAT_Y can vouch for HAT_X
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_X, 2, HAT_Y, false);
+        EligibilityModule.VouchConfig memory cfg = eligibility.vouchConfigs(HAT_X);
+        assertEq(cfg.quorum, uint32(2));
+        assertEq(cfg.membershipHatId, HAT_Y);
+    }
+
+    function test_ConfigureVouching_strangerReverts() public {
+        vm.expectRevert(EligibilityModule.NotSuperAdmin.selector);
+        vm.prank(stranger);
+        eligibility.configureVouching(HAT_X, 2, HAT_Y, false);
+    }
+
+    function test_VouchFor_succeedsAtQuorum() public {
+        // Configure vouching: 2-of-N wearers of HAT_Y can vouch HAT_X eligibility
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_X, 2, HAT_Y, false);
+
+        // Mint HAT_Y to wearerB + wearerC so they can vouch
+        hats.mintHat(HAT_Y, wearerB);
+        hats.mintHat(HAT_Y, wearerC);
+
+        // Pre-vouch, wearerA is NOT eligible
+        (bool e0,) = eligibility.getWearerStatus(wearerA, HAT_X);
+        assertFalse(e0, "no vouches yet");
+
+        // wearerB vouches → 1/2, not enough
+        vm.prank(wearerB);
+        eligibility.vouchFor(wearerA, HAT_X);
+        (bool e1,) = eligibility.getWearerStatus(wearerA, HAT_X);
+        assertFalse(e1, "1 of 2");
+
+        // wearerC vouches → quorum reached
+        vm.prank(wearerC);
+        eligibility.vouchFor(wearerA, HAT_X);
+        (bool e2, bool s2) = eligibility.getWearerStatus(wearerA, HAT_X);
+        assertTrue(e2, "quorum reached, eligible");
+        assertTrue(s2);
+    }
+
+    function test_VouchFor_revertsWhenNotConfigured() public {
+        // HAT_X has NO vouching config; vouching should be disabled
+        hats.mintHat(HAT_Y, wearerB);
+        vm.expectRevert(EligibilityModule.VouchingNotEnabled.selector);
+        vm.prank(wearerB);
+        eligibility.vouchFor(wearerA, HAT_X);
+    }
+
+    function test_VouchFor_revertsForSelfVouch() public {
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_X, 1, HAT_Y, false);
+        hats.mintHat(HAT_Y, wearerA);
+
+        vm.expectRevert(EligibilityModule.CannotVouchForSelf.selector);
+        vm.prank(wearerA);
+        eligibility.vouchFor(wearerA, HAT_X);
+    }
+
+    function test_VouchFor_revertsForUnauthorizedVoucher() public {
+        // Configure vouching but stranger doesn't wear membership hat
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_X, 1, HAT_Y, false);
+
+        vm.expectRevert(EligibilityModule.NotAuthorizedToVouch.selector);
+        vm.prank(stranger);
+        eligibility.vouchFor(wearerA, HAT_X);
+    }
+
+    function test_VouchFor_revertsOnDuplicateVouch() public {
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_X, 2, HAT_Y, false);
+        hats.mintHat(HAT_Y, wearerB);
+
+        vm.prank(wearerB);
+        eligibility.vouchFor(wearerA, HAT_X);
+
+        vm.expectRevert(EligibilityModule.AlreadyVouched.selector);
+        vm.prank(wearerB);
+        eligibility.vouchFor(wearerA, HAT_X);
+    }
+
+    function test_VouchFor_revertsForZeroWearer() public {
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_X, 1, HAT_Y, false);
+        hats.mintHat(HAT_Y, wearerB);
+
+        vm.expectRevert(EligibilityModule.ZeroAddress.selector);
+        vm.prank(wearerB);
+        eligibility.vouchFor(address(0), HAT_X);
+    }
+
+    function test_VouchFor_pausedReverts() public {
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_X, 1, HAT_Y, false);
+        hats.mintHat(HAT_Y, wearerB);
+
+        vm.prank(superAdmin);
+        eligibility.pause();
+
+        vm.expectRevert(bytes("Contract is paused"));
+        vm.prank(wearerB);
+        eligibility.vouchFor(wearerA, HAT_X);
+    }
+
+    function test_VouchFor_epochResetOnReconfigure() public {
+        // First config: quorum 2 with HAT_Y vouchers
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_X, 2, HAT_Y, false);
+        hats.mintHat(HAT_Y, wearerB);
+
+        vm.prank(wearerB);
+        eligibility.vouchFor(wearerA, HAT_X);
+
+        // Reconfigure (bumps epoch + invalidates old vouches)
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_X, 2, HAT_Y, false);
+
+        // wearerA should now have 0 vouches (epoch reset)
+        (bool e,) = eligibility.getWearerStatus(wearerA, HAT_X);
+        assertFalse(e, "epoch reset cleared prior vouch");
+
+        // wearerB CAN vouch again post-reset (NOT AlreadyVouched)
+        vm.prank(wearerB);
+        eligibility.vouchFor(wearerA, HAT_X);
+    }
+
+    /*══════════════════════════════════════ claimVouchedHat — happy path + reentrancy ══════════════════════════════════════*/
+
+    function test_ClaimVouchedHat_happyPath() public {
+        // Configure vouching, vouch to quorum, then claim
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_X, 1, HAT_Y, false);
+        hats.mintHat(HAT_Y, wearerB);
+
+        vm.prank(wearerB);
+        eligibility.vouchFor(wearerA, HAT_X);
+
+        // wearerA is eligible, claim mints the hat
+        vm.prank(wearerA);
+        eligibility.claimVouchedHat(HAT_X);
+        assertTrue(hats.isWearerOfHat(wearerA, HAT_X), "hat minted after claim");
+    }
+
+    function test_ClaimVouchedHat_revertsWhenNotEligible() public {
+        // No vouches; not eligible
+        vm.expectRevert(bytes("Not eligible to claim hat"));
+        vm.prank(wearerA);
+        eligibility.claimVouchedHat(HAT_X);
+    }
+
+    function test_ClaimVouchedHat_revertsWhenPaused() public {
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_X, 1, HAT_Y, false);
+        hats.mintHat(HAT_Y, wearerB);
+        vm.prank(wearerB);
+        eligibility.vouchFor(wearerA, HAT_X);
+
+        vm.prank(superAdmin);
+        eligibility.pause();
+
+        vm.expectRevert(bytes("Contract is paused"));
+        vm.prank(wearerA);
+        eligibility.claimVouchedHat(HAT_X);
+    }
+
+    /*══════════════════════════════════════ batchConfigureVouching ══════════════════════════════════════*/
+
+    function test_BatchConfigureVouching_lengthMismatchReverts() public {
+        uint256[] memory hatIds = new uint256[](2);
+        hatIds[0] = HAT_X;
+        hatIds[1] = HAT_Y;
+        uint32[] memory quorums = new uint32[](1);
+        quorums[0] = 1;
+        uint256[] memory members = new uint256[](2);
+        members[0] = HAT_Y;
+        members[1] = HAT_X;
+        bool[] memory flags = new bool[](2);
+
+        vm.expectRevert(EligibilityModule.ArrayLengthMismatch.selector);
+        vm.prank(superAdmin);
+        eligibility.batchConfigureVouching(hatIds, quorums, members, flags);
+    }
+
+    function test_BatchConfigureVouching_happyPath() public {
+        uint256[] memory hatIds = new uint256[](2);
+        hatIds[0] = HAT_X;
+        hatIds[1] = HAT_Y;
+        uint32[] memory quorums = new uint32[](2);
+        quorums[0] = 2;
+        quorums[1] = 3;
+        uint256[] memory members = new uint256[](2);
+        members[0] = HAT_Y;
+        members[1] = HAT_X;
+        bool[] memory flags = new bool[](2);
+
+        vm.prank(superAdmin);
+        eligibility.batchConfigureVouching(hatIds, quorums, members, flags);
+
+        EligibilityModule.VouchConfig memory cfgX = eligibility.vouchConfigs(HAT_X);
+        EligibilityModule.VouchConfig memory cfgY = eligibility.vouchConfigs(HAT_Y);
+        assertEq(cfgX.quorum, uint32(2));
+        assertEq(cfgY.quorum, uint32(3));
+    }
+
+    function test_BatchConfigureVouching_strangerReverts() public {
+        uint256[] memory hatIds = new uint256[](1);
+        hatIds[0] = HAT_X;
+        uint32[] memory quorums = new uint32[](1);
+        quorums[0] = 1;
+        uint256[] memory members = new uint256[](1);
+        members[0] = HAT_Y;
+        bool[] memory flags = new bool[](1);
+
+        vm.expectRevert(EligibilityModule.NotSuperAdmin.selector);
+        vm.prank(stranger);
+        eligibility.batchConfigureVouching(hatIds, quorums, members, flags);
+    }
+}
+
+/// MaliciousHats — synthetic IHats impl whose mintHat re-enters claimVouchedHat.
+/// Used by ReentrancyAttackTest below to verify the nonReentrant modifier on
+/// claimVouchedHat (line 881 of EligibilityModule.sol post-PR-#129) actually
+/// fires on the re-entry attempt. This is the cat-5 finding vigil's cancelled
+/// #520 wanted but didn't ship; closing the gap here.
+contract MaliciousHats is MockHats {
+    EligibilityModule public target;
+    uint256 public targetHatId;
+    address public attacker;
+    bool public attackArmed;
+    uint256 public reentryCount;
+    bool public reentryReverted;
+
+    function arm(EligibilityModule _target, uint256 _hatId, address _attacker) external {
+        target = _target;
+        targetHatId = _hatId;
+        attacker = _attacker;
+        attackArmed = true;
+    }
+
+    function mintHat(uint256 _hatId, address _wearer) external override returns (bool) {
+        // The original MockHats.mintHat sets wearers[_wearer][_hatId] = true.
+        // We do that too so the outer call appears to succeed normally if
+        // re-entry is blocked (which is what we expect).
+        if (attackArmed) {
+            attackArmed = false; // single-shot
+            reentryCount++;
+            // Try to re-enter claimVouchedHat. With nonReentrant in place,
+            // this MUST revert. We catch + record.
+            try target.claimVouchedHat(targetHatId) {
+                // Did NOT revert — reentrancy succeeded, fix is broken.
+                reentryReverted = false;
+            } catch {
+                // Revert as expected.
+                reentryReverted = true;
+            }
+        }
+        // Always honor the legit mint so the outer call sees success
+        wearers[_wearer][_hatId] = true;
+        return true;
+    }
+}
+
+/// Verifies the nonReentrant modifier on claimVouchedHat blocks the cat-5
+/// reentrancy attack vigil's cancelled #520 called out. A malicious IHats
+/// impl re-enters claimVouchedHat during the mintHat external call inside
+/// claimVouchedHat. Pre-fix (no modifier wired): re-entry double-claims.
+/// Post-fix: re-entry hits the nonReentrant guard and reverts.
+contract EligibilityModuleReentrancyTest is Test {
+    EligibilityModule internal eligibility;
+    MaliciousHats internal hats;
+
+    address internal superAdmin = vm.addr(11);
+    address internal voucher = vm.addr(12);
+    address internal attacker = vm.addr(13);
+
+    uint256 internal constant HAT_TARGET = 7000;
+    uint256 internal constant HAT_VOUCHER = 8000;
+
+    function setUp() public {
+        hats = new MaliciousHats();
+
+        EligibilityModule impl = new EligibilityModule();
+        bytes memory initData =
+            abi.encodeCall(EligibilityModule.initialize, (superAdmin, address(hats), address(0)));
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
+        eligibility = EligibilityModule(address(proxy));
+
+        // Setup: 1-of-1 vouching for HAT_TARGET, vouchers wear HAT_VOUCHER
+        vm.prank(superAdmin);
+        eligibility.configureVouching(HAT_TARGET, 1, HAT_VOUCHER, false);
+
+        // Mint voucher hat directly to voucher so they can vouch
+        hats.mintHat(HAT_VOUCHER, voucher);
+
+        // voucher vouches attacker → attacker becomes eligible to claim
+        vm.prank(voucher);
+        eligibility.vouchFor(attacker, HAT_TARGET);
+    }
+
+    function test_Reentrancy_claimVouchedHat_blocksRecursion() public {
+        // Arm the attack: when claimVouchedHat calls hats.mintHat(HAT_TARGET, attacker),
+        // our MaliciousHats re-enters claimVouchedHat(HAT_TARGET).
+        hats.arm(eligibility, HAT_TARGET, attacker);
+
+        // Outer claim succeeds; inner re-entry must be blocked by nonReentrant.
+        vm.prank(attacker);
+        eligibility.claimVouchedHat(HAT_TARGET);
+
+        // Verify the attempt happened + reverted.
+        assertEq(hats.reentryCount(), 1, "re-entry attempted exactly once");
+        assertTrue(hats.reentryReverted(), "re-entry hit nonReentrant guard and reverted");
+
+        // Verify attacker has the hat exactly once (not double-claimed).
+        assertTrue(hats.isWearerOfHat(attacker, HAT_TARGET), "outer claim minted hat");
+    }
 }

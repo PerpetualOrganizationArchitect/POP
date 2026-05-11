@@ -98,7 +98,7 @@ contract MockHats is IHats {
         return _admin + 1;
     }
 
-    function mintHat(uint256 _hatId, address _wearer) external returns (bool success) {
+    function mintHat(uint256 _hatId, address _wearer) external virtual returns (bool success) {
         wearers[_wearer][_hatId] = true;
         if (!activeHats[_hatId]) {
             activeHats[_hatId] = true;
