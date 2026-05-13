@@ -7162,3 +7162,163 @@ contract MockToken is Test, IERC20 {
                 assertEq(projectId, PID, "id 0 must be the post-revert task: counter did not advance");
             }
         }
+
+        /*──────────────── Folders + Organizer Hat ────────────────*/
+        contract TaskManagerFoldersTest is TaskManagerTestBase {
+            uint256 constant ORGANIZER_HAT = 99;
+            address organizer = makeAddr("organizer");
+            address randomUser = makeAddr("randomUser");
+            bytes32 ROOT_A = keccak256("folders-root-a");
+            bytes32 ROOT_B = keccak256("folders-root-b");
+            bytes32 PID;
+
+            function setUp() public {
+                setUpBase();
+                setHat(organizer, ORGANIZER_HAT);
+                // Designate ORGANIZER_HAT as an authorized folders organizer.
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.ORGANIZER_HAT_ALLOWED, abi.encode(ORGANIZER_HAT, true));
+                PID = _createDefaultProject("FOLDERS_PROJ", 0);
+            }
+
+            function _foldersRoot() internal view returns (bytes32 root) {
+                bytes memory data = tm.getLensData(10, "");
+                root = abi.decode(data, (bytes32));
+            }
+
+            function _organizerHats() internal view returns (uint256[] memory hats_) {
+                bytes memory data = tm.getLensData(11, "");
+                hats_ = abi.decode(data, (uint256[]));
+            }
+
+            /*───────── happy paths ─────────*/
+
+            function test_SetFolders_ByExecutor_Succeeds() public {
+                vm.prank(executor);
+                tm.setFolders(bytes32(0), ROOT_A);
+                assertEq(_foldersRoot(), ROOT_A, "root should be ROOT_A");
+            }
+
+            function test_SetFolders_ByOrganizerHat_Succeeds() public {
+                vm.prank(organizer);
+                tm.setFolders(bytes32(0), ROOT_A);
+                assertEq(_foldersRoot(), ROOT_A);
+
+                // organizer can also chain a follow-up update with the current root
+                vm.prank(organizer);
+                tm.setFolders(ROOT_A, ROOT_B);
+                assertEq(_foldersRoot(), ROOT_B);
+            }
+
+            function test_SetFolders_ZeroRootClear_Allowed() public {
+                vm.prank(organizer);
+                tm.setFolders(bytes32(0), ROOT_A);
+
+                vm.prank(organizer);
+                tm.setFolders(ROOT_A, bytes32(0));
+                assertEq(_foldersRoot(), bytes32(0), "root should clear to zero");
+            }
+
+            function test_SetFolders_EmitsFoldersUpdated_OldAndNewRoots() public {
+                vm.expectEmit(true, true, true, false, address(tm));
+                emit TaskManager.FoldersUpdated(ROOT_A, bytes32(0), organizer);
+                vm.prank(organizer);
+                tm.setFolders(bytes32(0), ROOT_A);
+
+                vm.expectEmit(true, true, true, false, address(tm));
+                emit TaskManager.FoldersUpdated(ROOT_B, ROOT_A, executor);
+                vm.prank(executor);
+                tm.setFolders(ROOT_A, ROOT_B);
+            }
+
+            /*───────── permission strictness ─────────*/
+
+            function test_RevertWhen_SetFolders_ByCreatorHat() public {
+                // creator1 wears CREATOR_HAT but not ORGANIZER_HAT — must revert.
+                vm.prank(creator1);
+                vm.expectRevert(TaskManager.NotOrganizer.selector);
+                tm.setFolders(bytes32(0), ROOT_A);
+            }
+
+            function test_RevertWhen_SetFolders_ByProjectManager() public {
+                // Make pm1 a project manager on PID and prove that still doesn't grant folder rights.
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.PROJECT_MANAGER, abi.encode(PID, pm1, true));
+
+                vm.prank(pm1);
+                vm.expectRevert(TaskManager.NotOrganizer.selector);
+                tm.setFolders(bytes32(0), ROOT_A);
+            }
+
+            function test_RevertWhen_SetFolders_ByRandom() public {
+                vm.prank(randomUser);
+                vm.expectRevert(TaskManager.NotOrganizer.selector);
+                tm.setFolders(bytes32(0), ROOT_A);
+            }
+
+            /*───────── CAS guard ─────────*/
+
+            function test_RevertWhen_SetFolders_StaleExpectedRoot() public {
+                vm.prank(organizer);
+                tm.setFolders(bytes32(0), ROOT_A);
+
+                // Caller still thinks current is bytes32(0) — must revert with FoldersRootStale.
+                vm.prank(organizer);
+                vm.expectRevert(abi.encodeWithSelector(TaskManager.FoldersRootStale.selector, bytes32(0), ROOT_A));
+                tm.setFolders(bytes32(0), ROOT_B);
+
+                // Storage unchanged.
+                assertEq(_foldersRoot(), ROOT_A, "state must be unchanged after stale revert");
+            }
+
+            /*───────── organizer hat config plumbing ─────────*/
+
+            function test_RevertWhen_SetConfig_OrganizerHatAllowed_NonExecutor() public {
+                vm.prank(organizer);
+                vm.expectRevert(TaskManager.NotExecutor.selector);
+                tm.setConfig(TaskManager.ConfigKey.ORGANIZER_HAT_ALLOWED, abi.encode(uint256(42), true));
+            }
+
+            function test_SetConfig_OrganizerHatAllowed_AddRemove_RoundTrip() public {
+                // Setup added ORGANIZER_HAT already. Add a second hat.
+                uint256 secondHat = 42;
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.ORGANIZER_HAT_ALLOWED, abi.encode(secondHat, true));
+
+                uint256[] memory after_ = _organizerHats();
+                assertEq(after_.length, 2, "should have two organizer hats");
+
+                // Remove the original.
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.ORGANIZER_HAT_ALLOWED, abi.encode(ORGANIZER_HAT, false));
+
+                uint256[] memory after2 = _organizerHats();
+                assertEq(after2.length, 1, "should have one organizer hat left");
+                assertEq(after2[0], secondHat, "remaining hat should be the second one");
+
+                // Original wearer can no longer reorganize.
+                vm.prank(organizer);
+                vm.expectRevert(TaskManager.NotOrganizer.selector);
+                tm.setFolders(bytes32(0), ROOT_A);
+            }
+
+            function test_SetConfig_OrganizerHatAllowed_EmitsEvent() public {
+                uint256 newHat = 77;
+                vm.expectEmit(true, false, false, true, address(tm));
+                emit TaskManager.OrganizerHatAllowed(newHat, true);
+                vm.prank(executor);
+                tm.setConfig(TaskManager.ConfigKey.ORGANIZER_HAT_ALLOWED, abi.encode(newHat, true));
+            }
+
+            /*───────── lens ─────────*/
+
+            function test_GetLensData_FoldersRoot_DefaultsToZero() public view {
+                assertEq(_foldersRoot(), bytes32(0), "fresh deploy should have zero root");
+            }
+
+            function test_GetLensData_OrganizerHats_ReturnsArray() public view {
+                uint256[] memory hats_ = _organizerHats();
+                assertEq(hats_.length, 1, "should have one organizer hat from setUp");
+                assertEq(hats_[0], ORGANIZER_HAT, "should be ORGANIZER_HAT");
+            }
+        }

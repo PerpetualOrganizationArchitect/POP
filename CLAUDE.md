@@ -83,6 +83,8 @@
 
 Any new forge script that mutates on-chain state (`Hub.adminCall`, `Hub.adminCallCrossChain`, `Satellite.adminCall`, beacon upgrades, `setRulesBatch`, etc.) must be simulated against a real RPC fork before being called complete. `forge build` + a unit test selector check is **not** enough — transport/permission/struct-decoding bugs only show up against live state.
 
+**Claude runs the sim — do not punt to the user.** The public RPC aliases in `foundry.toml` (`gnosis`, `arbitrum`, etc.) require no env vars, no keys, no auth for fork sims (no `--broadcast`, just `--fork-url <alias>`). Writing the `SimX` sibling and listing it as "user follow-up" is **not** a substitute. The task is unfinished until Claude has executed the sim and seen `PASS` output. If the user is the one running it, that's a process failure on Claude's part.
+
 **Required setup for every new mutating script:**
 
 1. Pair every `BroadcastX` contract with a `SimX` sibling that exercises the exact same call path under `vm.prank(<actual on-chain admin>)`.
@@ -93,7 +95,47 @@ Any new forge script that mutates on-chain state (`Hub.adminCall`, `Hub.adminCal
    ```sh
    forge script <path>:SimX --fork-url <chain> -vvv
    ```
-6. Production profile (`FOUNDRY_PROFILE=production`) on this branch currently has a pre-existing `Stack too deep` issue independent of any single script — default profile is the one that has to compile cleanly for every change.
+6. **Pick `VERSION` by querying the on-chain ImplementationRegistry, then double-checking the CREATE2 slot.** Two independent collision surfaces exist and you must probe both:
+   - **Registry collision** — `ImplementationRegistry.registerImplementation(...)` reverts `VersionExists` if `(typeName, version)` is already in storage. Query via `getImplementation(typeName, version)` — succeeds = taken, reverts `VersionUnknown` = free.
+   - **CREATE2 collision** — `DeterministicDeployer.deploy(salt, code)` no-ops if any bytecode exists at the predicted address. This is independent of the registry: it's not uncommon for an old CREATE2 slot to contain code that was later registered under a *different* version string (e.g. on Gnosis today, the `v3` CREATE2 slot holds bytecode that the registry knows as `v1`). Query via `cast code` against `dd.computeAddress(dd.computeSalt(typeName, version))`.
+
+   **Do not use event logs as a source of truth.** `ImplementationRegistered` events accumulate over the proxy's lifetime, including dev-time registrations that were later wiped by re-initialization. Only `getVersionCount` + `getVersionIdAt` reflect current storage. Likewise, do not grep prior `script/upgrades/*.s.sol` for "the last version" — that's brittle and out of date the moment someone broadcasts without committing the script.
+
+   The anchor is `getVersionCount(typeName)`: it gives a lower-bound starting point. Probe from there forward, checking both surfaces. Resolve the registry address per chain once (Gnosis: `0x72c16812aE2a6819F4d0D9E432A3818712fa5c63`; Arbitrum: look up via `PoaManagerHub.registry()` on `0xB72840B343654eAfb2CFf7acC4Fc6b59E6c3CC71`), then run this loop per chain:
+
+   ```sh
+   DD=0x4aC8B5ebEb9D8C3dE3180ddF381D552d59e8835a
+   TYPE=TaskManager
+   chain=gnosis
+   registry=0x72c16812aE2a6819F4d0D9E432A3818712fa5c63
+
+   count=$(cast call --rpc-url $chain $registry 'getVersionCount(string)(uint256)' "$TYPE" 2>&1 | grep -oE '^[0-9]+' | head -1)
+   echo "$TYPE on $chain: registry has $count versions — probing v$((count + 1)) upward"
+
+   for n in $(seq $((count + 1)) $((count + 20))); do
+     v="v$n"
+     # Cast exit code is the reliable signal: 0 = call succeeded (version is registered),
+     # non-zero = revert (VersionUnknown). Do NOT grep the revert message — its text varies.
+     if cast call --rpc-url $chain $registry 'getImplementation(string,string)(address)' "$TYPE" "$v" >/dev/null 2>&1; then
+       reg_taken=yes
+     else
+       reg_taken=no
+     fi
+     salt=$(cast call --rpc-url $chain $DD 'computeSalt(string,string)(bytes32)' "$TYPE" "$v" 2>/dev/null)
+     addr=$(cast call --rpc-url $chain $DD 'computeAddress(bytes32)(address)' "$salt" 2>/dev/null)
+     code=$(cast code --rpc-url $chain "$addr" 2>/dev/null)
+     if [ "$code" = "0x" ]; then create2_taken=no; else create2_taken=yes; fi
+     if [ "$reg_taken" = no ] && [ "$create2_taken" = no ]; then
+       echo "$v: FREE ($addr)"; break
+     else
+       echo "$v: TAKEN (registry=$reg_taken create2=$create2_taken)"
+     fi
+   done
+   ```
+
+   Use the lowest `vN` that's FREE on **every** chain you plan to deploy to. Confirmed on this branch (2026-05-13): for `TaskManager` on Gnosis, this picks `v4` in two RPC iterations — `v3` was rejected because its CREATE2 slot is occupied (the bytecode there is registered under "v1" historically), `v4` is clean on both surfaces. Sim failure with a "selector missing from impl bytecode" error is the *late* signal of a CREATE2 collision — proactive probing is cheaper than re-running the sim.
+
+7. Production profile (`FOUNDRY_PROFILE=production`) on this branch currently has a pre-existing `Stack too deep` issue independent of any single script — default profile is the one that has to compile cleanly for every change.
 
 ## Subgraph (live deployment lookups)
 
