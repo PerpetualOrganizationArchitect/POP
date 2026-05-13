@@ -32,6 +32,7 @@ interface IHybridVotingInit {
         uint256[] calldata initialCreatorHats,
         address[] calldata targets,
         uint8 thresholdPct,
+        uint8 earlyCloseTurnoutPct,
         ClassConfig[] calldata initialClasses
     ) external;
 }
@@ -243,6 +244,7 @@ library ModuleDeploymentLib {
         address executorAddr,
         uint256[] memory creatorHats,
         uint8 thresholdPct,
+        uint8 earlyCloseTurnoutPct,
         IHybridVotingInit.ClassConfig[] memory classes,
         address beacon
     ) internal returns (address hvProxy) {
@@ -257,6 +259,7 @@ library ModuleDeploymentLib {
             creatorHats,
             targets,
             thresholdPct,
+            earlyCloseTurnoutPct,
             classes
         );
         hvProxy = deployCore(config, ModuleTypes.HYBRID_VOTING_ID, init, beacon);

@@ -20,7 +20,7 @@ contract HybridVoting is Initializable {
     uint8 public constant MAX_CALLS = 20;
     uint8 public constant MAX_CLASSES = 8;
     uint32 public constant MAX_DURATION = 43_200; /* 30 days */
-    uint32 public constant MIN_DURATION = 1; /* 1 min for testing */
+    uint32 public constant MIN_DURATION = 10; /* 10 minutes; matches HybridVotingProposals._validateDuration */
 
     /* ─────── Data Structures ─────── */
 
@@ -53,7 +53,11 @@ contract HybridVoting is Initializable {
         mapping(uint256 => bool) pollHatAllowed; // O(1) lookup for poll hat permission
         ClassConfig[] classesSnapshot; // Snapshot the class config to freeze semantics for this proposal
         bool executed; // finalization guard
-        uint32 voterCount; // number of voters who cast a vote
+        uint32 voterCount; // unique voter count (consumed by async-majority early-close threshold)
+        // 0 = legacy timer-only; type(uint64).max = opt-out; else max(hint, on-chain).
+        uint64 snapshotEligibleVoters;
+        // 0 = use org default; else [orgDefault, 100].
+        uint8 turnoutPctOverride;
     }
 
     /* ─────── ERC-7201 Storage ─────── */
@@ -72,6 +76,8 @@ contract HybridVoting is Initializable {
         bool _paused; // Inline pausable state
         uint256 _lock; // Inline reentrancy guard state
         uint32 quorum; // minimum number of voters required (0 = disabled)
+        // 1..100; 0 in storage reads as 100 (safe back-compat default).
+        uint8 earlyCloseTurnoutPct;
     }
 
     bytes32 private constant _STORAGE_SLOT = keccak256("poa.hybridvoting.v2.storage");
@@ -117,6 +123,7 @@ contract HybridVoting is Initializable {
     event ExecutorUpdated(address newExec);
     event ThresholdPctSet(uint8 pct);
     event QuorumSet(uint32 quorum);
+    event EarlyCloseTurnoutPctSet(uint8 pct);
 
     /* ─────── Initialiser ─────── */
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -130,6 +137,7 @@ contract HybridVoting is Initializable {
         uint256[] calldata initialCreatorHats,
         address[] calldata initialTargets,
         uint8 thresholdPct_,
+        uint8 earlyCloseTurnoutPct_,
         ClassConfig[] calldata initialClasses
     ) external initializer {
         if (hats_ == address(0) || executor_ == address(0)) {
@@ -137,6 +145,9 @@ contract HybridVoting is Initializable {
         }
 
         VotingMath.validateThreshold(thresholdPct_);
+        if (earlyCloseTurnoutPct_ == 0 || earlyCloseTurnoutPct_ > 100) {
+            revert VotingErrors.InvalidTurnoutPct();
+        }
 
         Layout storage l = _layout();
         l.hats = IHats(hats_);
@@ -146,6 +157,9 @@ contract HybridVoting is Initializable {
 
         l.thresholdPct = thresholdPct_;
         emit ThresholdPctSet(thresholdPct_);
+
+        l.earlyCloseTurnoutPct = earlyCloseTurnoutPct_;
+        emit EarlyCloseTurnoutPctSet(earlyCloseTurnoutPct_);
 
         _initializeCreatorHats(initialCreatorHats);
         // initialTargets parameter kept for ABI compatibility but not used;
@@ -213,7 +227,8 @@ contract HybridVoting is Initializable {
         THRESHOLD,
         TARGET_ALLOWED, // deprecated: kept for enum ordering compatibility
         EXECUTOR,
-        QUORUM
+        QUORUM,
+        EARLY_CLOSE_TURNOUT_PCT
     }
 
     function setConfig(ConfigKey key, bytes calldata value) external onlyExecutor {
@@ -233,6 +248,11 @@ contract HybridVoting is Initializable {
             uint32 q = abi.decode(value, (uint32));
             l.quorum = q;
             emit QuorumSet(q);
+        } else if (key == ConfigKey.EARLY_CLOSE_TURNOUT_PCT) {
+            uint8 pct = abi.decode(value, (uint8));
+            if (pct == 0 || pct > 100) revert VotingErrors.InvalidTurnoutPct();
+            l.earlyCloseTurnoutPct = pct;
+            emit EarlyCloseTurnoutPctSet(pct);
         }
     }
 
@@ -252,6 +272,12 @@ contract HybridVoting is Initializable {
         _;
     }
 
+    /// Passes if timer expired OR early-close gate met.
+    modifier isExpiredOrEarlyClose(uint256 id) {
+        _checkExpiredOrEarlyClose(id);
+        _;
+    }
+
     function _checkCreator() private view {
         Layout storage l = _layout();
         if (_msgSender() != address(l.executor)) {
@@ -268,6 +294,20 @@ contract HybridVoting is Initializable {
         if (block.timestamp <= _layout()._proposals[id].endTimestamp) revert VotingErrors.VotingOpen();
     }
 
+    function _checkExpiredOrEarlyClose(uint256 id) private view {
+        if (block.timestamp <= _layout()._proposals[id].endTimestamp) {
+            if (!HybridVotingCore._isEarlyCloseEligible(id)) {
+                revert VotingErrors.VotingOpen();
+            }
+        }
+    }
+
+    /// True if announceWinner can be called right now via the early-close path.
+    function isEarlyCloseEligible(uint256 id) external view returns (bool) {
+        if (id >= _layout()._proposals.length) return false;
+        return HybridVotingCore._isEarlyCloseEligible(id);
+    }
+
     /* ─────── Proposal creation ─────── */
     function createProposal(
         bytes calldata title,
@@ -280,6 +320,35 @@ contract HybridVoting is Initializable {
         HybridVotingProposals.createProposal(title, descriptionHash, minutesDuration, numOptions, batches, hatIds);
     }
 
+    function createProposalWithEligibleSnapshot(
+        bytes calldata title,
+        bytes32 descriptionHash,
+        uint32 minutesDuration,
+        uint8 numOptions,
+        IExecutor.Call[][] calldata batches,
+        uint256[] calldata hatIds,
+        uint64 callerEligibleHint
+    ) external onlyCreator whenNotPaused {
+        HybridVotingProposals.createProposalWithEligibleSnapshot(
+            title, descriptionHash, minutesDuration, numOptions, batches, hatIds, callerEligibleHint
+        );
+    }
+
+    /// Per-proposal turnout override; pct must be in [orgDefault, 100].
+    function createProposalWithTurnoutPct(
+        bytes calldata title,
+        bytes32 descriptionHash,
+        uint32 minutesDuration,
+        uint8 numOptions,
+        IExecutor.Call[][] calldata batches,
+        uint256[] calldata hatIds,
+        uint8 turnoutPctOverride
+    ) external onlyCreator whenNotPaused {
+        HybridVotingProposals.createProposalWithTurnoutPct(
+            title, descriptionHash, minutesDuration, numOptions, batches, hatIds, turnoutPctOverride
+        );
+    }
+
     /* ─────── Voting ─────── */
     function vote(uint256 id, uint8[] calldata idxs, uint8[] calldata weights) external exists(id) whenNotPaused {
         HybridVotingCore.vote(id, idxs, weights);
@@ -289,7 +358,7 @@ contract HybridVoting is Initializable {
     function announceWinner(uint256 id)
         external
         exists(id)
-        isExpired(id)
+        isExpiredOrEarlyClose(id)
         whenNotPaused
         returns (uint256 winner, bool valid)
     {
@@ -307,6 +376,18 @@ contract HybridVoting is Initializable {
 
     function quorum() external view returns (uint32) {
         return _layout().quorum;
+    }
+
+    function earlyCloseTurnoutPct() external view returns (uint8) {
+        uint8 stored = _layout().earlyCloseTurnoutPct;
+        return stored == 0 ? 100 : stored;
+    }
+
+    function proposalTurnoutPct(uint256 id) external view exists(id) returns (uint8) {
+        uint8 override_ = _layout()._proposals[id].turnoutPctOverride;
+        if (override_ != 0) return override_;
+        uint8 stored = _layout().earlyCloseTurnoutPct;
+        return stored == 0 ? 100 : stored;
     }
 
     function creatorHats() external view returns (uint256[] memory) {
