@@ -38,6 +38,7 @@ interface IExecutorAdmin {
         bool[] calldata combineWithHierarchyFlags
     ) external;
     function setDefaultEligibility(address eligibilityModule, uint256 hatId, bool eligible, bool standing) external;
+    function setEligibilityAuthorizedRevoker(address eligibilityModule, address revoker, bool authorized) external;
 }
 
 interface IPaymasterHub {
@@ -62,16 +63,23 @@ interface IPaymasterHub {
     function depositForOrg(bytes32 orgId) external payable;
 }
 
+interface IRoleBundleHatterBootstrap {
+    function setAuthorizedMinter(address minter, bool authorized) external;
+    function setEligibilityModule(address eligibilityModule_) external;
+    function clearDeployer() external;
+    function setBundle(uint256 roleHat, uint256[] calldata capabilityHats) external;
+}
+
 interface ITaskManagerBootstrap {
     struct BootstrapProjectConfig {
         bytes title;
         bytes32 metadataHash;
         uint256 cap;
         address[] managers;
-        uint256[] createHats;
-        uint256[] claimHats;
-        uint256[] reviewHats;
-        uint256[] assignHats;
+        uint256 createHat;
+        uint256 claimHat;
+        uint256 reviewHat;
+        uint256 assignHat;
         address[] bountyTokens;
         uint256[] bountyCaps;
     }
@@ -225,6 +233,7 @@ contract OrgDeployer is Initializable {
         address hybridVoting;
         address directDemocracyVoting;
         address executor;
+        address roleBundleHatter;
         address quickJoin;
         address participationToken;
         address taskManager;
@@ -285,6 +294,10 @@ contract OrgDeployer is Initializable {
         ModulesFactory.EducationHubConfig educationHubConfig; // EducationHub deployment configuration
         BootstrapConfig bootstrap; // Optional: initial projects and tasks to create
         PaymasterConfig paymasterConfig; // Optional: paymaster configuration (funding via msg.value)
+        // Hats-native capability hats + bundle config. Empty arrays = legacy role-bitmap-only mode
+        // (factories will pick the first resolved role hat per gate as a backwards-compat shim).
+        RoleConfigStructs.CapabilityHatConfig[] capabilityHats;
+        RoleConfigStructs.RoleBundleConfig[] roleBundles;
     }
 
     /*════════════════  VALIDATION  ════════════════*/
@@ -375,10 +388,11 @@ contract OrgDeployer is Initializable {
             revert OrgExistsMismatch();
         }
 
-        /* 2. Deploy Governance Infrastructure (Executor, Hats modules, Hats tree) */
+        /* 2. Deploy Governance Infrastructure (Executor, Hats modules, RoleBundleHatter, Hats tree) */
         GovernanceFactory.GovernanceResult memory gov = _deployGovernanceInfrastructure(params);
         result.executor = gov.executor;
         result.eligibilityModule = gov.eligibilityModule;
+        result.roleBundleHatter = gov.roleBundleHatter;
 
         /* 2b. Accept executor beacon ownership (two-step transfer initiated by GovernanceFactory) */
         IExecutorAdmin(result.executor).acceptBeaconOwnership(gov.execBeacon);
@@ -418,6 +432,7 @@ contract OrgDeployer is Initializable {
                 executor: result.executor,
                 deployer: address(this), // For registration callbacks
                 registryAddr: params.registryAddr,
+                roleBundleHatter: gov.roleBundleHatter,
                 roleHatIds: gov.roleHatIds,
                 autoUpgrade: params.autoUpgrade,
                 roleAssignments: accessRoles,
@@ -484,8 +499,33 @@ contract OrgDeployer is Initializable {
         /* 8.6. Clear deployer address to prevent future bootstrap calls (defense-in-depth) */
         ITaskManagerBootstrap(result.taskManager).clearDeployer();
 
-        /* 9. Authorize QuickJoin to mint hats */
+        /* 9. Authorize QuickJoin to mint hats (legacy direct path, still used by claim flows) */
         IExecutorAdmin(result.executor).setHatMinterAuthorization(result.quickJoin, true);
+
+        /* 9b. Wire RoleBundleHatter:
+         *      - authorize it on Executor (so it can call Executor.mintHatsForUser)
+         *      - authorize QuickJoin and the executor on RoleBundleHatter (so they can call mintRole)
+         *      - seal by clearing the deployer field
+         */
+        IExecutorAdmin(result.executor).setHatMinterAuthorization(result.roleBundleHatter, true);
+        IRoleBundleHatterBootstrap(result.roleBundleHatter).setAuthorizedMinter(result.quickJoin, true);
+        IRoleBundleHatterBootstrap(result.roleBundleHatter).setAuthorizedMinter(result.executor, true);
+
+        // Wire the revocation cascade path:
+        //   - point RoleBundleHatter at the EligibilityModule (this contract is still its
+        //     deployer-admin here, so we can call setEligibilityModule directly)
+        //   - authorize RoleBundleHatter as a revoker on EligibilityModule. The Executor
+        //     is the EligibilityModule's superAdmin at this point (transferred during
+        //     HatsTreeSetup), so we route through Executor's onlyOwner passthrough.
+        IRoleBundleHatterBootstrap(result.roleBundleHatter).setEligibilityModule(gov.eligibilityModule);
+        IExecutorAdmin(result.executor)
+            .setEligibilityAuthorizedRevoker(gov.eligibilityModule, result.roleBundleHatter, true);
+
+        // Configure per-role capability bundles BEFORE clearing deployer auth.
+        // setBundle is gated to executor || deployer; this contract is the deployer.
+        _configureRoleBundles(result.roleBundleHatter, gov.roleHatIds, gov.capabilityHatIds, params.roleBundles);
+
+        IRoleBundleHatterBootstrap(result.roleBundleHatter).clearDeployer();
 
         /* 10. Link executor to governor */
         IExecutorAdmin(result.executor).setCaller(result.hybridVoting);
@@ -622,6 +662,30 @@ contract OrgDeployer is Initializable {
      * @notice Internal helper to deploy governance infrastructure
      * @dev Extracted to reduce stack depth in main deployment function
      */
+    /// @dev Resolves each `RoleBundleConfig` (role index + capability hat indices) into actual hat
+    ///      IDs from the freshly-created hat tree, then writes the bundle via RoleBundleHatter.
+    ///      Called while OrgDeployer still holds deployer auth on the bundle hatter (before
+    ///      `clearDeployer`). After this, `mintRole(roleHat, user)` will atomically mint the role
+    ///      hat plus every capability hat in its bundle.
+    function _configureRoleBundles(
+        address roleBundleHatter,
+        uint256[] memory roleHatIds,
+        uint256[] memory capabilityHatIds,
+        RoleConfigStructs.RoleBundleConfig[] calldata roleBundles
+    ) internal {
+        uint256 bundleLen = roleBundles.length;
+        for (uint256 i; i < bundleLen; ++i) {
+            RoleConfigStructs.RoleBundleConfig calldata cfg = roleBundles[i];
+            uint256 roleHat = roleHatIds[cfg.roleIndex];
+            uint256 idxLen = cfg.capabilityHatIndices.length;
+            uint256[] memory capHats = new uint256[](idxLen);
+            for (uint256 j; j < idxLen; ++j) {
+                capHats[j] = capabilityHatIds[cfg.capabilityHatIndices[j]];
+            }
+            IRoleBundleHatterBootstrap(roleBundleHatter).setBundle(roleHat, capHats);
+        }
+    }
+
     function _deployGovernanceInfrastructure(DeploymentParams calldata params)
         internal
         returns (GovernanceFactory.GovernanceResult memory)
@@ -652,6 +716,8 @@ contract OrgDeployer is Initializable {
         govParams.ddCreatorRolesBitmap = params.roleAssignments.ddCreatorRolesBitmap;
         govParams.ddInitialTargets = params.ddInitialTargets;
         govParams.roles = params.roles;
+        govParams.capabilityHats = params.capabilityHats;
+        govParams.roleBundles = params.roleBundles;
 
         return l.governanceFactory.deployInfrastructure(govParams);
     }
@@ -754,8 +820,16 @@ contract OrgDeployer is Initializable {
     }
 
     /**
-     * @notice Resolve role indices to hat IDs in bootstrap project configs
-     * @dev Role indices in config are converted to actual hat IDs using roleHatIds array
+     * @notice Resolve bootstrap project role indices to actual hat IDs.
+     * @dev   Each `createHat` / `claimHat` / `reviewHat` / `assignHat` slot is encoded as:
+     *          - `type(uint256).max` → no project override (TaskManager falls back to the global cap hat)
+     *          - any other value     → role-index lookup into `roleHatIds[idx]`
+     *
+     *        Bootstrap configs come from off-chain JSON via deploy scripts and historically
+     *        used `uint256[]` arrays of role indices. Under the capability-hat refactor we
+     *        only carry a single hat per cap, so the deploy scripts pick `roles[0]` (or
+     *        sentinel if empty). This function does the index → hat-id translation so the
+     *        TaskManager stores actual hat IDs in `projectCapHat` and not raw indices.
      */
     function _resolveBootstrapRoles(
         ITaskManagerBootstrap.BootstrapProjectConfig[] calldata projects,
@@ -769,10 +843,10 @@ contract OrgDeployer is Initializable {
                 metadataHash: projects[i].metadataHash,
                 cap: projects[i].cap,
                 managers: projects[i].managers,
-                createHats: _resolveRoleIndicesToHatIds(projects[i].createHats, roleHatIds),
-                claimHats: _resolveRoleIndicesToHatIds(projects[i].claimHats, roleHatIds),
-                reviewHats: _resolveRoleIndicesToHatIds(projects[i].reviewHats, roleHatIds),
-                assignHats: _resolveRoleIndicesToHatIds(projects[i].assignHats, roleHatIds),
+                createHat: _resolveBootstrapHatIndex(projects[i].createHat, roleHatIds),
+                claimHat: _resolveBootstrapHatIndex(projects[i].claimHat, roleHatIds),
+                reviewHat: _resolveBootstrapHatIndex(projects[i].reviewHat, roleHatIds),
+                assignHat: _resolveBootstrapHatIndex(projects[i].assignHat, roleHatIds),
                 bountyTokens: projects[i].bountyTokens,
                 bountyCaps: projects[i].bountyCaps
             });
@@ -781,20 +855,17 @@ contract OrgDeployer is Initializable {
         return resolved;
     }
 
-    /**
-     * @notice Convert array of role indices to array of hat IDs
-     */
-    function _resolveRoleIndicesToHatIds(uint256[] calldata roleIndices, uint256[] memory roleHatIds)
+    /// @dev `type(uint256).max` is the "no project override" sentinel — keeps the slot at
+    ///      0 so TaskManager's `_capHat` falls through to the global cap hat. Anything
+    ///      else is a role index that must be < roleHatIds.length.
+    function _resolveBootstrapHatIndex(uint256 indexOrSentinel, uint256[] memory roleHatIds)
         internal
         pure
-        returns (uint256[] memory hatIds)
+        returns (uint256)
     {
-        hatIds = new uint256[](roleIndices.length);
-        for (uint256 i = 0; i < roleIndices.length; i++) {
-            require(roleIndices[i] < roleHatIds.length, "Invalid role index in bootstrap config");
-            hatIds[i] = roleHatIds[roleIndices[i]];
-        }
-        return hatIds;
+        if (indexOrSentinel == type(uint256).max) return 0;
+        require(indexOrSentinel < roleHatIds.length, "Invalid role index in bootstrap config");
+        return roleHatIds[indexOrSentinel];
     }
 
     /*══════════════  PAYMASTER CONFIGURATION  ═════════════=*/

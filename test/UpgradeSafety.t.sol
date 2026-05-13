@@ -47,30 +47,26 @@ contract UpgradeSafetyTest is Test {
 
     function testParticipationTokenImplCannotBeInitialized() public {
         ParticipationToken impl = new ParticipationToken();
-        uint256[] memory hats = new uint256[](0);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        impl.initialize(OWNER, "Token", "TKN", HATS, hats, hats);
+        impl.initialize(OWNER, "Token", "TKN", HATS, 1, 2);
     }
 
     function testTaskManagerImplCannotBeInitialized() public {
         TaskManager impl = new TaskManager();
-        uint256[] memory hats = new uint256[](0);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        impl.initialize(OWNER, HATS, hats, OWNER, OWNER);
+        impl.initialize(OWNER, HATS, 1, OWNER, OWNER);
     }
 
     function testQuickJoinImplCannotBeInitialized() public {
         QuickJoin impl = new QuickJoin();
-        uint256[] memory hats = new uint256[](0);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        impl.initialize(OWNER, HATS, OWNER, OWNER, hats);
+        impl.initialize(OWNER, HATS, OWNER, OWNER, 1, OWNER);
     }
 
     function testEducationHubImplCannotBeInitialized() public {
         EducationHub impl = new EducationHub();
-        uint256[] memory hats = new uint256[](0);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        impl.initialize(OWNER, HATS, OWNER, hats, hats);
+        impl.initialize(OWNER, HATS, OWNER, 1, 2);
     }
 
     function testPaymentManagerImplCannotBeInitialized() public {
@@ -93,19 +89,17 @@ contract UpgradeSafetyTest is Test {
 
     function testHybridVotingImplCannotBeInitialized() public {
         HybridVoting impl = new HybridVoting();
-        uint256[] memory hats = new uint256[](0);
         address[] memory targets = new address[](0);
         HybridVoting.ClassConfig[] memory classes = new HybridVoting.ClassConfig[](0);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        impl.initialize(HATS, OWNER, hats, targets, 51, classes);
+        impl.initialize(HATS, OWNER, 1, targets, 51, classes);
     }
 
     function testDirectDemocracyVotingImplCannotBeInitialized() public {
         DirectDemocracyVoting impl = new DirectDemocracyVoting();
-        uint256[] memory hats = new uint256[](0);
         address[] memory targets = new address[](0);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        impl.initialize(HATS, OWNER, hats, hats, targets, 51);
+        impl.initialize(HATS, OWNER, 1, 2, targets, 51);
     }
 
     function testOrgRegistryImplCannotBeInitialized() public {

@@ -35,6 +35,7 @@ import {ModuleDeploymentLib, IHybridVotingInit} from "../src/libs/ModuleDeployme
 import {ModuleTypes} from "../src/libs/ModuleTypes.sol";
 import {EligibilityModule} from "../src/EligibilityModule.sol";
 import {ToggleModule} from "../src/ToggleModule.sol";
+import {RoleBundleHatter} from "../src/RoleBundleHatter.sol";
 import {IExecutor} from "../src/Executor.sol";
 import {SwitchableBeacon} from "../src/SwitchableBeacon.sol";
 import {IHats} from "@hats-protocol/src/Interfaces/IHats.sol";
@@ -184,7 +185,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -305,10 +308,11 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataHash: bytes32(0),
             cap: 1000 ether,
             managers: managers,
-            createHats: createRoles,
-            claimHats: claimRoles,
-            reviewHats: reviewRoles,
-            assignHats: assignRoles,
+            // Sentinel `type(uint256).max` = no project override (use global cap hat).
+            createHat: createRoles.length > 0 ? createRoles[0] : type(uint256).max,
+            claimHat: claimRoles.length > 0 ? claimRoles[0] : type(uint256).max,
+            reviewHat: reviewRoles.length > 0 ? reviewRoles[0] : type(uint256).max,
+            assignHat: assignRoles.length > 0 ? assignRoles[0] : type(uint256).max,
             bountyTokens: new address[](0),
             bountyCaps: new uint256[](0)
         });
@@ -356,7 +360,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 quadratic: false,
                 minBalance: 0,
                 asset: address(0),
-                hatIds: emptyHats
+                hatId: 0
             });
         } else if (ddSplit == 0) {
             // Pure Token Voting
@@ -367,7 +371,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 quadratic: quadratic,
                 minBalance: minBal,
                 asset: address(0), // Will be set during deployment
-                hatIds: emptyHats
+                hatId: 0
             });
         } else {
             // Hybrid (two classes)
@@ -380,7 +384,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 quadratic: false,
                 minBalance: 0,
                 asset: address(0),
-                hatIds: emptyHats
+                hatId: 0
             });
 
             // Class 1: Participation Token
@@ -390,7 +394,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 quadratic: quadratic,
                 minBalance: minBal,
                 asset: address(0), // Will be set during deployment
-                hatIds: emptyHats
+                hatId: 0
             });
         }
 
@@ -442,7 +446,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -503,7 +509,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -682,6 +690,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         // Deploy ToggleModule implementation
         ToggleModule toggleModuleImpl = new ToggleModule();
 
+        // Deploy RoleBundleHatter implementation
+        RoleBundleHatter roleBundleHatterImpl = new RoleBundleHatter();
+
         vm.startPrank(poaAdmin);
         console.log("Current msg.sender:", msg.sender);
 
@@ -788,6 +799,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
         poaManager.addContractType("UniversalAccountRegistry", address(accountRegImpl));
         poaManager.addContractType("EligibilityModule", address(eligibilityModuleImpl));
         poaManager.addContractType("ToggleModule", address(toggleModuleImpl));
+        poaManager.addContractType("RoleBundleHatter", address(roleBundleHatterImpl));
         poaManager.addContractType("PaymentManager", address(paymentManagerImpl));
 
         /*–– global account registry instance ––*/
@@ -868,7 +880,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -934,7 +948,7 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
 
         (address executorAddr, uint32 count, bool boot, bool exists) = orgRegistry.orgOf(ORG_ID);
         assertEq(executorAddr, exec); // Should be the Executor contract address, not orgOwner
-        assertEq(count, 10); // Updated to 10: now includes PaymentManager, EligibilityModule, ToggleModule, HybridVoting, and DirectDemocracyVoting
+        assertEq(count, 11); // Updated to 11: prior 10 plus the per-org RoleBundleHatter
         assertFalse(boot);
         assertTrue(exists);
 
@@ -1001,7 +1015,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _buildBootstrapWithTasks(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1027,10 +1043,11 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             metadataHash: bytes32(0),
             cap: 100 ether,
             managers: managers,
-            createHats: createRoles,
-            claimHats: claimRoles,
-            reviewHats: createRoles,
-            assignHats: createRoles,
+            // Sentinel `type(uint256).max` = no project override (use global cap hat).
+            createHat: createRoles.length > 0 ? createRoles[0] : type(uint256).max,
+            claimHat: claimRoles.length > 0 ? claimRoles[0] : type(uint256).max,
+            reviewHat: createRoles.length > 0 ? createRoles[0] : type(uint256).max,
+            assignHat: createRoles.length > 0 ? createRoles[0] : type(uint256).max,
             bountyTokens: new address[](0),
             bountyCaps: new uint256[](0)
         });
@@ -1090,7 +1107,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         deployer.deployFullOrg(params);
@@ -1134,7 +1153,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1221,7 +1242,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1495,7 +1518,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1713,7 +1738,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -1957,7 +1984,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2097,7 +2126,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.expectRevert(OrgDeployer.InvalidRoleConfiguration.selector);
@@ -2376,7 +2407,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2636,7 +2669,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2722,7 +2757,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         deployer.deployFullOrg(params);
@@ -2777,7 +2814,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -2947,7 +2986,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -3934,7 +3975,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         // Record logs to verify HatCreatedWithEligibility events were emitted
@@ -4038,7 +4081,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -4103,7 +4148,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -4123,10 +4170,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 metadataHash: bytes32(0),
                 cap: 1000 ether,
                 managers: managers,
-                createHats: emptyHats,
-                claimHats: emptyHats,
-                reviewHats: emptyHats,
-                assignHats: emptyHats,
+                createHat: 0,
+                claimHat: 0,
+                reviewHat: 0,
+                assignHat: 0,
                 bountyTokens: new address[](0),
                 bountyCaps: new uint256[](0)
             })
@@ -4181,7 +4228,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -4617,7 +4666,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.prank(deployerSigner);
@@ -4663,7 +4714,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.prank(orgOwner);
@@ -4720,7 +4773,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.prank(deployerSigner);
@@ -4773,7 +4828,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         deployer.deployFullOrg(params);
@@ -4824,7 +4881,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         deployer.deployFullOrg(params);
@@ -4879,7 +4938,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         deployer.deployFullOrg(params);
@@ -4928,7 +4989,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         deployer.deployFullOrg(params); // Should NOT revert
@@ -4979,7 +5042,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.deal(orgOwner, 1 ether);
@@ -5045,7 +5110,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: pmConfig
+            paymasterConfig: pmConfig,
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.deal(orgOwner, 1 ether);
@@ -5139,7 +5206,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: pmConfig
+            paymasterConfig: pmConfig,
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.prank(orgOwner);
@@ -5193,7 +5262,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.prank(orgOwner);
@@ -5263,7 +5334,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: pmConfig
+            paymasterConfig: pmConfig,
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.prank(orgOwner);
@@ -5330,7 +5403,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: pmConfig
+            paymasterConfig: pmConfig,
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.prank(orgOwner);
@@ -5406,7 +5481,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: pmConfig
+            paymasterConfig: pmConfig,
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.deal(orgOwner, 1 ether);
@@ -5612,7 +5689,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: pmConfig
+            paymasterConfig: pmConfig,
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.deal(orgOwner, 1 ether);
@@ -5687,7 +5766,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: pmConfig
+            paymasterConfig: pmConfig,
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.deal(orgOwner, 1 ether);
@@ -5756,7 +5837,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.prank(orgOwner);
@@ -5824,7 +5907,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: false}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: pmConfig
+            paymasterConfig: pmConfig,
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         // No ETH sent — budgets are the only config
@@ -6063,7 +6148,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: true,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: pmConfig
+            paymasterConfig: pmConfig,
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         vm.deal(orgOwner, 1 ether);
@@ -6321,7 +6408,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
@@ -6438,10 +6527,10 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
                 metadataHash: bytes32(0),
                 cap: 100 ether,
                 managers: managers,
-                createHats: emptyHats,
-                claimHats: emptyHats,
-                reviewHats: emptyHats,
-                assignHats: emptyHats,
+                createHat: 0,
+                claimHat: 0,
+                reviewHat: 0,
+                assignHat: 0,
                 bountyTokens: new address[](0),
                 bountyCaps: new uint256[](0)
             })
@@ -6545,7 +6634,9 @@ contract DeployerTest is Test, IEligibilityModuleEvents {
             passkeyEnabled: false,
             educationHubConfig: ModulesFactory.EducationHubConfig({enabled: true}),
             bootstrap: _emptyBootstrap(),
-            paymasterConfig: _defaultPaymasterConfig()
+            paymasterConfig: _defaultPaymasterConfig(),
+            capabilityHats: new RoleConfigStructs.CapabilityHatConfig[](0),
+            roleBundles: new RoleConfigStructs.RoleBundleConfig[](0)
         });
 
         OrgDeployer.DeploymentResult memory result = deployer.deployFullOrg(params);
